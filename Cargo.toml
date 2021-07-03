@@ -1,0 +1,13 @@
+[package]
+name = "iamb"
+version = "0.0.1"
+authors = ["Ulyssa <git@ulyssa.dev>"]
+repository = "https://github.com/ulyssa/iamb"
+homepage = "http://iamb.chat"
+readme = "README.md"
+description = "A Matrix chat client with vim-style editing and keybindings"
+license = "Apache-2.0"
+edition = "2018"
+exclude = [".github", "CONTRIBUTING.md"]
+
+[dependencies]
