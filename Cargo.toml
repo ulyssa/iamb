@@ -1,13 +1,38 @@
 [package]
 name = "iamb"
 version = "0.0.1"
+edition = "2018"
 authors = ["Ulyssa <git@ulyssa.dev>"]
 repository = "https://github.com/ulyssa/iamb"
 homepage = "http://iamb.chat"
 readme = "README.md"
-description = "A Matrix chat client with vim-style editing and keybindings"
+description = "A Matrix chat client that uses Vim keybindings"
 license = "Apache-2.0"
-edition = "2018"
 exclude = [".github", "CONTRIBUTING.md"]
+keywords = ["matrix", "chat", "tui", "vim"]
+rust-version = "1.65"
 
 [dependencies]
+chrono = "0.4"
+clap = {version = "4.0", features = ["derive"]}
+dirs = "4.0.0"
+futures = "0.3.21"
+gethostname = "0.4.1"
+matrix-sdk = {version = "0.6", default-features = false, features = ["e2e-encryption", "sled", "rustls-tls"]}
+modalkit = "0.0.7"
+regex = "^1.5"
+rpassword = "^7.2"
+serde = "^1.0"
+serde_json = "^1.0"
+sled = "0.34"
+thiserror = "^1.0.37"
+tokio = {version = "1.17.0", features = ["full"]}
+tracing = "~0.1.36"
+tracing-appender = "~0.2.2"
+tracing-subscriber = "0.3.16"
+unicode-segmentation = "^1.7"
+unicode-width = "0.1.10"
+url = {version = "^2.2.2", features = ["serde"]}
+
+[dev-dependencies]
+lazy_static = "1.4.0"

@@ -2,10 +2,10 @@
 
 ## About
 
-This is a vi-inspired terminal chat client for the Matrix protocol.
+`iamb` is a Matrix client for the terminal that uses Vim keybindings.
 
-__*Note that this project is still very much in its early stages and a
-lot is subject to eventually change.*__
+This project is a work-in-progress, and there's still a lot to be implemented,
+but much of the basic client functionality is already present.
 
 ## Installation
 
@@ -13,6 +13,21 @@ Install Rust and Cargo, and then run:
 
 ```
 cargo install iamb
+```
+
+## Configuration
+
+You can create a basic configuration in `$CONFIG_DIR/iamb/config.json` that looks like:
+
+```json
+{
+    "profiles": {
+        "example.com": {
+            "url": "https://example.com",
+            "@user:example.com"
+        }
+    }
+}
 ```
 
 ## License

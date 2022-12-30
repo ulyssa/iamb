@@ -1,0 +1,12 @@
+unstable_features = true
+max_width = 100
+fn_call_width = 90
+struct_lit_width = 50
+struct_variant_width = 50
+chain_width = 75
+binop_separator = "Back"
+force_multiline_blocks = true
+match_block_trailing_comma = true
+imports_layout = "HorizontalVertical"
+newline_style = "Unix"
+overflow_delimited_expr = true
