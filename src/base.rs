@@ -8,7 +8,7 @@ use tracing::warn;
 
 use matrix_sdk::{
     encryption::verification::SasVerification,
-    ruma::{OwnedRoomId, RoomId},
+    ruma::{OwnedRoomId, OwnedUserId, RoomId},
 };
 
 use modalkit::{
@@ -32,10 +32,16 @@ use modalkit::{
     },
     input::bindings::SequenceStatus,
     input::key::TerminalKey,
+    tui::{
+        buffer::Buffer,
+        layout::{Alignment, Rect},
+        text::{Span, Spans},
+        widgets::{Paragraph, Widget},
+    },
 };
 
 use crate::{
-    message::{Message, Messages},
+    message::{user_style, Message, Messages},
     worker::Requester,
     ApplicationSettings,
 };
@@ -167,11 +173,83 @@ pub struct RoomInfo {
     pub messages: Messages,
     pub fetch_id: RoomFetchStatus,
     pub fetch_last: Option<Instant>,
+    pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
 }
 
 impl RoomInfo {
     fn recently_fetched(&self) -> bool {
         self.fetch_last.map_or(false, |i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
+    }
+
+    fn get_typers(&self) -> &[OwnedUserId] {
+        if let Some((t, users)) = &self.users_typing {
+            if t.elapsed() < Duration::from_secs(4) {
+                return users.as_ref();
+            } else {
+                return &[];
+            }
+        } else {
+            return &[];
+        }
+    }
+
+    fn get_typing_spans(&self) -> Spans {
+        let typers = self.get_typers();
+        let n = typers.len();
+
+        match n {
+            0 => Spans(vec![]),
+            1 => {
+                let user = typers[0].as_str();
+                let user = Span::styled(user, user_style(user));
+
+                Spans(vec![user, Span::from(" is typing...")])
+            },
+            2 => {
+                let user1 = typers[0].as_str();
+                let user1 = Span::styled(user1, user_style(user1));
+
+                let user2 = typers[1].as_str();
+                let user2 = Span::styled(user2, user_style(user2));
+
+                Spans(vec![
+                    user1,
+                    Span::raw(" and "),
+                    user2,
+                    Span::from(" are typing..."),
+                ])
+            },
+            n if n < 5 => Spans::from("Several people are typing..."),
+            _ => Spans::from("Many people are typing..."),
+        }
+    }
+
+    pub fn set_typing(&mut self, user_ids: Vec<OwnedUserId>) {
+        self.users_typing = (Instant::now(), user_ids).into();
+    }
+
+    pub fn render_typing(
+        &mut self,
+        area: Rect,
+        buf: &mut Buffer,
+        settings: &ApplicationSettings,
+    ) -> Rect {
+        if area.height <= 2 || area.width <= 20 {
+            return area;
+        }
+
+        if !settings.tunables.typing_notice_display {
+            return area;
+        }
+
+        let top = Rect::new(area.x, area.y, area.width, area.height - 1);
+        let bar = Rect::new(area.x, area.y + top.height, area.width, 1);
+
+        Paragraph::new(self.get_typing_spans())
+            .alignment(Alignment::Center)
+            .render(bar, buf);
+
+        return top;
     }
 }
 
@@ -325,4 +403,75 @@ impl ApplicationInfo for IambInfo {
     type Action = IambAction;
     type WindowId = IambId;
     type ContentId = IambBufferId;
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::tests::*;
+
+    #[test]
+    fn test_typing_spans() {
+        let mut info = RoomInfo::default();
+
+        let users0 = vec![];
+        let users1 = vec![TEST_USER1.clone()];
+        let users2 = vec![TEST_USER1.clone(), TEST_USER2.clone()];
+        let users4 = vec![
+            TEST_USER1.clone(),
+            TEST_USER2.clone(),
+            TEST_USER3.clone(),
+            TEST_USER4.clone(),
+        ];
+        let users5 = vec![
+            TEST_USER1.clone(),
+            TEST_USER2.clone(),
+            TEST_USER3.clone(),
+            TEST_USER4.clone(),
+            TEST_USER5.clone(),
+        ];
+
+        // Nothing set.
+        assert_eq!(info.users_typing, None);
+        assert_eq!(info.get_typing_spans(), Spans(vec![]));
+
+        // Empty typing list.
+        info.set_typing(users0);
+        assert!(info.users_typing.is_some());
+        assert_eq!(info.get_typing_spans(), Spans(vec![]));
+
+        // Single user typing.
+        info.set_typing(users1);
+        assert!(info.users_typing.is_some());
+        assert_eq!(
+            info.get_typing_spans(),
+            Spans(vec![
+                Span::styled("@user1:example.com", user_style("@user1:example.com")),
+                Span::from(" is typing...")
+            ])
+        );
+
+        // Two users typing.
+        info.set_typing(users2);
+        assert!(info.users_typing.is_some());
+        assert_eq!(
+            info.get_typing_spans(),
+            Spans(vec![
+                Span::styled("@user1:example.com", user_style("@user1:example.com")),
+                Span::raw(" and "),
+                Span::styled("@user2:example.com", user_style("@user2:example.com")),
+                Span::raw(" are typing...")
+            ])
+        );
+
+        // Four users typing.
+        info.set_typing(users4);
+        assert!(info.users_typing.is_some());
+        assert_eq!(info.get_typing_spans(), Spans::from("Several people are typing..."));
+
+        // Five users typing.
+        info.set_typing(users5);
+        assert!(info.users_typing.is_some());
+        assert_eq!(info.get_typing_spans(), Spans::from("Many people are typing..."));
+    }
 }

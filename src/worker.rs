@@ -32,6 +32,7 @@ use matrix_sdk::{
             },
             room::message::{MessageType, RoomMessageEventContent, TextMessageEventContent},
             room::name::RoomNameEventContent,
+            typing::SyncTypingEvent,
             AnyMessageLikeEvent,
             AnyTimelineEvent,
             SyncMessageLikeEvent,
@@ -104,6 +105,7 @@ pub enum WorkerTask {
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     Spaces(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
     SendMessage(OwnedRoomId, String, ClientReply<IambResult<EchoPair>>),
+    TypingNotice(OwnedRoomId),
     Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
     VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
 }
@@ -199,6 +201,10 @@ impl Requester {
         self.tx.send(WorkerTask::Spaces(reply)).unwrap();
 
         return response.recv();
+    }
+
+    pub fn typing_notice(&self, room_id: OwnedRoomId) {
+        self.tx.send(WorkerTask::TypingNotice(room_id)).unwrap();
     }
 
     pub fn verify(&self, act: VerifyAction, sas: SasVerification) -> IambResult<EditInfo> {
@@ -333,6 +339,10 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.send_message(room_id, msg).await);
             },
+            WorkerTask::TypingNotice(room_id) => {
+                assert!(self.initialized);
+                self.typing_notice(room_id).await;
+            },
             WorkerTask::Verify(act, sas, reply) => {
                 assert!(self.initialized);
                 reply.send(self.verify(act, sas).await);
@@ -346,6 +356,24 @@ impl ClientWorker {
 
     async fn init(&mut self, store: AsyncProgramStore) {
         self.client.add_event_handler_context(store);
+
+        let _ = self.client.add_event_handler(
+            |ev: SyncTypingEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id().to_owned();
+                    let mut locked = store.lock().await;
+
+                    let users = ev
+                        .content
+                        .user_ids
+                        .into_iter()
+                        .filter(|u| u != &locked.application.settings.profile.user_id)
+                        .collect();
+
+                    locked.application.get_room_info(room_id).set_typing(users);
+                }
+            },
+        );
 
         let _ = self.client.add_event_handler(
             |ev: SyncStateEvent<RoomNameEventContent>,
@@ -742,6 +770,12 @@ impl ClientWorker {
         }
 
         return spaces;
+    }
+
+    async fn typing_notice(&mut self, room_id: OwnedRoomId) {
+        if let Some(room) = self.client.get_joined_room(room_id.as_ref()) {
+            let _ = room.typing_notice(true).await;
+        }
     }
 
     async fn verify(&self, action: VerifyAction, sas: SasVerification) -> IambResult<EditInfo> {

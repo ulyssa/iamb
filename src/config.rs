@@ -69,17 +69,73 @@ pub enum ConfigError {
     Invalid(#[from] serde_json::Error),
 }
 
+#[derive(Clone)]
+pub struct TunableValues {
+    pub typing_notice: bool,
+    pub typing_notice_display: bool,
+}
+
+#[derive(Clone, Default, Deserialize)]
+pub struct Tunables {
+    pub typing_notice: Option<bool>,
+    pub typing_notice_display: Option<bool>,
+}
+
+impl Tunables {
+    fn merge(self, other: Self) -> Self {
+        Tunables {
+            typing_notice: self.typing_notice.or(other.typing_notice),
+            typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
+        }
+    }
+
+    fn values(self) -> TunableValues {
+        TunableValues {
+            typing_notice: self.typing_notice.unwrap_or(true),
+            typing_notice_display: self.typing_notice.unwrap_or(true),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct DirectoryValues {
+    pub cache: PathBuf,
+}
+
+#[derive(Clone, Default, Deserialize)]
+pub struct Directories {
+    pub cache: Option<PathBuf>,
+}
+
+impl Directories {
+    fn merge(self, other: Self) -> Self {
+        Directories { cache: self.cache.or(other.cache) }
+    }
+
+    fn values(self) -> DirectoryValues {
+        DirectoryValues {
+            cache: self
+                .cache
+                .or_else(dirs::cache_dir)
+                .expect("no dirs.cache value configured!"),
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 pub struct ProfileConfig {
     pub user_id: OwnedUserId,
     pub url: Url,
+    pub settings: Option<Tunables>,
+    pub dirs: Option<Directories>,
 }
 
 #[derive(Clone, Deserialize)]
 pub struct IambConfig {
     pub profiles: HashMap<String, ProfileConfig>,
     pub default_profile: Option<String>,
-    pub cache: Option<PathBuf>,
+    pub settings: Option<Tunables>,
+    pub dirs: Option<Directories>,
 }
 
 impl IambConfig {
@@ -103,10 +159,11 @@ impl IambConfig {
 #[derive(Clone)]
 pub struct ApplicationSettings {
     pub matrix_dir: PathBuf,
-    pub cache_dir: PathBuf,
     pub session_json: PathBuf,
     pub profile_name: String,
     pub profile: ProfileConfig,
+    pub tunables: TunableValues,
+    pub dirs: DirectoryValues,
 }
 
 impl ApplicationSettings {
@@ -122,12 +179,16 @@ impl ApplicationSettings {
         let mut config_json = config_dir.clone();
         config_json.push("config.json");
 
-        let IambConfig { mut profiles, default_profile, cache } =
-            IambConfig::load(config_json.as_path())?;
+        let IambConfig {
+            mut profiles,
+            default_profile,
+            dirs,
+            settings: global,
+        } = IambConfig::load(config_json.as_path())?;
 
         validate_profile_names(&profiles);
 
-        let (profile_name, profile) = if let Some(profile) = cli.profile.or(default_profile) {
+        let (profile_name, mut profile) = if let Some(profile) = cli.profile.or(default_profile) {
             profiles.remove_entry(&profile).unwrap_or_else(|| {
                 usage!(
                     "No configured profile with the name {:?} in {}",
@@ -146,6 +207,10 @@ impl ApplicationSettings {
             );
         };
 
+        let tunables = global.unwrap_or_default();
+        let tunables = profile.settings.take().unwrap_or_default().merge(tunables);
+        let tunables = tunables.values();
+
         let mut profile_dir = config_dir.clone();
         profile_dir.push("profiles");
         profile_dir.push(profile_name.as_str());
@@ -156,18 +221,17 @@ impl ApplicationSettings {
         let mut session_json = profile_dir;
         session_json.push("session.json");
 
-        let cache_dir = cache.unwrap_or_else(|| {
-            let mut cache = dirs::cache_dir().expect("no user cache directory");
-            cache.push("iamb");
-            cache
-        });
+        let dirs = dirs.unwrap_or_default();
+        let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
+        let dirs = dirs.values();
 
         let settings = ApplicationSettings {
             matrix_dir,
-            cache_dir,
             session_json,
             profile_name,
             profile,
+            tunables,
+            dirs,
         };
 
         Ok(settings)

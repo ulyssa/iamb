@@ -21,8 +21,10 @@ pub struct WelcomeState {
 impl WelcomeState {
     pub fn new(store: &mut ProgramStore) -> Self {
         let buf = store.buffers.load_str(IambBufferId::Welcome, WELCOME_TEXT);
+        let mut tbox = TextBoxState::new(buf);
+        tbox.set_readonly(true);
 
-        WelcomeState { tbox: TextBoxState::new(buf) }
+        WelcomeState { tbox }
     }
 }
 

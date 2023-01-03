@@ -24,7 +24,7 @@ You can create a basic configuration in `$CONFIG_DIR/iamb/config.json` that look
     "profiles": {
         "example.com": {
             "url": "https://example.com",
-            "@user:example.com"
+            "user_id": "@user:example.com"
         }
     }
 }
@@ -51,7 +51,7 @@ two other TUI clients and Element Web:
 | Display read markers                    | :x: ([#11])        | :x:                | :x:                | :heavy_check_mark:  |
 | Sending Invites                         | :x: ([#7])         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Accepting Invites                       | :x: ([#7])         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
-| Typing Notification                     | :x: ([#9])         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Typing Notification                     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | E2E                                     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Replies                                 | :x: ([#3])         | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
 | Attachment uploading                    | :x: ([#13])        | :x:                | :heavy_check_mark: | :heavy_check_mark:  |

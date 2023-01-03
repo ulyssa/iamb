@@ -66,6 +66,18 @@ const USER_GUTTER_EMPTY_SPAN: Span<'static> = Span {
     },
 };
 
+pub(crate) fn user_color(user: &str) -> Color {
+    let mut hasher = DefaultHasher::new();
+    user.hash(&mut hasher);
+    let color = hasher.finish() as usize % COLORS.len();
+
+    COLORS[color]
+}
+
+pub(crate) fn user_style(user: &str) -> Style {
+    Style::default().fg(user_color(user)).add_modifier(StyleModifier::BOLD)
+}
+
 struct WrappedLinesIterator<'a> {
     iter: Lines<'a>,
     curr: Option<&'a str>,
@@ -446,13 +458,7 @@ impl Message {
 
     fn show_sender(&self, align_right: bool) -> Span {
         let sender = self.sender.to_string();
-
-        let mut hasher = DefaultHasher::new();
-        sender.hash(&mut hasher);
-        let color = hasher.finish() as usize % COLORS.len();
-        let color = COLORS[color];
-
-        let bold = Style::default().fg(color).add_modifier(StyleModifier::BOLD);
+        let style = user_style(sender.as_str());
 
         let sender = if align_right {
             format!("{: >width$}  ", sender, width = 28)
@@ -460,7 +466,7 @@ impl Message {
             format!("{: <width$}  ", sender, width = 28)
         };
 
-        Span::styled(sender, bold)
+        Span::styled(sender, style)
     }
 }
 

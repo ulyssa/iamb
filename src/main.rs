@@ -450,7 +450,7 @@ async fn main() -> IambResult<()> {
 
     // Set up the tracing subscriber so we can log client messages.
     let log_prefix = format!("iamb-log-{}", settings.profile_name);
-    let mut log_dir = settings.cache_dir.clone();
+    let mut log_dir = settings.dirs.cache.clone();
     log_dir.push("logs");
 
     create_dir_all(settings.matrix_dir.as_path())?;

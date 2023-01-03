@@ -20,7 +20,7 @@ use lazy_static::lazy_static;
 
 use crate::{
     base::{ChatStore, ProgramStore, RoomFetchStatus, RoomInfo},
-    config::{ApplicationSettings, ProfileConfig},
+    config::{ApplicationSettings, DirectoryValues, ProfileConfig, TunableValues},
     message::{
         Message,
         MessageContent,
@@ -35,6 +35,9 @@ lazy_static! {
     pub static ref TEST_ROOM1_ID: OwnedRoomId = RoomId::new(server_name!("example.com")).to_owned();
     pub static ref TEST_USER1: OwnedUserId = user_id!("@user1:example.com").to_owned();
     pub static ref TEST_USER2: OwnedUserId = user_id!("@user2:example.com").to_owned();
+    pub static ref TEST_USER3: OwnedUserId = user_id!("@user2:example.com").to_owned();
+    pub static ref TEST_USER4: OwnedUserId = user_id!("@user2:example.com").to_owned();
+    pub static ref TEST_USER5: OwnedUserId = user_id!("@user2:example.com").to_owned();
     pub static ref MSG1_KEY: MessageKey = (LocalEcho, EventId::new(server_name!("example.com")));
     pub static ref MSG2_KEY: MessageKey =
         (OriginServer(UInt::new(1).unwrap()), EventId::new(server_name!("example.com")));
@@ -103,19 +106,23 @@ pub fn mock_room() -> RoomInfo {
         messages: mock_messages(),
         fetch_id: RoomFetchStatus::NotStarted,
         fetch_last: None,
+        users_typing: None,
     }
 }
 
 pub fn mock_settings() -> ApplicationSettings {
     ApplicationSettings {
         matrix_dir: PathBuf::new(),
-        cache_dir: PathBuf::new(),
         session_json: PathBuf::new(),
         profile_name: "test".into(),
         profile: ProfileConfig {
             user_id: user_id!("@user:example.com").to_owned(),
             url: Url::parse("https://example.com").unwrap(),
+            settings: None,
+            dirs: None,
         },
+        tunables: TunableValues { typing_notice: true, typing_notice_display: true },
+        dirs: DirectoryValues { cache: PathBuf::new() },
     }
 }
 

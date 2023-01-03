@@ -10,7 +10,7 @@ description = "A Matrix chat client that uses Vim keybindings"
 license = "Apache-2.0"
 exclude = [".github", "CONTRIBUTING.md"]
 keywords = ["matrix", "chat", "tui", "vim"]
-rust-version = "1.65"
+rust-version = "1.66"
 
 [dependencies]
 chrono = "0.4"

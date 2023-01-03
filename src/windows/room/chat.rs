@@ -83,6 +83,27 @@ impl ChatState {
     pub fn id(&self) -> &RoomId {
         &self.room_id
     }
+
+    pub fn typing_notice(
+        &self,
+        act: &EditorAction,
+        ctx: &ProgramContext,
+        store: &mut ProgramStore,
+    ) {
+        if !self.focus.is_msgbar() || act.is_readonly(ctx) {
+            return;
+        }
+
+        if matches!(act, EditorAction::History(_)) {
+            return;
+        }
+
+        if !store.application.settings.tunables.typing_notice {
+            return;
+        }
+
+        store.application.worker.typing_notice(self.room_id.clone());
+    }
 }
 
 macro_rules! delegate {
@@ -148,6 +169,8 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
+        self.typing_notice(act, ctx, store);
+
         match delegate!(self, w => w.editor_command(act, ctx, store)) {
             res @ Ok(_) => res,
             Err(EditError::WrongBuffer(IambBufferId::Room(room_id, focus)))

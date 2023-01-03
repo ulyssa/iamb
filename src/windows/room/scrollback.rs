@@ -1125,6 +1125,9 @@ impl<'a> StatefulWidget for Scrollback<'a> {
     type State = ScrollbackState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let info = self.store.application.rooms.entry(state.room_id.clone()).or_default();
+        let area = info.render_typing(area, buf, &self.store.application.settings);
+
         state.set_term_info(area);
 
         let height = state.viewctx.get_height();
@@ -1136,8 +1139,6 @@ impl<'a> StatefulWidget for Scrollback<'a> {
         if state.cursor.timestamp < state.viewctx.corner.timestamp {
             state.viewctx.corner = state.cursor.clone();
         }
-
-        let info = self.store.application.get_room_info(state.room_id.clone());
 
         let cursor = &state.cursor;
         let cursor_key = if let Some(k) = cursor.to_key(info) {
@@ -1297,6 +1298,9 @@ mod tests {
         let prev = MoveDir2D::Up;
         let next = MoveDir2D::Down;
 
+        // Skip rendering typing notices.
+        store.application.settings.tunables.typing_notice_display = false;
+
         assert_eq!(scrollback.cursor, MessageCursor::latest());
         assert_eq!(scrollback.viewctx.dimensions, (0, 0));
         assert_eq!(scrollback.viewctx.corner, MessageCursor::latest());
@@ -1424,6 +1428,9 @@ mod tests {
         let mut store = mock_store();
         let mut scrollback = ScrollbackState::new(TEST_ROOM1_ID.clone());
         let ctx = ProgramContext::default();
+
+        // Skip rendering typing notices.
+        store.application.settings.tunables.typing_notice_display = false;
 
         // Set a terminal width of 60, and height of 3, rendering in scrollback as:
         //
