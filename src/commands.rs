@@ -1,5 +1,5 @@
 use modalkit::{
-    editing::{action::WindowAction, base::OpenTarget},
+    editing::base::OpenTarget,
     env::vim::command::{CommandContext, CommandDescription},
     input::commands::{CommandError, CommandResult, CommandStep},
     input::InputContext,
@@ -11,6 +11,7 @@ use crate::base::{
     ProgramCommand,
     ProgramCommands,
     ProgramContext,
+    RoomAction,
     VerifyAction,
 };
 
@@ -22,8 +23,8 @@ fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     match args.len() {
         0 => {
-            let open = WindowAction::Switch(OpenTarget::Application(IambId::VerifyList));
-            let step = CommandStep::Continue(open.into(), ctx.context.take());
+            let open = ctx.switch(OpenTarget::Application(IambId::VerifyList));
+            let step = CommandStep::Continue(open, ctx.context.take());
 
             return Ok(step);
         },
@@ -61,7 +62,18 @@ fn iamb_dms(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let open = WindowAction::Switch(OpenTarget::Application(IambId::DirectList));
+    let open = ctx.switch(OpenTarget::Application(IambId::DirectList));
+    let step = CommandStep::Continue(open, ctx.context.take());
+
+    return Ok(step);
+}
+
+fn iamb_members(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = IambAction::Room(RoomAction::Members(ctx.clone().into()));
     let step = CommandStep::Continue(open.into(), ctx.context.take());
 
     return Ok(step);
@@ -72,8 +84,8 @@ fn iamb_rooms(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let open = WindowAction::Switch(OpenTarget::Application(IambId::RoomList));
-    let step = CommandStep::Continue(open.into(), ctx.context.take());
+    let open = ctx.switch(OpenTarget::Application(IambId::RoomList));
+    let step = CommandStep::Continue(open, ctx.context.take());
 
     return Ok(step);
 }
@@ -83,8 +95,8 @@ fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let open = WindowAction::Switch(OpenTarget::Application(IambId::SpaceList));
-    let step = CommandStep::Continue(open.into(), ctx.context.take());
+    let open = ctx.switch(OpenTarget::Application(IambId::SpaceList));
+    let step = CommandStep::Continue(open, ctx.context.take());
 
     return Ok(step);
 }
@@ -94,8 +106,8 @@ fn iamb_welcome(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let open = WindowAction::Switch(OpenTarget::Application(IambId::Welcome));
-    let step = CommandStep::Continue(open.into(), ctx.context.take());
+    let open = ctx.switch(OpenTarget::Application(IambId::Welcome));
+    let step = CommandStep::Continue(open, ctx.context.take());
 
     return Ok(step);
 }
@@ -107,8 +119,8 @@ fn iamb_join(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let open = WindowAction::Switch(args.remove(0));
-    let step = CommandStep::Continue(open.into(), ctx.context.take());
+    let open = ctx.switch(args.remove(0));
+    let step = CommandStep::Continue(open, ctx.context.take());
 
     return Ok(step);
 }
@@ -116,6 +128,7 @@ fn iamb_join(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { names: vec!["dms".into()], f: iamb_dms });
     cmds.add_command(ProgramCommand { names: vec!["join".into()], f: iamb_join });
+    cmds.add_command(ProgramCommand { names: vec!["members".into()], f: iamb_members });
     cmds.add_command(ProgramCommand { names: vec!["rooms".into()], f: iamb_rooms });
     cmds.add_command(ProgramCommand { names: vec!["spaces".into()], f: iamb_spaces });
     cmds.add_command(ProgramCommand { names: vec!["verify".into()], f: iamb_verify });
@@ -133,6 +146,8 @@ pub fn setup_commands() -> ProgramCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use modalkit::editing::action::WindowAction;
+
     #[test]
     fn test_cmd_verify() {
         let mut cmds = setup_commands();

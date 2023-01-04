@@ -94,10 +94,6 @@ impl ChatState {
             return;
         }
 
-        if matches!(act, EditorAction::History(_)) {
-            return;
-        }
-
         if !store.application.settings.tunables.typing_notice {
             return;
         }

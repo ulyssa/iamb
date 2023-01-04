@@ -19,7 +19,7 @@ dirs = "4.0.0"
 futures = "0.3.21"
 gethostname = "0.4.1"
 matrix-sdk = {version = "0.6", default-features = false, features = ["e2e-encryption", "sled", "rustls-tls"]}
-modalkit = "0.0.7"
+modalkit = "0.0.8"
 regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"

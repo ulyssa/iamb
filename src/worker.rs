@@ -15,7 +15,7 @@ use matrix_sdk::{
     encryption::verification::{SasVerification, Verification},
     event_handler::Ctx,
     reqwest,
-    room::{Messages, MessagesOptions, Room as MatrixRoom},
+    room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
             room::create_room::v3::{Request as CreateRoomRequest, RoomPreset},
@@ -102,6 +102,7 @@ pub enum WorkerTask {
     GetRoom(OwnedRoomId, ClientReply<IambResult<(MatrixRoom, DisplayName)>>),
     JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
     JoinedRooms(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
+    Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     Spaces(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
     SendMessage(OwnedRoomId, String, ClientReply<IambResult<EchoPair>>),
@@ -183,6 +184,14 @@ impl Requester {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::JoinedRooms(reply)).unwrap();
+
+        return response.recv();
+    }
+
+    pub fn members(&self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::Members(room_id, reply)).unwrap();
 
         return response.recv();
     }
@@ -326,6 +335,10 @@ impl ClientWorker {
             WorkerTask::Login(style, reply) => {
                 assert!(self.initialized);
                 reply.send(self.login_and_sync(style).await);
+            },
+            WorkerTask::Members(room_id, reply) => {
+                assert!(self.initialized);
+                reply.send(self.members(room_id).await);
             },
             WorkerTask::SpaceMembers(space, reply) => {
                 assert!(self.initialized);
@@ -739,6 +752,14 @@ impl ClientWorker {
             });
 
             Ok((end, msgs.collect()))
+        } else {
+            Err(IambError::UnknownRoom(room_id).into())
+        }
+    }
+
+    async fn members(&mut self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
+        if let Some(room) = self.client.get_room(room_id.as_ref()) {
+            Ok(room.active_members().await.map_err(IambError::from)?)
         } else {
             Err(IambError::UnknownRoom(room_id).into())
         }

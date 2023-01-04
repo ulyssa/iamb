@@ -26,7 +26,7 @@ use modalkit::{
         store::Store,
     },
     env::vim::{
-        command::{VimCommand, VimCommandMachine},
+        command::{CommandContext, VimCommand, VimCommandMachine},
         keybindings::VimMachine,
         VimContext,
     },
@@ -60,7 +60,13 @@ pub enum VerifyAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RoomAction {
+    Members(Box<CommandContext<ProgramContext>>),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambAction {
+    Room(RoomAction),
     Verify(VerifyAction, String),
     VerifyRequest(String),
     SendMessage(OwnedRoomId, String),
@@ -70,6 +76,7 @@ pub enum IambAction {
 impl ApplicationAction for IambAction {
     fn is_edit_sequence<C: EditContext>(&self, _: &C) -> SequenceStatus {
         match self {
+            IambAction::Room(..) => SequenceStatus::Break,
             IambAction::SendMessage(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
@@ -79,6 +86,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_action<C: EditContext>(&self, _: &C) -> SequenceStatus {
         match self {
+            IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::SendMessage(..) => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
@@ -88,6 +96,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_selection<C: EditContext>(&self, _: &C) -> SequenceStatus {
         match self {
+            IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::SendMessage(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
@@ -97,6 +106,7 @@ impl ApplicationAction for IambAction {
 
     fn is_switchable<C: EditContext>(&self, _: &C) -> bool {
         match self {
+            IambAction::Room(..) => false,
             IambAction::SendMessage(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
@@ -275,6 +285,14 @@ impl ChatStore {
         }
     }
 
+    pub fn get_room_title(&self, room_id: &RoomId) -> String {
+        self.rooms
+            .get(room_id)
+            .and_then(|i| i.name.as_ref())
+            .map(String::from)
+            .unwrap_or_else(|| "Untitled Matrix Room".to_string())
+    }
+
     pub fn mark_for_load(&mut self, room_id: OwnedRoomId) {
         self.need_load.insert(room_id);
     }
@@ -346,6 +364,7 @@ impl ApplicationStore for ChatStore {}
 pub enum IambId {
     Room(OwnedRoomId),
     DirectList,
+    MemberList(OwnedRoomId),
     RoomList,
     SpaceList,
     VerifyList,
@@ -375,6 +394,7 @@ pub enum IambBufferId {
     Command,
     Room(OwnedRoomId, RoomFocus),
     DirectList,
+    MemberList(OwnedRoomId),
     RoomList,
     SpaceList,
     VerifyList,
@@ -387,6 +407,7 @@ impl IambBufferId {
             IambBufferId::Command => None,
             IambBufferId::Room(room, _) => Some(IambId::Room(room.clone())),
             IambBufferId::DirectList => Some(IambId::DirectList),
+            IambBufferId::MemberList(room) => Some(IambId::MemberList(room.clone())),
             IambBufferId::RoomList => Some(IambId::RoomList),
             IambBufferId::SpaceList => Some(IambId::SpaceList),
             IambBufferId::VerifyList => Some(IambId::VerifyList),

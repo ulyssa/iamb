@@ -317,12 +317,19 @@ impl Application {
     fn iamb_run(
         &mut self,
         action: IambAction,
-        _: ProgramContext,
+        ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
         let info = match action {
             IambAction::ToggleScrollbackFocus => {
                 self.screen.current_window_mut()?.focus_toggle();
+
+                None
+            },
+
+            IambAction::Room(act) => {
+                let acts = self.screen.current_window_mut()?.room_command(act, ctx, store)?;
+                self.action_prepend(acts);
 
                 None
             },

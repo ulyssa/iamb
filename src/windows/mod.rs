@@ -3,22 +3,23 @@ use std::collections::hash_map::Entry;
 
 use matrix_sdk::{
     encryption::verification::{format_emojis, SasVerification},
-    room::Room as MatrixRoom,
-    ruma::RoomId,
+    room::{Room as MatrixRoom, RoomMember},
+    ruma::{events::room::member::MembershipState, OwnedRoomId, RoomId},
     DisplayName,
 };
 
 use modalkit::tui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
     text::{Span, Spans, Text},
-    widgets::{Block, Borders, Widget},
+    widgets::{Block, Borders, StatefulWidget, Widget},
 };
 
 use modalkit::{
     editing::{
         action::{
+            Action,
             EditError,
             EditInfo,
             EditResult,
@@ -42,7 +43,7 @@ use modalkit::{
         },
     },
     widgets::{
-        list::{ListCursor, ListItem, ListState},
+        list::{List, ListCursor, ListItem, ListState},
         TermOffset,
         TerminalCursor,
         Window,
@@ -50,15 +51,19 @@ use modalkit::{
     },
 };
 
-use super::base::{
-    ChatStore,
-    IambBufferId,
-    IambId,
-    IambInfo,
-    IambResult,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
+use crate::{
+    base::{
+        ChatStore,
+        IambBufferId,
+        IambId,
+        IambInfo,
+        IambResult,
+        ProgramAction,
+        ProgramContext,
+        ProgramStore,
+        RoomAction,
+    },
+    message::user_style,
 };
 
 use self::{room::RoomState, welcome::WelcomeState};
@@ -120,6 +125,7 @@ macro_rules! delegate {
         match $s {
             IambWindow::Room($id) => $e,
             IambWindow::DirectList($id) => $e,
+            IambWindow::MemberList($id, _) => $e,
             IambWindow::RoomList($id) => $e,
             IambWindow::SpaceList($id) => $e,
             IambWindow::VerifyList($id) => $e,
@@ -130,6 +136,7 @@ macro_rules! delegate {
 
 pub enum IambWindow {
     DirectList(DirectListState),
+    MemberList(MemberListState, OwnedRoomId),
     Room(RoomState),
     VerifyList(VerifyListState),
     RoomList(RoomListState),
@@ -146,19 +153,41 @@ impl IambWindow {
         }
     }
 
+    pub fn room_command(
+        &mut self,
+        act: RoomAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
+        if let IambWindow::Room(w) = self {
+            w.room_command(act, ctx, store)
+        } else {
+            let msg = "No room currently focused!";
+            let err = UIError::Failure(msg.into());
+
+            return Err(err);
+        }
+    }
+
     pub fn get_title(&self, store: &mut ProgramStore) -> String {
         match self {
-            IambWindow::Room(w) => w.get_title(store),
             IambWindow::DirectList(_) => "Direct Messages".to_string(),
             IambWindow::RoomList(_) => "Rooms".to_string(),
             IambWindow::SpaceList(_) => "Spaces".to_string(),
             IambWindow::VerifyList(_) => "Verifications".to_string(),
             IambWindow::Welcome(_) => "Welcome to iamb".to_string(),
+
+            IambWindow::Room(w) => w.get_title(store),
+            IambWindow::MemberList(_, room_id) => {
+                let title = store.application.get_room_title(room_id.as_ref());
+                format!("Room Members: {}", title)
+            },
         }
     }
 }
 
 pub type DirectListState = ListState<DirectItem, IambInfo>;
+pub type MemberListState = ListState<MemberItem, IambInfo>;
 pub type RoomListState = ListState<RoomItem, IambInfo>;
 pub type SpaceListState = ListState<SpaceItem, IambInfo>;
 pub type VerifyListState = ListState<VerifyItem, IambInfo>;
@@ -263,13 +292,35 @@ impl WindowOps<IambInfo> for IambWindow {
                 let dms = store.application.worker.direct_messages();
                 let items = dms.into_iter().map(|(id, name)| DirectItem::new(id, name, store));
                 state.set(items.collect());
-                state.draw(inner, buf, focused, store);
+
+                List::new(store)
+                    .empty_message("No direct messages yet!")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(inner, buf, state);
+            },
+            IambWindow::MemberList(state, room_id) => {
+                if let Ok(mems) = store.application.worker.members(room_id.clone()) {
+                    let items = mems.into_iter().map(MemberItem::new);
+                    state.set(items.collect());
+                }
+
+                List::new(store)
+                    .empty_message("No users here yet!")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(inner, buf, state);
             },
             IambWindow::RoomList(state) => {
                 let joined = store.application.worker.joined_rooms();
                 let items = joined.into_iter().map(|(id, name)| RoomItem::new(id, name, store));
                 state.set(items.collect());
-                state.draw(inner, buf, focused, store);
+
+                List::new(store)
+                    .empty_message("You haven't joined any rooms yet")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(inner, buf, state);
             },
             IambWindow::SpaceList(state) => {
                 let spaces = store.application.worker.spaces();
@@ -277,6 +328,12 @@ impl WindowOps<IambInfo> for IambWindow {
                     spaces.into_iter().map(|(room, name)| SpaceItem::new(room, name, store));
                 state.set(items.collect());
                 state.draw(inner, buf, focused, store);
+
+                List::new(store)
+                    .empty_message("You haven't joined any spaces yet")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(inner, buf, state);
             },
             IambWindow::VerifyList(state) => {
                 let verifications = &store.application.verifications;
@@ -286,14 +343,29 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort();
 
                 state.set(items);
-                state.draw(inner, buf, focused, store);
+
+                List::new(store)
+                    .empty_message("No in-progress verifications")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(inner, buf, state);
             },
             IambWindow::Welcome(state) => state.draw(inner, buf, focused, store),
         }
     }
 
     fn dup(&self, store: &mut ProgramStore) -> Self {
-        delegate!(self, w => w.dup(store).into())
+        match self {
+            IambWindow::Room(w) => w.dup(store).into(),
+            IambWindow::DirectList(w) => w.dup(store).into(),
+            IambWindow::MemberList(w, room_id) => {
+                IambWindow::MemberList(w.dup(store), room_id.clone())
+            },
+            IambWindow::RoomList(w) => w.dup(store).into(),
+            IambWindow::SpaceList(w) => w.dup(store).into(),
+            IambWindow::VerifyList(w) => w.dup(store).into(),
+            IambWindow::Welcome(w) => w.dup(store).into(),
+        }
     }
 
     fn close(&mut self, flags: CloseFlags, store: &mut ProgramStore) -> bool {
@@ -314,6 +386,7 @@ impl Window<IambInfo> for IambWindow {
         match self {
             IambWindow::Room(room) => IambId::Room(room.id().to_owned()),
             IambWindow::DirectList(_) => IambId::DirectList,
+            IambWindow::MemberList(_, room_id) => IambId::MemberList(room_id.clone()),
             IambWindow::RoomList(_) => IambId::RoomList,
             IambWindow::SpaceList(_) => IambId::SpaceList,
             IambWindow::VerifyList(_) => IambId::VerifyList,
@@ -333,6 +406,13 @@ impl Window<IambInfo> for IambWindow {
                 let list = DirectListState::new(IambBufferId::DirectList, vec![]);
 
                 return Ok(list.into());
+            },
+            IambId::MemberList(room_id) => {
+                let id = IambBufferId::MemberList(room_id.clone());
+                let list = MemberListState::new(id, vec![]);
+                let win = IambWindow::MemberList(list, room_id);
+
+                return Ok(win);
             },
             IambId::RoomList => {
                 let list = RoomListState::new(IambBufferId::RoomList, vec![]);
@@ -412,6 +492,10 @@ impl ListItem<IambInfo> for RoomItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
         selected_text(self.name.as_str(), selected)
     }
+
+    fn get_word(&self) -> Option<String> {
+        self.room.room_id().to_string().into()
+    }
 }
 
 impl Promptable<ProgramContext, ProgramStore, IambInfo> for RoomItem {
@@ -451,6 +535,10 @@ impl ListItem<IambInfo> for DirectItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
         selected_text(self.name.as_str(), selected)
     }
+
+    fn get_word(&self) -> Option<String> {
+        self.room.room_id().to_string().into()
+    }
 }
 
 impl Promptable<ProgramContext, ProgramStore, IambInfo> for DirectItem {
@@ -489,6 +577,10 @@ impl ToString for SpaceItem {
 impl ListItem<IambInfo> for SpaceItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
         selected_text(self.name.as_str(), selected)
+    }
+
+    fn get_word(&self) -> Option<String> {
+        self.room.room_id().to_string().into()
     }
 }
 
@@ -667,9 +759,87 @@ impl ListItem<IambInfo> for VerifyItem {
 
         Text { lines }
     }
+
+    fn get_word(&self) -> Option<String> {
+        None
+    }
 }
 
 impl Promptable<ProgramContext, ProgramStore, IambInfo> for VerifyItem {
+    fn prompt(
+        &mut self,
+        act: &PromptAction,
+        _: &ProgramContext,
+        _: &mut ProgramStore,
+    ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
+        match act {
+            PromptAction::Submit => Ok(vec![]),
+            PromptAction::Abort(_) => {
+                let msg = "Cannot abort entry inside a list";
+                let err = EditError::Failure(msg.into());
+
+                Err(err)
+            },
+            PromptAction::Recall(_, _) => {
+                let msg = "Cannot recall history inside a list";
+                let err = EditError::Failure(msg.into());
+
+                Err(err)
+            },
+            _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct MemberItem {
+    member: RoomMember,
+}
+
+impl MemberItem {
+    fn new(member: RoomMember) -> Self {
+        Self { member }
+    }
+}
+
+impl ToString for MemberItem {
+    fn to_string(&self) -> String {
+        self.member.user_id().to_string()
+    }
+}
+
+impl ListItem<IambInfo> for MemberItem {
+    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+        let mut style = user_style(self.member.user_id().as_str());
+
+        if selected {
+            style = style.add_modifier(StyleModifier::REVERSED);
+        }
+
+        let user = Span::styled(self.to_string(), style);
+
+        let state = match self.member.membership() {
+            MembershipState::Ban => Span::raw(" (banned)").into(),
+            MembershipState::Invite => Span::raw(" (invited)").into(),
+            MembershipState::Knock => Span::raw(" (wants to join)").into(),
+            MembershipState::Leave => Span::raw(" (left)").into(),
+            MembershipState::Join => None,
+            _ => None,
+        };
+
+        if let Some(state) = state {
+            Spans(vec![user, state]).into()
+        } else {
+            user.into()
+        }
+    }
+
+    fn get_word(&self) -> Option<String> {
+        self.member.user_id().to_string().into()
+    }
+}
+
+impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
     fn prompt(
         &mut self,
         act: &PromptAction,

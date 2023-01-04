@@ -6,6 +6,7 @@ use modalkit::tui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
 
 use modalkit::{
     editing::action::{
+        Action,
         EditInfo,
         EditResult,
         Editable,
@@ -15,11 +16,29 @@ use modalkit::{
         Promptable,
         Scrollable,
     },
-    editing::base::{CloseFlags, MoveDir1D, PositionList, ScrollStyle, WordStyle},
+    editing::base::{
+        Axis,
+        CloseFlags,
+        Count,
+        MoveDir1D,
+        OpenTarget,
+        PositionList,
+        ScrollStyle,
+        WordStyle,
+    },
+    input::InputContext,
     widgets::{TermOffset, TerminalCursor, WindowOps},
 };
 
-use crate::base::{IambInfo, IambResult, ProgramAction, ProgramContext, ProgramStore};
+use crate::base::{
+    IambId,
+    IambInfo,
+    IambResult,
+    ProgramAction,
+    ProgramContext,
+    ProgramStore,
+    RoomAction,
+};
 
 use self::chat::ChatState;
 use self::space::{Space, SpaceState};
@@ -67,14 +86,28 @@ impl RoomState {
         }
     }
 
+    pub fn room_command(
+        &mut self,
+        act: RoomAction,
+        _: ProgramContext,
+        _: &mut ProgramStore,
+    ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
+        match act {
+            RoomAction::Members(mut cmd) => {
+                let width = Count::Exact(30);
+                let act =
+                    cmd.default_axis(Axis::Vertical).default_relation(MoveDir1D::Next).window(
+                        OpenTarget::Application(IambId::MemberList(self.id().to_owned())),
+                        width.into(),
+                    );
+
+                Ok(vec![(act, cmd.context.take())])
+            },
+        }
+    }
+
     pub fn get_title(&self, store: &mut ProgramStore) -> String {
-        store
-            .application
-            .rooms
-            .get(self.id())
-            .and_then(|i| i.name.as_ref())
-            .map(String::from)
-            .unwrap_or_else(|| "Untitled Matrix Room".to_string())
+        store.application.get_room_title(self.id())
     }
 
     pub fn focus_toggle(&mut self) {

@@ -3,8 +3,8 @@
 ## Useful Keybindings
 
 - `<Enter>` will send a typed message
+- `^V^J` can be used in Insert mode to enter a newline without submitting
 - `O`/`o` can be used to insert blank lines before and after the cursor line
-- `^O` can be used in Insert mode to enter a single Normal mode keybinding sequence
 - `^Wm` can be used to toggle whether the message bar or scrollback is selected
 - `^Wz` can be used to toggle whether the current window takes up the full screen
 
@@ -12,6 +12,7 @@
 
 - `:dms` will open a list of direct messages
 - `:rooms` will open a list of joined rooms
+- `:members` will open a list of members for the currently focused room or space
 - `:spaces` will open a list of joined spaces
 - `:join` can be used to switch to join a new room or start a direct message
 - `:split` and `:vsplit` can be used to open rooms in a new window
