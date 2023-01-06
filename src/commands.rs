@@ -12,6 +12,7 @@ use crate::base::{
     ProgramCommands,
     ProgramContext,
     RoomAction,
+    SetRoomField,
     VerifyAction,
 };
 
@@ -125,11 +126,35 @@ fn iamb_join(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_set(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() != 2 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let field = args.remove(0);
+    let value = args.remove(0);
+
+    let act: IambAction = match field.as_str() {
+        "room.name" => RoomAction::Set(SetRoomField::Name(value)).into(),
+        "room.topic" => RoomAction::Set(SetRoomField::Topic(value)).into(),
+        _ => {
+            return Result::Err(CommandError::InvalidArgument);
+        },
+    };
+
+    let step = CommandStep::Continue(act.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { names: vec!["dms".into()], f: iamb_dms });
     cmds.add_command(ProgramCommand { names: vec!["join".into()], f: iamb_join });
     cmds.add_command(ProgramCommand { names: vec!["members".into()], f: iamb_members });
     cmds.add_command(ProgramCommand { names: vec!["rooms".into()], f: iamb_rooms });
+    cmds.add_command(ProgramCommand { names: vec!["set".into()], f: iamb_set });
     cmds.add_command(ProgramCommand { names: vec!["spaces".into()], f: iamb_spaces });
     cmds.add_command(ProgramCommand { names: vec!["verify".into()], f: iamb_verify });
     cmds.add_command(ProgramCommand { names: vec!["welcome".into()], f: iamb_welcome });
@@ -212,6 +237,50 @@ mod tests {
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
         let res = cmds.input_cmd("join foo bar", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_set() {
+        let mut cmds = setup_commands();
+        let ctx = ProgramContext::default();
+
+        let res = cmds
+            .input_cmd("set room.topic \"Lots of fun discussion!\"", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(SetRoomField::Topic("Lots of fun discussion!".into()).into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds
+            .input_cmd("set room.topic The\\ Discussion\\ Room", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(SetRoomField::Topic("The Discussion Room".into()).into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("set room.topic Development", ctx.clone()).unwrap();
+        let act = IambAction::Room(SetRoomField::Topic("Development".into()).into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("set room.name Development", ctx.clone()).unwrap();
+        let act = IambAction::Room(SetRoomField::Name("Development".into()).into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds
+            .input_cmd("set room.name \"Application Development\"", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(SetRoomField::Name("Application Development".into()).into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("set", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("set room.name", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("set room.topic", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("set room.topic A B C", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
     }
 }

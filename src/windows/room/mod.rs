@@ -2,7 +2,13 @@ use matrix_sdk::room::Room as MatrixRoom;
 use matrix_sdk::ruma::RoomId;
 use matrix_sdk::DisplayName;
 
-use modalkit::tui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
+use modalkit::tui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Modifier as StyleModifier, Style},
+    text::{Span, Spans},
+    widgets::StatefulWidget,
+};
 
 use modalkit::{
     editing::action::{
@@ -90,7 +96,7 @@ impl RoomState {
         &mut self,
         act: RoomAction,
         _: ProgramContext,
-        _: &mut ProgramStore,
+        store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         match act {
             RoomAction::Members(mut cmd) => {
@@ -103,17 +109,42 @@ impl RoomState {
 
                 Ok(vec![(act, cmd.context.take())])
             },
+            RoomAction::Set(field) => {
+                store.application.worker.set_room(self.id().to_owned(), field)?;
+
+                Ok(vec![])
+            },
         }
     }
 
-    pub fn get_title(&self, store: &mut ProgramStore) -> String {
-        store.application.get_room_title(self.id())
+    pub fn get_title(&self, store: &mut ProgramStore) -> Spans {
+        let title = store.application.get_room_title(self.id());
+        let style = Style::default().add_modifier(StyleModifier::BOLD);
+        let mut spans = vec![Span::styled(title, style)];
+
+        match self.room().topic() {
+            Some(desc) if !desc.is_empty() => {
+                spans.push(" (".into());
+                spans.push(desc.into());
+                spans.push(")".into());
+            },
+            _ => {},
+        }
+
+        Spans(spans)
     }
 
     pub fn focus_toggle(&mut self) {
         match self {
             RoomState::Chat(chat) => chat.focus_toggle(),
             RoomState::Space(_) => return,
+        }
+    }
+
+    pub fn room(&self) -> &MatrixRoom {
+        match self {
+            RoomState::Chat(chat) => chat.room(),
+            RoomState::Space(space) => space.room(),
         }
     }
 

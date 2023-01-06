@@ -110,6 +110,14 @@ pub fn mock_room() -> RoomInfo {
     }
 }
 
+pub fn mock_dirs() -> DirectoryValues {
+    DirectoryValues {
+        cache: PathBuf::new(),
+        logs: PathBuf::new(),
+        downloads: PathBuf::new(),
+    }
+}
+
 pub fn mock_settings() -> ApplicationSettings {
     ApplicationSettings {
         matrix_dir: PathBuf::new(),
@@ -122,7 +130,7 @@ pub fn mock_settings() -> ApplicationSettings {
             dirs: None,
         },
         tunables: TunableValues { typing_notice: true, typing_notice_display: true },
-        dirs: DirectoryValues { cache: PathBuf::new() },
+        dirs: mock_dirs(),
     }
 }
 

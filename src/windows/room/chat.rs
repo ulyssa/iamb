@@ -44,6 +44,7 @@ use super::scrollback::{Scrollback, ScrollbackState};
 
 pub struct ChatState {
     room_id: OwnedRoomId,
+    room: MatrixRoom,
 
     tbox: TextBoxState<IambInfo>,
     sent: HistoryList<EditRope>,
@@ -63,6 +64,7 @@ impl ChatState {
 
         ChatState {
             room_id,
+            room,
 
             tbox,
             sent: HistoryList::new(EditRope::from(""), 100),
@@ -78,6 +80,10 @@ impl ChatState {
             RoomFocus::Scrollback => RoomFocus::MessageBar,
             RoomFocus::MessageBar => RoomFocus::Scrollback,
         };
+    }
+
+    pub fn room(&self) -> &MatrixRoom {
+        &self.room
     }
 
     pub fn id(&self) -> &RoomId {
@@ -133,6 +139,7 @@ impl WindowOps<IambInfo> for ChatState {
 
         ChatState {
             room_id: self.room_id.clone(),
+            room: self.room.clone(),
 
             tbox,
             sent: self.sent.clone(),

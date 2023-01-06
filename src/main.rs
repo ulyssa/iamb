@@ -162,7 +162,7 @@ impl Application {
         term.draw(|f| {
             let area = f.size();
 
-            let screen = Screen::new(store).showmode(modestr);
+            let screen = Screen::new(store).showmode(modestr).borders(true);
             f.render_stateful_widget(screen, area, sstate);
 
             if let Some((cx, cy)) = sstate.get_term_cursor() {
@@ -457,11 +457,10 @@ async fn main() -> IambResult<()> {
 
     // Set up the tracing subscriber so we can log client messages.
     let log_prefix = format!("iamb-log-{}", settings.profile_name);
-    let mut log_dir = settings.dirs.cache.clone();
-    log_dir.push("logs");
+    let log_dir = settings.dirs.logs.as_path();
 
     create_dir_all(settings.matrix_dir.as_path())?;
-    create_dir_all(log_dir.as_path())?;
+    create_dir_all(log_dir)?;
 
     let appender = tracing_appender::rolling::daily(log_dir, log_prefix);
     let (appender, _) = tracing_appender::non_blocking(appender);

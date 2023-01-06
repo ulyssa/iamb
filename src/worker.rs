@@ -30,8 +30,11 @@ use matrix_sdk::{
                 start::{OriginalSyncKeyVerificationStartEvent, ToDeviceKeyVerificationStartEvent},
                 VerificationMethod,
             },
-            room::message::{MessageType, RoomMessageEventContent, TextMessageEventContent},
-            room::name::RoomNameEventContent,
+            room::{
+                message::{MessageType, RoomMessageEventContent, TextMessageEventContent},
+                name::RoomNameEventContent,
+                topic::RoomTopicEventContent,
+            },
             typing::SyncTypingEvent,
             AnyMessageLikeEvent,
             AnyTimelineEvent,
@@ -51,7 +54,7 @@ use matrix_sdk::{
 use modalkit::editing::action::{EditInfo, InfoMessage, UIError};
 
 use crate::{
-    base::{AsyncProgramStore, IambError, IambResult, VerifyAction},
+    base::{AsyncProgramStore, IambError, IambResult, SetRoomField, VerifyAction},
     message::{Message, MessageFetchResult, MessageTimeStamp},
     ApplicationSettings,
 };
@@ -106,6 +109,7 @@ pub enum WorkerTask {
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     Spaces(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
     SendMessage(OwnedRoomId, String, ClientReply<IambResult<EchoPair>>),
+    SetRoom(OwnedRoomId, SetRoomField, ClientReply<IambResult<()>>),
     TypingNotice(OwnedRoomId),
     Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
     VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
@@ -200,6 +204,14 @@ impl Requester {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::SpaceMembers(space, reply)).unwrap();
+
+        return response.recv();
+    }
+
+    pub fn set_room(&self, room_id: OwnedRoomId, ev: SetRoomField) -> IambResult<()> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::SetRoom(room_id, ev, reply)).unwrap();
 
         return response.recv();
     }
@@ -339,6 +351,10 @@ impl ClientWorker {
             WorkerTask::Members(room_id, reply) => {
                 assert!(self.initialized);
                 reply.send(self.members(room_id).await);
+            },
+            WorkerTask::SetRoom(room_id, field, reply) => {
+                assert!(self.initialized);
+                reply.send(self.set_room(room_id, field).await);
             },
             WorkerTask::SpaceMembers(space, reply) => {
                 assert!(self.initialized);
@@ -763,6 +779,27 @@ impl ClientWorker {
         } else {
             Err(IambError::UnknownRoom(room_id).into())
         }
+    }
+
+    async fn set_room(&mut self, room_id: OwnedRoomId, field: SetRoomField) -> IambResult<()> {
+        let room = if let Some(r) = self.client.get_joined_room(&room_id) {
+            r
+        } else {
+            return Err(IambError::UnknownRoom(room_id).into());
+        };
+
+        match field {
+            SetRoomField::Name(name) => {
+                let ev = RoomNameEventContent::new(name.into());
+                let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+            },
+            SetRoomField::Topic(topic) => {
+                let ev = RoomTopicEventContent::new(topic);
+                let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+            },
+        }
+
+        Ok(())
     }
 
     async fn space_members(&mut self, space: OwnedRoomId) -> IambResult<Vec<OwnedRoomId>> {

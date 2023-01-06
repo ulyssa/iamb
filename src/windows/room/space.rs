@@ -18,6 +18,7 @@ use crate::windows::RoomItem;
 
 pub struct SpaceState {
     room_id: OwnedRoomId,
+    room: MatrixRoom,
     list: ListState<RoomItem, IambInfo>,
 }
 
@@ -27,7 +28,11 @@ impl SpaceState {
         let content = IambBufferId::Room(room_id.clone(), RoomFocus::Scrollback);
         let list = ListState::new(content, vec![]);
 
-        SpaceState { room_id, list }
+        SpaceState { room_id, room, list }
+    }
+
+    pub fn room(&self) -> &MatrixRoom {
+        &self.room
     }
 
     pub fn id(&self) -> &RoomId {
@@ -37,6 +42,7 @@ impl SpaceState {
     pub fn dup(&self, store: &mut ProgramStore) -> Self {
         SpaceState {
             room_id: self.room_id.clone(),
+            room: self.room.clone(),
             list: self.list.dup(store),
         }
     }

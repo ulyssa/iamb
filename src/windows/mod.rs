@@ -13,7 +13,7 @@ use modalkit::tui::{
     layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
     text::{Span, Spans, Text},
-    widgets::{Block, Borders, StatefulWidget, Widget},
+    widgets::StatefulWidget,
 };
 
 use modalkit::{
@@ -70,6 +70,21 @@ use self::{room::RoomState, welcome::WelcomeState};
 
 pub mod room;
 pub mod welcome;
+
+#[inline]
+fn bold_style() -> Style {
+    Style::default().add_modifier(StyleModifier::BOLD)
+}
+
+#[inline]
+fn bold_span(s: &str) -> Span {
+    Span::styled(s, bold_style())
+}
+
+#[inline]
+fn bold_spans(s: &str) -> Spans {
+    bold_span(s).into()
+}
 
 #[inline]
 fn selected_style(selected: bool) -> Style {
@@ -166,22 +181,6 @@ impl IambWindow {
             let err = UIError::Failure(msg.into());
 
             return Err(err);
-        }
-    }
-
-    pub fn get_title(&self, store: &mut ProgramStore) -> String {
-        match self {
-            IambWindow::DirectList(_) => "Direct Messages".to_string(),
-            IambWindow::RoomList(_) => "Rooms".to_string(),
-            IambWindow::SpaceList(_) => "Spaces".to_string(),
-            IambWindow::VerifyList(_) => "Verifications".to_string(),
-            IambWindow::Welcome(_) => "Welcome to iamb".to_string(),
-
-            IambWindow::Room(w) => w.get_title(store),
-            IambWindow::MemberList(_, room_id) => {
-                let title = store.application.get_room_title(room_id.as_ref());
-                format!("Room Members: {}", title)
-            },
         }
     }
 }
@@ -281,13 +280,8 @@ impl TerminalCursor for IambWindow {
 
 impl WindowOps<IambInfo> for IambWindow {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
-        let title = self.get_title(store);
-        let block = Block::default().title(title.as_str()).borders(Borders::ALL);
-        let inner = block.inner(area);
-        block.render(area, buf);
-
         match self {
-            IambWindow::Room(state) => state.draw(inner, buf, focused, store),
+            IambWindow::Room(state) => state.draw(area, buf, focused, store),
             IambWindow::DirectList(state) => {
                 let dms = store.application.worker.direct_messages();
                 let items = dms.into_iter().map(|(id, name)| DirectItem::new(id, name, store));
@@ -297,7 +291,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("No direct messages yet!")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
-                    .render(inner, buf, state);
+                    .render(area, buf, state);
             },
             IambWindow::MemberList(state, room_id) => {
                 if let Ok(mems) = store.application.worker.members(room_id.clone()) {
@@ -309,7 +303,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("No users here yet!")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
-                    .render(inner, buf, state);
+                    .render(area, buf, state);
             },
             IambWindow::RoomList(state) => {
                 let joined = store.application.worker.joined_rooms();
@@ -320,20 +314,20 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("You haven't joined any rooms yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
-                    .render(inner, buf, state);
+                    .render(area, buf, state);
             },
             IambWindow::SpaceList(state) => {
                 let spaces = store.application.worker.spaces();
                 let items =
                     spaces.into_iter().map(|(room, name)| SpaceItem::new(room, name, store));
                 state.set(items.collect());
-                state.draw(inner, buf, focused, store);
+                state.draw(area, buf, focused, store);
 
                 List::new(store)
                     .empty_message("You haven't joined any spaces yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
-                    .render(inner, buf, state);
+                    .render(area, buf, state);
             },
             IambWindow::VerifyList(state) => {
                 let verifications = &store.application.verifications;
@@ -348,9 +342,9 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("No in-progress verifications")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
-                    .render(inner, buf, state);
+                    .render(area, buf, state);
             },
-            IambWindow::Welcome(state) => state.draw(inner, buf, focused, store),
+            IambWindow::Welcome(state) => state.draw(area, buf, focused, store),
         }
     }
 
@@ -391,6 +385,44 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::SpaceList(_) => IambId::SpaceList,
             IambWindow::VerifyList(_) => IambId::VerifyList,
             IambWindow::Welcome(_) => IambId::Welcome,
+        }
+    }
+
+    fn get_tab_title(&self, store: &mut ProgramStore) -> Spans {
+        match self {
+            IambWindow::DirectList(_) => bold_spans("Direct Messages"),
+            IambWindow::RoomList(_) => bold_spans("Rooms"),
+            IambWindow::SpaceList(_) => bold_spans("Spaces"),
+            IambWindow::VerifyList(_) => bold_spans("Verifications"),
+            IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
+
+            IambWindow::Room(w) => {
+                let title = store.application.get_room_title(w.id());
+
+                Spans::from(title)
+            },
+            IambWindow::MemberList(_, room_id) => {
+                let title = store.application.get_room_title(room_id.as_ref());
+
+                Spans(vec![bold_span("Room Members: "), title.into()])
+            },
+        }
+    }
+
+    fn get_win_title(&self, store: &mut ProgramStore) -> Spans {
+        match self {
+            IambWindow::DirectList(_) => bold_spans("Direct Messages"),
+            IambWindow::RoomList(_) => bold_spans("Rooms"),
+            IambWindow::SpaceList(_) => bold_spans("Spaces"),
+            IambWindow::VerifyList(_) => bold_spans("Verifications"),
+            IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
+
+            IambWindow::Room(w) => w.get_title(store),
+            IambWindow::MemberList(_, room_id) => {
+                let title = store.application.get_room_title(room_id.as_ref());
+
+                Spans(vec![bold_span("Room Members: "), title.into()])
+            },
         }
     }
 
@@ -463,6 +495,10 @@ impl Window<IambInfo> for IambWindow {
         let err = UIError::Unimplemented(msg);
 
         Err(err)
+    }
+
+    fn unnamed(store: &mut ProgramStore) -> IambResult<Self> {
+        Self::open(IambId::RoomList, store)
     }
 }
 

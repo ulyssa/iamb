@@ -60,8 +60,21 @@ pub enum VerifyAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SetRoomField {
+    Name(String),
+    Topic(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomAction {
     Members(Box<CommandContext<ProgramContext>>),
+    Set(SetRoomField),
+}
+
+impl From<SetRoomField> for RoomAction {
+    fn from(act: SetRoomField) -> Self {
+        RoomAction::Set(act)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -71,6 +84,12 @@ pub enum IambAction {
     VerifyRequest(String),
     SendMessage(OwnedRoomId, String),
     ToggleScrollbackFocus,
+}
+
+impl From<RoomAction> for IambAction {
+    fn from(act: RoomAction) -> Self {
+        IambAction::Room(act)
+    }
 }
 
 impl ApplicationAction for IambAction {

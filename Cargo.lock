@@ -1600,9 +1600,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.8"
+version = "0.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7f4e400066e546471efee517b7e5e3ca5af2c04014e76289aecc7af621011bba"
+checksum = "28a676fc7ab6a9fd329ff82d9d291370aafcf904ac3ff9f72397f64529cb1b2d"
 dependencies = [
  "anymap2",
  "bitflags",

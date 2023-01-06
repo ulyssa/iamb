@@ -100,25 +100,44 @@ impl Tunables {
 #[derive(Clone)]
 pub struct DirectoryValues {
     pub cache: PathBuf,
+    pub logs: PathBuf,
+    pub downloads: PathBuf,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Directories {
     pub cache: Option<PathBuf>,
+    pub logs: Option<PathBuf>,
+    pub downloads: Option<PathBuf>,
 }
 
 impl Directories {
     fn merge(self, other: Self) -> Self {
-        Directories { cache: self.cache.or(other.cache) }
+        Directories {
+            cache: self.cache.or(other.cache),
+            logs: self.logs.or(other.logs),
+            downloads: self.downloads.or(other.downloads),
+        }
     }
 
     fn values(self) -> DirectoryValues {
-        DirectoryValues {
-            cache: self
-                .cache
-                .or_else(dirs::cache_dir)
-                .expect("no dirs.cache value configured!"),
-        }
+        let cache = self
+            .cache
+            .or_else(dirs::cache_dir)
+            .expect("no dirs.cache value configured!");
+
+        let logs = self.logs.unwrap_or_else(|| {
+            let mut dir = cache.clone();
+            dir.push("logs");
+            dir
+        });
+
+        let downloads = self
+            .downloads
+            .or_else(dirs::download_dir)
+            .expect("no dirs.download value configured!");
+
+        DirectoryValues { cache, logs, downloads }
     }
 }
 

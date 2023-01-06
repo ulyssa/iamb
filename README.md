@@ -43,8 +43,8 @@ two other TUI clients and Element Web:
 | Room tag editing                        | :x: ([#15])        | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
 | Search joined rooms                     | :x: ([#16])        | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
 | Room user list                          | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
-| Display Room Description                | :x: ([#12])        | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
-| Edit Room Description                   | :x: ([#12])        | :x:                | :heavy_check_mark: | :heavy_check_mark:  |
+| Display Room Description                | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Edit Room Description                   | :heavy_check_mark: | :x:                | :heavy_check_mark: | :heavy_check_mark:  |
 | Highlights                              | :x: ([#8])         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Pushrules                               | :x:                | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
 | Send read markers                       | :x: ([#11])        | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
