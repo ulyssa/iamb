@@ -7,6 +7,11 @@
 This project is a work-in-progress, and there's still a lot to be implemented,
 but much of the basic client functionality is already present.
 
+## Documentation
+
+You can find documentation for installing, configuring, and using iamb on its
+website, [iamb.chat].
+
 ## Installation
 
 Install Rust and Cargo, and then run:
@@ -76,6 +81,7 @@ iamb is released under the [Apache License, Version 2.0].
 
 [Apache License, Version 2.0]: https://github.com/ulyssa/iamb/blob/master/LICENSE
 [client-comparison-matrix]: https://matrix.org/clients-matrix/
+[iamb.chat]: https://iamb.chat
 [gomuks]: https://github.com/tulir/gomuks
 [weechat-matrix]: https://github.com/poljar/weechat-matrix
 [#2]: https://github.com/ulyssa/iamb/issues/2
