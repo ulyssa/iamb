@@ -22,34 +22,21 @@ use matrix_sdk::ruma::{
 };
 
 use modalkit::tui::{
-    style::{Color, Modifier as StyleModifier, Style},
+    style::{Modifier as StyleModifier, Style},
     text::{Span, Spans, Text},
 };
 
 use modalkit::editing::{base::ViewportContext, cursor::Cursor};
 
-use crate::base::{IambResult, RoomInfo};
+use crate::{
+    base::{IambResult, RoomInfo},
+    config::ApplicationSettings,
+};
 
 pub type MessageEvent = MessageLikeEvent<RoomMessageEventContent>;
 pub type MessageFetchResult = IambResult<(Option<String>, Vec<MessageEvent>)>;
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 pub type Messages = BTreeMap<MessageKey, Message>;
-
-const COLORS: [Color; 13] = [
-    Color::Blue,
-    Color::Cyan,
-    Color::Green,
-    Color::LightBlue,
-    Color::LightGreen,
-    Color::LightCyan,
-    Color::LightMagenta,
-    Color::LightRed,
-    Color::LightYellow,
-    Color::Magenta,
-    Color::Red,
-    Color::Reset,
-    Color::Yellow,
-];
 
 const USER_GUTTER: usize = 30;
 const TIME_GUTTER: usize = 12;
@@ -65,18 +52,6 @@ const USER_GUTTER_EMPTY_SPAN: Span<'static> = Span {
         sub_modifier: StyleModifier::empty(),
     },
 };
-
-pub(crate) fn user_color(user: &str) -> Color {
-    let mut hasher = DefaultHasher::new();
-    user.hash(&mut hasher);
-    let color = hasher.finish() as usize % COLORS.len();
-
-    COLORS[color]
-}
-
-pub(crate) fn user_style(user: &str) -> Style {
-    Style::default().fg(user_color(user)).add_modifier(StyleModifier::BOLD)
-}
 
 struct WrappedLinesIterator<'a> {
     iter: Lines<'a>,
@@ -390,7 +365,13 @@ impl Message {
         Message { content, sender, timestamp }
     }
 
-    pub fn show(&self, selected: bool, vwctx: &ViewportContext<MessageCursor>) -> Text {
+    pub fn show(
+        &self,
+        prev: Option<&Message>,
+        selected: bool,
+        vwctx: &ViewportContext<MessageCursor>,
+        settings: &ApplicationSettings,
+    ) -> Text {
         let width = vwctx.get_width();
         let msg = self.as_ref();
 
@@ -414,7 +395,7 @@ impl Message {
                 let trailing = Span::styled(space(lw.saturating_sub(w)), style);
 
                 if i == 0 {
-                    let user = self.show_sender(true);
+                    let user = self.show_sender(prev, true, settings);
 
                     if let Some(time) = self.timestamp.show() {
                         lines.push(Spans(vec![user, line, trailing, time]))
@@ -435,7 +416,7 @@ impl Message {
                 let trailing = Span::styled(space(lw.saturating_sub(w)), style);
 
                 let prefix = if i == 0 {
-                    self.show_sender(true)
+                    self.show_sender(prev, true, settings)
                 } else {
                     USER_GUTTER_EMPTY_SPAN
                 };
@@ -443,7 +424,7 @@ impl Message {
                 lines.push(Spans(vec![prefix, line, trailing]))
             }
         } else {
-            lines.push(Spans::from(self.show_sender(false)));
+            lines.push(Spans::from(self.show_sender(prev, false, settings)));
 
             for (line, _) in wrap(msg, width.saturating_sub(2)) {
                 let line = format!("  {}", line);
@@ -456,14 +437,26 @@ impl Message {
         return Text { lines };
     }
 
-    fn show_sender(&self, align_right: bool) -> Span {
-        let sender = self.sender.to_string();
-        let style = user_style(sender.as_str());
+    fn show_sender(
+        &self,
+        prev: Option<&Message>,
+        align_right: bool,
+        settings: &ApplicationSettings,
+    ) -> Span {
+        let user = if matches!(prev, Some(prev) if self.sender == prev.sender) {
+            USER_GUTTER_EMPTY_SPAN
+        } else {
+            settings.get_user_span(self.sender.as_ref())
+        };
+
+        let Span { content, style } = user;
+        let stop = content.len().min(28);
+        let s = &content[..stop];
 
         let sender = if align_right {
-            format!("{: >width$}  ", sender, width = 28)
+            format!("{: >width$}  ", s, width = 28)
         } else {
-            format!("{: <width$}  ", sender, width = 28)
+            format!("{: <width$}  ", s, width = 28)
         };
 
         Span::styled(sender, style)

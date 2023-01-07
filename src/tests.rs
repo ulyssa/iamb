@@ -1,4 +1,6 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
+use std::path::PathBuf;
+use std::sync::mpsc::sync_channel;
 
 use matrix_sdk::ruma::{
     event_id,
@@ -12,15 +14,20 @@ use matrix_sdk::ruma::{
     UInt,
 };
 
-use std::path::PathBuf;
-use std::sync::mpsc::sync_channel;
-use url::Url;
-
 use lazy_static::lazy_static;
+use modalkit::tui::style::Color;
+use url::Url;
 
 use crate::{
     base::{ChatStore, ProgramStore, RoomFetchStatus, RoomInfo},
-    config::{ApplicationSettings, DirectoryValues, ProfileConfig, TunableValues},
+    config::{
+        ApplicationSettings,
+        DirectoryValues,
+        ProfileConfig,
+        TunableValues,
+        UserColor,
+        UserDisplayTunables,
+    },
     message::{
         Message,
         MessageContent,
@@ -35,9 +42,9 @@ lazy_static! {
     pub static ref TEST_ROOM1_ID: OwnedRoomId = RoomId::new(server_name!("example.com")).to_owned();
     pub static ref TEST_USER1: OwnedUserId = user_id!("@user1:example.com").to_owned();
     pub static ref TEST_USER2: OwnedUserId = user_id!("@user2:example.com").to_owned();
-    pub static ref TEST_USER3: OwnedUserId = user_id!("@user2:example.com").to_owned();
-    pub static ref TEST_USER4: OwnedUserId = user_id!("@user2:example.com").to_owned();
-    pub static ref TEST_USER5: OwnedUserId = user_id!("@user2:example.com").to_owned();
+    pub static ref TEST_USER3: OwnedUserId = user_id!("@user3:example.com").to_owned();
+    pub static ref TEST_USER4: OwnedUserId = user_id!("@user4:example.com").to_owned();
+    pub static ref TEST_USER5: OwnedUserId = user_id!("@user5:example.com").to_owned();
     pub static ref MSG1_KEY: MessageKey = (LocalEcho, EventId::new(server_name!("example.com")));
     pub static ref MSG2_KEY: MessageKey =
         (OriginServer(UInt::new(1).unwrap()), EventId::new(server_name!("example.com")));
@@ -118,6 +125,19 @@ pub fn mock_dirs() -> DirectoryValues {
     }
 }
 
+pub fn mock_tunables() -> TunableValues {
+    TunableValues {
+        typing_notice: true,
+        typing_notice_display: true,
+        users: vec![(TEST_USER5.clone(), UserDisplayTunables {
+            color: Some(UserColor(Color::Black)),
+            name: Some("USER 5".into()),
+        })]
+        .into_iter()
+        .collect::<HashMap<_, _>>(),
+    }
+}
+
 pub fn mock_settings() -> ApplicationSettings {
     ApplicationSettings {
         matrix_dir: PathBuf::new(),
@@ -129,7 +149,7 @@ pub fn mock_settings() -> ApplicationSettings {
             settings: None,
             dirs: None,
         },
-        tunables: TunableValues { typing_notice: true, typing_notice_display: true },
+        tunables: mock_tunables(),
         dirs: mock_dirs(),
     }
 }

@@ -61,6 +61,7 @@ use modalkit::editing::{
 
 use crate::{
     base::{IambBufferId, IambInfo, ProgramContext, ProgramStore, RoomFocus, RoomInfo},
+    config::ApplicationSettings,
     message::{Message, MessageCursor, MessageKey},
 };
 
@@ -148,7 +149,13 @@ impl ScrollbackState {
         }
     }
 
-    fn scrollview(&mut self, idx: MessageKey, pos: MovePosition, info: &RoomInfo) {
+    fn scrollview(
+        &mut self,
+        idx: MessageKey,
+        pos: MovePosition,
+        info: &RoomInfo,
+        settings: &ApplicationSettings,
+    ) {
         let selidx = if let Some(key) = self.cursor.to_key(info) {
             key
         } else {
@@ -165,7 +172,7 @@ impl ScrollbackState {
 
                 for (key, item) in info.messages.range(..=&idx).rev() {
                     let sel = selidx == key;
-                    let len = item.show(sel, &self.viewctx).lines.len();
+                    let len = item.show(None, sel, &self.viewctx, settings).lines.len();
 
                     if key == &idx {
                         lines += len / 2;
@@ -187,7 +194,7 @@ impl ScrollbackState {
 
                 for (key, item) in info.messages.range(..=&idx).rev() {
                     let sel = key == selidx;
-                    let len = item.show(sel, &self.viewctx).lines.len();
+                    let len = item.show(None, sel, &self.viewctx, settings).lines.len();
 
                     lines += len;
 
@@ -202,7 +209,7 @@ impl ScrollbackState {
         }
     }
 
-    fn shift_cursor(&mut self, info: &RoomInfo) {
+    fn shift_cursor(&mut self, info: &RoomInfo, settings: &ApplicationSettings) {
         let last_key = if let Some(k) = info.messages.last_key_value() {
             k.0
         } else {
@@ -227,7 +234,7 @@ impl ScrollbackState {
                 break;
             }
 
-            lines += item.show(false, &self.viewctx).height().max(1);
+            lines += item.show(None, false, &self.viewctx, settings).height().max(1);
 
             if lines >= self.viewctx.get_height() {
                 // We've reached the end of the viewport; move cursor into it.
@@ -930,7 +937,8 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        let info = store.application.get_room_info(self.room_id.clone());
+        let info = store.application.rooms.entry(self.room_id.clone()).or_default();
+        let settings = &store.application.settings;
         let mut corner = self.viewctx.corner.clone();
 
         let last_key = if let Some(k) = info.messages.last_key_value() {
@@ -956,7 +964,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in info.messages.range(..=&corner_key).rev() {
                     let sel = key == cursor_key;
-                    let txt = item.show(sel, &self.viewctx);
+                    let txt = item.show(None, sel, &self.viewctx, settings);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -982,7 +990,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             MoveDir2D::Down => {
                 for (key, item) in info.messages.range(&corner_key..) {
                     let sel = key == cursor_key;
-                    let txt = item.show(sel, &self.viewctx);
+                    let txt = item.show(None, sel, &self.viewctx, settings);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1018,7 +1026,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         }
 
         self.viewctx.corner = corner;
-        self.shift_cursor(info);
+        self.shift_cursor(info, settings);
 
         Ok(None)
     }
@@ -1038,10 +1046,11 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 Err(err)
             },
             Axis::Vertical => {
-                let info = store.application.get_room_info(self.room_id.clone());
+                let info = store.application.rooms.entry(self.room_id.clone()).or_default();
+                let settings = &store.application.settings;
 
                 if let Some(key) = self.cursor.to_key(info).cloned() {
-                    self.scrollview(key, pos, info);
+                    self.scrollview(key, pos, info, settings);
                 }
 
                 Ok(None)
@@ -1126,6 +1135,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let info = self.store.application.rooms.entry(state.room_id.clone()).or_default();
+        let settings = &self.store.application.settings;
         let area = info.render_typing(area, buf, &self.store.application.settings);
 
         state.set_term_info(area);
@@ -1157,10 +1167,13 @@ impl<'a> StatefulWidget for Scrollback<'a> {
 
         let mut lines = vec![];
         let mut sawit = false;
+        let mut prev = None;
 
         for (key, item) in info.messages.range(&corner_key..) {
             let sel = key == cursor_key;
-            let txt = item.show(self.focused && sel, &state.viewctx);
+            let txt = item.show(prev, self.focused && sel, &state.viewctx, settings);
+
+            prev = Some(item);
 
             for (row, line) in txt.lines.into_iter().enumerate() {
                 if sawit && lines.len() >= height {

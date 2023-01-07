@@ -1,19 +1,59 @@
+use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
+use std::fmt;
 use std::fs::File;
+use std::hash::{Hash, Hasher};
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::Parser;
-use matrix_sdk::ruma::OwnedUserId;
-use serde::Deserialize;
+use matrix_sdk::ruma::{OwnedUserId, UserId};
+use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer};
 use url::Url;
+
+use modalkit::tui::{
+    style::{Color, Modifier as StyleModifier, Style},
+    text::Span,
+};
 
 macro_rules! usage {
     ( $($args: tt)* ) => {
         println!($($args)*);
         process::exit(2);
     }
+}
+
+const COLORS: [Color; 13] = [
+    Color::Blue,
+    Color::Cyan,
+    Color::Green,
+    Color::LightBlue,
+    Color::LightGreen,
+    Color::LightCyan,
+    Color::LightMagenta,
+    Color::LightRed,
+    Color::LightYellow,
+    Color::Magenta,
+    Color::Red,
+    Color::Reset,
+    Color::Yellow,
+];
+
+pub fn user_color(user: &str) -> Color {
+    let mut hasher = DefaultHasher::new();
+    user.hash(&mut hasher);
+    let color = hasher.finish() as usize % COLORS.len();
+
+    COLORS[color]
+}
+
+pub fn user_style_from_color(color: Color) -> Style {
+    Style::default().fg(color).add_modifier(StyleModifier::BOLD)
+}
+
+pub fn user_style(user: &str) -> Style {
+    user_style_from_color(user_color(user))
 }
 
 fn is_profile_char(c: char) -> bool {
@@ -69,16 +109,88 @@ pub enum ConfigError {
     Invalid(#[from] serde_json::Error),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct UserColor(pub Color);
+pub struct UserColorVisitor;
+
+impl<'de> Visitor<'de> for UserColorVisitor {
+    type Value = UserColor;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid color")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        match value {
+            "none" => Ok(UserColor(Color::Reset)),
+            "red" => Ok(UserColor(Color::Red)),
+            "black" => Ok(UserColor(Color::Black)),
+            "green" => Ok(UserColor(Color::Green)),
+            "yellow" => Ok(UserColor(Color::Yellow)),
+            "blue" => Ok(UserColor(Color::Blue)),
+            "magenta" => Ok(UserColor(Color::Magenta)),
+            "cyan" => Ok(UserColor(Color::Cyan)),
+            "gray" => Ok(UserColor(Color::Gray)),
+            "dark-gray" => Ok(UserColor(Color::DarkGray)),
+            "light-red" => Ok(UserColor(Color::LightRed)),
+            "light-green" => Ok(UserColor(Color::LightGreen)),
+            "light-yellow" => Ok(UserColor(Color::LightYellow)),
+            "light-blue" => Ok(UserColor(Color::LightBlue)),
+            "light-magenta" => Ok(UserColor(Color::LightMagenta)),
+            "light-cyan" => Ok(UserColor(Color::LightCyan)),
+            "white" => Ok(UserColor(Color::White)),
+            _ => Err(E::custom("Could not parse color")),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for UserColor {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(UserColorVisitor)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct UserDisplayTunables {
+    pub color: Option<UserColor>,
+    pub name: Option<String>,
+}
+
+pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
+
+fn merge_users(a: Option<UserOverrides>, b: Option<UserOverrides>) -> Option<UserOverrides> {
+    match (a, b) {
+        (Some(a), None) => Some(a),
+        (None, Some(b)) => Some(b),
+        (Some(mut a), Some(b)) => {
+            for (k, v) in b {
+                a.insert(k, v);
+            }
+
+            Some(a)
+        },
+        (None, None) => None,
+    }
+}
+
 #[derive(Clone)]
 pub struct TunableValues {
     pub typing_notice: bool,
     pub typing_notice_display: bool,
+    pub users: UserOverrides,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
     pub typing_notice: Option<bool>,
     pub typing_notice_display: Option<bool>,
+    pub users: Option<UserOverrides>,
 }
 
 impl Tunables {
@@ -86,6 +198,7 @@ impl Tunables {
         Tunables {
             typing_notice: self.typing_notice.or(other.typing_notice),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
+            users: merge_users(self.users, other.users),
         }
     }
 
@@ -93,6 +206,7 @@ impl Tunables {
         TunableValues {
             typing_notice: self.typing_notice.unwrap_or(true),
             typing_notice_display: self.typing_notice.unwrap_or(true),
+            users: self.users.unwrap_or_default(),
         }
     }
 }
@@ -255,11 +369,32 @@ impl ApplicationSettings {
 
         Ok(settings)
     }
+
+    pub fn get_user_span<'a>(&self, user_id: &'a UserId) -> Span<'a> {
+        if let Some(user) = self.tunables.users.get(user_id) {
+            let color = if let Some(UserColor(c)) = user.color {
+                c
+            } else {
+                user_color(user_id.as_str())
+            };
+
+            let style = user_style_from_color(color);
+
+            if let Some(name) = &user.name {
+                Span::styled(name.clone(), style)
+            } else {
+                Span::styled(user_id.as_str(), style)
+            }
+        } else {
+            Span::styled(user_id.as_str(), user_style(user_id.as_str()))
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use matrix_sdk::ruma::user_id;
 
     #[test]
     fn test_profile_name_invalid() {
@@ -282,5 +417,75 @@ mod tests {
         assert_eq!(validate_profile_name("a-B-c"), true);
         assert_eq!(validate_profile_name("a.b-c"), true);
         assert_eq!(validate_profile_name("a.B-c"), true);
+    }
+
+    #[test]
+    fn test_merge_users() {
+        let a = None;
+        let b = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
+            color: Some(UserColor(Color::Red)),
+            name: Some("Hello".into()),
+        })]
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+        let c = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
+            color: Some(UserColor(Color::Green)),
+            name: Some("World".into()),
+        })]
+        .into_iter()
+        .collect::<HashMap<_, _>>();
+
+        let res = merge_users(a.clone(), a.clone());
+        assert_eq!(res, None);
+
+        let res = merge_users(a.clone(), Some(b.clone()));
+        assert_eq!(res, Some(b.clone()));
+
+        let res = merge_users(Some(b.clone()), a.clone());
+        assert_eq!(res, Some(b.clone()));
+
+        let res = merge_users(Some(b.clone()), Some(b.clone()));
+        assert_eq!(res, Some(b.clone()));
+
+        let res = merge_users(Some(b.clone()), Some(c.clone()));
+        assert_eq!(res, Some(c.clone()));
+
+        let res = merge_users(Some(c.clone()), Some(b.clone()));
+        assert_eq!(res, Some(b.clone()));
+    }
+
+    #[test]
+    fn test_parse_tunables() {
+        let res: Tunables = serde_json::from_str("{}").unwrap();
+        assert_eq!(res.typing_notice, None);
+        assert_eq!(res.typing_notice_display, None);
+        assert_eq!(res.users, None);
+
+        let res: Tunables = serde_json::from_str("{\"typing_notice\": true}").unwrap();
+        assert_eq!(res.typing_notice, Some(true));
+        assert_eq!(res.typing_notice_display, None);
+        assert_eq!(res.users, None);
+
+        let res: Tunables = serde_json::from_str("{\"typing_notice\": false}").unwrap();
+        assert_eq!(res.typing_notice, Some(false));
+        assert_eq!(res.typing_notice_display, None);
+        assert_eq!(res.users, None);
+
+        let res: Tunables = serde_json::from_str("{\"users\": {}}").unwrap();
+        assert_eq!(res.typing_notice, None);
+        assert_eq!(res.typing_notice_display, None);
+        assert_eq!(res.users, Some(HashMap::new()));
+
+        let res: Tunables = serde_json::from_str(
+            "{\"users\": {\"@a:b.c\": {\"color\": \"black\", \"name\": \"Tim\"}}}",
+        )
+        .unwrap();
+        assert_eq!(res.typing_notice, None);
+        assert_eq!(res.typing_notice_display, None);
+        let users = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
+            color: Some(UserColor(Color::Black)),
+            name: Some("Tim".into()),
+        })];
+        assert_eq!(res.users, Some(users.into_iter().collect()));
     }
 }

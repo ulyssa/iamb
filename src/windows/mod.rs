@@ -51,19 +51,16 @@ use modalkit::{
     },
 };
 
-use crate::{
-    base::{
-        ChatStore,
-        IambBufferId,
-        IambId,
-        IambInfo,
-        IambResult,
-        ProgramAction,
-        ProgramContext,
-        ProgramStore,
-        RoomAction,
-    },
-    message::user_style,
+use crate::base::{
+    ChatStore,
+    IambBufferId,
+    IambId,
+    IambInfo,
+    IambResult,
+    ProgramAction,
+    ProgramContext,
+    ProgramStore,
+    RoomAction,
 };
 
 use self::{room::RoomState, welcome::WelcomeState};
@@ -845,14 +842,17 @@ impl ToString for MemberItem {
 }
 
 impl ListItem<IambInfo> for MemberItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
-        let mut style = user_style(self.member.user_id().as_str());
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        store: &mut ProgramStore,
+    ) -> Text {
+        let mut user = store.application.settings.get_user_span(self.member.user_id());
 
         if selected {
-            style = style.add_modifier(StyleModifier::REVERSED);
+            user.style = user.style.add_modifier(StyleModifier::REVERSED);
         }
-
-        let user = Span::styled(self.to_string(), style);
 
         let state = match self.member.membership() {
             MembershipState::Ban => Span::raw(" (banned)").into(),

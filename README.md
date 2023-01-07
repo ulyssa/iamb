@@ -1,5 +1,9 @@
 # iamb
 
+[![Build Status](https://github.com/ulyssa/iamb/workflows/CI/badge.svg)](https://github.com/ulyssa/iamb/actions?query=workflow%3ACI+)
+[![License: Apache 2.0](https://img.shields.io/crates/l/iamb.svg?logo=apache)](https://crates.io/crates/iamb)
+[![Latest Version](https://img.shields.io/crates/v/iamb.svg?logo=rust)](https://crates.io/crates/iamb)
+
 ## About
 
 `iamb` is a Matrix client for the terminal that uses Vim keybindings.
