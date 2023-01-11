@@ -309,46 +309,41 @@ pub enum MessageContent {
     Redacted,
 }
 
-impl AsRef<str> for MessageContent {
-    fn as_ref(&self) -> &str {
+impl MessageContent {
+    pub fn show(&self) -> Cow<'_, str> {
         match self {
             MessageContent::Original(ev) => {
-                match &ev.msgtype {
-                    MessageType::Text(content) => {
-                        return content.body.as_ref();
-                    },
-                    MessageType::Emote(content) => {
-                        return content.body.as_ref();
-                    },
-                    MessageType::Notice(content) => {
-                        return content.body.as_str();
-                    },
-                    MessageType::ServerNotice(_) => {
-                        // XXX: implement
+                let s = match &ev.msgtype {
+                    MessageType::Text(content) => content.body.as_ref(),
+                    MessageType::Emote(content) => content.body.as_ref(),
+                    MessageType::Notice(content) => content.body.as_str(),
+                    MessageType::ServerNotice(content) => content.body.as_str(),
 
-                        return "[server notice]";
-                    },
                     MessageType::VerificationRequest(_) => {
                         // XXX: implement
 
-                        return "[verification request]";
+                        return Cow::Owned("[verification request]".into());
                     },
-                    MessageType::Audio(..) => {
-                        return "[audio]";
+                    MessageType::Audio(content) => {
+                        return Cow::Owned(format!("[Attached Audio: {}]", content.body));
                     },
-                    MessageType::File(..) => {
-                        return "[file]";
+                    MessageType::File(content) => {
+                        return Cow::Owned(format!("[Attached File: {}]", content.body));
                     },
-                    MessageType::Image(..) => {
-                        return "[image]";
+                    MessageType::Image(content) => {
+                        return Cow::Owned(format!("[Attached Image: {}]", content.body));
                     },
-                    MessageType::Video(..) => {
-                        return "[video]";
+                    MessageType::Video(content) => {
+                        return Cow::Owned(format!("[Attached Video: {}]", content.body));
                     },
-                    _ => return "[unknown message type]",
-                }
+                    _ => {
+                        return Cow::Owned(format!("[Unknown message type: {:?}]", ev.msgtype()));
+                    },
+                };
+
+                Cow::Borrowed(s)
             },
-            MessageContent::Redacted => "[redacted]",
+            MessageContent::Redacted => Cow::Borrowed("[redacted]"),
         }
     }
 }
@@ -358,11 +353,12 @@ pub struct Message {
     pub content: MessageContent,
     pub sender: OwnedUserId,
     pub timestamp: MessageTimeStamp,
+    pub downloaded: bool,
 }
 
 impl Message {
     pub fn new(content: MessageContent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
-        Message { content, sender, timestamp }
+        Message { content, sender, timestamp, downloaded: false }
     }
 
     pub fn show(
@@ -373,7 +369,13 @@ impl Message {
         settings: &ApplicationSettings,
     ) -> Text {
         let width = vwctx.get_width();
-        let msg = self.as_ref();
+        let mut msg = self.content.show();
+
+        if self.downloaded {
+            msg.to_mut().push_str(" \u{2705}");
+        }
+
+        let msg = msg.as_ref();
 
         let mut lines = vec![];
 
@@ -391,7 +393,7 @@ impl Message {
             let lw = width - USER_GUTTER - TIME_GUTTER;
 
             for (i, (line, w)) in wrap(msg, lw).enumerate() {
-                let line = Span::styled(line, style);
+                let line = Span::styled(line.to_string(), style);
                 let trailing = Span::styled(space(lw.saturating_sub(w)), style);
 
                 if i == 0 {
@@ -412,7 +414,7 @@ impl Message {
             let lw = width - USER_GUTTER;
 
             for (i, (line, w)) in wrap(msg, lw).enumerate() {
-                let line = Span::styled(line, style);
+                let line = Span::styled(line.to_string(), style);
                 let trailing = Span::styled(space(lw.saturating_sub(w)), style);
 
                 let prefix = if i == 0 {
@@ -478,15 +480,9 @@ impl From<MessageEvent> for Message {
     }
 }
 
-impl AsRef<str> for Message {
-    fn as_ref(&self) -> &str {
-        self.content.as_ref()
-    }
-}
-
 impl ToString for Message {
     fn to_string(&self) -> String {
-        self.as_ref().to_string()
+        self.content.show().into_owned()
     }
 }
 

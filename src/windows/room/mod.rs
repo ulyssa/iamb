@@ -1,6 +1,4 @@
-use matrix_sdk::room::Room as MatrixRoom;
-use matrix_sdk::ruma::RoomId;
-use matrix_sdk::DisplayName;
+use matrix_sdk::{room::Room as MatrixRoom, ruma::RoomId, DisplayName};
 
 use modalkit::tui::{
     buffer::Buffer,
@@ -37,13 +35,16 @@ use modalkit::{
 };
 
 use crate::base::{
+    IambError,
     IambId,
     IambInfo,
     IambResult,
+    MessageAction,
     ProgramAction,
     ProgramContext,
     ProgramStore,
     RoomAction,
+    SendAction,
 };
 
 use self::chat::ChatState;
@@ -92,7 +93,31 @@ impl RoomState {
         }
     }
 
-    pub fn room_command(
+    pub async fn message_command(
+        &mut self,
+        act: MessageAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        match self {
+            RoomState::Chat(chat) => chat.message_command(act, ctx, store).await,
+            RoomState::Space(_) => Err(IambError::NoSelectedMessage.into()),
+        }
+    }
+
+    pub async fn send_command(
+        &mut self,
+        act: SendAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        match self {
+            RoomState::Chat(chat) => chat.send_command(act, ctx, store).await,
+            RoomState::Space(_) => Err(IambError::NoSelectedRoom.into()),
+        }
+    }
+
+    pub async fn room_command(
         &mut self,
         act: RoomAction,
         _: ProgramContext,

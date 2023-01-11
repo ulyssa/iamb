@@ -237,7 +237,11 @@ impl Directories {
     fn values(self) -> DirectoryValues {
         let cache = self
             .cache
-            .or_else(dirs::cache_dir)
+            .or_else(|| {
+                let mut dir = dirs::cache_dir()?;
+                dir.push("iamb");
+                dir.into()
+            })
             .expect("no dirs.cache value configured!");
 
         let logs = self.logs.unwrap_or_else(|| {

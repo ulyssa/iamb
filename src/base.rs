@@ -60,6 +60,11 @@ pub enum VerifyAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MessageAction {
+    Download(Option<String>, bool),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SetRoomField {
     Name(String),
     Topic(String),
@@ -78,12 +83,25 @@ impl From<SetRoomField> for RoomAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SendAction {
+    Submit,
+    Upload(String),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambAction {
+    Message(MessageAction),
     Room(RoomAction),
+    Send(SendAction),
     Verify(VerifyAction, String),
     VerifyRequest(String),
-    SendMessage(OwnedRoomId, String),
     ToggleScrollbackFocus,
+}
+
+impl From<MessageAction> for IambAction {
+    fn from(act: MessageAction) -> Self {
+        IambAction::Message(act)
+    }
 }
 
 impl From<RoomAction> for IambAction {
@@ -92,11 +110,18 @@ impl From<RoomAction> for IambAction {
     }
 }
 
+impl From<SendAction> for IambAction {
+    fn from(act: SendAction) -> Self {
+        IambAction::Send(act)
+    }
+}
+
 impl ApplicationAction for IambAction {
     fn is_edit_sequence<C: EditContext>(&self, _: &C) -> SequenceStatus {
         match self {
+            IambAction::Message(..) => SequenceStatus::Break,
             IambAction::Room(..) => SequenceStatus::Break,
-            IambAction::SendMessage(..) => SequenceStatus::Break,
+            IambAction::Send(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
@@ -105,8 +130,9 @@ impl ApplicationAction for IambAction {
 
     fn is_last_action<C: EditContext>(&self, _: &C) -> SequenceStatus {
         match self {
+            IambAction::Message(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
-            IambAction::SendMessage(..) => SequenceStatus::Atom,
+            IambAction::Send(..) => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
@@ -115,8 +141,9 @@ impl ApplicationAction for IambAction {
 
     fn is_last_selection<C: EditContext>(&self, _: &C) -> SequenceStatus {
         match self {
+            IambAction::Message(..) => SequenceStatus::Ignore,
             IambAction::Room(..) => SequenceStatus::Ignore,
-            IambAction::SendMessage(..) => SequenceStatus::Ignore,
+            IambAction::Send(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
@@ -125,8 +152,9 @@ impl ApplicationAction for IambAction {
 
     fn is_switchable<C: EditContext>(&self, _: &C) -> bool {
         match self {
+            IambAction::Message(..) => false,
             IambAction::Room(..) => false,
-            IambAction::SendMessage(..) => false,
+            IambAction::Send(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
@@ -172,6 +200,21 @@ pub enum IambError {
 
     #[error("Serialization/deserialization error: {0}")]
     Serde(#[from] serde_json::Error),
+
+    #[error("Selected message does not have any attachments")]
+    NoAttachment,
+
+    #[error("No message currently selected")]
+    NoSelectedMessage,
+
+    #[error("Current window is not a room or space")]
+    NoSelectedRoomOrSpace,
+
+    #[error("Current window is not a room")]
+    NoSelectedRoom,
+
+    #[error("You need to join the room before you can do that")]
+    NotJoined,
 
     #[error("Unknown room identifier: {0}")]
     UnknownRoom(OwnedRoomId),

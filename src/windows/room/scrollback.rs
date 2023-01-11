@@ -126,6 +126,14 @@ impl ScrollbackState {
         self.viewctx.dimensions = (area.width as usize, area.height as usize);
     }
 
+    pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
+        if let Some(k) = &self.cursor.timestamp {
+            info.messages.get_mut(k)
+        } else {
+            info.messages.last_entry().map(|o| o.into_mut())
+        }
+    }
+
     pub fn messages<'a>(
         &self,
         range: EditRange<MessageCursor>,
@@ -389,7 +397,7 @@ impl ScrollbackState {
                 continue;
             }
 
-            if needle.is_match(msg.as_ref()) {
+            if needle.is_match(msg.content.show().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -413,7 +421,7 @@ impl ScrollbackState {
                 break;
             }
 
-            if needle.is_match(msg.as_ref()) {
+            if needle.is_match(msg.content.show().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -659,7 +667,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     let mut yanked = EditRope::from("");
 
                     for (_, msg) in self.messages(range, info) {
-                        yanked += EditRope::from(msg.as_ref());
+                        yanked += EditRope::from(msg.content.show().into_owned());
                         yanked += EditRope::from('\n');
                     }
 
@@ -1159,11 +1167,13 @@ impl<'a> StatefulWidget for Scrollback<'a> {
         };
 
         let corner = &state.viewctx.corner;
-        let corner_key = match (&corner.timestamp, &cursor.timestamp) {
-            (_, None) => nth_key_before(cursor_key.clone(), height, info),
-            (None, _) => nth_key_before(cursor_key.clone(), height, info),
-            (Some(k), _) => k.clone(),
+        let corner_key = if let Some(k) = &corner.timestamp {
+            k.clone()
+        } else {
+            nth_key_before(cursor_key.clone(), height, info)
         };
+
+        let full = cursor.timestamp.is_none();
 
         let mut lines = vec![];
         let mut sawit = false;
@@ -1175,8 +1185,10 @@ impl<'a> StatefulWidget for Scrollback<'a> {
 
             prev = Some(item);
 
+            let incomplete_ok = !full || !sel;
+
             for (row, line) in txt.lines.into_iter().enumerate() {
-                if sawit && lines.len() >= height {
+                if sawit && lines.len() >= height && incomplete_ok {
                     // Check whether we've seen the first line of the
                     // selected message and can fill the screen.
                     break;
@@ -1224,10 +1236,10 @@ mod tests {
     use super::*;
     use crate::tests::*;
 
-    #[test]
-    fn test_search_messages() {
+    #[tokio::test]
+    async fn test_search_messages() {
         let room_id = TEST_ROOM1_ID.clone();
-        let mut store = mock_store();
+        let mut store = mock_store().await;
         let mut scrollback = ScrollbackState::new(room_id.clone());
         let ctx = ProgramContext::default();
 
@@ -1268,9 +1280,9 @@ mod tests {
         assert_eq!(scrollback.cursor, MSG1_KEY.clone().into());
     }
 
-    #[test]
-    fn test_movement() {
-        let mut store = mock_store();
+    #[tokio::test]
+    async fn test_movement() {
+        let mut store = mock_store().await;
         let mut scrollback = ScrollbackState::new(TEST_ROOM1_ID.clone());
         let ctx = ProgramContext::default();
 
@@ -1302,9 +1314,9 @@ mod tests {
         assert_eq!(scrollback.cursor, MSG1_KEY.clone().into());
     }
 
-    #[test]
-    fn test_dirscroll() {
-        let mut store = mock_store();
+    #[tokio::test]
+    async fn test_dirscroll() {
+        let mut store = mock_store().await;
         let mut scrollback = ScrollbackState::new(TEST_ROOM1_ID.clone());
         let ctx = ProgramContext::default();
 
@@ -1436,9 +1448,9 @@ mod tests {
         assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 4));
     }
 
-    #[test]
-    fn test_cursorpos() {
-        let mut store = mock_store();
+    #[tokio::test]
+    async fn test_cursorpos() {
+        let mut store = mock_store().await;
         let mut scrollback = ScrollbackState::new(TEST_ROOM1_ID.clone());
         let ctx = ProgramContext::default();
 

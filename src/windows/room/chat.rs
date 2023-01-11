@@ -1,11 +1,21 @@
+use std::borrow::Cow;
+use std::ffi::OsStr;
+use std::fs;
+use std::path::{Path, PathBuf};
+
 use matrix_sdk::{
+    attachment::AttachmentConfig,
+    media::{MediaFormat, MediaRequest},
     room::Room as MatrixRoom,
-    ruma::{OwnedRoomId, RoomId},
+    ruma::{
+        events::room::message::{MessageType, RoomMessageEventContent, TextMessageEventContent},
+        OwnedRoomId,
+        RoomId,
+    },
 };
 
-use modalkit::tui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
-
 use modalkit::{
+    tui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget},
     widgets::textbox::{TextBox, TextBoxState},
     widgets::TerminalCursor,
     widgets::{PromptActions, WindowOps},
@@ -18,10 +28,12 @@ use modalkit::editing::{
         EditResult,
         Editable,
         EditorAction,
+        InfoMessage,
         Jumpable,
         PromptAction,
         Promptable,
         Scrollable,
+        UIError,
     },
     base::{CloseFlags, Count, MoveDir1D, PositionList, ScrollStyle, WordStyle},
     context::Resolve,
@@ -32,13 +44,18 @@ use modalkit::editing::{
 use crate::base::{
     IambAction,
     IambBufferId,
+    IambError,
     IambInfo,
     IambResult,
+    MessageAction,
     ProgramAction,
     ProgramContext,
     ProgramStore,
     RoomFocus,
+    SendAction,
 };
+
+use crate::message::{Message, MessageContent, MessageTimeStamp};
 
 use super::scrollback::{Scrollback, ScrollbackState};
 
@@ -73,6 +90,169 @@ impl ChatState {
             scrollback,
             focus: RoomFocus::MessageBar,
         }
+    }
+
+    pub async fn message_command(
+        &mut self,
+        act: MessageAction,
+        _: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        let client = &store.application.worker.client;
+
+        let settings = &store.application.settings;
+        let info = store.application.rooms.entry(self.room_id.clone()).or_default();
+
+        let msg = self.scrollback.get_mut(info).ok_or(IambError::NoSelectedMessage)?;
+
+        match act {
+            MessageAction::Download(filename, force) => {
+                if let MessageContent::Original(ev) = &msg.content {
+                    let media = client.media();
+
+                    let mut filename = match filename {
+                        Some(f) => PathBuf::from(f),
+                        None => settings.dirs.downloads.clone(),
+                    };
+
+                    let source = match &ev.msgtype {
+                        MessageType::Audio(c) => {
+                            if filename.is_dir() {
+                                filename.push(c.body.as_str());
+                            }
+
+                            c.source.clone()
+                        },
+                        MessageType::File(c) => {
+                            if filename.is_dir() {
+                                if let Some(name) = &c.filename {
+                                    filename.push(name);
+                                } else {
+                                    filename.push(c.body.as_str());
+                                }
+                            }
+
+                            c.source.clone()
+                        },
+                        MessageType::Image(c) => {
+                            if filename.is_dir() {
+                                filename.push(c.body.as_str());
+                            }
+
+                            c.source.clone()
+                        },
+                        MessageType::Video(c) => {
+                            if filename.is_dir() {
+                                filename.push(c.body.as_str());
+                            }
+
+                            c.source.clone()
+                        },
+                        _ => {
+                            return Err(IambError::NoAttachment.into());
+                        },
+                    };
+
+                    if !force && filename.exists() {
+                        let msg = format!(
+                            "The file {} already exists; use :download! to overwrite it.",
+                            filename.display()
+                        );
+                        let err = UIError::Failure(msg);
+
+                        return Err(err);
+                    }
+
+                    let req = MediaRequest { source, format: MediaFormat::File };
+
+                    let bytes =
+                        media.get_media_content(&req, true).await.map_err(IambError::from)?;
+
+                    fs::write(filename.as_path(), bytes.as_slice())?;
+
+                    msg.downloaded = true;
+
+                    let info = InfoMessage::from(format!(
+                        "Attachment downloaded to {}",
+                        filename.display()
+                    ));
+
+                    return Ok(info.into());
+                }
+
+                Err(IambError::NoAttachment.into())
+            },
+        }
+    }
+
+    pub async fn send_command(
+        &mut self,
+        act: SendAction,
+        _: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        let room = store
+            .application
+            .worker
+            .client
+            .get_joined_room(self.id())
+            .ok_or(IambError::NotJoined)?;
+
+        let (event_id, msg) = match act {
+            SendAction::Submit => {
+                let msg = self.tbox.get_text();
+
+                if msg.is_empty() {
+                    return Ok(None);
+                }
+
+                let msg = TextMessageEventContent::plain(msg);
+                let msg = MessageType::Text(msg);
+                let msg = RoomMessageEventContent::new(msg);
+
+                // XXX: second parameter can be a locally unique transaction id.
+                // Useful for doing retries.
+                let resp = room.send(msg.clone(), None).await.map_err(IambError::from)?;
+                let event_id = resp.event_id;
+
+                // Clear the TextBoxState contents now that the message is sent.
+                self.tbox.reset();
+
+                (event_id, msg)
+            },
+            SendAction::Upload(file) => {
+                let path = Path::new(file.as_str());
+                let mime = mime_guess::from_path(path).first_or(mime::APPLICATION_OCTET_STREAM);
+
+                let bytes = fs::read(path)?;
+                let name = path
+                    .file_name()
+                    .map(OsStr::to_string_lossy)
+                    .unwrap_or_else(|| Cow::from("Attachment"));
+                let config = AttachmentConfig::new();
+
+                let resp = room
+                    .send_attachment(name.as_ref(), &mime, bytes.as_ref(), config)
+                    .await
+                    .map_err(IambError::from)?;
+
+                // Mock up the local echo message for the scrollback.
+                let msg = TextMessageEventContent::plain(format!("[Attached File: {}]", name));
+                let msg = MessageType::Text(msg);
+                let msg = RoomMessageEventContent::new(msg);
+
+                (resp.event_id, msg)
+            },
+        };
+
+        let user = store.application.settings.profile.user_id.clone();
+        let info = store.application.get_room_info(self.id().to_owned());
+        let key = (MessageTimeStamp::LocalEcho, event_id);
+        let msg = MessageContent::Original(msg.into());
+        let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
+        info.messages.insert(key, msg);
+
+        Ok(None)
     }
 
     pub fn focus_toggle(&mut self) {
@@ -229,17 +409,9 @@ impl PromptActions<ProgramContext, ProgramStore, IambInfo> for ChatState {
         ctx: &ProgramContext,
         _: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
-        let txt = self.tbox.reset_text();
+        let act = SendAction::Submit;
 
-        let act = if txt.is_empty() {
-            vec![]
-        } else {
-            let act = IambAction::SendMessage(self.room_id.clone(), txt).into();
-
-            vec![(act, ctx.clone())]
-        };
-
-        Ok(act)
+        Ok(vec![(IambAction::from(act).into(), ctx.clone())])
     }
 
     fn abort(

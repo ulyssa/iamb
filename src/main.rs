@@ -9,6 +9,7 @@ use std::fs::{create_dir_all, File};
 use std::io::{stdout, BufReader, Stdout};
 use std::ops::DerefMut;
 use std::process;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -63,7 +64,6 @@ use crate::{
         ProgramStore,
     },
     config::{ApplicationSettings, Iamb},
-    message::{Message, MessageContent, MessageTimeStamp},
     windows::IambWindow,
     worker::{ClientWorker, LoginStyle, Requester},
 };
@@ -226,7 +226,7 @@ impl Application {
         }
     }
 
-    fn action_run(
+    async fn action_run(
         &mut self,
         action: ProgramAction,
         ctx: ProgramContext,
@@ -257,7 +257,7 @@ impl Application {
             },
 
             // Simple delegations.
-            Action::Application(act) => self.iamb_run(act, ctx, store)?,
+            Action::Application(act) => self.iamb_run(act, ctx, store).await?,
             Action::CommandBar(act) => self.screen.command_bar(&act, &ctx)?,
             Action::Macro(act) => self.bindings.macro_command(&act, &ctx, store)?,
             Action::Scroll(style) => self.screen.scroll(&style, &ctx, store)?,
@@ -314,7 +314,7 @@ impl Application {
         return Ok(info);
     }
 
-    fn iamb_run(
+    async fn iamb_run(
         &mut self,
         action: IambAction,
         ctx: ProgramContext,
@@ -327,24 +327,19 @@ impl Application {
                 None
             },
 
+            IambAction::Message(act) => {
+                self.screen.current_window_mut()?.message_command(act, ctx, store).await?
+            },
             IambAction::Room(act) => {
-                let acts = self.screen.current_window_mut()?.room_command(act, ctx, store)?;
+                let acts = self.screen.current_window_mut()?.room_command(act, ctx, store).await?;
                 self.action_prepend(acts);
 
                 None
             },
-
-            IambAction::SendMessage(room_id, msg) => {
-                let (event_id, msg) = self.worker.send_message(room_id.clone(), msg)?;
-                let user = store.application.settings.profile.user_id.clone();
-                let info = store.application.get_room_info(room_id);
-                let key = (MessageTimeStamp::LocalEcho, event_id);
-                let msg = MessageContent::Original(msg.into());
-                let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
-                info.messages.insert(key, msg);
-
-                None
+            IambAction::Send(act) => {
+                self.screen.current_window_mut()?.send_command(act, ctx, store).await?
             },
+
             IambAction::Verify(act, user_dev) => {
                 if let Some(sas) = store.application.verifications.get(&user_dev) {
                     self.worker.verify(act, sas.clone())?
@@ -378,7 +373,7 @@ impl Application {
             let mut keyskip = false;
 
             while let Some((action, ctx)) = self.action_pop(keyskip) {
-                match self.action_run(action, ctx, locked.deref_mut()) {
+                match self.action_run(action, ctx, locked.deref_mut()).await {
                     Ok(None) => {
                         // Continue processing.
                         continue;
@@ -408,7 +403,7 @@ impl Application {
     }
 }
 
-fn login(worker: Requester, settings: &ApplicationSettings) -> IambResult<()> {
+async fn login(worker: Requester, settings: &ApplicationSettings) -> IambResult<()> {
     println!("Logging in for {}...", settings.profile.user_id);
 
     if settings.session_json.is_file() {
@@ -447,38 +442,15 @@ fn print_exit<T: Display, N>(v: T) -> N {
     process::exit(2);
 }
 
-#[tokio::main]
-async fn main() -> IambResult<()> {
-    // Parse command-line flags.
-    let iamb = Iamb::parse();
-
-    // Load configuration and set up the Matrix SDK.
-    let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);
-
-    // Set up the tracing subscriber so we can log client messages.
-    let log_prefix = format!("iamb-log-{}", settings.profile_name);
-    let log_dir = settings.dirs.logs.as_path();
-
-    create_dir_all(settings.matrix_dir.as_path())?;
-    create_dir_all(log_dir)?;
-
-    let appender = tracing_appender::rolling::daily(log_dir, log_prefix);
-    let (appender, _) = tracing_appender::non_blocking(appender);
-
-    let subscriber = FmtSubscriber::builder()
-        .with_writer(appender)
-        .with_max_level(Level::WARN)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
-
+async fn run(settings: ApplicationSettings) -> IambResult<()> {
     // Set up the async worker thread and global store.
-    let worker = ClientWorker::spawn(settings.clone());
+    let worker = ClientWorker::spawn(settings.clone()).await;
     let store = ChatStore::new(worker.clone(), settings.clone());
     let store = Store::new(store);
     let store = Arc::new(AsyncMutex::new(store));
     worker.init(store.clone());
 
-    login(worker, &settings).unwrap_or_else(print_exit);
+    login(worker, &settings).await.unwrap_or_else(print_exit);
 
     // Make sure panics clean up the terminal properly.
     let orig_hook = std::panic::take_hook();
@@ -495,5 +467,44 @@ async fn main() -> IambResult<()> {
     // We can now run the application.
     application.run().await?;
 
+    Ok(())
+}
+
+fn main() -> IambResult<()> {
+    // Parse command-line flags.
+    let iamb = Iamb::parse();
+
+    // Load configuration and set up the Matrix SDK.
+    let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);
+
+    // Set up the tracing subscriber so we can log client messages.
+    let log_prefix = format!("iamb-log-{}", settings.profile_name);
+    let log_dir = settings.dirs.logs.as_path();
+
+    create_dir_all(settings.matrix_dir.as_path())?;
+    create_dir_all(log_dir)?;
+
+    let appender = tracing_appender::rolling::daily(log_dir, log_prefix);
+    let (appender, guard) = tracing_appender::non_blocking(appender);
+
+    let subscriber = FmtSubscriber::builder()
+        .with_writer(appender)
+        .with_max_level(Level::TRACE)
+        .finish();
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    let rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name_fn(|| {
+            static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
+            let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
+            format!("iamb-worker-{}", id)
+        })
+        .build()
+        .unwrap();
+
+    rt.block_on(async move { run(settings).await })?;
+
+    drop(guard);
     process::exit(0);
 }

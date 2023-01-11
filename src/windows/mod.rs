@@ -54,13 +54,16 @@ use modalkit::{
 use crate::base::{
     ChatStore,
     IambBufferId,
+    IambError,
     IambId,
     IambInfo,
     IambResult,
+    MessageAction,
     ProgramAction,
     ProgramContext,
     ProgramStore,
     RoomAction,
+    SendAction,
 };
 
 use self::{room::RoomState, welcome::WelcomeState};
@@ -100,6 +103,20 @@ fn selected_span(s: &str, selected: bool) -> Span {
 #[inline]
 fn selected_text(s: &str, selected: bool) -> Text {
     Text::from(selected_span(s, selected))
+}
+
+fn room_cmp(a: &MatrixRoom, b: &MatrixRoom) -> Ordering {
+    let ca1 = a.canonical_alias();
+    let ca2 = b.canonical_alias();
+
+    let ord = match (ca1, ca2) {
+        (None, None) => Ordering::Equal,
+        (None, Some(_)) => Ordering::Greater,
+        (Some(_), None) => Ordering::Less,
+        (Some(ca1), Some(ca2)) => ca1.cmp(&ca2),
+    };
+
+    ord.then_with(|| a.room_id().cmp(b.room_id()))
 }
 
 #[inline]
@@ -165,19 +182,42 @@ impl IambWindow {
         }
     }
 
-    pub fn room_command(
+    pub async fn message_command(
+        &mut self,
+        act: MessageAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        if let IambWindow::Room(w) = self {
+            w.message_command(act, ctx, store).await
+        } else {
+            return Err(IambError::NoSelectedRoom.into());
+        }
+    }
+
+    pub async fn room_command(
         &mut self,
         act: RoomAction,
         ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         if let IambWindow::Room(w) = self {
-            w.room_command(act, ctx, store)
+            w.room_command(act, ctx, store).await
         } else {
-            let msg = "No room currently focused!";
-            let err = UIError::Failure(msg.into());
+            return Err(IambError::NoSelectedRoomOrSpace.into());
+        }
+    }
 
-            return Err(err);
+    pub async fn send_command(
+        &mut self,
+        act: SendAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        if let IambWindow::Room(w) = self {
+            w.send_command(act, ctx, store).await
+        } else {
+            return Err(IambError::NoSelectedRoom.into());
         }
     }
 }
@@ -304,8 +344,13 @@ impl WindowOps<IambInfo> for IambWindow {
             },
             IambWindow::RoomList(state) => {
                 let joined = store.application.worker.joined_rooms();
-                let items = joined.into_iter().map(|(id, name)| RoomItem::new(id, name, store));
-                state.set(items.collect());
+                let mut items = joined
+                    .into_iter()
+                    .map(|(id, name)| RoomItem::new(id, name, store))
+                    .collect::<Vec<_>>();
+                items.sort();
+
+                state.set(items);
 
                 List::new(store)
                     .empty_message("You haven't joined any rooms yet")
@@ -515,6 +560,26 @@ impl RoomItem {
     }
 }
 
+impl PartialEq for RoomItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.room.room_id() == other.room.room_id()
+    }
+}
+
+impl Eq for RoomItem {}
+
+impl Ord for RoomItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        room_cmp(&self.room, &other.room)
+    }
+}
+
+impl PartialOrd for RoomItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.cmp(other).into()
+    }
+}
+
 impl ToString for RoomItem {
     fn to_string(&self) -> String {
         return self.name.clone();
@@ -598,6 +663,26 @@ impl SpaceItem {
         store.application.set_room_name(room.room_id(), name.as_str());
 
         SpaceItem { room, name }
+    }
+}
+
+impl PartialEq for SpaceItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.room.room_id() == other.room.room_id()
+    }
+}
+
+impl Eq for SpaceItem {}
+
+impl Ord for SpaceItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        room_cmp(&self.room, &other.room)
+    }
+}
+
+impl PartialOrd for SpaceItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.cmp(other).into()
     }
 }
 

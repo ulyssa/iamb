@@ -8,10 +8,12 @@ use modalkit::{
 use crate::base::{
     IambAction,
     IambId,
+    MessageAction,
     ProgramCommand,
     ProgramCommands,
     ProgramContext,
     RoomAction,
+    SendAction,
     SetRoomField,
     VerifyAction,
 };
@@ -149,13 +151,43 @@ fn iamb_set(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() != 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let sact = SendAction::Upload(args.remove(0));
+    let iact = IambAction::from(sact);
+    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
+fn iamb_download(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let mact = MessageAction::Download(args.pop(), desc.bang);
+    let iact = IambAction::from(mact);
+    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { names: vec!["dms".into()], f: iamb_dms });
+    cmds.add_command(ProgramCommand { names: vec!["download".into()], f: iamb_download });
     cmds.add_command(ProgramCommand { names: vec!["join".into()], f: iamb_join });
     cmds.add_command(ProgramCommand { names: vec!["members".into()], f: iamb_members });
     cmds.add_command(ProgramCommand { names: vec!["rooms".into()], f: iamb_rooms });
     cmds.add_command(ProgramCommand { names: vec!["set".into()], f: iamb_set });
     cmds.add_command(ProgramCommand { names: vec!["spaces".into()], f: iamb_spaces });
+    cmds.add_command(ProgramCommand { names: vec!["upload".into()], f: iamb_upload });
     cmds.add_command(ProgramCommand { names: vec!["verify".into()], f: iamb_verify });
     cmds.add_command(ProgramCommand { names: vec!["welcome".into()], f: iamb_welcome });
 }

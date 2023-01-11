@@ -1,6 +1,5 @@
 use std::collections::{BTreeMap, HashMap};
 use std::path::PathBuf;
-use std::sync::mpsc::sync_channel;
 
 use matrix_sdk::ruma::{
     event_id,
@@ -16,6 +15,7 @@ use matrix_sdk::ruma::{
 
 use lazy_static::lazy_static;
 use modalkit::tui::style::Color;
+use tokio::sync::mpsc::unbounded_channel;
 use url::Url;
 
 use crate::{
@@ -154,9 +154,11 @@ pub fn mock_settings() -> ApplicationSettings {
     }
 }
 
-pub fn mock_store() -> ProgramStore {
-    let (tx, _) = sync_channel(5);
-    let worker = Requester { tx };
+pub async fn mock_store() -> ProgramStore {
+    let (tx, _) = unbounded_channel();
+    let homeserver = Url::parse("https://localhost").unwrap();
+    let client = matrix_sdk::Client::new(homeserver).await.unwrap();
+    let worker = Requester { tx, client };
 
     let mut store = ChatStore::new(worker, mock_settings());
     let room_id = TEST_ROOM1_ID.clone();
