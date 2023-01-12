@@ -1,11 +1,15 @@
-use matrix_sdk::{room::Room as MatrixRoom, ruma::RoomId, DisplayName};
+use matrix_sdk::{
+    room::{Invited, Room as MatrixRoom},
+    ruma::RoomId,
+    DisplayName,
+};
 
 use modalkit::tui::{
     buffer::Buffer,
-    layout::Rect,
+    layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
-    text::{Span, Spans},
-    widgets::StatefulWidget,
+    text::{Span, Spans, Text},
+    widgets::{Paragraph, StatefulWidget, Widget},
 };
 
 use modalkit::{
@@ -93,6 +97,48 @@ impl RoomState {
         }
     }
 
+    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
+        match self {
+            RoomState::Chat(chat) => chat.refresh_room(store),
+            RoomState::Space(space) => space.refresh_room(store),
+        }
+    }
+
+    fn draw_invite(
+        &self,
+        invited: Invited,
+        area: Rect,
+        buf: &mut Buffer,
+        store: &mut ProgramStore,
+    ) {
+        let inviter = store.application.worker.get_inviter(invited.clone());
+
+        let name = match invited.canonical_alias() {
+            Some(alias) => alias.to_string(),
+            None => format!("{:?}", store.application.get_room_title(self.id())),
+        };
+
+        let mut invited = vec![Span::from(format!(
+            "You have been invited to join {}",
+            name
+        ))];
+
+        if let Ok(Some(inviter)) = &inviter {
+            invited.push(Span::from(" by "));
+            invited.push(store.application.settings.get_user_span(inviter.user_id()));
+        }
+
+        let l1 = Spans(invited);
+        let l2 = Spans::from(
+            "You can run `:invite accept` or `:invite reject` to accept or reject this invitation.",
+        );
+        let text = Text { lines: vec![l1, l2] };
+
+        Paragraph::new(text).alignment(Alignment::Center).render(area, buf);
+
+        return;
+    }
+
     pub async fn message_command(
         &mut self,
         act: MessageAction,
@@ -124,6 +170,33 @@ impl RoomState {
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         match act {
+            RoomAction::InviteAccept => {
+                if let Some(room) = store.application.worker.client.get_invited_room(self.id()) {
+                    room.accept_invitation().await.map_err(IambError::from)?;
+
+                    Ok(vec![])
+                } else {
+                    Err(IambError::NotInvited.into())
+                }
+            },
+            RoomAction::InviteReject => {
+                if let Some(room) = store.application.worker.client.get_invited_room(self.id()) {
+                    room.reject_invitation().await.map_err(IambError::from)?;
+
+                    Ok(vec![])
+                } else {
+                    Err(IambError::NotInvited.into())
+                }
+            },
+            RoomAction::InviteSend(user) => {
+                if let Some(room) = store.application.worker.client.get_joined_room(self.id()) {
+                    room.invite_user_by_id(user.as_ref()).await.map_err(IambError::from)?;
+
+                    Ok(vec![])
+                } else {
+                    Err(IambError::NotJoined.into())
+                }
+            },
             RoomAction::Members(mut cmd) => {
                 let width = Count::Exact(30);
                 let act =
@@ -234,6 +307,14 @@ impl TerminalCursor for RoomState {
 
 impl WindowOps<IambInfo> for RoomState {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
+        if let MatrixRoom::Invited(_) = self.room() {
+            self.refresh_room(store);
+        }
+
+        if let MatrixRoom::Invited(invited) = self.room() {
+            self.draw_invite(invited.clone(), area, buf, store);
+        }
+
         match self {
             RoomState::Chat(chat) => chat.draw(area, buf, focused, store),
             RoomState::Space(space) => {

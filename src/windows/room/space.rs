@@ -31,6 +31,12 @@ impl SpaceState {
         SpaceState { room_id, room, list }
     }
 
+    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
+        if let Some(room) = store.application.worker.client.get_room(self.id()) {
+            self.room = room;
+        }
+    }
+
     pub fn room(&self) -> &MatrixRoom {
         &self.room
     }
@@ -88,7 +94,13 @@ impl<'a> StatefulWidget for Space<'a> {
     type State = SpaceState;
 
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
-        let members = self.store.application.worker.space_members(state.room_id.clone()).unwrap();
+        let members =
+            if let Ok(m) = self.store.application.worker.space_members(state.room_id.clone()) {
+                m
+            } else {
+                return;
+            };
+
         let items = members
             .into_iter()
             .filter_map(|id| {

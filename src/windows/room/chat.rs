@@ -92,6 +92,12 @@ impl ChatState {
         }
     }
 
+    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
+        if let Some(room) = store.application.worker.client.get_room(self.id()) {
+            self.room = room;
+        }
+    }
+
     pub async fn message_command(
         &mut self,
         act: MessageAction,

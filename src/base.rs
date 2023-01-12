@@ -72,6 +72,9 @@ pub enum SetRoomField {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomAction {
+    InviteAccept,
+    InviteReject,
+    InviteSend(OwnedUserId),
     Members(Box<CommandContext<ProgramContext>>),
     Set(SetRoomField),
 }
@@ -180,7 +183,7 @@ pub type IambResult<T> = UIResult<T, IambInfo>;
 
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
-    #[error("Unknown room identifier: {0}")]
+    #[error("Invalid user identifier: {0}")]
     InvalidUserId(String),
 
     #[error("Invalid verification user/device pair: {0}")]
@@ -212,6 +215,9 @@ pub enum IambError {
 
     #[error("Current window is not a room")]
     NoSelectedRoom,
+
+    #[error("You do not have a current invitation to this room")]
+    NotInvited,
 
     #[error("You need to join the room before you can do that")]
     NotJoined,

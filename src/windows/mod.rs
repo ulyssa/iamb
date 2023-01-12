@@ -343,10 +343,10 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::RoomList(state) => {
-                let joined = store.application.worker.joined_rooms();
+                let joined = store.application.worker.active_rooms();
                 let mut items = joined
                     .into_iter()
-                    .map(|(id, name)| RoomItem::new(id, name, store))
+                    .map(|(room, name)| RoomItem::new(room, name, store))
                     .collect::<Vec<_>>();
                 items.sort();
 

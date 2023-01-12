@@ -58,8 +58,8 @@ two other TUI clients and Element Web:
 | Pushrules                               | :x:                | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
 | Send read markers                       | :x: ([#11])        | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Display read markers                    | :x: ([#11])        | :x:                | :x:                | :heavy_check_mark:  |
-| Sending Invites                         | :x: ([#7])         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
-| Accepting Invites                       | :x: ([#7])         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Sending Invites                         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Accepting Invites                       | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Typing Notification                     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | E2E                                     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Replies                                 | :x: ([#3])         | :heavy_check_mark: | :x:                | :heavy_check_mark:  |

@@ -1,3 +1,7 @@
+use std::convert::TryFrom;
+
+use matrix_sdk::ruma::OwnedUserId;
+
 use modalkit::{
     editing::base::OpenTarget,
     env::vim::command::{CommandContext, CommandDescription},
@@ -20,6 +24,53 @@ use crate::base::{
 
 type ProgContext = CommandContext<ProgramContext>;
 type ProgResult = CommandResult<ProgramCommand>;
+
+fn iamb_invite(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let args = desc.arg.strings()?;
+
+    if args.is_empty() {
+        return Err(CommandError::InvalidArgument);
+    }
+
+    let ract = match args[0].as_str() {
+        "accept" => {
+            if args.len() != 1 {
+                return Err(CommandError::InvalidArgument);
+            }
+
+            RoomAction::InviteAccept
+        },
+        "reject" => {
+            if args.len() != 1 {
+                return Err(CommandError::InvalidArgument);
+            }
+
+            RoomAction::InviteReject
+        },
+        "send" => {
+            if args.len() != 2 {
+                return Err(CommandError::InvalidArgument);
+            }
+
+            if let Ok(user) = OwnedUserId::try_from(args[1].as_str()) {
+                RoomAction::InviteSend(user)
+            } else {
+                let msg = format!("Invalid user identifier: {}", args[1]);
+                let err = CommandError::Error(msg);
+
+                return Err(err);
+            }
+        },
+        _ => {
+            return Err(CommandError::InvalidArgument);
+        },
+    };
+
+    let iact = IambAction::from(ract);
+    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+
+    return Ok(step);
+}
 
 fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut args = desc.arg.strings()?;
@@ -182,6 +233,7 @@ fn iamb_download(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult 
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { names: vec!["dms".into()], f: iamb_dms });
     cmds.add_command(ProgramCommand { names: vec!["download".into()], f: iamb_download });
+    cmds.add_command(ProgramCommand { names: vec!["invite".into()], f: iamb_invite });
     cmds.add_command(ProgramCommand { names: vec!["join".into()], f: iamb_join });
     cmds.add_command(ProgramCommand { names: vec!["members".into()], f: iamb_members });
     cmds.add_command(ProgramCommand { names: vec!["rooms".into()], f: iamb_rooms });
@@ -203,6 +255,7 @@ pub fn setup_commands() -> ProgramCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use matrix_sdk::ruma::user_id;
     use modalkit::editing::action::WindowAction;
 
     #[test]
@@ -313,6 +366,43 @@ mod tests {
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
         let res = cmds.input_cmd("set room.topic A B C", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_invite() {
+        let mut cmds = setup_commands();
+        let ctx = ProgramContext::default();
+
+        let res = cmds.input_cmd("invite accept", ctx.clone()).unwrap();
+        let act = IambAction::Room(RoomAction::InviteAccept);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("invite reject", ctx.clone()).unwrap();
+        let act = IambAction::Room(RoomAction::InviteReject);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("invite send @user:example.com", ctx.clone()).unwrap();
+        let act =
+            IambAction::Room(RoomAction::InviteSend(user_id!("@user:example.com").to_owned()));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("invite", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("invite foo", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("invite accept @user:example.com", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("invite reject @user:example.com", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("invite send", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("invite @user:example.com", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
     }
 }

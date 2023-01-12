@@ -17,7 +17,7 @@ use matrix_sdk::{
     encryption::verification::{SasVerification, Verification},
     event_handler::Ctx,
     reqwest,
-    room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
+    room::{Invited, Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
             room::create_room::v3::{Request as CreateRoomRequest, RoomPreset},
@@ -98,13 +98,14 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
 }
 
 pub enum WorkerTask {
+    ActiveRooms(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
     DirectMessages(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
     Init(AsyncProgramStore, ClientReply<()>),
     LoadOlder(OwnedRoomId, Option<String>, u32, ClientReply<MessageFetchResult>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
+    GetInviter(Invited, ClientReply<IambResult<Option<RoomMember>>>),
     GetRoom(OwnedRoomId, ClientReply<IambResult<(MatrixRoom, DisplayName)>>),
     JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
-    JoinedRooms(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     Spaces(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
@@ -117,6 +118,9 @@ pub enum WorkerTask {
 impl Debug for WorkerTask {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
+            WorkerTask::ActiveRooms(_) => {
+                f.debug_tuple("WorkerTask::ActiveRooms").field(&format_args!("_")).finish()
+            },
             WorkerTask::DirectMessages(_) => {
                 f.debug_tuple("WorkerTask::DirectMessages")
                     .field(&format_args!("_"))
@@ -142,6 +146,9 @@ impl Debug for WorkerTask {
                     .field(&format_args!("_"))
                     .finish()
             },
+            WorkerTask::GetInviter(invite, _) => {
+                f.debug_tuple("WorkerTask::GetInviter").field(invite).finish()
+            },
             WorkerTask::GetRoom(room_id, _) => {
                 f.debug_tuple("WorkerTask::GetRoom")
                     .field(room_id)
@@ -153,9 +160,6 @@ impl Debug for WorkerTask {
                     .field(s)
                     .field(&format_args!("_"))
                     .finish()
-            },
-            WorkerTask::JoinedRooms(_) => {
-                f.debug_tuple("WorkerTask::JoinedRooms").field(&format_args!("_")).finish()
             },
             WorkerTask::Members(room_id, _) => {
                 f.debug_tuple("WorkerTask::Members")
@@ -245,6 +249,14 @@ impl Requester {
         return response.recv();
     }
 
+    pub fn get_inviter(&self, invite: Invited) -> IambResult<Option<RoomMember>> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::GetInviter(invite, reply)).unwrap();
+
+        return response.recv();
+    }
+
     pub fn get_room(&self, room_id: OwnedRoomId) -> IambResult<(MatrixRoom, DisplayName)> {
         let (reply, response) = oneshot();
 
@@ -261,10 +273,10 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn joined_rooms(&self) -> Vec<(MatrixRoom, DisplayName)> {
+    pub fn active_rooms(&self) -> Vec<(MatrixRoom, DisplayName)> {
         let (reply, response) = oneshot();
 
-        self.tx.send(WorkerTask::JoinedRooms(reply)).unwrap();
+        self.tx.send(WorkerTask::ActiveRooms(reply)).unwrap();
 
         return response.recv();
     }
@@ -406,13 +418,17 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.join_room(room_id).await);
             },
+            WorkerTask::GetInviter(invited, reply) => {
+                assert!(self.initialized);
+                reply.send(self.get_inviter(invited).await);
+            },
             WorkerTask::GetRoom(room_id, reply) => {
                 assert!(self.initialized);
                 reply.send(self.get_room(room_id).await);
             },
-            WorkerTask::JoinedRooms(reply) => {
+            WorkerTask::ActiveRooms(reply) => {
                 assert!(self.initialized);
-                reply.send(self.joined_rooms().await);
+                reply.send(self.active_rooms().await);
             },
             WorkerTask::LoadOlder(room_id, fetch_id, limit, reply) => {
                 assert!(self.initialized);
@@ -716,6 +732,12 @@ impl ClientWorker {
         }
     }
 
+    async fn get_inviter(&mut self, invited: Invited) -> IambResult<Option<RoomMember>> {
+        let details = invited.invite_details().await.map_err(IambError::from)?;
+
+        Ok(details.inviter)
+    }
+
     async fn get_room(&mut self, room_id: OwnedRoomId) -> IambResult<(MatrixRoom, DisplayName)> {
         if let Some(room) = self.client.get_room(&room_id) {
             let name = room.display_name().await.map_err(IambError::from)?;
@@ -749,33 +771,53 @@ impl ClientWorker {
         }
     }
 
-    async fn direct_messages(&mut self) -> Vec<(MatrixRoom, DisplayName)> {
+    async fn direct_messages(&self) -> Vec<(MatrixRoom, DisplayName)> {
         let mut rooms = vec![];
 
-        for room in self.client.joined_rooms().into_iter() {
-            if room.is_space() || !room.is_direct() {
+        for room in self.client.invited_rooms().into_iter() {
+            if !room.is_direct() {
                 continue;
             }
 
-            if let Ok(name) = room.display_name().await {
-                rooms.push((MatrixRoom::from(room), name))
+            let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+
+            rooms.push((room.into(), name));
+        }
+
+        for room in self.client.joined_rooms().into_iter() {
+            if !room.is_direct() {
+                continue;
             }
+
+            let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+
+            rooms.push((room.into(), name));
         }
 
         return rooms;
     }
 
-    async fn joined_rooms(&mut self) -> Vec<(MatrixRoom, DisplayName)> {
+    async fn active_rooms(&self) -> Vec<(MatrixRoom, DisplayName)> {
         let mut rooms = vec![];
+
+        for room in self.client.invited_rooms().into_iter() {
+            if room.is_space() || room.is_direct() {
+                continue;
+            }
+
+            let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+
+            rooms.push((room.into(), name));
+        }
 
         for room in self.client.joined_rooms().into_iter() {
             if room.is_space() || room.is_direct() {
                 continue;
             }
 
-            if let Ok(name) = room.display_name().await {
-                rooms.push((MatrixRoom::from(room), name))
-            }
+            let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+
+            rooms.push((room.into(), name));
         }
 
         return rooms;
@@ -857,17 +899,27 @@ impl ClientWorker {
         Ok(rooms)
     }
 
-    async fn spaces(&mut self) -> Vec<(MatrixRoom, DisplayName)> {
+    async fn spaces(&self) -> Vec<(MatrixRoom, DisplayName)> {
         let mut spaces = vec![];
+
+        for room in self.client.invited_rooms().into_iter() {
+            if !room.is_space() {
+                continue;
+            }
+
+            let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+
+            spaces.push((room.into(), name));
+        }
 
         for room in self.client.joined_rooms().into_iter() {
             if !room.is_space() {
                 continue;
             }
 
-            if let Ok(name) = room.display_name().await {
-                spaces.push((MatrixRoom::from(room), name));
-            }
+            let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+
+            spaces.push((room.into(), name));
         }
 
         return spaces;
