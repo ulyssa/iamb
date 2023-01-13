@@ -104,11 +104,26 @@ fn nth_after(pos: MessageKey, n: usize, info: &RoomInfo) -> MessageCursor {
 }
 
 pub struct ScrollbackState {
+    /// The room identifier.
     room_id: OwnedRoomId,
+
+    /// The buffer identifier used for saving marks, etc.
     id: IambBufferId,
+
+    /// The currently selected message in the scrollback.
     cursor: MessageCursor,
+
+    /// Contextual info about the viewport used during rendering.
     viewctx: ViewportContext<MessageCursor>,
+
+    /// The jumplist of visited messages.
     jumped: HistoryList<MessageCursor>,
+
+    /// Whether the full message should be drawn during the next render() call.
+    ///
+    /// This is used to ensure that ^E/^Y work nicely when the cursor is currently
+    /// on a multiline message.
+    show_full_on_redraw: bool,
 }
 
 impl ScrollbackState {
@@ -117,13 +132,32 @@ impl ScrollbackState {
         let cursor = MessageCursor::default();
         let viewctx = ViewportContext::default();
         let jumped = HistoryList::default();
+        let show_full_on_redraw = false;
 
-        ScrollbackState { room_id, id, cursor, viewctx, jumped }
+        ScrollbackState {
+            room_id,
+            id,
+            cursor,
+            viewctx,
+            jumped,
+            show_full_on_redraw,
+        }
+    }
+
+    pub fn goto_latest(&mut self) {
+        self.cursor = MessageCursor::latest();
     }
 
     /// Set the dimensions and placement within the terminal window for this list.
     pub fn set_term_info(&mut self, area: Rect) {
         self.viewctx.dimensions = (area.width as usize, area.height as usize);
+    }
+
+    pub fn get_key(&self, info: &mut RoomInfo) -> Option<MessageKey> {
+        self.cursor
+            .timestamp
+            .clone()
+            .or_else(|| info.messages.last_key_value().map(|kv| kv.0.clone()))
     }
 
     pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
@@ -397,7 +431,7 @@ impl ScrollbackState {
                 continue;
             }
 
-            if needle.is_match(msg.content.show().as_ref()) {
+            if needle.is_match(msg.event.show().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -421,7 +455,7 @@ impl ScrollbackState {
                 break;
             }
 
-            if needle.is_match(msg.content.show().as_ref()) {
+            if needle.is_match(msg.event.show().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -462,6 +496,7 @@ impl WindowOps<IambInfo> for ScrollbackState {
             cursor: self.cursor.clone(),
             viewctx: self.viewctx.clone(),
             jumped: self.jumped.clone(),
+            show_full_on_redraw: false,
         }
     }
 
@@ -582,6 +617,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     self.cursor = pos;
                 }
 
+                self.show_full_on_redraw = true;
+
                 return Ok(None);
             },
             EditAction::Yank => {
@@ -667,7 +704,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     let mut yanked = EditRope::from("");
 
                     for (_, msg) in self.messages(range, info) {
-                        yanked += EditRope::from(msg.content.show().into_owned());
+                        yanked += EditRope::from(msg.event.show().into_owned());
                         yanked += EditRope::from('\n');
                     }
 
@@ -1173,15 +1210,15 @@ impl<'a> StatefulWidget for Scrollback<'a> {
             nth_key_before(cursor_key.clone(), height, info)
         };
 
-        let full = cursor.timestamp.is_none();
-
+        let foc = self.focused || cursor.timestamp.is_some();
+        let full = std::mem::take(&mut state.show_full_on_redraw) || cursor.timestamp.is_none();
         let mut lines = vec![];
         let mut sawit = false;
         let mut prev = None;
 
         for (key, item) in info.messages.range(&corner_key..) {
             let sel = key == cursor_key;
-            let txt = item.show(prev, self.focused && sel, &state.viewctx, settings);
+            let txt = item.show(prev, foc && sel, &state.viewctx, settings);
 
             prev = Some(item);
 

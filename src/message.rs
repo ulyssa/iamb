@@ -11,9 +11,12 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
-    events::{
-        room::message::{MessageType, RoomMessageEventContent},
-        MessageLikeEvent,
+    events::room::message::{
+        MessageType,
+        OriginalRoomMessageEvent,
+        RedactedRoomMessageEvent,
+        RoomMessageEvent,
+        RoomMessageEventContent,
     },
     MilliSecondsSinceUnixEpoch,
     OwnedEventId,
@@ -33,8 +36,7 @@ use crate::{
     config::ApplicationSettings,
 };
 
-pub type MessageEvent = MessageLikeEvent<RoomMessageEventContent>;
-pub type MessageFetchResult = IambResult<(Option<String>, Vec<MessageEvent>)>;
+pub type MessageFetchResult = IambResult<(Option<String>, Vec<RoomMessageEvent>)>;
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 pub type Messages = BTreeMap<MessageKey, Message>;
 
@@ -145,6 +147,13 @@ impl MessageTimeStamp {
 
     fn is_local_echo(&self) -> bool {
         matches!(self, MessageTimeStamp::LocalEcho)
+    }
+
+    pub fn as_millis(&self) -> Option<MilliSecondsSinceUnixEpoch> {
+        match self {
+            MessageTimeStamp::OriginServer(ms) => MilliSecondsSinceUnixEpoch(*ms).into(),
+            MessageTimeStamp::LocalEcho => None,
+        }
     }
 }
 
@@ -304,61 +313,65 @@ impl PartialOrd for MessageCursor {
 }
 
 #[derive(Clone)]
-pub enum MessageContent {
-    Original(Box<RoomMessageEventContent>),
-    Redacted,
+pub enum MessageEvent {
+    Original(Box<OriginalRoomMessageEvent>),
+    Redacted(Box<RedactedRoomMessageEvent>),
+    Local(Box<RoomMessageEventContent>),
 }
 
-impl MessageContent {
+impl MessageEvent {
     pub fn show(&self) -> Cow<'_, str> {
         match self {
-            MessageContent::Original(ev) => {
-                let s = match &ev.msgtype {
-                    MessageType::Text(content) => content.body.as_ref(),
-                    MessageType::Emote(content) => content.body.as_ref(),
-                    MessageType::Notice(content) => content.body.as_str(),
-                    MessageType::ServerNotice(content) => content.body.as_str(),
-
-                    MessageType::VerificationRequest(_) => {
-                        // XXX: implement
-
-                        return Cow::Owned("[verification request]".into());
-                    },
-                    MessageType::Audio(content) => {
-                        return Cow::Owned(format!("[Attached Audio: {}]", content.body));
-                    },
-                    MessageType::File(content) => {
-                        return Cow::Owned(format!("[Attached File: {}]", content.body));
-                    },
-                    MessageType::Image(content) => {
-                        return Cow::Owned(format!("[Attached Image: {}]", content.body));
-                    },
-                    MessageType::Video(content) => {
-                        return Cow::Owned(format!("[Attached Video: {}]", content.body));
-                    },
-                    _ => {
-                        return Cow::Owned(format!("[Unknown message type: {:?}]", ev.msgtype()));
-                    },
-                };
-
-                Cow::Borrowed(s)
-            },
-            MessageContent::Redacted => Cow::Borrowed("[redacted]"),
+            MessageEvent::Original(ev) => show_room_content(&ev.content),
+            MessageEvent::Redacted(_) => Cow::Borrowed("[redacted]"),
+            MessageEvent::Local(content) => show_room_content(content),
         }
     }
 }
 
+fn show_room_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
+    let s = match &content.msgtype {
+        MessageType::Text(content) => content.body.as_ref(),
+        MessageType::Emote(content) => content.body.as_ref(),
+        MessageType::Notice(content) => content.body.as_str(),
+        MessageType::ServerNotice(content) => content.body.as_str(),
+
+        MessageType::VerificationRequest(_) => {
+            // XXX: implement
+
+            return Cow::Owned("[verification request]".into());
+        },
+        MessageType::Audio(content) => {
+            return Cow::Owned(format!("[Attached Audio: {}]", content.body));
+        },
+        MessageType::File(content) => {
+            return Cow::Owned(format!("[Attached File: {}]", content.body));
+        },
+        MessageType::Image(content) => {
+            return Cow::Owned(format!("[Attached Image: {}]", content.body));
+        },
+        MessageType::Video(content) => {
+            return Cow::Owned(format!("[Attached Video: {}]", content.body));
+        },
+        _ => {
+            return Cow::Owned(format!("[Unknown message type: {:?}]", content.msgtype()));
+        },
+    };
+
+    Cow::Borrowed(s)
+}
+
 #[derive(Clone)]
 pub struct Message {
-    pub content: MessageContent,
+    pub event: MessageEvent,
     pub sender: OwnedUserId,
     pub timestamp: MessageTimeStamp,
     pub downloaded: bool,
 }
 
 impl Message {
-    pub fn new(content: MessageContent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
-        Message { content, sender, timestamp, downloaded: false }
+    pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
+        Message { event, sender, timestamp, downloaded: false }
     }
 
     pub fn show(
@@ -369,7 +382,7 @@ impl Message {
         settings: &ApplicationSettings,
     ) -> Text {
         let width = vwctx.get_width();
-        let mut msg = self.content.show();
+        let mut msg = self.event.show();
 
         if self.downloaded {
             msg.to_mut().push_str(" \u{2705}");
@@ -465,24 +478,38 @@ impl Message {
     }
 }
 
-impl From<MessageEvent> for Message {
-    fn from(event: MessageEvent) -> Self {
-        match event {
-            MessageLikeEvent::Original(ev) => {
-                let content = MessageContent::Original(ev.content.into());
+impl From<OriginalRoomMessageEvent> for Message {
+    fn from(event: OriginalRoomMessageEvent) -> Self {
+        let timestamp = event.origin_server_ts.into();
+        let user_id = event.sender.clone();
+        let content = MessageEvent::Original(event.into());
 
-                Message::new(content, ev.sender, ev.origin_server_ts.into())
-            },
-            MessageLikeEvent::Redacted(ev) => {
-                Message::new(MessageContent::Redacted, ev.sender, ev.origin_server_ts.into())
-            },
+        Message::new(content, user_id, timestamp)
+    }
+}
+
+impl From<RedactedRoomMessageEvent> for Message {
+    fn from(event: RedactedRoomMessageEvent) -> Self {
+        let timestamp = event.origin_server_ts.into();
+        let user_id = event.sender.clone();
+        let content = MessageEvent::Redacted(event.into());
+
+        Message::new(content, user_id, timestamp)
+    }
+}
+
+impl From<RoomMessageEvent> for Message {
+    fn from(event: RoomMessageEvent) -> Self {
+        match event {
+            RoomMessageEvent::Original(ev) => ev.into(),
+            RoomMessageEvent::Redacted(ev) => ev.into(),
         }
     }
 }
 
 impl ToString for Message {
     fn to_string(&self) -> String {
-        self.content.show().into_owned()
+        self.event.show().into_owned()
     }
 }
 

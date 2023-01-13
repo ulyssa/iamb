@@ -62,7 +62,7 @@ two other TUI clients and Element Web:
 | Accepting Invites                       | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Typing Notification                     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | E2E                                     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
-| Replies                                 | :x: ([#3])         | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
+| Replies                                 | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
 | Attachment uploading                    | :heavy_check_mark: | :x:                | :heavy_check_mark: | :heavy_check_mark:  |
 | Attachment downloading                  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Send stickers                           | :x:                | :x:                | :x:                | :heavy_check_mark:  |

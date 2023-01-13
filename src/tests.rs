@@ -3,10 +3,11 @@ use std::path::PathBuf;
 
 use matrix_sdk::ruma::{
     event_id,
-    events::room::message::RoomMessageEventContent,
+    events::room::message::{OriginalRoomMessageEvent, RoomMessageEventContent},
     server_name,
     user_id,
     EventId,
+    OwnedEventId,
     OwnedRoomId,
     OwnedUserId,
     RoomId,
@@ -30,7 +31,7 @@ use crate::{
     },
     message::{
         Message,
-        MessageContent,
+        MessageEvent,
         MessageKey,
         MessageTimeStamp::{LocalEcho, OriginServer},
         Messages,
@@ -45,54 +46,69 @@ lazy_static! {
     pub static ref TEST_USER3: OwnedUserId = user_id!("@user3:example.com").to_owned();
     pub static ref TEST_USER4: OwnedUserId = user_id!("@user4:example.com").to_owned();
     pub static ref TEST_USER5: OwnedUserId = user_id!("@user5:example.com").to_owned();
-    pub static ref MSG1_KEY: MessageKey = (LocalEcho, EventId::new(server_name!("example.com")));
-    pub static ref MSG2_KEY: MessageKey =
-        (OriginServer(UInt::new(1).unwrap()), EventId::new(server_name!("example.com")));
-    pub static ref MSG3_KEY: MessageKey = (
-        OriginServer(UInt::new(2).unwrap()),
-        event_id!("$5jRz3KfVhaUzXtVj7k:example.com").to_owned()
-    );
-    pub static ref MSG4_KEY: MessageKey = (
-        OriginServer(UInt::new(2).unwrap()),
-        event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned()
-    );
-    pub static ref MSG5_KEY: MessageKey =
-        (OriginServer(UInt::new(8).unwrap()), EventId::new(server_name!("example.com")));
+    pub static ref MSG1_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
+    pub static ref MSG2_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
+    pub static ref MSG3_EVID: OwnedEventId =
+        event_id!("$5jRz3KfVhaUzXtVj7k:example.com").to_owned();
+    pub static ref MSG4_EVID: OwnedEventId =
+        event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned();
+    pub static ref MSG5_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
+    pub static ref MSG1_KEY: MessageKey = (LocalEcho, MSG1_EVID.clone());
+    pub static ref MSG2_KEY: MessageKey = (OriginServer(UInt::new(1).unwrap()), MSG2_EVID.clone());
+    pub static ref MSG3_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG3_EVID.clone());
+    pub static ref MSG4_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG4_EVID.clone());
+    pub static ref MSG5_KEY: MessageKey = (OriginServer(UInt::new(8).unwrap()), MSG5_EVID.clone());
+}
+
+pub fn mock_room1_message(
+    content: RoomMessageEventContent,
+    sender: OwnedUserId,
+    key: MessageKey,
+) -> Message {
+    let origin_server_ts = key.0.as_millis().unwrap();
+    let event_id = key.1;
+
+    let event = OriginalRoomMessageEvent {
+        content,
+        event_id,
+        sender,
+        origin_server_ts,
+        room_id: TEST_ROOM1_ID.clone(),
+        unsigned: Default::default(),
+    };
+
+    event.into()
 }
 
 pub fn mock_message1() -> Message {
     let content = RoomMessageEventContent::text_plain("writhe");
-    let content = MessageContent::Original(content.into());
+    let content = MessageEvent::Local(content.into());
 
     Message::new(content, TEST_USER1.clone(), MSG1_KEY.0)
 }
 
 pub fn mock_message2() -> Message {
     let content = RoomMessageEventContent::text_plain("helium");
-    let content = MessageContent::Original(content.into());
 
-    Message::new(content, TEST_USER2.clone(), MSG2_KEY.0)
+    mock_room1_message(content, TEST_USER2.clone(), MSG2_KEY.clone())
 }
 
 pub fn mock_message3() -> Message {
     let content = RoomMessageEventContent::text_plain("this\nis\na\nmultiline\nmessage");
-    let content = MessageContent::Original(content.into());
 
-    Message::new(content, TEST_USER2.clone(), MSG3_KEY.0)
+    mock_room1_message(content, TEST_USER2.clone(), MSG3_KEY.clone())
 }
 
 pub fn mock_message4() -> Message {
     let content = RoomMessageEventContent::text_plain("help");
-    let content = MessageContent::Original(content.into());
 
-    Message::new(content, TEST_USER1.clone(), MSG4_KEY.0)
+    mock_room1_message(content, TEST_USER1.clone(), MSG4_KEY.clone())
 }
 
 pub fn mock_message5() -> Message {
     let content = RoomMessageEventContent::text_plain("character");
-    let content = MessageContent::Original(content.into());
 
-    Message::new(content, TEST_USER2.clone(), MSG5_KEY.0)
+    mock_room1_message(content, TEST_USER2.clone(), MSG4_KEY.clone())
 }
 
 pub fn mock_messages() -> Messages {

@@ -61,7 +61,9 @@ pub enum VerifyAction {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
+    Cancel,
     Download(Option<String>, bool),
+    Reply,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

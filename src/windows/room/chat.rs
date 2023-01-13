@@ -8,14 +8,24 @@ use matrix_sdk::{
     media::{MediaFormat, MediaRequest},
     room::Room as MatrixRoom,
     ruma::{
-        events::room::message::{MessageType, RoomMessageEventContent, TextMessageEventContent},
+        events::room::message::{
+            MessageType,
+            OriginalRoomMessageEvent,
+            RoomMessageEventContent,
+            TextMessageEventContent,
+        },
         OwnedRoomId,
         RoomId,
     },
 };
 
 use modalkit::{
-    tui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget},
+    tui::{
+        buffer::Buffer,
+        layout::Rect,
+        text::{Span, Spans},
+        widgets::{Paragraph, StatefulWidget, Widget},
+    },
     widgets::textbox::{TextBox, TextBoxState},
     widgets::TerminalCursor,
     widgets::{PromptActions, WindowOps},
@@ -52,10 +62,11 @@ use crate::base::{
     ProgramContext,
     ProgramStore,
     RoomFocus,
+    RoomInfo,
     SendAction,
 };
 
-use crate::message::{Message, MessageContent, MessageTimeStamp};
+use crate::message::{Message, MessageEvent, MessageKey, MessageTimeStamp};
 
 use super::scrollback::{Scrollback, ScrollbackState};
 
@@ -69,6 +80,8 @@ pub struct ChatState {
 
     scrollback: ScrollbackState,
     focus: RoomFocus,
+
+    reply_to: Option<MessageKey>,
 }
 
 impl ChatState {
@@ -89,7 +102,25 @@ impl ChatState {
 
             scrollback,
             focus: RoomFocus::MessageBar,
+
+            reply_to: None,
         }
+    }
+
+    fn get_reply_to<'a>(&self, info: &'a RoomInfo) -> Option<&'a OriginalRoomMessageEvent> {
+        let key = self.reply_to.as_ref()?;
+        let msg = info.messages.get(key)?;
+
+        if let MessageEvent::Original(ev) = &msg.event {
+            Some(ev)
+        } else {
+            None
+        }
+    }
+
+    fn reset(&mut self) -> EditRope {
+        self.reply_to = None;
+        self.tbox.reset()
     }
 
     pub fn refresh_room(&mut self, store: &mut ProgramStore) {
@@ -112,8 +143,13 @@ impl ChatState {
         let msg = self.scrollback.get_mut(info).ok_or(IambError::NoSelectedMessage)?;
 
         match act {
+            MessageAction::Cancel => {
+                self.reply_to = None;
+
+                Ok(None)
+            },
             MessageAction::Download(filename, force) => {
-                if let MessageContent::Original(ev) = &msg.content {
+                if let MessageEvent::Original(ev) = &msg.event {
                     let media = client.media();
 
                     let mut filename = match filename {
@@ -121,7 +157,7 @@ impl ChatState {
                         None => settings.dirs.downloads.clone(),
                     };
 
-                    let source = match &ev.msgtype {
+                    let source = match &ev.content.msgtype {
                         MessageType::Audio(c) => {
                             if filename.is_dir() {
                                 filename.push(c.body.as_str());
@@ -188,6 +224,12 @@ impl ChatState {
 
                 Err(IambError::NoAttachment.into())
             },
+            MessageAction::Reply => {
+                self.reply_to = self.scrollback.get_key(info);
+                self.focus = RoomFocus::MessageBar;
+
+                Ok(None)
+            },
         }
     }
 
@@ -203,6 +245,7 @@ impl ChatState {
             .client
             .get_joined_room(self.id())
             .ok_or(IambError::NotJoined)?;
+        let info = store.application.rooms.entry(self.id().to_owned()).or_default();
 
         let (event_id, msg) = match act {
             SendAction::Submit => {
@@ -214,15 +257,21 @@ impl ChatState {
 
                 let msg = TextMessageEventContent::plain(msg);
                 let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
+
+                let mut msg = RoomMessageEventContent::new(msg);
+
+                if let Some(m) = self.get_reply_to(info) {
+                    // XXX: Switch to RoomMessageEventContent::reply() once it's stable?
+                    msg = msg.make_reply_to(m);
+                }
 
                 // XXX: second parameter can be a locally unique transaction id.
                 // Useful for doing retries.
                 let resp = room.send(msg.clone(), None).await.map_err(IambError::from)?;
                 let event_id = resp.event_id;
 
-                // Clear the TextBoxState contents now that the message is sent.
-                self.tbox.reset();
+                // Reset message bar state now that it's been sent.
+                self.reset();
 
                 (event_id, msg)
             },
@@ -252,11 +301,13 @@ impl ChatState {
         };
 
         let user = store.application.settings.profile.user_id.clone();
-        let info = store.application.get_room_info(self.id().to_owned());
         let key = (MessageTimeStamp::LocalEcho, event_id);
-        let msg = MessageContent::Original(msg.into());
+        let msg = MessageEvent::Local(msg.into());
         let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
         info.messages.insert(key, msg);
+
+        // Jump to the end of the scrollback to show the message.
+        self.scrollback.goto_latest();
 
         Ok(None)
     }
@@ -333,6 +384,8 @@ impl WindowOps<IambInfo> for ChatState {
 
             scrollback: self.scrollback.dup(store),
             focus: self.focus,
+
+            reply_to: None,
         }
     }
 
@@ -432,7 +485,7 @@ impl PromptActions<ProgramContext, ProgramStore, IambInfo> for ChatState {
             return Ok(vec![]);
         }
 
-        let text = self.tbox.reset().trim();
+        let text = self.reset().trim();
 
         if text.is_empty() {
             let _ = self.sent.end();
@@ -506,14 +559,33 @@ impl<'a> StatefulWidget for Chat<'a> {
         let lines = state.tbox.has_lines(5).max(1) as u16;
         let drawh = area.height;
         let texth = lines.min(drawh).clamp(1, 5);
-        let scrollh = drawh.saturating_sub(texth);
+        let desch = if state.reply_to.is_some() {
+            drawh.saturating_sub(texth).min(1)
+        } else {
+            0
+        };
+        let scrollh = drawh.saturating_sub(texth).saturating_sub(desch);
 
         let scrollarea = Rect::new(area.x, area.y, area.width, scrollh);
-        let textarea = Rect::new(scrollarea.x, scrollarea.y + scrollh, scrollarea.width, texth);
+        let descarea = Rect::new(area.x, scrollarea.y + scrollh, area.width, desch);
+        let textarea = Rect::new(area.x, descarea.y + desch, area.width, texth);
 
         let scrollback_focused = state.focus.is_scrollback() && self.focused;
         let scrollback = Scrollback::new(self.store).focus(scrollback_focused);
         scrollback.render(scrollarea, buf, &mut state.scrollback);
+
+        let desc_spans = state.reply_to.as_ref().and_then(|k| {
+            let room = self.store.application.rooms.get(state.id())?;
+            let msg = room.messages.get(k)?;
+            let user = self.store.application.settings.get_user_span(msg.sender.as_ref());
+            let spans = Spans(vec![Span::from("Replying to "), user]);
+
+            spans.into()
+        });
+
+        if let Some(desc_spans) = desc_spans {
+            Paragraph::new(desc_spans).render(descarea, buf);
+        }
 
         let prompt = if self.focused { "> " } else { "  " };
 
