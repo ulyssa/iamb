@@ -11,16 +11,23 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
-    events::room::message::{
-        MessageType,
-        OriginalRoomMessageEvent,
-        RedactedRoomMessageEvent,
-        RoomMessageEvent,
-        RoomMessageEventContent,
+    events::{
+        room::{
+            message::{
+                MessageType,
+                OriginalRoomMessageEvent,
+                RedactedRoomMessageEvent,
+                RoomMessageEvent,
+                RoomMessageEventContent,
+            },
+            redaction::SyncRoomRedactionEvent,
+        },
+        Redact,
     },
     MilliSecondsSinceUnixEpoch,
     OwnedEventId,
     OwnedUserId,
+    RoomVersionId,
     UInt,
 };
 
@@ -323,8 +330,32 @@ impl MessageEvent {
     pub fn show(&self) -> Cow<'_, str> {
         match self {
             MessageEvent::Original(ev) => show_room_content(&ev.content),
-            MessageEvent::Redacted(_) => Cow::Borrowed("[redacted]"),
+            MessageEvent::Redacted(ev) => {
+                let reason = ev
+                    .unsigned
+                    .redacted_because
+                    .as_ref()
+                    .and_then(|e| e.as_original())
+                    .and_then(|r| r.content.reason.as_ref());
+
+                if let Some(r) = reason {
+                    Cow::Owned(format!("[Redacted: {:?}]", r))
+                } else {
+                    Cow::Borrowed("[Redacted]")
+                }
+            },
             MessageEvent::Local(content) => show_room_content(content),
+        }
+    }
+
+    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, version: &RoomVersionId) {
+        match self {
+            MessageEvent::Redacted(_) => return,
+            MessageEvent::Local(_) => return,
+            MessageEvent::Original(ev) => {
+                let redacted = ev.clone().redact(redaction, version);
+                *self = MessageEvent::Redacted(Box::new(redacted));
+            },
         }
     }
 }

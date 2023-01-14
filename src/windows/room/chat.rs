@@ -224,6 +224,33 @@ impl ChatState {
 
                 Err(IambError::NoAttachment.into())
             },
+            MessageAction::Redact(reason) => {
+                let room = store
+                    .application
+                    .worker
+                    .client
+                    .get_joined_room(self.id())
+                    .ok_or(IambError::NotJoined)?;
+
+                let event_id = match &msg.event {
+                    MessageEvent::Original(ev) => ev.event_id.clone(),
+                    MessageEvent::Local(_) => {
+                        self.scrollback.get_key(info).ok_or(IambError::NoSelectedMessage)?.1
+                    },
+                    MessageEvent::Redacted(_) => {
+                        let msg = "";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
+                };
+
+                let event_id = event_id.as_ref();
+                let reason = reason.as_deref();
+                let _ = room.redact(event_id, reason, None).await.map_err(IambError::from)?;
+
+                Ok(None)
+            },
             MessageAction::Reply => {
                 self.reply_to = self.scrollback.get_key(info);
                 self.focus = RoomFocus::MessageBar;

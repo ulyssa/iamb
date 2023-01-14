@@ -35,6 +35,7 @@ use matrix_sdk::{
             room::{
                 message::{MessageType, RoomMessageEventContent},
                 name::RoomNameEventContent,
+                redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
                 topic::RoomTopicEventContent,
             },
             typing::SyncTypingEvent,
@@ -46,6 +47,7 @@ use matrix_sdk::{
         OwnedRoomId,
         OwnedRoomOrAliasId,
         OwnedUserId,
+        RoomVersionId,
     },
     Client,
     DisplayName,
@@ -543,6 +545,34 @@ impl ClientWorker {
                     // Remove the echo.
                     let key = (MessageTimeStamp::LocalEcho, event_id);
                     let _ = info.messages.remove(&key);
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |ev: OriginalSyncRoomRedactionEvent,
+             room: MatrixRoom,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+                    let room_info = room.clone_info();
+                    let room_version = room_info.room_version().unwrap_or(&RoomVersionId::V1);
+
+                    let mut locked = store.lock().await;
+                    let info = locked.application.get_room_info(room_id.to_owned());
+
+                    // XXX: need to store a mapping of EventId -> MessageKey somewhere
+                    // to avoid having to iterate over the messages here.
+                    for ((_, id), msg) in info.messages.iter_mut().rev() {
+                        if id != &ev.redacts {
+                            continue;
+                        }
+
+                        let ev = SyncRoomRedactionEvent::Original(ev);
+                        msg.event.redact(ev, room_version);
+
+                        break;
+                    }
                 }
             },
         );

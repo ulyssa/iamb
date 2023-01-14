@@ -63,6 +63,7 @@ pub enum VerifyAction {
 pub enum MessageAction {
     Cancel,
     Download(Option<String>, bool),
+    Redact(Option<String>),
     Reply,
 }
 

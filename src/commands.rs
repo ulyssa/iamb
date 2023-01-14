@@ -144,6 +144,19 @@ fn iamb_cancel(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_redact(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let ract = IambAction::from(MessageAction::Redact(args.into_iter().next()));
+    let step = CommandStep::Continue(ract.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
 fn iamb_reply(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -259,6 +272,7 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { names: vec!["invite".into()], f: iamb_invite });
     cmds.add_command(ProgramCommand { names: vec!["join".into()], f: iamb_join });
     cmds.add_command(ProgramCommand { names: vec!["members".into()], f: iamb_members });
+    cmds.add_command(ProgramCommand { names: vec!["redact".into()], f: iamb_redact });
     cmds.add_command(ProgramCommand { names: vec!["reply".into()], f: iamb_reply });
     cmds.add_command(ProgramCommand { names: vec!["rooms".into()], f: iamb_rooms });
     cmds.add_command(ProgramCommand { names: vec!["set".into()], f: iamb_set });
@@ -427,6 +441,27 @@ mod tests {
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
         let res = cmds.input_cmd("invite @user:example.com", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_redact() {
+        let mut cmds = setup_commands();
+        let ctx = ProgramContext::default();
+
+        let res = cmds.input_cmd("redact", ctx.clone()).unwrap();
+        let act = IambAction::Message(MessageAction::Redact(None));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("redact Removed", ctx.clone()).unwrap();
+        let act = IambAction::Message(MessageAction::Redact(Some("Removed".into())));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("redact \"Removed\"", ctx.clone()).unwrap();
+        let act = IambAction::Message(MessageAction::Redact(Some("Removed".into())));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("redact Removed Removed", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
     }
 }

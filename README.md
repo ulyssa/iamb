@@ -69,7 +69,7 @@ two other TUI clients and Element Web:
 | Send formatted messages (markdown)      | :x: ([#10])        | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Rich Text Editor for formatted messages | :x:                | :x:                | :x:                | :heavy_check_mark:  |
 | Display formatted messages              | :x: ([#10])        | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
-| Redacting                               | :x: ([#5])         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Redacting                               | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
 | Multiple Matrix Accounts                | :heavy_check_mark: | :x:                | :heavy_check_mark: | :x:                 |
 | New user registration                   | :x:                | :x:                | :x:                | :heavy_check_mark:  |
 | VOIP                                    | :x:                | :x:                | :x:                | :heavy_check_mark:  |
