@@ -74,7 +74,7 @@ two other TUI clients and Element Web:
 | New user registration                   | ❌          | ❌       | ❌               | ✔️                   |
 | VOIP                                    | ❌          | ❌       | ❌               | ✔️                   |
 | Reactions                               | ❌  ([#2])  | ✔️        | ❌               | ✔️                   |
-| Message editing                         | ❌  ([#4])  | ✔️        | ❌               | ✔️                   |
+| Message editing                         | ✔️           | ✔️        | ❌               | ✔️                   |
 | Room upgrades                           | ❌          | ✔️        | ❌               | ✔️                   |
 | Localisations                           | ❌          | 1        | ❌               | 44                  |
 | SSO Support                             | ❌          | ✔️        | ✔️                | ✔️                   |

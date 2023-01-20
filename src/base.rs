@@ -8,7 +8,20 @@ use tracing::warn;
 
 use matrix_sdk::{
     encryption::verification::SasVerification,
-    ruma::{OwnedRoomId, OwnedUserId, RoomId},
+    ruma::{
+        events::room::message::{
+            OriginalRoomMessageEvent,
+            Relation,
+            Replacement,
+            RoomMessageEvent,
+            RoomMessageEventContent,
+        },
+        EventId,
+        OwnedEventId,
+        OwnedRoomId,
+        OwnedUserId,
+        RoomId,
+    },
 };
 
 use modalkit::{
@@ -41,7 +54,7 @@ use modalkit::{
 };
 
 use crate::{
-    message::{Message, Messages},
+    message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     worker::Requester,
     ApplicationSettings,
 };
@@ -61,9 +74,22 @@ pub enum VerifyAction {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
+    /// Cance the current reply or edit.
     Cancel,
+
+    /// Download an attachment to the given path.
+    ///
+    /// The [bool] argument controls whether to overwrite any already existing file at the
+    /// destination path.
     Download(Option<String>, bool),
+
+    /// Edit a sent message.
+    Edit,
+
+    /// Redact a message.
     Redact(Option<String>),
+
+    /// Reply to a message.
     Reply,
 }
 
@@ -251,13 +277,72 @@ pub enum RoomFetchStatus {
 #[derive(Default)]
 pub struct RoomInfo {
     pub name: Option<String>,
+
+    pub keys: HashMap<OwnedEventId, MessageKey>,
     pub messages: Messages,
+
     pub fetch_id: RoomFetchStatus,
     pub fetch_last: Option<Instant>,
     pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
 }
 
 impl RoomInfo {
+    pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
+        self.messages.get(self.keys.get(event_id)?)
+    }
+
+    pub fn insert_edit(&mut self, msg: Replacement) {
+        let event_id = msg.event_id;
+        let new_content = msg.new_content;
+
+        let key = if let Some(k) = self.keys.get(&event_id) {
+            k
+        } else {
+            return;
+        };
+
+        let msg = if let Some(msg) = self.messages.get_mut(key) {
+            msg
+        } else {
+            return;
+        };
+
+        match &mut msg.event {
+            MessageEvent::Original(orig) => {
+                orig.content = *new_content;
+            },
+            MessageEvent::Local(content) => {
+                *content = new_content;
+            },
+            MessageEvent::Redacted(_) => {
+                return;
+            },
+        }
+    }
+
+    pub fn insert_message(&mut self, msg: RoomMessageEvent) {
+        let event_id = msg.event_id().to_owned();
+        let key = (msg.origin_server_ts().into(), event_id.clone());
+
+        self.keys.insert(event_id.clone(), key.clone());
+        self.messages.insert(key, msg.into());
+
+        // Remove any echo.
+        let key = (MessageTimeStamp::LocalEcho, event_id);
+        let _ = self.messages.remove(&key);
+    }
+
+    pub fn insert(&mut self, msg: RoomMessageEvent) {
+        match msg {
+            RoomMessageEvent::Original(OriginalRoomMessageEvent {
+                content:
+                    RoomMessageEventContent { relates_to: Some(Relation::Replacement(repl)), .. },
+                ..
+            }) => self.insert_edit(repl),
+            _ => self.insert_message(msg),
+        }
+    }
+
     fn recently_fetched(&self) -> bool {
         self.fetch_last.map_or(false, |i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
     }
@@ -388,9 +473,7 @@ impl ChatStore {
             match res {
                 Ok((fetch_id, msgs)) => {
                     for msg in msgs.into_iter() {
-                        let key = (msg.origin_server_ts().into(), msg.event_id().to_owned());
-
-                        info.messages.insert(key, Message::from(msg));
+                        info.insert(msg);
                     }
 
                     info.fetch_id =

@@ -111,6 +111,18 @@ pub fn mock_message5() -> Message {
     mock_room1_message(content, TEST_USER2.clone(), MSG4_KEY.clone())
 }
 
+pub fn mock_keys() -> HashMap<OwnedEventId, MessageKey> {
+    let mut keys = HashMap::new();
+
+    keys.insert(MSG1_EVID.clone(), MSG1_KEY.clone());
+    keys.insert(MSG2_EVID.clone(), MSG2_KEY.clone());
+    keys.insert(MSG3_EVID.clone(), MSG3_KEY.clone());
+    keys.insert(MSG4_EVID.clone(), MSG4_KEY.clone());
+    keys.insert(MSG5_EVID.clone(), MSG5_KEY.clone());
+
+    keys
+}
+
 pub fn mock_messages() -> Messages {
     let mut messages = BTreeMap::new();
 
@@ -126,7 +138,10 @@ pub fn mock_messages() -> Messages {
 pub fn mock_room() -> RoomInfo {
     RoomInfo {
         name: Some("Watercooler Discussion".into()),
+
+        keys: mock_keys(),
         messages: mock_messages(),
+
         fetch_id: RoomFetchStatus::NotStarted,
         fetch_last: None,
         users_typing: None,

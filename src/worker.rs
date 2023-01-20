@@ -58,7 +58,7 @@ use modalkit::editing::action::{EditInfo, InfoMessage, UIError};
 
 use crate::{
     base::{AsyncProgramStore, IambError, IambResult, SetRoomField, VerifyAction},
-    message::{Message, MessageFetchResult, MessageTimeStamp},
+    message::MessageFetchResult,
     ApplicationSettings,
 };
 
@@ -536,15 +536,7 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
                     let mut info = locked.application.get_room_info(room_id.to_owned());
                     info.name = room_name;
-
-                    let event_id = ev.event_id().to_owned();
-                    let key = (ev.origin_server_ts().into(), event_id.clone());
-                    let msg = Message::from(ev.into_full_event(room_id.to_owned()));
-                    info.messages.insert(key, msg);
-
-                    // Remove the echo.
-                    let key = (MessageTimeStamp::LocalEcho, event_id);
-                    let _ = info.messages.remove(&key);
+                    info.insert(ev.into_full_event(room_id.to_owned()));
                 }
             },
         );
@@ -561,17 +553,15 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
 
-                    // XXX: need to store a mapping of EventId -> MessageKey somewhere
-                    // to avoid having to iterate over the messages here.
-                    for ((_, id), msg) in info.messages.iter_mut().rev() {
-                        if id != &ev.redacts {
-                            continue;
-                        }
+                    let key = if let Some(k) = info.keys.get(&ev.redacts) {
+                        k
+                    } else {
+                        return;
+                    };
 
+                    if let Some(msg) = info.messages.get_mut(key) {
                         let ev = SyncRoomRedactionEvent::Original(ev);
                         msg.event.redact(ev, room_version);
-
-                        break;
                     }
                 }
             },

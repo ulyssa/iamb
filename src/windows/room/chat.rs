@@ -1,6 +1,7 @@
 use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::fs;
+use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use matrix_sdk::{
@@ -11,6 +12,8 @@ use matrix_sdk::{
         events::room::message::{
             MessageType,
             OriginalRoomMessageEvent,
+            Relation,
+            Replacement,
             RoomMessageEventContent,
             TextMessageEventContent,
         },
@@ -82,6 +85,7 @@ pub struct ChatState {
     focus: RoomFocus,
 
     reply_to: Option<MessageKey>,
+    editing: Option<MessageKey>,
 }
 
 impl ChatState {
@@ -104,6 +108,7 @@ impl ChatState {
             focus: RoomFocus::MessageBar,
 
             reply_to: None,
+            editing: None,
         }
     }
 
@@ -120,6 +125,7 @@ impl ChatState {
 
     fn reset(&mut self) -> EditRope {
         self.reply_to = None;
+        self.editing = None;
         self.tbox.reset()
     }
 
@@ -145,6 +151,7 @@ impl ChatState {
         match act {
             MessageAction::Cancel => {
                 self.reply_to = None;
+                self.editing = None;
 
                 Ok(None)
             },
@@ -224,6 +231,40 @@ impl ChatState {
 
                 Err(IambError::NoAttachment.into())
             },
+            MessageAction::Edit => {
+                if msg.sender != settings.profile.user_id {
+                    let msg = "Cannot edit messages sent by someone else";
+                    let err = UIError::Failure(msg.into());
+
+                    return Err(err);
+                }
+
+                let ev = match &msg.event {
+                    MessageEvent::Original(ev) => &ev.content,
+                    MessageEvent::Local(ev) => ev.deref(),
+                    _ => {
+                        let msg = "Cannot edit a redacted message";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
+                };
+
+                let text = match &ev.msgtype {
+                    MessageType::Text(msg) => msg.body.as_str(),
+                    _ => {
+                        let msg = "Cannot edit a non-text message";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
+                };
+
+                self.tbox.set_text(text);
+                self.editing = self.scrollback.get_key(info);
+
+                Ok(None)
+            },
             MessageAction::Redact(reason) => {
                 let room = store
                     .application
@@ -273,6 +314,7 @@ impl ChatState {
             .get_joined_room(self.id())
             .ok_or(IambError::NotJoined)?;
         let info = store.application.rooms.entry(self.id().to_owned()).or_default();
+        let mut show_echo = true;
 
         let (event_id, msg) = match act {
             SendAction::Submit => {
@@ -287,7 +329,14 @@ impl ChatState {
 
                 let mut msg = RoomMessageEventContent::new(msg);
 
-                if let Some(m) = self.get_reply_to(info) {
+                if let Some((_, event_id)) = &self.editing {
+                    msg.relates_to = Some(Relation::Replacement(Replacement::new(
+                        event_id.clone(),
+                        Box::new(msg.clone()),
+                    )));
+
+                    show_echo = false;
+                } else if let Some(m) = self.get_reply_to(info) {
                     // XXX: Switch to RoomMessageEventContent::reply() once it's stable?
                     msg = msg.make_reply_to(m);
                 }
@@ -327,11 +376,13 @@ impl ChatState {
             },
         };
 
-        let user = store.application.settings.profile.user_id.clone();
-        let key = (MessageTimeStamp::LocalEcho, event_id);
-        let msg = MessageEvent::Local(msg.into());
-        let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
-        info.messages.insert(key, msg);
+        if show_echo {
+            let user = store.application.settings.profile.user_id.clone();
+            let key = (MessageTimeStamp::LocalEcho, event_id);
+            let msg = MessageEvent::Local(msg.into());
+            let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
+            info.messages.insert(key, msg);
+        }
 
         // Jump to the end of the scrollback to show the message.
         self.scrollback.goto_latest();
@@ -413,6 +464,7 @@ impl WindowOps<IambInfo> for ChatState {
             focus: self.focus,
 
             reply_to: None,
+            editing: None,
         }
     }
 
@@ -601,14 +653,20 @@ impl<'a> StatefulWidget for Chat<'a> {
         let scrollback = Scrollback::new(self.store).focus(scrollback_focused);
         scrollback.render(scrollarea, buf, &mut state.scrollback);
 
-        let desc_spans = state.reply_to.as_ref().and_then(|k| {
-            let room = self.store.application.rooms.get(state.id())?;
-            let msg = room.messages.get(k)?;
-            let user = self.store.application.settings.get_user_span(msg.sender.as_ref());
-            let spans = Spans(vec![Span::from("Replying to "), user]);
+        let desc_spans = match (&state.editing, &state.reply_to) {
+            (None, None) => None,
+            (Some(_), _) => Some(Spans::from("Editing message")),
+            (_, Some(_)) => {
+                state.reply_to.as_ref().and_then(|k| {
+                    let room = self.store.application.rooms.get(state.id())?;
+                    let msg = room.messages.get(k)?;
+                    let user = self.store.application.settings.get_user_span(msg.sender.as_ref());
+                    let spans = Spans(vec![Span::from("Replying to "), user]);
 
-            spans.into()
-        });
+                    spans.into()
+                })
+            },
+        };
 
         if let Some(desc_spans) = desc_spans {
             Paragraph::new(desc_spans).render(descarea, buf);
