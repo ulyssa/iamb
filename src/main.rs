@@ -42,6 +42,7 @@ mod commands;
 mod config;
 mod keybindings;
 mod message;
+mod util;
 mod windows;
 mod worker;
 
@@ -98,6 +99,14 @@ use modalkit::{
         Window,
     },
 };
+
+const MIN_MSG_LOAD: u32 = 50;
+
+fn msg_load_req(area: Rect) -> u32 {
+    let n = area.height as u32;
+
+    n.max(MIN_MSG_LOAD)
+}
 
 struct Application {
     store: AsyncProgramStore,
@@ -176,7 +185,7 @@ impl Application {
                 f.set_cursor(cx, cy);
             }
 
-            store.application.load_older(area.height as u32);
+            store.application.load_older(msg_load_req(area));
         })?;
 
         Ok(())
@@ -186,7 +195,8 @@ impl Application {
         loop {
             self.redraw(false, self.store.clone().lock().await.deref_mut())?;
 
-            if !poll(Duration::from_millis(500))? {
+            if !poll(Duration::from_secs(1))? {
+                // Redraw in case there's new messages to show.
                 continue;
             }
 

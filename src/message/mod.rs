@@ -4,19 +4,20 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
-use std::str::Lines;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
-use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
     events::{
         room::{
             message::{
+                FormattedBody,
+                MessageFormat,
                 MessageType,
                 OriginalRoomMessageEvent,
                 RedactedRoomMessageEvent,
+                Relation,
                 RoomMessageEvent,
                 RoomMessageEventContent,
             },
@@ -33,6 +34,7 @@ use matrix_sdk::ruma::{
 
 use modalkit::tui::{
     style::{Modifier as StyleModifier, Style},
+    symbols::line::THICK_VERTICAL,
     text::{Span, Spans, Text},
 };
 
@@ -41,7 +43,12 @@ use modalkit::editing::{base::ViewportContext, cursor::Cursor};
 use crate::{
     base::{IambResult, RoomInfo},
     config::ApplicationSettings,
+    message::html::{parse_matrix_html, StyleTree},
+    util::{space_span, wrapped_text},
 };
+
+mod html;
+mod printer;
 
 pub type MessageFetchResult = IambResult<(Option<String>, Vec<RoomMessageEvent>)>;
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
@@ -61,65 +68,6 @@ const USER_GUTTER_EMPTY_SPAN: Span<'static> = Span {
         sub_modifier: StyleModifier::empty(),
     },
 };
-
-struct WrappedLinesIterator<'a> {
-    iter: Lines<'a>,
-    curr: Option<&'a str>,
-    width: usize,
-}
-
-impl<'a> WrappedLinesIterator<'a> {
-    fn new(input: &'a str, width: usize) -> Self {
-        WrappedLinesIterator { iter: input.lines(), curr: None, width }
-    }
-}
-
-impl<'a> Iterator for WrappedLinesIterator<'a> {
-    type Item = (&'a str, usize);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.curr.is_none() {
-            self.curr = self.iter.next();
-        }
-
-        if let Some(s) = self.curr.take() {
-            let width = UnicodeWidthStr::width(s);
-
-            if width <= self.width {
-                return Some((s, width));
-            } else {
-                // Find where to split the line.
-                let mut width = 0;
-                let mut idx = 0;
-
-                for (i, g) in UnicodeSegmentation::grapheme_indices(s, true) {
-                    let gw = UnicodeWidthStr::width(g);
-                    idx = i;
-
-                    if width + gw > self.width {
-                        break;
-                    }
-
-                    width += gw;
-                }
-
-                self.curr = Some(&s[idx..]);
-
-                return Some((&s[..idx], width));
-            }
-        } else {
-            return None;
-        }
-    }
-}
-
-fn wrap(input: &str, width: usize) -> WrappedLinesIterator<'_> {
-    WrappedLinesIterator::new(input, width)
-}
-
-fn space(width: usize) -> String {
-    " ".repeat(width)
-}
 
 #[derive(thiserror::Error, Debug)]
 pub enum TimeStampIntError {
@@ -327,9 +275,9 @@ pub enum MessageEvent {
 }
 
 impl MessageEvent {
-    pub fn show(&self) -> Cow<'_, str> {
+    pub fn body(&self) -> Cow<'_, str> {
         match self {
-            MessageEvent::Original(ev) => show_room_content(&ev.content),
+            MessageEvent::Original(ev) => body_cow_content(&ev.content),
             MessageEvent::Redacted(ev) => {
                 let reason = ev
                     .unsigned
@@ -344,7 +292,25 @@ impl MessageEvent {
                     Cow::Borrowed("[Redacted]")
                 }
             },
-            MessageEvent::Local(content) => show_room_content(content),
+            MessageEvent::Local(content) => body_cow_content(content),
+        }
+    }
+
+    pub fn html(&self) -> Option<StyleTree> {
+        let content = match self {
+            MessageEvent::Original(ev) => &ev.content,
+            MessageEvent::Redacted(_) => return None,
+            MessageEvent::Local(content) => content,
+        };
+
+        if let MessageType::Text(content) = &content.msgtype {
+            if let Some(FormattedBody { format: MessageFormat::Html, body }) = &content.formatted {
+                Some(parse_matrix_html(body.as_str()))
+            } else {
+                None
+            }
+        } else {
+            None
         }
     }
 
@@ -360,18 +326,14 @@ impl MessageEvent {
     }
 }
 
-fn show_room_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
+fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
     let s = match &content.msgtype {
-        MessageType::Text(content) => content.body.as_ref(),
+        MessageType::Text(content) => content.body.as_str(),
+        MessageType::VerificationRequest(_) => "[Verification Request]",
         MessageType::Emote(content) => content.body.as_ref(),
         MessageType::Notice(content) => content.body.as_str(),
         MessageType::ServerNotice(content) => content.body.as_str(),
 
-        MessageType::VerificationRequest(_) => {
-            // XXX: implement
-
-            return Cow::Owned("[verification request]".into());
-        },
         MessageType::Audio(content) => {
             return Cow::Owned(format!("[Attached Audio: {}]", content.body));
         },
@@ -392,37 +354,93 @@ fn show_room_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
     Cow::Borrowed(s)
 }
 
-#[derive(Clone)]
+enum MessageColumns<'a> {
+    Three(usize, Option<Span<'a>>, Option<Span<'a>>),
+    Two(usize, Option<Span<'a>>),
+    One(usize, Option<Span<'a>>),
+}
+
+impl<'a> MessageColumns<'a> {
+    fn width(&self) -> usize {
+        match self {
+            MessageColumns::Three(fill, _, _) => *fill,
+            MessageColumns::Two(fill, _) => *fill,
+            MessageColumns::One(fill, _) => *fill,
+        }
+    }
+
+    #[inline]
+    fn push_spans(&mut self, spans: Spans<'a>, style: Style, text: &mut Text<'a>) {
+        match self {
+            MessageColumns::Three(_, user, time) => {
+                let user = user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
+                let time = time.take().unwrap_or_else(|| Span::from(""));
+
+                let mut line = vec![user];
+                line.extend(spans.0);
+                line.push(time);
+
+                text.lines.push(Spans(line))
+            },
+            MessageColumns::Two(_, opt) => {
+                let user = opt.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
+                let mut line = vec![user];
+                line.extend(spans.0);
+
+                text.lines.push(Spans(line));
+            },
+            MessageColumns::One(_, opt) => {
+                if let Some(user) = opt.take() {
+                    text.lines.push(Spans(vec![user]));
+                }
+
+                let leading = space_span(2, style);
+                let mut line = vec![leading];
+                line.extend(spans.0);
+
+                text.lines.push(Spans(line));
+            },
+        }
+    }
+
+    fn push_text(&mut self, append: Text<'a>, style: Style, text: &mut Text<'a>) {
+        for line in append.lines.into_iter() {
+            self.push_spans(line, style, text);
+        }
+    }
+}
+
 pub struct Message {
     pub event: MessageEvent,
     pub sender: OwnedUserId,
     pub timestamp: MessageTimeStamp,
     pub downloaded: bool,
+    pub html: Option<StyleTree>,
 }
 
 impl Message {
     pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
-        Message { event, sender, timestamp, downloaded: false }
+        let html = event.html();
+        let downloaded = false;
+
+        Message { event, sender, timestamp, downloaded, html }
     }
 
-    pub fn show(
-        &self,
-        prev: Option<&Message>,
-        selected: bool,
-        vwctx: &ViewportContext<MessageCursor>,
-        settings: &ApplicationSettings,
-    ) -> Text {
-        let width = vwctx.get_width();
-        let mut msg = self.event.show();
+    pub fn reply_to(&self) -> Option<OwnedEventId> {
+        let content = match &self.event {
+            MessageEvent::Local(content) => content,
+            MessageEvent::Original(ev) => &ev.content,
+            MessageEvent::Redacted(_) => return None,
+        };
 
-        if self.downloaded {
-            msg.to_mut().push_str(" \u{2705}");
+        if let Some(Relation::Reply { in_reply_to }) = &content.relates_to {
+            Some(in_reply_to.event_id.clone())
+        } else {
+            None
         }
+    }
 
-        let msg = msg.as_ref();
-
-        let mut lines = vec![];
-
+    fn get_render_style(&self, selected: bool) -> Style {
         let mut style = Style::default();
 
         if selected {
@@ -433,54 +451,109 @@ impl Message {
             style = style.add_modifier(StyleModifier::ITALIC);
         }
 
+        return style;
+    }
+
+    fn get_render_format(
+        &self,
+        prev: Option<&Message>,
+        width: usize,
+        settings: &ApplicationSettings,
+    ) -> MessageColumns {
         if USER_GUTTER + TIME_GUTTER + MIN_MSG_LEN <= width {
             let lw = width - USER_GUTTER - TIME_GUTTER;
+            let user = self.show_sender(prev, true, settings);
+            let time = self.timestamp.show();
 
-            for (i, (line, w)) in wrap(msg, lw).enumerate() {
-                let line = Span::styled(line.to_string(), style);
-                let trailing = Span::styled(space(lw.saturating_sub(w)), style);
-
-                if i == 0 {
-                    let user = self.show_sender(prev, true, settings);
-
-                    if let Some(time) = self.timestamp.show() {
-                        lines.push(Spans(vec![user, line, trailing, time]))
-                    } else {
-                        lines.push(Spans(vec![user, line, trailing]))
-                    }
-                } else {
-                    let space = USER_GUTTER_EMPTY_SPAN;
-
-                    lines.push(Spans(vec![space, line, trailing]))
-                }
-            }
+            MessageColumns::Three(lw, user, time)
         } else if USER_GUTTER + MIN_MSG_LEN <= width {
             let lw = width - USER_GUTTER;
+            let user = self.show_sender(prev, true, settings);
 
-            for (i, (line, w)) in wrap(msg, lw).enumerate() {
-                let line = Span::styled(line.to_string(), style);
-                let trailing = Span::styled(space(lw.saturating_sub(w)), style);
-
-                let prefix = if i == 0 {
-                    self.show_sender(prev, true, settings)
-                } else {
-                    USER_GUTTER_EMPTY_SPAN
-                };
-
-                lines.push(Spans(vec![prefix, line, trailing]))
-            }
+            MessageColumns::Two(lw, user)
         } else {
-            lines.push(Spans::from(self.show_sender(prev, false, settings)));
+            let lw = width.saturating_sub(2);
+            let user = self.show_sender(prev, false, settings);
 
-            for (line, _) in wrap(msg, width.saturating_sub(2)) {
-                let line = format!("  {}", line);
-                let line = Span::styled(line, style);
+            MessageColumns::One(lw, user)
+        }
+    }
 
-                lines.push(Spans(vec![line]))
+    pub fn show<'a>(
+        &'a self,
+        prev: Option<&Message>,
+        selected: bool,
+        vwctx: &ViewportContext<MessageCursor>,
+        info: &'a RoomInfo,
+        settings: &ApplicationSettings,
+    ) -> Text<'a> {
+        let width = vwctx.get_width();
+
+        let style = self.get_render_style(selected);
+        let mut fmt = self.get_render_format(prev, width, settings);
+        let mut text = Text { lines: vec![] };
+        let width = fmt.width();
+
+        // Show the message that this one replied to, if any.
+        let reply = self.reply_to().and_then(|e| info.get_event(&e));
+
+        if let Some(r) = &reply {
+            let w = width.saturating_sub(2);
+            let mut replied = r.show_msg(w, style, true);
+            let mut sender = r.sender_span(settings);
+            let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
+            let trailing = w.saturating_sub(sender_width + 1);
+
+            sender.style = sender.style.patch(style);
+
+            fmt.push_spans(
+                Spans(vec![
+                    Span::styled(" ", style),
+                    Span::styled(THICK_VERTICAL, style),
+                    sender,
+                    Span::styled(":", style),
+                    space_span(trailing, style),
+                ]),
+                style,
+                &mut text,
+            );
+
+            for line in replied.lines.iter_mut() {
+                line.0.insert(0, Span::styled(THICK_VERTICAL, style));
+                line.0.insert(0, Span::styled(" ", style));
             }
+
+            fmt.push_text(replied, style, &mut text);
         }
 
-        return Text { lines };
+        // Now show the message contents, and the inlined reply if we couldn't find it above.
+        let msg = self.show_msg(width, style, reply.is_some());
+        fmt.push_text(msg, style, &mut text);
+
+        if text.lines.is_empty() {
+            // If there was nothing in the body, just show an empty message.
+            fmt.push_spans(space_span(width, style).into(), style, &mut text);
+        }
+
+        return text;
+    }
+
+    pub fn show_msg(&self, width: usize, style: Style, hide_reply: bool) -> Text {
+        if let Some(html) = &self.html {
+            html.to_text(width, style, hide_reply)
+        } else {
+            let mut msg = self.event.body();
+
+            if self.downloaded {
+                msg.to_mut().push_str(" \u{2705}");
+            }
+
+            wrapped_text(msg, width, style)
+        }
+    }
+
+    fn sender_span(&self, settings: &ApplicationSettings) -> Span {
+        settings.get_user_span(self.sender.as_ref())
     }
 
     fn show_sender(
@@ -488,11 +561,11 @@ impl Message {
         prev: Option<&Message>,
         align_right: bool,
         settings: &ApplicationSettings,
-    ) -> Span {
+    ) -> Option<Span> {
         let user = if matches!(prev, Some(prev) if self.sender == prev.sender) {
-            USER_GUTTER_EMPTY_SPAN
+            return None;
         } else {
-            settings.get_user_span(self.sender.as_ref())
+            self.sender_span(settings)
         };
 
         let Span { content, style } = user;
@@ -505,7 +578,7 @@ impl Message {
             format!("{: <width$}  ", s, width = 28)
         };
 
-        Span::styled(sender, style)
+        Span::styled(sender, style).into()
     }
 }
 
@@ -540,7 +613,7 @@ impl From<RoomMessageEvent> for Message {
 
 impl ToString for Message {
     fn to_string(&self) -> String {
-        self.event.show().into_owned()
+        self.event.body().into_owned()
     }
 }
 
@@ -548,47 +621,6 @@ impl ToString for Message {
 pub mod tests {
     use super::*;
     use crate::tests::*;
-
-    #[test]
-    fn test_wrapped_lines_ascii() {
-        let s = "hello world!\nabcdefghijklmnopqrstuvwxyz\ngoodbye";
-
-        let mut iter = wrap(s, 100);
-        assert_eq!(iter.next(), Some(("hello world!", 12)));
-        assert_eq!(iter.next(), Some(("abcdefghijklmnopqrstuvwxyz", 26)));
-        assert_eq!(iter.next(), Some(("goodbye", 7)));
-        assert_eq!(iter.next(), None);
-
-        let mut iter = wrap(s, 5);
-        assert_eq!(iter.next(), Some(("hello", 5)));
-        assert_eq!(iter.next(), Some((" worl", 5)));
-        assert_eq!(iter.next(), Some(("d!", 2)));
-        assert_eq!(iter.next(), Some(("abcde", 5)));
-        assert_eq!(iter.next(), Some(("fghij", 5)));
-        assert_eq!(iter.next(), Some(("klmno", 5)));
-        assert_eq!(iter.next(), Some(("pqrst", 5)));
-        assert_eq!(iter.next(), Some(("uvwxy", 5)));
-        assert_eq!(iter.next(), Some(("z", 1)));
-        assert_eq!(iter.next(), Some(("goodb", 5)));
-        assert_eq!(iter.next(), Some(("ye", 2)));
-        assert_eq!(iter.next(), None);
-    }
-
-    #[test]
-    fn test_wrapped_lines_unicode() {
-        let s = "ＣＨＩＣＫＥＮ";
-
-        let mut iter = wrap(s, 14);
-        assert_eq!(iter.next(), Some((s, 14)));
-        assert_eq!(iter.next(), None);
-
-        let mut iter = wrap(s, 5);
-        assert_eq!(iter.next(), Some(("ＣＨ", 4)));
-        assert_eq!(iter.next(), Some(("ＩＣ", 4)));
-        assert_eq!(iter.next(), Some(("ＫＥ", 4)));
-        assert_eq!(iter.next(), Some(("Ｎ", 2)));
-        assert_eq!(iter.next(), None);
-    }
 
     #[test]
     fn test_mc_cmp() {

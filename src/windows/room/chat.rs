@@ -324,7 +324,7 @@ impl ChatState {
                     return Ok(None);
                 }
 
-                let msg = TextMessageEventContent::plain(msg);
+                let msg = TextMessageEventContent::markdown(msg);
                 let msg = MessageType::Text(msg);
 
                 let mut msg = RoomMessageEventContent::new(msg);

@@ -214,7 +214,7 @@ impl ScrollbackState {
 
                 for (key, item) in info.messages.range(..=&idx).rev() {
                     let sel = selidx == key;
-                    let len = item.show(None, sel, &self.viewctx, settings).lines.len();
+                    let len = item.show(None, sel, &self.viewctx, info, settings).lines.len();
 
                     if key == &idx {
                         lines += len / 2;
@@ -236,7 +236,7 @@ impl ScrollbackState {
 
                 for (key, item) in info.messages.range(..=&idx).rev() {
                     let sel = key == selidx;
-                    let len = item.show(None, sel, &self.viewctx, settings).lines.len();
+                    let len = item.show(None, sel, &self.viewctx, info, settings).lines.len();
 
                     lines += len;
 
@@ -276,7 +276,7 @@ impl ScrollbackState {
                 break;
             }
 
-            lines += item.show(None, false, &self.viewctx, settings).height().max(1);
+            lines += item.show(None, false, &self.viewctx, info, settings).height().max(1);
 
             if lines >= self.viewctx.get_height() {
                 // We've reached the end of the viewport; move cursor into it.
@@ -431,7 +431,7 @@ impl ScrollbackState {
                 continue;
             }
 
-            if needle.is_match(msg.event.show().as_ref()) {
+            if needle.is_match(msg.event.body().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -455,7 +455,7 @@ impl ScrollbackState {
                 break;
             }
 
-            if needle.is_match(msg.event.show().as_ref()) {
+            if needle.is_match(msg.event.body().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -704,7 +704,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     let mut yanked = EditRope::from("");
 
                     for (_, msg) in self.messages(range, info) {
-                        yanked += EditRope::from(msg.event.show().into_owned());
+                        yanked += EditRope::from(msg.event.body());
                         yanked += EditRope::from('\n');
                     }
 
@@ -1009,7 +1009,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in info.messages.range(..=&corner_key).rev() {
                     let sel = key == cursor_key;
-                    let txt = item.show(None, sel, &self.viewctx, settings);
+                    let txt = item.show(None, sel, &self.viewctx, info, settings);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1035,7 +1035,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             MoveDir2D::Down => {
                 for (key, item) in info.messages.range(&corner_key..) {
                     let sel = key == cursor_key;
-                    let txt = item.show(None, sel, &self.viewctx, settings);
+                    let txt = item.show(None, sel, &self.viewctx, info, settings);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1218,7 +1218,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
 
         for (key, item) in info.messages.range(&corner_key..) {
             let sel = key == cursor_key;
-            let txt = item.show(prev, foc && sel, &state.viewctx, settings);
+            let txt = item.show(prev, foc && sel, &state.viewctx, info, settings);
 
             prev = Some(item);
 

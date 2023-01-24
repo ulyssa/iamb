@@ -59,7 +59,7 @@ use crate::{
     ApplicationSettings,
 };
 
-const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(3);
+const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambInfo {}

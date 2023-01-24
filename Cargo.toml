@@ -10,31 +10,42 @@ description = "A Matrix chat client that uses Vim keybindings"
 license = "Apache-2.0"
 exclude = [".github", "CONTRIBUTING.md"]
 keywords = ["matrix", "chat", "tui", "vim"]
+categories = ["command-line-utilities"]
 rust-version = "1.66"
 
 [dependencies]
 chrono = "0.4"
 clap = {version = "4.0", features = ["derive"]}
+css-color-parser = "0.1.2"
 dirs = "4.0.0"
-futures = "0.3.21"
 gethostname = "0.4.1"
-matrix-sdk = {version = "0.6", default-features = false, features = ["e2e-encryption", "sled", "rustls-tls"]}
+html5ever = "0.26.0"
+markup5ever_rcdom = "0.2.0"
 mime = "^0.3.16"
 mime_guess = "^2.0.4"
-modalkit = "0.0.9"
 regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"
 serde_json = "^1.0"
-sled = "0.34"
 thiserror = "^1.0.37"
-tokio = {version = "1.24.1", features = ["macros", "net", "rt-multi-thread", "sync", "time"]}
 tracing = "~0.1.36"
 tracing-appender = "~0.2.2"
 tracing-subscriber = "0.3.16"
 unicode-segmentation = "^1.7"
 unicode-width = "0.1.10"
 url = {version = "^2.2.2", features = ["serde"]}
+
+[dependencies.modalkit]
+version = "0.0.10"
+
+[dependencies.matrix-sdk]
+version = "0.6"
+default-features = false
+features = ["e2e-encryption", "markdown", "sled", "rustls-tls"]
+
+[dependencies.tokio]
+version = "1.24.1"
+features = ["macros", "net", "rt-multi-thread", "sync", "time"]
 
 [dev-dependencies]
 lazy_static = "1.4.0"

@@ -21,7 +21,7 @@ website, [iamb.chat].
 Install Rust and Cargo, and then run:
 
 ```
-cargo install iamb
+cargo install --locked iamb
 ```
 
 ## Configuration
@@ -66,9 +66,9 @@ two other TUI clients and Element Web:
 | Attachment uploading                    | ✔️           | ❌       | ✔️                | ✔️                   |
 | Attachment downloading                  | ✔️           | ✔️        | ✔️                | ✔️                   |
 | Send stickers                           | ❌          | ❌       | ❌               | ✔️                   |
-| Send formatted messages (markdown)      | ❌  ([#10]) | ✔️        | ✔️                | ✔️                   |
+| Send formatted messages (markdown)      | ✔️           | ✔️        | ✔️                | ✔️                   |
 | Rich Text Editor for formatted messages | ❌          | ❌       | ❌               | ✔️                   |
-| Display formatted messages              | ❌  ([#10]) | ✔️        | ✔️                | ✔️                   |
+| Display formatted messages              | ✔️           | ✔️        | ✔️                | ✔️                   |
 | Redacting                               | ✔️           | ✔️        | ✔️                | ✔️                   |
 | Multiple Matrix Accounts                | ✔️           | ❌       | ✔️                | ❌                  |
 | New user registration                   | ❌          | ❌       | ❌               | ✔️                   |
