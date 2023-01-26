@@ -124,6 +124,57 @@ fn room_cmp(a: &MatrixRoom, b: &MatrixRoom) -> Ordering {
     ord.then_with(|| a.room_id().cmp(b.room_id()))
 }
 
+fn tag_cmp(a: &Option<Tags>, b: &Option<Tags>) -> Ordering {
+    let (fava, lowa) = a
+        .as_ref()
+        .map(|tags| {
+            (tags.contains_key(&TagName::Favorite), tags.contains_key(&TagName::LowPriority))
+        })
+        .unwrap_or((false, false));
+
+    let (favb, lowb) = b
+        .as_ref()
+        .map(|tags| {
+            (tags.contains_key(&TagName::Favorite), tags.contains_key(&TagName::LowPriority))
+        })
+        .unwrap_or((false, false));
+
+    // If a has Favorite and b doesn't, it should sort earlier in room list.
+    let cmpf = favb.cmp(&fava);
+
+    // If a has LowPriority and b doesn't, it should sort later in room list.
+    let cmpl = lowa.cmp(&lowb);
+
+    cmpl.then(cmpf)
+}
+
+fn append_tags<'a>(tags: &'a Tags, spans: &mut Vec<Span<'a>>, style: Style) {
+    if tags.is_empty() {
+        return;
+    }
+
+    spans.push(Span::styled(" (", style));
+
+    for (i, tag) in tags.keys().enumerate() {
+        if i > 0 {
+            spans.push(Span::styled(", ", style));
+        }
+
+        match tag {
+            TagName::Favorite => spans.push(Span::styled("Favorite", style)),
+            TagName::LowPriority => spans.push(Span::styled("Low Priority", style)),
+            TagName::ServerNotice => spans.push(Span::styled("Server Notice", style)),
+            TagName::User(tag) => {
+                spans.push(Span::styled("User Tag: ", style));
+                spans.push(Span::styled(tag.as_ref(), style));
+            },
+            tag => spans.push(Span::styled(format!("{:?}", tag), style)),
+        }
+    }
+
+    spans.push(Span::styled(")", style));
+}
+
 #[inline]
 fn room_prompt(
     room_id: &RoomId,
@@ -326,8 +377,13 @@ impl WindowOps<IambInfo> for IambWindow {
             IambWindow::Room(state) => state.draw(area, buf, focused, store),
             IambWindow::DirectList(state) => {
                 let dms = store.application.worker.direct_messages();
-                let items = dms.into_iter().map(|(id, name)| DirectItem::new(id, name, store));
-                state.set(items.collect());
+                let mut items = dms
+                    .into_iter()
+                    .map(|(id, name, tags)| DirectItem::new(id, name, tags, store))
+                    .collect::<Vec<_>>();
+                items.sort();
+
+                state.set(items);
 
                 List::new(store)
                     .empty_message("No direct messages yet!")
@@ -583,29 +639,7 @@ impl Eq for RoomItem {}
 
 impl Ord for RoomItem {
     fn cmp(&self, other: &Self) -> Ordering {
-        let (fava, lowa) = self
-            .tags
-            .as_ref()
-            .map(|tags| {
-                (tags.contains_key(&TagName::Favorite), tags.contains_key(&TagName::LowPriority))
-            })
-            .unwrap_or((false, false));
-
-        let (favb, lowb) = other
-            .tags
-            .as_ref()
-            .map(|tags| {
-                (tags.contains_key(&TagName::Favorite), tags.contains_key(&TagName::LowPriority))
-            })
-            .unwrap_or((false, false));
-
-        // If self has Favorite and other doesn't, it should sort earlier in room list.
-        let cmpf = favb.cmp(&fava);
-
-        // If self has LowPriority and other doesn't, it should sort later in room list.
-        let cmpl = lowa.cmp(&lowb);
-
-        cmpl.then(cmpf).then_with(|| room_cmp(&self.room, &other.room))
+        tag_cmp(&self.tags, &other.tags).then_with(|| room_cmp(&self.room, &other.room))
     }
 }
 
@@ -627,30 +661,7 @@ impl ListItem<IambInfo> for RoomItem {
             let style = selected_style(selected);
             let mut spans = vec![Span::styled(self.name.as_str(), style)];
 
-            if tags.is_empty() {
-                return Text::from(Spans(spans));
-            }
-
-            spans.push(Span::styled(" (", style));
-
-            for (i, tag) in tags.keys().enumerate() {
-                if i > 0 {
-                    spans.push(Span::styled(", ", style));
-                }
-
-                match tag {
-                    TagName::Favorite => spans.push(Span::styled("Favorite", style)),
-                    TagName::LowPriority => spans.push(Span::styled("Low Priority", style)),
-                    TagName::ServerNotice => spans.push(Span::styled("Server Notice", style)),
-                    TagName::User(tag) => {
-                        spans.push(Span::styled("User Tag: ", style));
-                        spans.push(Span::styled(tag.as_ref(), style));
-                    },
-                    tag => spans.push(Span::styled(format!("{:?}", tag), style)),
-                }
-            }
-
-            spans.push(Span::styled(")", style));
+            append_tags(tags, &mut spans, style);
 
             Text::from(Spans(spans))
         } else {
@@ -677,16 +688,22 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for RoomItem {
 #[derive(Clone)]
 pub struct DirectItem {
     room: MatrixRoom,
+    tags: Option<Tags>,
     name: String,
 }
 
 impl DirectItem {
-    fn new(room: MatrixRoom, name: DisplayName, store: &mut ProgramStore) -> Self {
+    fn new(
+        room: MatrixRoom,
+        name: DisplayName,
+        tags: Option<Tags>,
+        store: &mut ProgramStore,
+    ) -> Self {
         let name = name.to_string();
 
         store.application.set_room_name(room.room_id(), name.as_str());
 
-        DirectItem { room, name }
+        DirectItem { room, tags, name }
     }
 }
 
@@ -698,11 +715,40 @@ impl ToString for DirectItem {
 
 impl ListItem<IambInfo> for DirectItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
-        selected_text(self.name.as_str(), selected)
+        if let Some(tags) = &self.tags {
+            let style = selected_style(selected);
+            let mut spans = vec![Span::styled(self.name.as_str(), style)];
+
+            append_tags(tags, &mut spans, style);
+
+            Text::from(Spans(spans))
+        } else {
+            selected_text(self.name.as_str(), selected)
+        }
     }
 
     fn get_word(&self) -> Option<String> {
         self.room.room_id().to_string().into()
+    }
+}
+
+impl PartialEq for DirectItem {
+    fn eq(&self, other: &Self) -> bool {
+        self.room.room_id() == other.room.room_id()
+    }
+}
+
+impl Eq for DirectItem {}
+
+impl Ord for DirectItem {
+    fn cmp(&self, other: &Self) -> Ordering {
+        tag_cmp(&self.tags, &other.tags).then_with(|| room_cmp(&self.room, &other.room))
+    }
+}
+
+impl PartialOrd for DirectItem {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.cmp(other).into()
     }
 }
 

@@ -99,14 +99,16 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
     return (reply, response);
 }
 
+pub type FetchedRoom = (MatrixRoom, DisplayName, Option<Tags>);
+
 pub enum WorkerTask {
-    ActiveRooms(ClientReply<Vec<(MatrixRoom, DisplayName, Option<Tags>)>>),
-    DirectMessages(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
+    ActiveRooms(ClientReply<Vec<FetchedRoom>>),
+    DirectMessages(ClientReply<Vec<FetchedRoom>>),
     Init(AsyncProgramStore, ClientReply<()>),
     LoadOlder(OwnedRoomId, Option<String>, u32, ClientReply<MessageFetchResult>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     GetInviter(Invited, ClientReply<IambResult<Option<RoomMember>>>),
-    GetRoom(OwnedRoomId, ClientReply<IambResult<(MatrixRoom, DisplayName, Option<Tags>)>>),
+    GetRoom(OwnedRoomId, ClientReply<IambResult<FetchedRoom>>),
     JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
@@ -235,7 +237,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn direct_messages(&self) -> Vec<(MatrixRoom, DisplayName)> {
+    pub fn direct_messages(&self) -> Vec<FetchedRoom> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::DirectMessages(reply)).unwrap();
@@ -251,10 +253,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn get_room(
-        &self,
-        room_id: OwnedRoomId,
-    ) -> IambResult<(MatrixRoom, DisplayName, Option<Tags>)> {
+    pub fn get_room(&self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::GetRoom(room_id, reply)).unwrap();
@@ -270,7 +269,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn active_rooms(&self) -> Vec<(MatrixRoom, DisplayName, Option<Tags>)> {
+    pub fn active_rooms(&self) -> Vec<FetchedRoom> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::ActiveRooms(reply)).unwrap();
@@ -704,14 +703,9 @@ impl ClientWorker {
         Ok(Some(InfoMessage::from("Successfully logged in!")))
     }
 
-    async fn direct_message(
-        &mut self,
-        user: OwnedUserId,
-    ) -> IambResult<(MatrixRoom, DisplayName, Option<Tags>)> {
-        for (room, name) in self.direct_messages().await {
+    async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<FetchedRoom> {
+        for (room, name, tags) in self.direct_messages().await {
             if room.get_member(user.as_ref()).await.map_err(IambError::from)?.is_some() {
-                let tags = room.tags().await.map_err(IambError::from)?;
-
                 return Ok((room, name, tags));
             }
         }
@@ -746,10 +740,7 @@ impl ClientWorker {
         Ok(details.inviter)
     }
 
-    async fn get_room(
-        &mut self,
-        room_id: OwnedRoomId,
-    ) -> IambResult<(MatrixRoom, DisplayName, Option<Tags>)> {
+    async fn get_room(&mut self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
         if let Some(room) = self.client.get_room(&room_id) {
             let name = room.display_name().await.map_err(IambError::from)?;
             let tags = room.tags().await.map_err(IambError::from)?;
@@ -783,7 +774,7 @@ impl ClientWorker {
         }
     }
 
-    async fn direct_messages(&self) -> Vec<(MatrixRoom, DisplayName)> {
+    async fn direct_messages(&self) -> Vec<FetchedRoom> {
         let mut rooms = vec![];
 
         for room in self.client.invited_rooms().into_iter() {
@@ -792,8 +783,9 @@ impl ClientWorker {
             }
 
             let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+            let tags = room.tags().await.unwrap_or_default();
 
-            rooms.push((room.into(), name));
+            rooms.push((room.into(), name, tags));
         }
 
         for room in self.client.joined_rooms().into_iter() {
@@ -802,14 +794,15 @@ impl ClientWorker {
             }
 
             let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+            let tags = room.tags().await.unwrap_or_default();
 
-            rooms.push((room.into(), name));
+            rooms.push((room.into(), name, tags));
         }
 
         return rooms;
     }
 
-    async fn active_rooms(&self) -> Vec<(MatrixRoom, DisplayName, Option<Tags>)> {
+    async fn active_rooms(&self) -> Vec<FetchedRoom> {
         let mut rooms = vec![];
 
         for room in self.client.invited_rooms().into_iter() {
