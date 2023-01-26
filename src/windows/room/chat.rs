@@ -262,6 +262,7 @@ impl ChatState {
 
                 self.tbox.set_text(text);
                 self.editing = self.scrollback.get_key(info);
+                self.focus = RoomFocus::MessageBar;
 
                 Ok(None)
             },
