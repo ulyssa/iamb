@@ -125,7 +125,7 @@ pub fn space_text(width: usize, style: Style) -> Text<'static> {
     space_span(width, style).into()
 }
 
-pub fn join_cell_text<'a>(texts: Vec<(Text<'a>, usize)>, join: Span<'a>) -> Text<'a> {
+pub fn join_cell_text<'a>(texts: Vec<(Text<'a>, usize)>, join: Span<'a>, style: Style) -> Text<'a> {
     let height = texts.iter().map(|t| t.0.height()).max().unwrap_or(0);
     let mut text = Text { lines: vec![Spans(vec![join.clone()]); height] };
 
@@ -134,7 +134,7 @@ pub fn join_cell_text<'a>(texts: Vec<(Text<'a>, usize)>, join: Span<'a>) -> Text
             if let Some(spans) = t.lines.get_mut(i) {
                 text.lines[i].0.append(&mut spans.0);
             } else {
-                text.lines[i].0.push(space_span(w, Style::default()));
+                text.lines[i].0.push(space_span(w, style));
             }
 
             text.lines[i].0.push(join.clone());

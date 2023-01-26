@@ -198,7 +198,7 @@ impl Table {
                     })
                     .collect();
 
-                let joined = join_cell_text(cells, Span::styled(line::VERTICAL, style));
+                let joined = join_cell_text(cells, Span::styled(line::VERTICAL, style), style);
                 text.lines.extend(joined.lines);
 
                 nrows += 1;
