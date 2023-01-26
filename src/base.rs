@@ -214,6 +214,8 @@ pub type AsyncProgramStore = Arc<AsyncMutex<ProgramStore>>;
 
 pub type IambResult<T> = UIResult<T, IambInfo>;
 
+pub type Receipts = HashMap<OwnedEventId, Vec<OwnedUserId>>;
+
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
     #[error("Invalid user identifier: {0}")]
@@ -286,6 +288,9 @@ pub struct RoomInfo {
     pub keys: HashMap<OwnedEventId, MessageKey>,
     pub messages: Messages,
 
+    pub receipts: HashMap<OwnedEventId, Vec<OwnedUserId>>,
+    pub read_till: Option<OwnedEventId>,
+
     pub fetch_id: RoomFetchStatus,
     pub fetch_last: Option<Instant>,
     pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
@@ -316,7 +321,7 @@ impl RoomInfo {
             MessageEvent::Original(orig) => {
                 orig.content = *new_content;
             },
-            MessageEvent::Local(content) => {
+            MessageEvent::Local(_, content) => {
                 *content = new_content;
             },
             MessageEvent::Redacted(_) => {
@@ -364,7 +369,7 @@ impl RoomInfo {
         }
     }
 
-    fn get_typing_spans(&self, settings: &ApplicationSettings) -> Spans {
+    fn get_typing_spans<'a>(&'a self, settings: &'a ApplicationSettings) -> Spans<'a> {
         let typers = self.get_typers();
         let n = typers.len();
 
@@ -452,6 +457,26 @@ impl ChatStore {
             .and_then(|i| i.name.as_ref())
             .map(String::from)
             .unwrap_or_else(|| "Untitled Matrix Room".to_string())
+    }
+
+    pub async fn set_receipts(&mut self, receipts: Vec<(OwnedRoomId, Receipts)>) {
+        let mut updates = vec![];
+
+        for (room_id, receipts) in receipts.into_iter() {
+            if let Some(info) = self.rooms.get_mut(&room_id) {
+                info.receipts = receipts;
+
+                if let Some(read_till) = info.read_till.take() {
+                    updates.push((room_id, read_till));
+                }
+            }
+        }
+
+        for (room_id, read_till) in updates.into_iter() {
+            if let Some(room) = self.worker.client.get_joined_room(&room_id) {
+                let _ = room.read_receipt(read_till.as_ref()).await;
+            }
+        }
     }
 
     pub fn mark_for_load(&mut self, room_id: OwnedRoomId) {
@@ -588,7 +613,7 @@ impl ApplicationInfo for IambInfo {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::config::{user_style, user_style_from_color};
+    use crate::config::user_style_from_color;
     use crate::tests::*;
     use modalkit::tui::style::Color;
 

@@ -15,13 +15,15 @@ use matrix_sdk::ruma::{
 };
 
 use lazy_static::lazy_static;
-use modalkit::tui::style::Color;
+use modalkit::tui::style::{Color, Style};
 use tokio::sync::mpsc::unbounded_channel;
 use url::Url;
 
 use crate::{
     base::{ChatStore, ProgramStore, RoomFetchStatus, RoomInfo},
     config::{
+        user_color,
+        user_style_from_color,
         ApplicationSettings,
         DirectoryValues,
         ProfileConfig,
@@ -60,6 +62,10 @@ lazy_static! {
     pub static ref MSG5_KEY: MessageKey = (OriginServer(UInt::new(8).unwrap()), MSG5_EVID.clone());
 }
 
+pub fn user_style(user: &str) -> Style {
+    user_style_from_color(user_color(user))
+}
+
 pub fn mock_room1_message(
     content: RoomMessageEventContent,
     sender: OwnedUserId,
@@ -82,7 +88,7 @@ pub fn mock_room1_message(
 
 pub fn mock_message1() -> Message {
     let content = RoomMessageEventContent::text_plain("writhe");
-    let content = MessageEvent::Local(content.into());
+    let content = MessageEvent::Local(MSG1_EVID.clone(), content.into());
 
     Message::new(content, TEST_USER1.clone(), MSG1_KEY.0)
 }
@@ -138,10 +144,13 @@ pub fn mock_messages() -> Messages {
 pub fn mock_room() -> RoomInfo {
     RoomInfo {
         name: Some("Watercooler Discussion".into()),
+        tags: None,
 
         keys: mock_keys(),
         messages: mock_messages(),
-        tags: None,
+
+        receipts: HashMap::new(),
+        read_till: None,
 
         fetch_id: RoomFetchStatus::NotStarted,
         fetch_last: None,
@@ -159,7 +168,9 @@ pub fn mock_dirs() -> DirectoryValues {
 
 pub fn mock_tunables() -> TunableValues {
     TunableValues {
-        typing_notice: true,
+        read_receipt_send: true,
+        read_receipt_display: true,
+        typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
             color: Some(UserColor(Color::Black)),

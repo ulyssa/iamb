@@ -1,3 +1,4 @@
+use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;
 use std::fmt;
@@ -50,10 +51,6 @@ pub fn user_color(user: &str) -> Color {
 
 pub fn user_style_from_color(color: Color) -> Style {
     Style::default().fg(color).add_modifier(StyleModifier::BOLD)
-}
-
-pub fn user_style(user: &str) -> Style {
-    user_style_from_color(user_color(user))
 }
 
 fn is_profile_char(c: char) -> bool {
@@ -181,14 +178,18 @@ fn merge_users(a: Option<UserOverrides>, b: Option<UserOverrides>) -> Option<Use
 
 #[derive(Clone)]
 pub struct TunableValues {
-    pub typing_notice: bool,
+    pub read_receipt_send: bool,
+    pub read_receipt_display: bool,
+    pub typing_notice_send: bool,
     pub typing_notice_display: bool,
     pub users: UserOverrides,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
-    pub typing_notice: Option<bool>,
+    pub read_receipt_send: Option<bool>,
+    pub read_receipt_display: Option<bool>,
+    pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
     pub users: Option<UserOverrides>,
 }
@@ -196,7 +197,9 @@ pub struct Tunables {
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
-            typing_notice: self.typing_notice.or(other.typing_notice),
+            read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
+            read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
+            typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
             users: merge_users(self.users, other.users),
         }
@@ -204,8 +207,10 @@ impl Tunables {
 
     fn values(self) -> TunableValues {
         TunableValues {
-            typing_notice: self.typing_notice.unwrap_or(true),
-            typing_notice_display: self.typing_notice.unwrap_or(true),
+            read_receipt_send: self.read_receipt_send.unwrap_or(true),
+            read_receipt_display: self.read_receipt_display.unwrap_or(true),
+            typing_notice_send: self.typing_notice_send.unwrap_or(true),
+            typing_notice_display: self.typing_notice_display.unwrap_or(true),
             users: self.users.unwrap_or_default(),
         }
     }
@@ -374,24 +379,41 @@ impl ApplicationSettings {
         Ok(settings)
     }
 
+    pub fn get_user_char_span<'a>(&self, user_id: &'a UserId) -> Span<'a> {
+        let (color, c) = self
+            .tunables
+            .users
+            .get(user_id)
+            .map(|user| {
+                (
+                    user.color.as_ref().map(|c| c.0),
+                    user.name.as_ref().and_then(|s| s.chars().next()),
+                )
+            })
+            .unwrap_or_default();
+
+        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
+        let style = user_style_from_color(color);
+
+        let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
+
+        Span::styled(String::from(c), style)
+    }
+
     pub fn get_user_span<'a>(&self, user_id: &'a UserId) -> Span<'a> {
-        if let Some(user) = self.tunables.users.get(user_id) {
-            let color = if let Some(UserColor(c)) = user.color {
-                c
-            } else {
-                user_color(user_id.as_str())
-            };
+        let (color, name) = self
+            .tunables
+            .users
+            .get(user_id)
+            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
+            .unwrap_or_default();
 
-            let style = user_style_from_color(color);
+        let user_id = user_id.as_str();
+        let color = color.unwrap_or_else(|| user_color(user_id));
+        let style = user_style_from_color(color);
+        let name = name.unwrap_or(Cow::Borrowed(user_id));
 
-            if let Some(name) = &user.name {
-                Span::styled(name.clone(), style)
-            } else {
-                Span::styled(user_id.as_str(), style)
-            }
-        } else {
-            Span::styled(user_id.as_str(), user_style(user_id.as_str()))
-        }
+        Span::styled(name, style)
     }
 }
 
@@ -461,22 +483,22 @@ mod tests {
     #[test]
     fn test_parse_tunables() {
         let res: Tunables = serde_json::from_str("{}").unwrap();
-        assert_eq!(res.typing_notice, None);
+        assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
         assert_eq!(res.users, None);
 
-        let res: Tunables = serde_json::from_str("{\"typing_notice\": true}").unwrap();
-        assert_eq!(res.typing_notice, Some(true));
+        let res: Tunables = serde_json::from_str("{\"typing_notice_send\": true}").unwrap();
+        assert_eq!(res.typing_notice_send, Some(true));
         assert_eq!(res.typing_notice_display, None);
         assert_eq!(res.users, None);
 
-        let res: Tunables = serde_json::from_str("{\"typing_notice\": false}").unwrap();
-        assert_eq!(res.typing_notice, Some(false));
+        let res: Tunables = serde_json::from_str("{\"typing_notice_send\": false}").unwrap();
+        assert_eq!(res.typing_notice_send, Some(false));
         assert_eq!(res.typing_notice_display, None);
         assert_eq!(res.users, None);
 
         let res: Tunables = serde_json::from_str("{\"users\": {}}").unwrap();
-        assert_eq!(res.typing_notice, None);
+        assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
         assert_eq!(res.users, Some(HashMap::new()));
 
@@ -484,7 +506,7 @@ mod tests {
             "{\"users\": {\"@a:b.c\": {\"color\": \"black\", \"name\": \"Tim\"}}}",
         )
         .unwrap();
-        assert_eq!(res.typing_notice, None);
+        assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
         let users = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
             color: Some(UserColor(Color::Black)),

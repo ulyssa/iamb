@@ -57,7 +57,7 @@ use matrix_sdk::{
 use modalkit::editing::action::{EditInfo, InfoMessage, UIError};
 
 use crate::{
-    base::{AsyncProgramStore, IambError, IambResult, VerifyAction},
+    base::{AsyncProgramStore, IambError, IambResult, Receipts, VerifyAction},
     message::MessageFetchResult,
     ApplicationSettings,
 };
@@ -97,6 +97,29 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
     let response = ClientResponse(rx);
 
     return (reply, response);
+}
+
+async fn update_receipts(client: &Client) -> Vec<(OwnedRoomId, Receipts)> {
+    let mut rooms = vec![];
+
+    for room in client.joined_rooms() {
+        if let Ok(users) = room.active_members_no_sync().await {
+            let mut receipts = Receipts::new();
+
+            for member in users {
+                let res = room.user_read_receipt(member.user_id()).await;
+
+                if let Ok(Some((event_id, _))) = res {
+                    let user_id = member.user_id().to_owned();
+                    receipts.entry(event_id).or_default().push(user_id);
+                }
+            }
+
+            rooms.push((room.room_id().to_owned(), receipts));
+        }
+    }
+
+    return rooms;
 }
 
 pub type FetchedRoom = (MatrixRoom, DisplayName, Option<Tags>);
@@ -454,7 +477,7 @@ impl ClientWorker {
     }
 
     async fn init(&mut self, store: AsyncProgramStore) {
-        self.client.add_event_handler_context(store);
+        self.client.add_event_handler_context(store.clone());
 
         let _ = self.client.add_event_handler(
             |ev: SyncTypingEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
@@ -660,6 +683,19 @@ impl ClientWorker {
                 }
             },
         );
+
+        let client = self.client.clone();
+        let _ = tokio::spawn(async move {
+            // Update the displayed read receipts ever 5 seconds.
+            let mut interval = tokio::time::interval(Duration::from_secs(5));
+
+            loop {
+                interval.tick().await;
+
+                let receipts = update_receipts(&client).await;
+                store.lock().await.application.set_receipts(receipts).await;
+            }
+        });
 
         self.initialized = true;
     }

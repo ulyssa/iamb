@@ -1260,7 +1260,13 @@ impl<'a> StatefulWidget for Scrollback<'a> {
             y += 1;
         }
 
-        let first_key = info.messages.first_key_value().map(|f| f.0.clone());
+        if settings.tunables.read_receipt_send && state.cursor.timestamp.is_none() {
+            // If the cursor is at the last message, then update the read marker.
+            info.read_till = info.messages.last_key_value().map(|(k, _)| k.1.clone());
+        }
+
+        // Check whether we should load older messages for this room.
+        let first_key = info.messages.first_key_value().map(|(k, _)| k.clone());
         if first_key == state.viewctx.corner.timestamp {
             // If the top of the screen is the older message, load more.
             self.store.application.mark_for_load(state.room_id.clone());

@@ -4,6 +4,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
+use std::slice::Iter;
 
 use chrono::{DateTime, NaiveDateTime, Utc};
 use unicode_width::UnicodeWidthStr;
@@ -25,6 +26,7 @@ use matrix_sdk::ruma::{
         },
         Redact,
     },
+    EventId,
     MilliSecondsSinceUnixEpoch,
     OwnedEventId,
     OwnedUserId,
@@ -54,20 +56,28 @@ pub type MessageFetchResult = IambResult<(Option<String>, Vec<RoomMessageEvent>)
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 pub type Messages = BTreeMap<MessageKey, Message>;
 
+const fn span_static(s: &'static str) -> Span<'static> {
+    Span {
+        content: Cow::Borrowed(s),
+        style: Style {
+            fg: None,
+            bg: None,
+            add_modifier: StyleModifier::empty(),
+            sub_modifier: StyleModifier::empty(),
+        },
+    }
+}
+
 const USER_GUTTER: usize = 30;
 const TIME_GUTTER: usize = 12;
+const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
 
 const USER_GUTTER_EMPTY: &str = "                              ";
-const USER_GUTTER_EMPTY_SPAN: Span<'static> = Span {
-    content: Cow::Borrowed(USER_GUTTER_EMPTY),
-    style: Style {
-        fg: None,
-        bg: None,
-        add_modifier: StyleModifier::empty(),
-        sub_modifier: StyleModifier::empty(),
-    },
-};
+const USER_GUTTER_EMPTY_SPAN: Span<'static> = span_static(USER_GUTTER_EMPTY);
+
+const TIME_GUTTER_EMPTY: &str = "            ";
+const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
 
 #[derive(thiserror::Error, Debug)]
 pub enum TimeStampIntError {
@@ -271,10 +281,18 @@ impl PartialOrd for MessageCursor {
 pub enum MessageEvent {
     Original(Box<OriginalRoomMessageEvent>),
     Redacted(Box<RedactedRoomMessageEvent>),
-    Local(Box<RoomMessageEventContent>),
+    Local(OwnedEventId, Box<RoomMessageEventContent>),
 }
 
 impl MessageEvent {
+    pub fn event_id(&self) -> &EventId {
+        match self {
+            MessageEvent::Original(ev) => ev.event_id.as_ref(),
+            MessageEvent::Redacted(ev) => ev.event_id.as_ref(),
+            MessageEvent::Local(event_id, _) => event_id.as_ref(),
+        }
+    }
+
     pub fn body(&self) -> Cow<'_, str> {
         match self {
             MessageEvent::Original(ev) => body_cow_content(&ev.content),
@@ -292,7 +310,7 @@ impl MessageEvent {
                     Cow::Borrowed("[Redacted]")
                 }
             },
-            MessageEvent::Local(content) => body_cow_content(content),
+            MessageEvent::Local(_, content) => body_cow_content(content),
         }
     }
 
@@ -300,7 +318,7 @@ impl MessageEvent {
         let content = match self {
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
-            MessageEvent::Local(content) => content,
+            MessageEvent::Local(_, content) => content,
         };
 
         if let MessageType::Text(content) = &content.msgtype {
@@ -317,7 +335,7 @@ impl MessageEvent {
     pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, version: &RoomVersionId) {
         match self {
             MessageEvent::Redacted(_) => return,
-            MessageEvent::Local(_) => return,
+            MessageEvent::Local(_, _) => return,
             MessageEvent::Original(ev) => {
                 let redacted = ev.clone().redact(redaction, version);
                 *self = MessageEvent::Redacted(Box::new(redacted));
@@ -354,27 +372,65 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
     Cow::Borrowed(s)
 }
 
-enum MessageColumns<'a> {
-    Three(usize, Option<Span<'a>>, Option<Span<'a>>),
-    Two(usize, Option<Span<'a>>),
-    One(usize, Option<Span<'a>>),
+enum MessageColumns {
+    /// Four columns: sender, message, timestamp, read receipts.
+    Four,
+
+    /// Three columns: sender, message, timestamp.
+    Three,
+
+    /// Two columns: sender, message.
+    Two,
+
+    /// One column: message with sender on line before the message.
+    One,
 }
 
-impl<'a> MessageColumns<'a> {
+struct MessageFormatter<'a> {
+    settings: &'a ApplicationSettings,
+    cols: MessageColumns,
+    fill: usize,
+    user: Option<Span<'a>>,
+    time: Option<Span<'a>>,
+    read: Iter<'a, OwnedUserId>,
+}
+
+impl<'a> MessageFormatter<'a> {
     fn width(&self) -> usize {
-        match self {
-            MessageColumns::Three(fill, _, _) => *fill,
-            MessageColumns::Two(fill, _) => *fill,
-            MessageColumns::One(fill, _) => *fill,
-        }
+        self.fill
     }
 
     #[inline]
     fn push_spans(&mut self, spans: Spans<'a>, style: Style, text: &mut Text<'a>) {
-        match self {
-            MessageColumns::Three(_, user, time) => {
-                let user = user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
-                let time = time.take().unwrap_or_else(|| Span::from(""));
+        match self.cols {
+            MessageColumns::Four => {
+                let settings = self.settings;
+                let user = self.user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
+                let time = self.time.take().unwrap_or(TIME_GUTTER_EMPTY_SPAN);
+
+                let mut line = vec![user];
+                line.extend(spans.0);
+                line.push(time);
+
+                // Show read receipts.
+                let user_char =
+                    |user: &'a OwnedUserId| -> Span<'a> { settings.get_user_char_span(user) };
+
+                let a = self.read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
+                let b = self.read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
+                let c = self.read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
+
+                line.push(Span::raw(" "));
+                line.push(c);
+                line.push(b);
+                line.push(a);
+                line.push(Span::raw(" "));
+
+                text.lines.push(Spans(line))
+            },
+            MessageColumns::Three => {
+                let user = self.user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
+                let time = self.time.take().unwrap_or_else(|| Span::from(""));
 
                 let mut line = vec![user];
                 line.extend(spans.0);
@@ -382,15 +438,15 @@ impl<'a> MessageColumns<'a> {
 
                 text.lines.push(Spans(line))
             },
-            MessageColumns::Two(_, opt) => {
-                let user = opt.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
+            MessageColumns::Two => {
+                let user = self.user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
                 let mut line = vec![user];
                 line.extend(spans.0);
 
                 text.lines.push(Spans(line));
             },
-            MessageColumns::One(_, opt) => {
-                if let Some(user) = opt.take() {
+            MessageColumns::One => {
+                if let Some(user) = self.user.take() {
                     text.lines.push(Spans(vec![user]));
                 }
 
@@ -428,7 +484,7 @@ impl Message {
 
     pub fn reply_to(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
-            MessageEvent::Local(content) => content,
+            MessageEvent::Local(_, content) => content,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
         };
@@ -454,28 +510,50 @@ impl Message {
         return style;
     }
 
-    fn get_render_format(
-        &self,
+    fn get_render_format<'a>(
+        &'a self,
         prev: Option<&Message>,
         width: usize,
-        settings: &ApplicationSettings,
-    ) -> MessageColumns {
-        if USER_GUTTER + TIME_GUTTER + MIN_MSG_LEN <= width {
-            let lw = width - USER_GUTTER - TIME_GUTTER;
+        info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
+    ) -> MessageFormatter<'a> {
+        if USER_GUTTER + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
+            settings.tunables.read_receipt_display
+        {
+            let cols = MessageColumns::Four;
+            let fill = width - USER_GUTTER - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, settings);
             let time = self.timestamp.show();
+            let read = match info.receipts.get(self.event.event_id()) {
+                Some(read) => read.iter(),
+                None => [].iter(),
+            };
 
-            MessageColumns::Three(lw, user, time)
-        } else if USER_GUTTER + MIN_MSG_LEN <= width {
-            let lw = width - USER_GUTTER;
+            MessageFormatter { settings, cols, fill, user, time, read }
+        } else if USER_GUTTER + TIME_GUTTER + MIN_MSG_LEN <= width {
+            let cols = MessageColumns::Three;
+            let fill = width - USER_GUTTER - TIME_GUTTER;
             let user = self.show_sender(prev, true, settings);
+            let time = self.timestamp.show();
+            let read = [].iter();
 
-            MessageColumns::Two(lw, user)
+            MessageFormatter { settings, cols, fill, user, time, read }
+        } else if USER_GUTTER + MIN_MSG_LEN <= width {
+            let cols = MessageColumns::Two;
+            let fill = width - USER_GUTTER;
+            let user = self.show_sender(prev, true, settings);
+            let time = None;
+            let read = [].iter();
+
+            MessageFormatter { settings, cols, fill, user, time, read }
         } else {
-            let lw = width.saturating_sub(2);
+            let cols = MessageColumns::One;
+            let fill = width.saturating_sub(2);
             let user = self.show_sender(prev, false, settings);
+            let time = None;
+            let read = [].iter();
 
-            MessageColumns::One(lw, user)
+            MessageFormatter { settings, cols, fill, user, time, read }
         }
     }
 
@@ -485,12 +563,12 @@ impl Message {
         selected: bool,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
-        settings: &ApplicationSettings,
+        settings: &'a ApplicationSettings,
     ) -> Text<'a> {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected);
-        let mut fmt = self.get_render_format(prev, width, settings);
+        let mut fmt = self.get_render_format(prev, width, info, settings);
         let mut text = Text { lines: vec![] };
         let width = fmt.width();
 

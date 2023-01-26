@@ -241,7 +241,7 @@ impl ChatState {
 
                 let ev = match &msg.event {
                     MessageEvent::Original(ev) => &ev.content,
-                    MessageEvent::Local(ev) => ev.deref(),
+                    MessageEvent::Local(_, ev) => ev.deref(),
                     _ => {
                         let msg = "Cannot edit a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -275,9 +275,7 @@ impl ChatState {
 
                 let event_id = match &msg.event {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(_) => {
-                        self.scrollback.get_key(info).ok_or(IambError::NoSelectedMessage)?.1
-                    },
+                    MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::Redacted(_) => {
                         let msg = "";
                         let err = UIError::Failure(msg.into());
@@ -378,8 +376,8 @@ impl ChatState {
 
         if show_echo {
             let user = store.application.settings.profile.user_id.clone();
-            let key = (MessageTimeStamp::LocalEcho, event_id);
-            let msg = MessageEvent::Local(msg.into());
+            let key = (MessageTimeStamp::LocalEcho, event_id.clone());
+            let msg = MessageEvent::Local(event_id, msg.into());
             let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
             info.messages.insert(key, msg);
         }
@@ -415,7 +413,7 @@ impl ChatState {
             return;
         }
 
-        if !store.application.settings.tunables.typing_notice {
+        if !store.application.settings.tunables.typing_notice_send {
             return;
         }
 
