@@ -8,6 +8,7 @@ use tracing::warn;
 
 use matrix_sdk::{
     encryption::verification::SasVerification,
+    room::Joined,
     ruma::{
         events::room::message::{
             OriginalRoomMessageEvent,
@@ -16,6 +17,7 @@ use matrix_sdk::{
             RoomMessageEvent,
             RoomMessageEventContent,
         },
+        events::tag::{TagName, Tags},
         EventId,
         OwnedEventId,
         OwnedRoomId,
@@ -94,9 +96,10 @@ pub enum MessageAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SetRoomField {
-    Name(String),
-    Topic(String),
+pub enum RoomField {
+    Name,
+    Tag(TagName),
+    Topic,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,13 +108,8 @@ pub enum RoomAction {
     InviteReject,
     InviteSend(OwnedUserId),
     Members(Box<CommandContext<ProgramContext>>),
-    Set(SetRoomField),
-}
-
-impl From<SetRoomField> for RoomAction {
-    fn from(act: SetRoomField) -> Self {
-        RoomAction::Set(act)
-    }
+    Set(RoomField, String),
+    Unset(RoomField),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -191,6 +189,12 @@ impl ApplicationAction for IambAction {
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
         }
+    }
+}
+
+impl From<RoomAction> for ProgramAction {
+    fn from(act: RoomAction) -> Self {
+        IambAction::from(act).into()
     }
 }
 
@@ -277,6 +281,7 @@ pub enum RoomFetchStatus {
 #[derive(Default)]
 pub struct RoomInfo {
     pub name: Option<String>,
+    pub tags: Option<Tags>,
 
     pub keys: HashMap<OwnedEventId, MessageKey>,
     pub messages: Messages,
@@ -435,6 +440,10 @@ impl ChatStore {
             verifications: Default::default(),
             need_load: Default::default(),
         }
+    }
+
+    pub fn get_joined_room(&self, room_id: &RoomId) -> Option<Joined> {
+        self.worker.client.get_joined_room(room_id)
     }
 
     pub fn get_room_title(&self, room_id: &RoomId) -> String {

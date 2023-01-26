@@ -1,6 +1,6 @@
 use std::convert::TryFrom;
 
-use matrix_sdk::ruma::OwnedUserId;
+use matrix_sdk::ruma::{events::tag::TagName, OwnedUserId};
 
 use modalkit::{
     editing::base::OpenTarget,
@@ -17,13 +17,37 @@ use crate::base::{
     ProgramCommands,
     ProgramContext,
     RoomAction,
+    RoomField,
     SendAction,
-    SetRoomField,
     VerifyAction,
 };
 
 type ProgContext = CommandContext<ProgramContext>;
 type ProgResult = CommandResult<ProgramCommand>;
+
+/// Convert strings the user types into a tag name.
+fn tag_name(name: String) -> Result<TagName, CommandError> {
+    let tag = match name.as_str() {
+        "fav" | "favorite" | "favourite" | "m.favourite" => TagName::Favorite,
+        "low" | "lowpriority" | "low_priority" | "low-priority" | "m.lowpriority" => {
+            TagName::LowPriority
+        },
+        "servernotice" | "server_notice" | "server-notice" | "m.server_notice" => {
+            TagName::ServerNotice
+        },
+        _ => {
+            if let Ok(tag) = name.parse() {
+                TagName::User(tag)
+            } else {
+                let msg = format!("Invalid user tag name: {}", name);
+
+                return Err(CommandError::Error(msg));
+            }
+        },
+    };
+
+    Ok(tag)
+}
 
 fn iamb_invite(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let args = desc.arg.strings()?;
@@ -225,22 +249,46 @@ fn iamb_join(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
-fn iamb_set(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut args = desc.arg.strings()?;
 
-    if args.len() != 2 {
+    if args.len() < 2 {
         return Result::Err(CommandError::InvalidArgument);
     }
 
     let field = args.remove(0);
-    let value = args.remove(0);
+    let action = args.remove(0);
 
-    let act: IambAction = match field.as_str() {
-        "room.name" => RoomAction::Set(SetRoomField::Name(value)).into(),
-        "room.topic" => RoomAction::Set(SetRoomField::Topic(value)).into(),
-        _ => {
-            return Result::Err(CommandError::InvalidArgument);
-        },
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let act: IambAction = match (field.as_str(), action.as_str(), args.pop()) {
+        // :room name set <room-name>
+        ("name", "set", Some(s)) => RoomAction::Set(RoomField::Name, s).into(),
+        ("name", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room name unset
+        ("name", "unset", None) => RoomAction::Unset(RoomField::Name).into(),
+        ("name", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room topic set <topic>
+        ("topic", "set", Some(s)) => RoomAction::Set(RoomField::Topic, s).into(),
+        ("topic", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room topic unset
+        ("topic", "unset", None) => RoomAction::Unset(RoomField::Topic).into(),
+        ("topic", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room tag set <tag-name>
+        ("tag", "set", Some(s)) => RoomAction::Set(RoomField::Tag(tag_name(s)?), "".into()).into(),
+        ("tag", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room tag unset <tag-name>
+        ("tag", "unset", Some(s)) => RoomAction::Unset(RoomField::Tag(tag_name(s)?)).into(),
+        ("tag", "unset", None) => return Result::Err(CommandError::InvalidArgument),
+
+        _ => return Result::Err(CommandError::InvalidArgument),
     };
 
     let step = CommandStep::Continue(act.into(), ctx.context.take());
@@ -287,7 +335,7 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { names: vec!["redact".into()], f: iamb_redact });
     cmds.add_command(ProgramCommand { names: vec!["reply".into()], f: iamb_reply });
     cmds.add_command(ProgramCommand { names: vec!["rooms".into()], f: iamb_rooms });
-    cmds.add_command(ProgramCommand { names: vec!["set".into()], f: iamb_set });
+    cmds.add_command(ProgramCommand { names: vec!["room".into()], f: iamb_room });
     cmds.add_command(ProgramCommand { names: vec!["spaces".into()], f: iamb_spaces });
     cmds.add_command(ProgramCommand { names: vec!["upload".into()], f: iamb_upload });
     cmds.add_command(ProgramCommand { names: vec!["verify".into()], f: iamb_verify });
@@ -376,47 +424,227 @@ mod tests {
     }
 
     #[test]
-    fn test_cmd_set() {
+    fn test_cmd_room_invalid() {
+        let mut cmds = setup_commands();
+        let ctx = ProgramContext::default();
+
+        let res = cmds.input_cmd("room", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("room foo", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("room set topic", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_room_topic_set() {
         let mut cmds = setup_commands();
         let ctx = ProgramContext::default();
 
         let res = cmds
-            .input_cmd("set room.topic \"Lots of fun discussion!\"", ctx.clone())
+            .input_cmd("room topic set \"Lots of fun discussion!\"", ctx.clone())
             .unwrap();
-        let act = IambAction::Room(SetRoomField::Topic("Lots of fun discussion!".into()).into());
+        let act = RoomAction::Set(RoomField::Topic, "Lots of fun discussion!".into());
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
-            .input_cmd("set room.topic The\\ Discussion\\ Room", ctx.clone())
+            .input_cmd("room topic set The\\ Discussion\\ Room", ctx.clone())
             .unwrap();
-        let act = IambAction::Room(SetRoomField::Topic("The Discussion Room".into()).into());
+        let act = RoomAction::Set(RoomField::Topic, "The Discussion Room".into());
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
-        let res = cmds.input_cmd("set room.topic Development", ctx.clone()).unwrap();
-        let act = IambAction::Room(SetRoomField::Topic("Development".into()).into());
+        let res = cmds.input_cmd("room topic set Development", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Topic, "Development".into());
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
-        let res = cmds.input_cmd("set room.name Development", ctx.clone()).unwrap();
-        let act = IambAction::Room(SetRoomField::Name("Development".into()).into());
+        let res = cmds.input_cmd("room topic", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("room topic set", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("room topic set A B C", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_room_name_invalid() {
+        let mut cmds = setup_commands();
+        let ctx = ProgramContext::default();
+
+        let res = cmds.input_cmd("room name", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("room name foo", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_room_name_set() {
+        let mut cmds = setup_commands();
+        let ctx = ProgramContext::default();
+
+        let res = cmds.input_cmd("room name set Development", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Name, "Development".into());
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
-            .input_cmd("set room.name \"Application Development\"", ctx.clone())
+            .input_cmd("room name set \"Application Development\"", ctx.clone())
             .unwrap();
-        let act = IambAction::Room(SetRoomField::Name("Application Development".into()).into());
+        let act = RoomAction::Set(RoomField::Name, "Application Development".into());
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
-        let res = cmds.input_cmd("set", ctx.clone());
+        let res = cmds.input_cmd("room name set", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_room_name_unset() {
+        let mut cmds = setup_commands();
+        let ctx = ProgramContext::default();
+
+        let res = cmds.input_cmd("room name unset", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Name);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room name unset foo", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_room_tag_set() {
+        let mut cmds = setup_commands();
+        let ctx = ProgramContext::default();
+
+        let res = cmds.input_cmd("room tag set favourite", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Tag(TagName::Favorite), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set favorite", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Tag(TagName::Favorite), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set fav", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Tag(TagName::Favorite), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set low_priority", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Tag(TagName::LowPriority), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set low-priority", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Tag(TagName::LowPriority), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set low", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Tag(TagName::LowPriority), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set servernotice", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Tag(TagName::ServerNotice), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set server_notice", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Tag(TagName::ServerNotice), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set server_notice", ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::Tag(TagName::ServerNotice), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set u.custom-tag", ctx.clone()).unwrap();
+        let act = RoomAction::Set(
+            RoomField::Tag(TagName::User("u.custom-tag".parse().unwrap())),
+            "".into(),
+        );
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag set u.irc", ctx.clone()).unwrap();
+        let act =
+            RoomAction::Set(RoomField::Tag(TagName::User("u.irc".parse().unwrap())), "".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
-        let res = cmds.input_cmd("set room.name", ctx.clone());
+        let res = cmds.input_cmd("room tag set", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
-        let res = cmds.input_cmd("set room.topic", ctx.clone());
+        let res = cmds.input_cmd("room tag set unknown", ctx.clone());
+        assert_eq!(res, Err(CommandError::Error("Invalid user tag name: unknown".into())));
+
+        let res = cmds.input_cmd("room tag set needs-leading-u-dot", ctx.clone());
+        assert_eq!(
+            res,
+            Err(CommandError::Error("Invalid user tag name: needs-leading-u-dot".into()))
+        );
+    }
+
+    #[test]
+    fn test_cmd_room_tag_unset() {
+        let mut cmds = setup_commands();
+        let ctx = ProgramContext::default();
+
+        let res = cmds.input_cmd("room tag unset favourite", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::Favorite));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset favorite", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::Favorite));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset fav", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::Favorite));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset low_priority", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::LowPriority));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset low-priority", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::LowPriority));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset low", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::LowPriority));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset servernotice", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::ServerNotice));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset server_notice", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::ServerNotice));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset server_notice", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::ServerNotice));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset u.custom-tag", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::User("u.custom-tag".parse().unwrap())));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag unset u.irc", ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::Tag(TagName::User("u.irc".parse().unwrap())));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room tag", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
-        let res = cmds.input_cmd("set room.topic A B C", ctx.clone());
+        let res = cmds.input_cmd("room tag set", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("room tag unset unknown", ctx.clone());
+        assert_eq!(res, Err(CommandError::Error("Invalid user tag name: unknown".into())));
+
+        let res = cmds.input_cmd("room tag unset needs-leading-u-dot", ctx.clone());
+        assert_eq!(
+            res,
+            Err(CommandError::Error("Invalid user tag name: needs-leading-u-dot".into()))
+        );
     }
 
     #[test]

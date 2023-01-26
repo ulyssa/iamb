@@ -141,6 +141,7 @@ pub fn mock_room() -> RoomInfo {
 
         keys: mock_keys(),
         messages: mock_messages(),
+        tags: None,
 
         fetch_id: RoomFetchStatus::NotStarted,
         fetch_last: None,

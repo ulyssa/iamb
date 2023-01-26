@@ -49,7 +49,7 @@ two other TUI clients and Element Web:
 | --------------------------------------- | :---------- | :------: | :--------------: | :-----------------: |
 | Room directory                          | ❌  ([#14]) | ❌       | ✔️                | ✔️                   |
 | Room tag showing                        | ❌  ([#15]) | ✔️        | ❌               | ✔️                   |
-| Room tag editing                        | ❌  ([#15]) | ✔️        | ❌               | ✔️                   |
+| Room tag editing                        | ✔️           | ✔️        | ❌               | ✔️                   |
 | Search joined rooms                     | ❌  ([#16]) | ✔️        | ❌               | ✔️                   |
 | Room user list                          | ✔️           | ✔️        | ✔️                | ✔️                   |
 | Display Room Description                | ✔️           | ✔️        | ✔️                | ✔️                   |

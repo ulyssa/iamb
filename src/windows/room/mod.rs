@@ -1,6 +1,12 @@
 use matrix_sdk::{
     room::{Invited, Room as MatrixRoom},
-    ruma::RoomId,
+    ruma::{
+        events::{
+            room::{name::RoomNameEventContent, topic::RoomTopicEventContent},
+            tag::{TagInfo, Tags},
+        },
+        RoomId,
+    },
     DisplayName,
 };
 
@@ -23,6 +29,7 @@ use modalkit::{
         PromptAction,
         Promptable,
         Scrollable,
+        UIError,
     },
     editing::base::{
         Axis,
@@ -48,6 +55,7 @@ use crate::base::{
     ProgramContext,
     ProgramStore,
     RoomAction,
+    RoomField,
     SendAction,
 };
 
@@ -85,10 +93,16 @@ impl From<SpaceState> for RoomState {
 }
 
 impl RoomState {
-    pub fn new(room: MatrixRoom, name: DisplayName, store: &mut ProgramStore) -> Self {
+    pub fn new(
+        room: MatrixRoom,
+        name: DisplayName,
+        tags: Option<Tags>,
+        store: &mut ProgramStore,
+    ) -> Self {
         let room_id = room.room_id().to_owned();
         let info = store.application.get_room_info(room_id);
         info.name = name.to_string().into();
+        info.tags = tags;
 
         if room.is_space() {
             SpaceState::new(room).into()
@@ -207,8 +221,50 @@ impl RoomState {
 
                 Ok(vec![(act, cmd.context.take())])
             },
-            RoomAction::Set(field) => {
-                store.application.worker.set_room(self.id().to_owned(), field)?;
+            RoomAction::Set(field, value) => {
+                let room = store
+                    .application
+                    .get_joined_room(self.id())
+                    .ok_or(UIError::Application(IambError::NotJoined))?;
+
+                match field {
+                    RoomField::Name => {
+                        let ev = RoomNameEventContent::new(value.into());
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+                    },
+                    RoomField::Tag(tag) => {
+                        let mut info = TagInfo::new();
+                        info.order = Some(1.0);
+
+                        let _ = room.set_tag(tag, info).await.map_err(IambError::from)?;
+                    },
+                    RoomField::Topic => {
+                        let ev = RoomTopicEventContent::new(value);
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+                    },
+                }
+
+                Ok(vec![])
+            },
+            RoomAction::Unset(field) => {
+                let room = store
+                    .application
+                    .get_joined_room(self.id())
+                    .ok_or(UIError::Application(IambError::NotJoined))?;
+
+                match field {
+                    RoomField::Name => {
+                        let ev = RoomNameEventContent::new(None);
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+                    },
+                    RoomField::Tag(tag) => {
+                        let _ = room.remove_tag(tag).await.map_err(IambError::from)?;
+                    },
+                    RoomField::Topic => {
+                        let ev = RoomTopicEventContent::new("".into());
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+                    },
+                }
 
                 Ok(vec![])
             },

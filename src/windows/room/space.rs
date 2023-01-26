@@ -104,10 +104,10 @@ impl<'a> StatefulWidget for Space<'a> {
         let items = members
             .into_iter()
             .filter_map(|id| {
-                let (room, name) = self.store.application.worker.get_room(id.clone()).ok()?;
+                let (room, name, tags) = self.store.application.worker.get_room(id.clone()).ok()?;
 
                 if id != state.room_id {
-                    Some(RoomItem::new(room, name, self.store))
+                    Some(RoomItem::new(room, name, tags, self.store))
                 } else {
                     None
                 }

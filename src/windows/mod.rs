@@ -4,7 +4,12 @@ use std::collections::hash_map::Entry;
 use matrix_sdk::{
     encryption::verification::{format_emojis, SasVerification},
     room::{Room as MatrixRoom, RoomMember},
-    ruma::{events::room::member::MembershipState, OwnedRoomId, RoomId},
+    ruma::{
+        events::room::member::MembershipState,
+        events::tag::{TagName, Tags},
+        OwnedRoomId,
+        RoomId,
+    },
     DisplayName,
 };
 
@@ -346,7 +351,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 let joined = store.application.worker.active_rooms();
                 let mut items = joined
                     .into_iter()
-                    .map(|(room, name)| RoomItem::new(room, name, store))
+                    .map(|(room, name, tags)| RoomItem::new(room, name, tags, store))
                     .collect::<Vec<_>>();
                 items.sort();
 
@@ -471,8 +476,8 @@ impl Window<IambInfo> for IambWindow {
     fn open(id: IambId, store: &mut ProgramStore) -> IambResult<Self> {
         match id {
             IambId::Room(room_id) => {
-                let (room, name) = store.application.worker.get_room(room_id)?;
-                let room = RoomState::new(room, name, store);
+                let (room, name, tags) = store.application.worker.get_room(room_id)?;
+                let room = RoomState::new(room, name, tags, store);
 
                 return Ok(room.into());
             },
@@ -519,8 +524,8 @@ impl Window<IambInfo> for IambWindow {
                 let room_id = worker.join_room(v.key().to_string())?;
                 v.insert(room_id.clone());
 
-                let (room, name) = store.application.worker.get_room(room_id)?;
-                let room = RoomState::new(room, name, store);
+                let (room, name, tags) = store.application.worker.get_room(room_id)?;
+                let room = RoomState::new(room, name, tags, store);
 
                 Ok(room.into())
             },
@@ -547,16 +552,24 @@ impl Window<IambInfo> for IambWindow {
 #[derive(Clone)]
 pub struct RoomItem {
     room: MatrixRoom,
+    tags: Option<Tags>,
     name: String,
 }
 
 impl RoomItem {
-    fn new(room: MatrixRoom, name: DisplayName, store: &mut ProgramStore) -> Self {
+    fn new(
+        room: MatrixRoom,
+        name: DisplayName,
+        tags: Option<Tags>,
+        store: &mut ProgramStore,
+    ) -> Self {
         let name = name.to_string();
 
-        store.application.set_room_name(room.room_id(), name.as_str());
+        let info = store.application.get_room_info(room.room_id().to_owned());
+        info.name = name.clone().into();
+        info.tags = tags.clone();
 
-        RoomItem { room, name }
+        RoomItem { room, tags, name }
     }
 }
 
@@ -570,7 +583,29 @@ impl Eq for RoomItem {}
 
 impl Ord for RoomItem {
     fn cmp(&self, other: &Self) -> Ordering {
-        room_cmp(&self.room, &other.room)
+        let (fava, lowa) = self
+            .tags
+            .as_ref()
+            .map(|tags| {
+                (tags.contains_key(&TagName::Favorite), tags.contains_key(&TagName::LowPriority))
+            })
+            .unwrap_or((false, false));
+
+        let (favb, lowb) = other
+            .tags
+            .as_ref()
+            .map(|tags| {
+                (tags.contains_key(&TagName::Favorite), tags.contains_key(&TagName::LowPriority))
+            })
+            .unwrap_or((false, false));
+
+        // If self has Favorite and other doesn't, it should sort earlier in room list.
+        let cmpf = favb.cmp(&fava);
+
+        // If self has LowPriority and other doesn't, it should sort later in room list.
+        let cmpl = lowa.cmp(&lowb);
+
+        cmpl.then(cmpf).then_with(|| room_cmp(&self.room, &other.room))
     }
 }
 
@@ -588,7 +623,39 @@ impl ToString for RoomItem {
 
 impl ListItem<IambInfo> for RoomItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
-        selected_text(self.name.as_str(), selected)
+        if let Some(tags) = &self.tags {
+            let style = selected_style(selected);
+            let mut spans = vec![Span::styled(self.name.as_str(), style)];
+
+            if tags.is_empty() {
+                return Text::from(Spans(spans));
+            }
+
+            spans.push(Span::styled(" (", style));
+
+            for (i, tag) in tags.keys().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled(", ", style));
+                }
+
+                match tag {
+                    TagName::Favorite => spans.push(Span::styled("Favorite", style)),
+                    TagName::LowPriority => spans.push(Span::styled("Low Priority", style)),
+                    TagName::ServerNotice => spans.push(Span::styled("Server Notice", style)),
+                    TagName::User(tag) => {
+                        spans.push(Span::styled("User Tag: ", style));
+                        spans.push(Span::styled(tag.as_ref(), style));
+                    },
+                    tag => spans.push(Span::styled(format!("{:?}", tag), style)),
+                }
+            }
+
+            spans.push(Span::styled(")", style));
+
+            Text::from(Spans(spans))
+        } else {
+            selected_text(self.name.as_str(), selected)
+        }
     }
 
     fn get_word(&self) -> Option<String> {

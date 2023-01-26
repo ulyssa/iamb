@@ -36,8 +36,8 @@ use matrix_sdk::{
                 message::{MessageType, RoomMessageEventContent},
                 name::RoomNameEventContent,
                 redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
-                topic::RoomTopicEventContent,
             },
+            tag::Tags,
             typing::SyncTypingEvent,
             AnyMessageLikeEvent,
             AnyTimelineEvent,
@@ -57,7 +57,7 @@ use matrix_sdk::{
 use modalkit::editing::action::{EditInfo, InfoMessage, UIError};
 
 use crate::{
-    base::{AsyncProgramStore, IambError, IambResult, SetRoomField, VerifyAction},
+    base::{AsyncProgramStore, IambError, IambResult, VerifyAction},
     message::MessageFetchResult,
     ApplicationSettings,
 };
@@ -100,18 +100,17 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
 }
 
 pub enum WorkerTask {
-    ActiveRooms(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
+    ActiveRooms(ClientReply<Vec<(MatrixRoom, DisplayName, Option<Tags>)>>),
     DirectMessages(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
     Init(AsyncProgramStore, ClientReply<()>),
     LoadOlder(OwnedRoomId, Option<String>, u32, ClientReply<MessageFetchResult>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     GetInviter(Invited, ClientReply<IambResult<Option<RoomMember>>>),
-    GetRoom(OwnedRoomId, ClientReply<IambResult<(MatrixRoom, DisplayName)>>),
+    GetRoom(OwnedRoomId, ClientReply<IambResult<(MatrixRoom, DisplayName, Option<Tags>)>>),
     JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     Spaces(ClientReply<Vec<(MatrixRoom, DisplayName)>>),
-    SetRoom(OwnedRoomId, SetRoomField, ClientReply<IambResult<()>>),
     TypingNotice(OwnedRoomId),
     Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
     VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
@@ -177,13 +176,6 @@ impl Debug for WorkerTask {
             },
             WorkerTask::Spaces(_) => {
                 f.debug_tuple("WorkerTask::Spaces").field(&format_args!("_")).finish()
-            },
-            WorkerTask::SetRoom(room_id, field, _) => {
-                f.debug_tuple("WorkerTask::SetRoom")
-                    .field(room_id)
-                    .field(field)
-                    .field(&format_args!("_"))
-                    .finish()
             },
             WorkerTask::TypingNotice(room_id) => {
                 f.debug_tuple("WorkerTask::TypingNotice").field(room_id).finish()
@@ -259,7 +251,10 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn get_room(&self, room_id: OwnedRoomId) -> IambResult<(MatrixRoom, DisplayName)> {
+    pub fn get_room(
+        &self,
+        room_id: OwnedRoomId,
+    ) -> IambResult<(MatrixRoom, DisplayName, Option<Tags>)> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::GetRoom(room_id, reply)).unwrap();
@@ -275,7 +270,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn active_rooms(&self) -> Vec<(MatrixRoom, DisplayName)> {
+    pub fn active_rooms(&self) -> Vec<(MatrixRoom, DisplayName, Option<Tags>)> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::ActiveRooms(reply)).unwrap();
@@ -295,14 +290,6 @@ impl Requester {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::SpaceMembers(space, reply)).unwrap();
-
-        return response.recv();
-    }
-
-    pub fn set_room(&self, room_id: OwnedRoomId, ev: SetRoomField) -> IambResult<()> {
-        let (reply, response) = oneshot();
-
-        self.tx.send(WorkerTask::SetRoom(room_id, ev, reply)).unwrap();
 
         return response.recv();
     }
@@ -443,10 +430,6 @@ impl ClientWorker {
             WorkerTask::Members(room_id, reply) => {
                 assert!(self.initialized);
                 reply.send(self.members(room_id).await);
-            },
-            WorkerTask::SetRoom(room_id, field, reply) => {
-                assert!(self.initialized);
-                reply.send(self.set_room(room_id, field).await);
             },
             WorkerTask::SpaceMembers(space, reply) => {
                 assert!(self.initialized);
@@ -721,10 +704,15 @@ impl ClientWorker {
         Ok(Some(InfoMessage::from("Successfully logged in!")))
     }
 
-    async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<(MatrixRoom, DisplayName)> {
+    async fn direct_message(
+        &mut self,
+        user: OwnedUserId,
+    ) -> IambResult<(MatrixRoom, DisplayName, Option<Tags>)> {
         for (room, name) in self.direct_messages().await {
             if room.get_member(user.as_ref()).await.map_err(IambError::from)?.is_some() {
-                return Ok((room, name));
+                let tags = room.tags().await.map_err(IambError::from)?;
+
+                return Ok((room, name, tags));
             }
         }
 
@@ -758,11 +746,15 @@ impl ClientWorker {
         Ok(details.inviter)
     }
 
-    async fn get_room(&mut self, room_id: OwnedRoomId) -> IambResult<(MatrixRoom, DisplayName)> {
+    async fn get_room(
+        &mut self,
+        room_id: OwnedRoomId,
+    ) -> IambResult<(MatrixRoom, DisplayName, Option<Tags>)> {
         if let Some(room) = self.client.get_room(&room_id) {
             let name = room.display_name().await.map_err(IambError::from)?;
+            let tags = room.tags().await.map_err(IambError::from)?;
 
-            Ok((room, name))
+            Ok((room, name, tags))
         } else {
             Err(IambError::UnknownRoom(room_id).into())
         }
@@ -817,7 +809,7 @@ impl ClientWorker {
         return rooms;
     }
 
-    async fn active_rooms(&self) -> Vec<(MatrixRoom, DisplayName)> {
+    async fn active_rooms(&self) -> Vec<(MatrixRoom, DisplayName, Option<Tags>)> {
         let mut rooms = vec![];
 
         for room in self.client.invited_rooms().into_iter() {
@@ -826,8 +818,9 @@ impl ClientWorker {
             }
 
             let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+            let tags = room.tags().await.unwrap_or_default();
 
-            rooms.push((room.into(), name));
+            rooms.push((room.into(), name, tags));
         }
 
         for room in self.client.joined_rooms().into_iter() {
@@ -836,8 +829,9 @@ impl ClientWorker {
             }
 
             let name = room.display_name().await.unwrap_or(DisplayName::Empty);
+            let tags = room.tags().await.unwrap_or_default();
 
-            rooms.push((room.into(), name));
+            rooms.push((room.into(), name, tags));
         }
 
         return rooms;
@@ -884,27 +878,6 @@ impl ClientWorker {
         } else {
             Err(IambError::UnknownRoom(room_id).into())
         }
-    }
-
-    async fn set_room(&mut self, room_id: OwnedRoomId, field: SetRoomField) -> IambResult<()> {
-        let room = if let Some(r) = self.client.get_joined_room(&room_id) {
-            r
-        } else {
-            return Err(IambError::UnknownRoom(room_id).into());
-        };
-
-        match field {
-            SetRoomField::Name(name) => {
-                let ev = RoomNameEventContent::new(name.into());
-                let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
-            },
-            SetRoomField::Topic(topic) => {
-                let ev = RoomTopicEventContent::new(topic);
-                let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
-            },
-        }
-
-        Ok(())
     }
 
     async fn space_members(&mut self, space: OwnedRoomId) -> IambResult<Vec<OwnedRoomId>> {
