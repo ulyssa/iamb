@@ -81,9 +81,9 @@ pub enum MessageAction {
 
     /// Download an attachment to the given path.
     ///
-    /// The [bool] argument controls whether to overwrite any already existing file at the
-    /// destination path.
-    Download(Option<String>, bool),
+    /// The second argument controls whether to overwrite any already existing file at the
+    /// destination path, or to open the attachment after downloading.
+    Download(Option<String>, DownloadFlags),
 
     /// Edit a sent message.
     Edit,
@@ -93,6 +93,18 @@ pub enum MessageAction {
 
     /// Reply to a message.
     Reply,
+}
+
+bitflags::bitflags! {
+    pub struct DownloadFlags: u32 {
+        const NONE = 0b00000000;
+
+        /// Overwrite file if it already exists.
+        const FORCE = 0b00000001;
+
+        /// Open file after downloading.
+        const OPEN = 0b00000010;
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

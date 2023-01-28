@@ -10,6 +10,7 @@ use modalkit::{
 };
 
 use crate::base::{
+    DownloadFlags,
     IambAction,
     IambId,
     MessageAction,
@@ -317,7 +318,29 @@ fn iamb_download(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult 
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let mact = MessageAction::Download(args.pop(), desc.bang);
+    let mut flags = DownloadFlags::NONE;
+    if desc.bang {
+        flags |= DownloadFlags::FORCE;
+    };
+    let mact = MessageAction::Download(args.pop(), flags);
+    let iact = IambAction::from(mact);
+    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
+fn iamb_open(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let mut flags = DownloadFlags::OPEN;
+    if desc.bang {
+        flags |= DownloadFlags::FORCE;
+    };
+    let mact = MessageAction::Download(args.pop(), flags);
     let iact = IambAction::from(mact);
     let step = CommandStep::Continue(iact.into(), ctx.context.take());
 
@@ -328,6 +351,7 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { names: vec!["cancel".into()], f: iamb_cancel });
     cmds.add_command(ProgramCommand { names: vec!["dms".into()], f: iamb_dms });
     cmds.add_command(ProgramCommand { names: vec!["download".into()], f: iamb_download });
+    cmds.add_command(ProgramCommand { names: vec!["open".into()], f: iamb_open });
     cmds.add_command(ProgramCommand { names: vec!["edit".into()], f: iamb_edit });
     cmds.add_command(ProgramCommand { names: vec!["invite".into()], f: iamb_invite });
     cmds.add_command(ProgramCommand { names: vec!["join".into()], f: iamb_join });

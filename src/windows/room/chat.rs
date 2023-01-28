@@ -4,6 +4,8 @@ use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
+use tokio;
+
 use matrix_sdk::{
     attachment::AttachmentConfig,
     media::{MediaFormat, MediaRequest},
@@ -55,6 +57,7 @@ use modalkit::editing::{
 };
 
 use crate::base::{
+    DownloadFlags,
     IambAction,
     IambBufferId,
     IambError,
@@ -155,7 +158,7 @@ impl ChatState {
 
                 Ok(None)
             },
-            MessageAction::Download(filename, force) => {
+            MessageAction::Download(filename, flags) => {
                 if let MessageEvent::Original(ev) = &msg.event {
                     let media = client.media();
 
@@ -202,29 +205,42 @@ impl ChatState {
                         },
                     };
 
-                    if !force && filename.exists() {
-                        let msg = format!(
-                            "The file {} already exists; use :download! to overwrite it.",
-                            filename.display()
-                        );
-                        let err = UIError::Failure(msg);
+                    if filename.exists() {
+                        if !flags.contains(DownloadFlags::FORCE) {
+                            let msg = format!(
+                                "The file {} already exists; add ! to end of command to overwrite it.",
+                                filename.display()
+                            );
+                            let err = UIError::Failure(msg);
 
-                        return Err(err);
+                            return Err(err);
+                        }
+
+                        let req = MediaRequest { source, format: MediaFormat::File };
+
+                        let bytes =
+                            media.get_media_content(&req, true).await.map_err(IambError::from)?;
+
+                        fs::write(filename.as_path(), bytes.as_slice())?;
+
+                        msg.downloaded = true;
                     }
 
-                    let req = MediaRequest { source, format: MediaFormat::File };
+                    let info = if flags.contains(DownloadFlags::OPEN) {
+                        // open::that may not return until the spawned program closes.
+                        let target = filename.clone().into_os_string();
+                        tokio::task::spawn_blocking(move || open::that(target));
 
-                    let bytes =
-                        media.get_media_content(&req, true).await.map_err(IambError::from)?;
-
-                    fs::write(filename.as_path(), bytes.as_slice())?;
-
-                    msg.downloaded = true;
-
-                    let info = InfoMessage::from(format!(
-                        "Attachment downloaded to {}",
-                        filename.display()
-                    ));
+                        InfoMessage::from(format!(
+                            "Attachment downloaded to {} and opened",
+                            filename.display()
+                        ))
+                    } else {
+                        InfoMessage::from(format!(
+                            "Attachment downloaded to {}",
+                            filename.display()
+                        ))
+                    };
 
                     return Ok(info.into());
                 }
