@@ -168,6 +168,7 @@ pub fn mock_dirs() -> DirectoryValues {
 
 pub fn mock_tunables() -> TunableValues {
     TunableValues {
+        default_room: None,
         read_receipt_send: true,
         read_receipt_display: true,
         typing_notice_send: true,

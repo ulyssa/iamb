@@ -138,7 +138,14 @@ impl Application {
         let cmds = crate::commands::setup_commands();
 
         let mut locked = store.lock().await;
-        let win = IambWindow::open(IambId::Welcome, locked.deref_mut()).unwrap();
+
+        let win = settings
+            .tunables
+            .default_room
+            .and_then(|room| IambWindow::find(room, locked.deref_mut()).ok())
+            .or_else(|| IambWindow::open(IambId::Welcome, locked.deref_mut()).ok())
+            .unwrap();
+
         let cmd = CommandBarState::new(IambBufferId::Command, locked.deref_mut());
         let screen = ScreenState::new(win, cmd);
 
