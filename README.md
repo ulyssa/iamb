@@ -48,7 +48,7 @@ two other TUI clients and Element Web:
 |                                         | iamb        | [gomuks] | [weechat-matrix] | Element Web/Desktop |
 | --------------------------------------- | :---------- | :------: | :--------------: | :-----------------: |
 | Room directory                          | ❌  ([#14]) | ❌       | ✔️                | ✔️                   |
-| Room tag showing                        | ❌  ([#15]) | ✔️        | ❌               | ✔️                   |
+| Room tag showing                        | ✔️           | ✔️        | ❌               | ✔️                   |
 | Room tag editing                        | ✔️           | ✔️        | ❌               | ✔️                   |
 | Search joined rooms                     | ❌  ([#16]) | ✔️        | ❌               | ✔️                   |
 | Room user list                          | ✔️           | ✔️        | ✔️                | ✔️                   |
@@ -56,8 +56,8 @@ two other TUI clients and Element Web:
 | Edit Room Description                   | ✔️           | ❌       | ✔️                | ✔️                   |
 | Highlights                              | ❌  ([#8])  | ✔️        | ✔️                | ✔️                   |
 | Pushrules                               | ❌          | ✔️        | ❌               | ✔️                   |
-| Send read markers                       | ❌  ([#11]) | ✔️        | ✔️                | ✔️                   |
-| Display read markers                    | ❌  ([#11]) | ❌       | ❌               | ✔️                   |
+| Send read markers                       | ✔️           | ✔️        | ✔️                | ✔️                   |
+| Display read markers                    | ✔️           | ❌       | ❌               | ✔️                   |
 | Sending Invites                         | ✔️           | ✔️        | ✔️                | ✔️                   |
 | Accepting Invites                       | ✔️           | ✔️        | ✔️                | ✔️                   |
 | Typing Notification                     | ✔️           | ✔️        | ✔️                | ✔️                   |
