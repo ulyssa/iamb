@@ -23,7 +23,7 @@ use matrix_sdk::ruma::OwnedUserId;
 use modalkit::crossterm::{
     self,
     cursor::Show as CursorShow,
-    event::{poll, read, Event},
+    event::{poll, read, DisableBracketedPaste, EnableBracketedPaste, Event},
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
 };
@@ -77,6 +77,8 @@ use modalkit::{
             EditError,
             EditInfo,
             Editable,
+            EditorAction,
+            InsertTextAction,
             Jumpable,
             Promptable,
             Scrollable,
@@ -85,7 +87,7 @@ use modalkit::{
             WindowAction,
             WindowContainer,
         },
-        base::{OpenTarget, RepeatType},
+        base::{MoveDir1D, OpenTarget, RepeatType},
         context::Resolve,
         key::KeyManager,
         store::Store,
@@ -126,6 +128,7 @@ impl Application {
         let mut stdout = stdout();
         crossterm::terminal::enable_raw_mode()?;
         crossterm::execute!(stdout, EnterAlternateScreen)?;
+        crossterm::execute!(stdout, EnableBracketedPaste)?;
 
         let title = format!("iamb ({})", settings.profile.user_id);
         crossterm::execute!(stdout, SetTitle(title))?;
@@ -218,8 +221,21 @@ impl Application {
                 Event::Resize(_, _) => {
                     // We'll redraw for the new size next time step() is called.
                 },
-                Event::Paste(_) => {
-                    // Do nothing for now.
+                Event::Paste(s) => {
+                    let act = InsertTextAction::Transcribe(s, MoveDir1D::Previous, 1.into());
+                    let act = EditorAction::from(act);
+                    let ctx = ProgramContext::default();
+                    let mut store = self.store.lock().await;
+
+                    match self.screen.editor_command(&act, &ctx, store.deref_mut()) {
+                        Ok(None) => {},
+                        Ok(Some(info)) => {
+                            self.screen.push_info(info);
+                        },
+                        Err(e) => {
+                            self.screen.push_error(e);
+                        },
+                    }
                 },
             }
         }
@@ -473,6 +489,7 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
         let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(stdout(), DisableBracketedPaste);
         let _ = crossterm::execute!(stdout(), LeaveAlternateScreen);
         let _ = crossterm::execute!(stdout(), CursorShow);
         orig_hook(panic_info);
