@@ -40,7 +40,7 @@ fn tag_name(name: String) -> Result<TagName, CommandError> {
             if let Ok(tag) = name.parse() {
                 TagName::User(tag)
             } else {
-                let msg = format!("Invalid user tag name: {}", name);
+                let msg = format!("Invalid user tag name: {name}");
 
                 return Err(CommandError::Error(msg));
             }

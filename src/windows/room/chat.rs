@@ -383,7 +383,7 @@ impl ChatState {
                     .map_err(IambError::from)?;
 
                 // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {}]", name));
+                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
                 let msg = MessageType::Text(msg);
                 let msg = RoomMessageEventContent::new(msg);
 

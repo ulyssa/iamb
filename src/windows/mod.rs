@@ -168,7 +168,7 @@ fn append_tags<'a>(tags: &'a Tags, spans: &mut Vec<Span<'a>>, style: Style) {
                 spans.push(Span::styled("User Tag: ", style));
                 spans.push(Span::styled(tag.as_ref(), style));
             },
-            tag => spans.push(Span::styled(format!("{:?}", tag), style)),
+            tag => spans.push(Span::styled(format!("{tag:?}"), style)),
         }
     }
 
@@ -594,7 +594,7 @@ impl Window<IambInfo> for IambWindow {
     }
 
     fn posn(index: usize, _: &mut ProgramStore) -> IambResult<Self> {
-        let msg = format!("Cannot find indexed buffer (index = {})", index);
+        let msg = format!("Cannot find indexed buffer (index = {index})");
         let err = UIError::Unimplemented(msg);
 
         Err(err)
@@ -852,7 +852,7 @@ impl VerifyItem {
             let device = self.sasv1.other_device();
 
             if let Some(display_name) = device.display_name() {
-                format!("Device verification with {} ({})", display_name, state)
+                format!("Device verification with {display_name} ({state})")
             } else {
                 format!("Device verification with device {} ({})", device.device_id(), state)
             }
@@ -958,7 +958,7 @@ impl ListItem<IambInfo> for VerifyItem {
             lines.push(Spans::from(""));
 
             for line in format_emojis(emoji).lines() {
-                lines.push(Spans::from(format!("    {}", line)));
+                lines.push(Spans::from(format!("    {line}")));
             }
 
             lines.push(Spans::from(""));

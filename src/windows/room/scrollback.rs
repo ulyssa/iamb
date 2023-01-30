@@ -615,7 +615,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     },
 
                     _ => {
-                        let msg = format!("Unknown editing target: {:?}", motion);
+                        let msg = format!("Unknown editing target: {motion:?}");
                         let err = EditError::Unimplemented(msg);
 
                         return Err(err);
@@ -702,7 +702,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     },
 
                     _ => {
-                        let msg = format!("Unknown motion: {:?}", motion);
+                        let msg = format!("Unknown motion: {motion:?}");
                         let err = EditError::Unimplemented(msg);
 
                         return Err(err);
@@ -790,7 +790,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             HistoryAction::Checkpoint => Ok(None),
             HistoryAction::Undo(_) => Err(EditError::Failure("Nothing to undo".into())),
             HistoryAction::Redo(_) => Err(EditError::Failure("Nothing to redo".into())),
-            _ => Err(EditError::Unimplemented(format!("Unknown action: {:?}", act))),
+            _ => Err(EditError::Unimplemented(format!("Unknown action: {act:?}"))),
         }
     }
 
@@ -847,7 +847,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 Ok(None)
             },
-            _ => Err(EditError::Unimplemented(format!("Unknown action: {:?}", act))),
+            _ => Err(EditError::Unimplemented(format!("Unknown action: {act:?}"))),
         }
     }
 }
@@ -874,7 +874,7 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 Err(err)
             },
 
-            _ => Err(EditError::Unimplemented(format!("Unknown action: {:?}", act))),
+            _ => Err(EditError::Unimplemented(format!("Unknown action: {act:?}"))),
         }
     }
 }
@@ -973,7 +973,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 return Err(err);
             },
             _ => {
-                let msg = format!("Messages scrollback doesn't support {:?}", act);
+                let msg = format!("Messages scrollback doesn't support {act:?}");
                 let err = EditError::Unimplemented(msg);
 
                 return Err(err);

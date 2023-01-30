@@ -455,13 +455,13 @@ async fn login(worker: Requester, settings: &ApplicationSettings) -> IambResult<
         match worker.login(LoginStyle::Password(password)) {
             Ok(info) => {
                 if let Some(msg) = info {
-                    println!("{}", msg);
+                    println!("{msg}");
                 }
 
                 break;
             },
             Err(err) => {
-                println!("Failed to login: {}", err);
+                println!("Failed to login: {err}");
                 continue;
             },
         }
@@ -471,7 +471,7 @@ async fn login(worker: Requester, settings: &ApplicationSettings) -> IambResult<
 }
 
 fn print_exit<T: Display, N>(v: T) -> N {
-    println!("{}", v);
+    println!("{v}");
     process::exit(2);
 }
 
@@ -532,7 +532,7 @@ fn main() -> IambResult<()> {
         .thread_name_fn(|| {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
             let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
-            format!("iamb-worker-{}", id)
+            format!("iamb-worker-{id}")
         })
         .build()
         .unwrap();

@@ -134,7 +134,7 @@ impl MessageTimeStamp {
         match self {
             MessageTimeStamp::OriginServer(ms) => {
                 let time = millis_to_datetime(*ms).format("%T");
-                let time = format!("  [{}]", time);
+                let time = format!("  [{time}]");
 
                 Span::raw(time).into()
             },
@@ -343,7 +343,7 @@ impl MessageEvent {
                     .and_then(|r| r.content.reason.as_ref());
 
                 if let Some(r) = reason {
-                    Cow::Owned(format!("[Redacted: {:?}]", r))
+                    Cow::Owned(format!("[Redacted: {r:?}]"))
                 } else {
                     Cow::Borrowed("[Redacted]")
                 }

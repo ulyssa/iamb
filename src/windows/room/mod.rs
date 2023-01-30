@@ -132,10 +132,7 @@ impl RoomState {
             None => format!("{:?}", store.application.get_room_title(self.id())),
         };
 
-        let mut invited = vec![Span::from(format!(
-            "You have been invited to join {}",
-            name
-        ))];
+        let mut invited = vec![Span::from(format!("You have been invited to join {name}"))];
 
         if let Ok(Some(inviter)) = &inviter {
             invited.push(Span::from(" by "));

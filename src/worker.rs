@@ -350,6 +350,7 @@ pub struct ClientWorker {
     settings: ApplicationSettings,
     client: Client,
     sync_handle: Option<JoinHandle<()>>,
+    rcpt_handle: Option<JoinHandle<()>>,
 }
 
 impl ClientWorker {
@@ -388,9 +389,10 @@ impl ClientWorker {
             settings,
             client: client.clone(),
             sync_handle: None,
+            rcpt_handle: None,
         };
 
-        let _ = tokio::spawn(async move {
+        tokio::spawn(async move {
             worker.work(rx).await;
         });
 
@@ -410,6 +412,10 @@ impl ClientWorker {
         }
 
         if let Some(handle) = self.sync_handle.take() {
+            handle.abort();
+        }
+
+        if let Some(handle) = self.rcpt_handle.take() {
             handle.abort();
         }
     }
@@ -685,7 +691,8 @@ impl ClientWorker {
         );
 
         let client = self.client.clone();
-        let _ = tokio::spawn(async move {
+
+        self.rcpt_handle = tokio::spawn(async move {
             // Update the displayed read receipts ever 5 seconds.
             let mut interval = tokio::time::interval(Duration::from_secs(5));
 
@@ -695,7 +702,8 @@ impl ClientWorker {
                 let receipts = update_receipts(&client).await;
                 store.lock().await.application.set_receipts(receipts).await;
             }
-        });
+        })
+        .into();
 
         self.initialized = true;
     }
@@ -762,7 +770,7 @@ impl ClientWorker {
                     "Failed to create direct message room"
                 );
 
-                let msg = format!("Could not open a room with {}", user);
+                let msg = format!("Could not open a room with {user}");
                 let err = UIError::Failure(msg);
 
                 Err(err)
@@ -1007,12 +1015,12 @@ impl ClientWorker {
                 let methods = vec![VerificationMethod::SasV1];
                 let request = identity.request_verification_with_methods(methods);
                 let _req = request.await.map_err(IambError::from)?;
-                let info = format!("Sent verification request to {}", user_id);
+                let info = format!("Sent verification request to {user_id}");
 
                 Ok(InfoMessage::from(info).into())
             },
             None => {
-                let msg = format!("Could not find identity information for {}", user_id);
+                let msg = format!("Could not find identity information for {user_id}");
                 let err = UIError::Failure(msg);
 
                 Err(err)
