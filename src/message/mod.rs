@@ -6,7 +6,7 @@ use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
 use std::slice::Iter;
 
-use chrono::{DateTime, NaiveDateTime, Utc};
+use chrono::{DateTime, Local as LocalTz, NaiveDateTime, TimeZone};
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
@@ -68,6 +68,13 @@ const fn span_static(s: &'static str) -> Span<'static> {
     }
 }
 
+const BOLD_STYLE: Style = Style {
+    fg: None,
+    bg: None,
+    add_modifier: StyleModifier::BOLD,
+    sub_modifier: StyleModifier::empty(),
+};
+
 const USER_GUTTER: usize = 30;
 const TIME_GUTTER: usize = 12;
 const READ_GUTTER: usize = 5;
@@ -78,6 +85,14 @@ const USER_GUTTER_EMPTY_SPAN: Span<'static> = span_static(USER_GUTTER_EMPTY);
 
 const TIME_GUTTER_EMPTY: &str = "            ";
 const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
+
+#[inline]
+fn millis_to_datetime(ms: UInt) -> DateTime<LocalTz> {
+    let time = i64::from(ms) / 1000;
+    let time = NaiveDateTime::from_timestamp_opt(time, 0).unwrap_or_default();
+
+    LocalTz.from_utc_datetime(&time)
+}
 
 #[derive(thiserror::Error, Debug)]
 pub enum TimeStampIntError {
@@ -95,13 +110,30 @@ pub enum MessageTimeStamp {
 }
 
 impl MessageTimeStamp {
-    fn show(&self) -> Option<Span> {
+    fn as_datetime(&self) -> DateTime<LocalTz> {
         match self {
-            MessageTimeStamp::OriginServer(ts) => {
-                let time = i64::from(*ts) / 1000;
-                let time = NaiveDateTime::from_timestamp_opt(time, 0)?;
-                let time = DateTime::<Utc>::from_utc(time, Utc);
-                let time = time.format("%T");
+            MessageTimeStamp::OriginServer(ms) => millis_to_datetime(*ms),
+            MessageTimeStamp::LocalEcho => LocalTz::now(),
+        }
+    }
+
+    fn same_day(&self, other: &Self) -> bool {
+        let dt1 = self.as_datetime();
+        let dt2 = other.as_datetime();
+
+        dt1.date_naive() == dt2.date_naive()
+    }
+
+    fn show_date(&self) -> Option<Span> {
+        let time = self.as_datetime().format("%A, %B %d %Y").to_string();
+
+        Span::styled(time, BOLD_STYLE).into()
+    }
+
+    fn show_time(&self) -> Option<Span> {
+        match self {
+            MessageTimeStamp::OriginServer(ms) => {
+                let time = millis_to_datetime(*ms).format("%T");
                 let time = format!("  [{}]", time);
 
                 Span::raw(time).into()
@@ -139,6 +171,12 @@ impl PartialOrd for MessageTimeStamp {
     }
 }
 
+impl From<UInt> for MessageTimeStamp {
+    fn from(millis: UInt) -> Self {
+        MessageTimeStamp::OriginServer(millis)
+    }
+}
+
 impl From<MilliSecondsSinceUnixEpoch> for MessageTimeStamp {
     fn from(millis: MilliSecondsSinceUnixEpoch) -> Self {
         MessageTimeStamp::OriginServer(millis.0)
@@ -168,7 +206,7 @@ impl TryFrom<usize> for MessageTimeStamp {
             let n = u64::try_from(u)?;
             let n = UInt::try_from(n).map_err(TimeStampIntError::UIntError)?;
 
-            Ok(MessageTimeStamp::OriginServer(n))
+            Ok(MessageTimeStamp::from(n))
         }
     }
 }
@@ -388,10 +426,26 @@ enum MessageColumns {
 
 struct MessageFormatter<'a> {
     settings: &'a ApplicationSettings,
+
+    /// How many columns to print.
     cols: MessageColumns,
+
+    /// The full, original width.
+    orig: usize,
+
+    /// The width that the message contents need to fill.
     fill: usize,
+
+    /// The formatted Span for the message sender.
     user: Option<Span<'a>>,
+
+    /// The time the message was sent.
     time: Option<Span<'a>>,
+
+    /// The date the message was sent.
+    date: Option<Span<'a>>,
+
+    /// Iterator over the users who have read up to this message.
     read: Iter<'a, OwnedUserId>,
 }
 
@@ -402,6 +456,15 @@ impl<'a> MessageFormatter<'a> {
 
     #[inline]
     fn push_spans(&mut self, spans: Spans<'a>, style: Style, text: &mut Text<'a>) {
+        if let Some(date) = self.date.take() {
+            let len = date.content.as_ref().len();
+            let padding = self.orig.saturating_sub(len);
+            let leading = space_span(padding / 2, Style::default());
+            let trailing = space_span(padding.saturating_sub(padding / 2), Style::default());
+
+            text.lines.push(Spans(vec![leading, date, trailing]));
+        }
+
         match self.cols {
             MessageColumns::Four => {
                 let settings = self.settings;
@@ -517,27 +580,33 @@ impl Message {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> MessageFormatter<'a> {
+        let orig = width;
+        let date = match &prev {
+            Some(prev) if prev.timestamp.same_day(&self.timestamp) => None,
+            _ => self.timestamp.show_date(),
+        };
+
         if USER_GUTTER + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
             settings.tunables.read_receipt_display
         {
             let cols = MessageColumns::Four;
             let fill = width - USER_GUTTER - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, settings);
-            let time = self.timestamp.show();
+            let time = self.timestamp.show_time();
             let read = match info.receipts.get(self.event.event_id()) {
                 Some(read) => read.iter(),
                 None => [].iter(),
             };
 
-            MessageFormatter { settings, cols, fill, user, time, read }
+            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         } else if USER_GUTTER + TIME_GUTTER + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
             let fill = width - USER_GUTTER - TIME_GUTTER;
             let user = self.show_sender(prev, true, settings);
-            let time = self.timestamp.show();
+            let time = self.timestamp.show_time();
             let read = [].iter();
 
-            MessageFormatter { settings, cols, fill, user, time, read }
+            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         } else if USER_GUTTER + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Two;
             let fill = width - USER_GUTTER;
@@ -545,7 +614,7 @@ impl Message {
             let time = None;
             let read = [].iter();
 
-            MessageFormatter { settings, cols, fill, user, time, read }
+            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         } else {
             let cols = MessageColumns::One;
             let fill = width.saturating_sub(2);
@@ -553,7 +622,7 @@ impl Message {
             let time = None;
             let read = [].iter();
 
-            MessageFormatter { settings, cols, fill, user, time, read }
+            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         }
     }
 
@@ -640,13 +709,13 @@ impl Message {
         align_right: bool,
         settings: &ApplicationSettings,
     ) -> Option<Span> {
-        let user = if matches!(prev, Some(prev) if self.sender == prev.sender) {
-            return None;
-        } else {
-            self.sender_span(settings)
-        };
+        if let Some(prev) = prev {
+            if self.sender == prev.sender && self.timestamp.same_day(&prev.timestamp) {
+                return None;
+            }
+        }
 
-        let Span { content, style } = user;
+        let Span { content, style } = self.sender_span(settings);
         let stop = content.len().min(28);
         let s = &content[..stop];
 

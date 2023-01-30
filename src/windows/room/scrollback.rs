@@ -103,6 +103,10 @@ fn nth_after(pos: MessageKey, n: usize, info: &RoomInfo) -> MessageCursor {
     nth_key_after(pos, n, info).into()
 }
 
+fn prevmsg<'a>(key: &MessageKey, info: &'a RoomInfo) -> Option<&'a Message> {
+    info.messages.range(..key).next_back().map(|(_, v)| v)
+}
+
 pub struct ScrollbackState {
     /// The room identifier.
     room_id: OwnedRoomId,
@@ -214,7 +218,8 @@ impl ScrollbackState {
 
                 for (key, item) in info.messages.range(..=&idx).rev() {
                     let sel = selidx == key;
-                    let len = item.show(None, sel, &self.viewctx, info, settings).lines.len();
+                    let prev = prevmsg(key, info);
+                    let len = item.show(prev, sel, &self.viewctx, info, settings).lines.len();
 
                     if key == &idx {
                         lines += len / 2;
@@ -236,7 +241,8 @@ impl ScrollbackState {
 
                 for (key, item) in info.messages.range(..=&idx).rev() {
                     let sel = key == selidx;
-                    let len = item.show(None, sel, &self.viewctx, info, settings).lines.len();
+                    let prev = prevmsg(key, info);
+                    let len = item.show(prev, sel, &self.viewctx, info, settings).lines.len();
 
                     lines += len;
 
@@ -269,6 +275,7 @@ impl ScrollbackState {
         let mut lines = 0;
 
         let cursor_key = self.cursor.timestamp.as_ref().unwrap_or(last_key);
+        let mut prev = prevmsg(cursor_key, info);
 
         for (idx, item) in info.messages.range(corner_key.clone()..) {
             if idx == cursor_key {
@@ -276,13 +283,15 @@ impl ScrollbackState {
                 break;
             }
 
-            lines += item.show(None, false, &self.viewctx, info, settings).height().max(1);
+            lines += item.show(prev, false, &self.viewctx, info, settings).height().max(1);
 
             if lines >= self.viewctx.get_height() {
                 // We've reached the end of the viewport; move cursor into it.
                 self.cursor = idx.clone().into();
                 break;
             }
+
+            prev = Some(item);
         }
     }
 
@@ -1009,7 +1018,8 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in info.messages.range(..=&corner_key).rev() {
                     let sel = key == cursor_key;
-                    let txt = item.show(None, sel, &self.viewctx, info, settings);
+                    let prev = prevmsg(key, info);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1033,11 +1043,15 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 }
             },
             MoveDir2D::Down => {
+                let mut prev = prevmsg(&corner_key, info);
+
                 for (key, item) in info.messages.range(&corner_key..) {
                     let sel = key == cursor_key;
-                    let txt = item.show(None, sel, &self.viewctx, info, settings);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
+
+                    prev = Some(item);
 
                     if key != &corner_key {
                         corner.text_row = 0;
@@ -1214,7 +1228,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
         let full = std::mem::take(&mut state.show_full_on_redraw) || cursor.timestamp.is_none();
         let mut lines = vec![];
         let mut sawit = false;
-        let mut prev = None;
+        let mut prev = prevmsg(&corner_key, info);
 
         for (key, item) in info.messages.range(&corner_key..) {
             let sel = key == cursor_key;
@@ -1373,10 +1387,11 @@ mod tests {
         assert_eq!(scrollback.viewctx.dimensions, (0, 0));
         assert_eq!(scrollback.viewctx.corner, MessageCursor::latest());
 
-        // Set a terminal width of 60, and height of 3, rendering in scrollback as:
+        // Set a terminal width of 60, and height of 4, rendering in scrollback as:
         //
         //       |------------------------------------------------------------|
-        // MSG2: |           @user2:example.com  helium                       |
+        // MSG2: |                Wednesday, December 31 1969                 |
+        //       |           @user2:example.com  helium                       |
         // MSG3: |           @user2:example.com  this                         |
         //       |                               is                           |
         //       |                               a                            |
@@ -1384,14 +1399,15 @@ mod tests {
         //       |                               message                      |
         // MSG4: |           @user1:example.com  help                         |
         // MSG5: |           @user2:example.com  character                    |
-        // MSG1: |           @user1:example.com  writhe                       |
+        // MSG1: |                   XXXday, Month NN 20XX                    |
+        //       |           @user1:example.com  writhe                       |
         //       |------------------------------------------------------------|
-        let area = Rect::new(0, 0, 60, 3);
+        let area = Rect::new(0, 0, 60, 4);
         let mut buffer = Buffer::empty(area);
         scrollback.draw(area, &mut buffer, true, &mut store);
 
         assert_eq!(scrollback.cursor, MessageCursor::latest());
-        assert_eq!(scrollback.viewctx.dimensions, (60, 3));
+        assert_eq!(scrollback.viewctx.dimensions, (60, 4));
         assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG4_KEY.clone(), 0));
 
         // Scroll up a line at a time until we hit the first message.
@@ -1423,6 +1439,11 @@ mod tests {
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 1));
+
+        scrollback
+            .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
+            .unwrap();
         assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 0));
 
         // Cannot scroll any further.
@@ -1432,6 +1453,11 @@ mod tests {
         assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 0));
 
         // Now scroll back down one line at a time.
+        scrollback
+            .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
+            .unwrap();
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 1));
+
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
@@ -1472,19 +1498,24 @@ mod tests {
             .unwrap();
         assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 0));
 
+        scrollback
+            .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
+            .unwrap();
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 1));
+
         // Cannot scroll down any further.
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 0));
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 1));
 
-        // Scroll up two Pages (six lines).
+        // Scroll up two Pages (eight lines).
         scrollback
             .dirscroll(prev, ScrollSize::Page, &2.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 1));
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 0));
 
-        // Scroll down two HalfPages (three lines).
+        // Scroll down two HalfPages (four lines).
         scrollback
             .dirscroll(next, ScrollSize::HalfPage, &2.into(), &ctx, &mut store)
             .unwrap();
@@ -1503,7 +1534,8 @@ mod tests {
         // Set a terminal width of 60, and height of 3, rendering in scrollback as:
         //
         //       |------------------------------------------------------------|
-        // MSG2: |           @user2:example.com  helium                       |
+        // MSG2: |                Wednesday, December 31 1969                 |
+        //       |           @user2:example.com  helium                       |
         // MSG3: |           @user2:example.com  this                         |
         //       |                               is                           |
         //       |                               a                            |
@@ -1511,7 +1543,8 @@ mod tests {
         //       |                               message                      |
         // MSG4: |           @user1:example.com  help                         |
         // MSG5: |           @user2:example.com  character                    |
-        // MSG1: |           @user1:example.com  writhe                       |
+        // MSG1: |                   XXXday, Month NN 20XX                    |
+        //       |           @user1:example.com  writhe                       |
         //       |------------------------------------------------------------|
         let area = Rect::new(0, 0, 60, 3);
         let mut buffer = Buffer::empty(area);
