@@ -215,17 +215,7 @@ impl ChatState {
                         },
                     };
 
-                    if filename.exists() {
-                        if !flags.contains(DownloadFlags::FORCE) {
-                            let msg = format!(
-                                "The file {} already exists; add ! to end of command to overwrite it.",
-                                filename.display()
-                            );
-                            let err = UIError::Failure(msg);
-
-                            return Err(err);
-                        }
-
+                    if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
                         let req = MediaRequest { source, format: MediaFormat::File };
 
                         let bytes =
@@ -234,6 +224,14 @@ impl ChatState {
                         fs::write(filename.as_path(), bytes.as_slice())?;
 
                         msg.downloaded = true;
+                    } else if !flags.contains(DownloadFlags::OPEN) {
+                        let msg = format!(
+                            "The file {} already exists; add ! to end of command to overwrite it.",
+                            filename.display()
+                        );
+                        let err = UIError::Failure(msg);
+
+                        return Err(err);
                     }
 
                     let info = if flags.contains(DownloadFlags::OPEN) {
