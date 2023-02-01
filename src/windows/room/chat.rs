@@ -178,43 +178,41 @@ impl ChatState {
                         None => settings.dirs.downloads.clone(),
                     };
 
-                    let source = match &ev.content.msgtype {
-                        MessageType::Audio(c) => {
-                            if filename.is_dir() {
-                                filename.push(c.body.as_str());
-                            }
-
-                            c.source.clone()
-                        },
+                    let (source, msg_filename) = match &ev.content.msgtype {
+                        MessageType::Audio(c) => (c.source.clone(), c.body.as_str()),
                         MessageType::File(c) => {
-                            if filename.is_dir() {
-                                if let Some(name) = &c.filename {
-                                    filename.push(name);
-                                } else {
-                                    filename.push(c.body.as_str());
-                                }
-                            }
-
-                            c.source.clone()
+                            (c.source.clone(), c.filename.as_deref().unwrap_or(c.body.as_str()))
                         },
-                        MessageType::Image(c) => {
-                            if filename.is_dir() {
-                                filename.push(c.body.as_str());
-                            }
-
-                            c.source.clone()
-                        },
-                        MessageType::Video(c) => {
-                            if filename.is_dir() {
-                                filename.push(c.body.as_str());
-                            }
-
-                            c.source.clone()
-                        },
+                        MessageType::Image(c) => (c.source.clone(), c.body.as_str()),
+                        MessageType::Video(c) => (c.source.clone(), c.body.as_str()),
                         _ => {
                             return Err(IambError::NoAttachment.into());
                         },
                     };
+
+                    if filename.is_dir() {
+                        filename.push(msg_filename);
+                    }
+
+                    if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
+                        // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
+                        if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
+                            let ext = filename.extension();
+                            let mut filename_incr = filename.clone();
+                            for n in 1..=1000 {
+                                if let Some(ext) = ext.and_then(OsStr::to_str) {
+                                    filename_incr.set_file_name(format!("{}-{}.{}", stem, n, ext));
+                                } else {
+                                    filename_incr.set_file_name(format!("{}-{}", stem, n));
+                                }
+
+                                if !filename_incr.exists() {
+                                    filename = filename_incr;
+                                    break;
+                                }
+                            }
+                        }
+                    }
 
                     if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
                         let req = MediaRequest { source, format: MediaFormat::File };
