@@ -9,8 +9,9 @@ use tokio;
 use matrix_sdk::{
     attachment::AttachmentConfig,
     media::{MediaFormat, MediaRequest},
-    room::Room as MatrixRoom,
+    room::{Joined, Room as MatrixRoom},
     ruma::{
+        events::reaction::{ReactionEventContent, Relation as Reaction},
         events::room::message::{
             MessageType,
             OriginalRoomMessageEvent,
@@ -19,6 +20,7 @@ use matrix_sdk::{
             RoomMessageEventContent,
             TextMessageEventContent,
         },
+        EventId,
         OwnedRoomId,
         RoomId,
     },
@@ -73,6 +75,7 @@ use crate::base::{
 };
 
 use crate::message::{Message, MessageEvent, MessageKey, MessageTimeStamp};
+use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
 
@@ -115,6 +118,10 @@ impl ChatState {
         }
     }
 
+    fn get_joined(&self, worker: &Requester) -> Result<Joined, IambError> {
+        worker.client.get_joined_room(self.id()).ok_or(IambError::NotJoined)
+    }
+
     fn get_reply_to<'a>(&self, info: &'a RoomInfo) -> Option<&'a OriginalRoomMessageEvent> {
         let key = self.reply_to.as_ref()?;
         let msg = info.messages.get(key)?;
@@ -149,7 +156,10 @@ impl ChatState {
         let settings = &store.application.settings;
         let info = store.application.rooms.entry(self.room_id.clone()).or_default();
 
-        let msg = self.scrollback.get_mut(info).ok_or(IambError::NoSelectedMessage)?;
+        let msg = self
+            .scrollback
+            .get_mut(&mut info.messages)
+            .ok_or(IambError::NoSelectedMessage)?;
 
         match act {
             MessageAction::Cancel => {
@@ -282,19 +292,32 @@ impl ChatState {
 
                 Ok(None)
             },
-            MessageAction::Redact(reason) => {
-                let room = store
-                    .application
-                    .worker
-                    .client
-                    .get_joined_room(self.id())
-                    .ok_or(IambError::NotJoined)?;
-
+            MessageAction::React(emoji) => {
+                let room = self.get_joined(&store.application.worker)?;
                 let event_id = match &msg.event {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::Redacted(_) => {
-                        let msg = "";
+                        let msg = "Cannot react to a redacted message";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
+                };
+
+                let reaction = Reaction::new(event_id, emoji);
+                let msg = ReactionEventContent::new(reaction);
+                let _ = room.send(msg, None).await.map_err(IambError::from)?;
+
+                Ok(None)
+            },
+            MessageAction::Redact(reason) => {
+                let room = self.get_joined(&store.application.worker)?;
+                let event_id = match &msg.event {
+                    MessageEvent::Original(ev) => ev.event_id.clone(),
+                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Redacted(_) => {
+                        let msg = "Cannot redact already redacted message";
                         let err = UIError::Failure(msg.into());
 
                         return Err(err);
@@ -310,6 +333,46 @@ impl ChatState {
             MessageAction::Reply => {
                 self.reply_to = self.scrollback.get_key(info);
                 self.focus = RoomFocus::MessageBar;
+
+                Ok(None)
+            },
+            MessageAction::Unreact(emoji) => {
+                let room = self.get_joined(&store.application.worker)?;
+                let event_id: &EventId = match &msg.event {
+                    MessageEvent::Original(ev) => ev.event_id.as_ref(),
+                    MessageEvent::Local(event_id, _) => event_id.as_ref(),
+                    MessageEvent::Redacted(_) => {
+                        let msg = "Cannot unreact to a redacted message";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
+                };
+
+                let reactions = match info.reactions.get(event_id) {
+                    Some(r) => r,
+                    None => return Ok(None),
+                };
+
+                let reactions = reactions.iter().filter_map(|(event_id, (reaction, user_id))| {
+                    if user_id != &settings.profile.user_id {
+                        return None;
+                    }
+
+                    if let Some(emoji) = &emoji {
+                        if emoji == reaction {
+                            return Some(event_id);
+                        } else {
+                            return None;
+                        }
+                    } else {
+                        return Some(event_id);
+                    }
+                });
+
+                for reaction in reactions {
+                    let _ = room.redact(reaction, None, None).await.map_err(IambError::from)?;
+                }
 
                 Ok(None)
             },

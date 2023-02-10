@@ -10,14 +10,19 @@ use matrix_sdk::{
     encryption::verification::SasVerification,
     room::Joined,
     ruma::{
-        events::room::message::{
-            OriginalRoomMessageEvent,
-            Relation,
-            Replacement,
-            RoomMessageEvent,
-            RoomMessageEventContent,
+        events::{
+            reaction::ReactionEvent,
+            room::message::{
+                OriginalRoomMessageEvent,
+                Relation,
+                Replacement,
+                RoomMessageEvent,
+                RoomMessageEventContent,
+            },
+            tag::{TagName, Tags},
+            AnyMessageLikeEvent,
+            MessageLikeEvent,
         },
-        events::tag::{TagName, Tags},
         EventId,
         OwnedEventId,
         OwnedRoomId,
@@ -88,11 +93,20 @@ pub enum MessageAction {
     /// Edit a sent message.
     Edit,
 
-    /// Redact a message.
+    /// React to a message with an Emoji.
+    React(String),
+
+    /// Redact a message, with an optional reason.
     Redact(Option<String>),
 
     /// Reply to a message.
     Reply,
+
+    /// Unreact to a message.
+    ///
+    /// If no specific Emoji to remove to is specified, then all reactions from the user on the
+    /// message are removed.
+    Unreact(Option<String>),
 }
 
 bitflags::bitflags! {
@@ -226,6 +240,12 @@ pub type AsyncProgramStore = Arc<AsyncMutex<ProgramStore>>;
 
 pub type IambResult<T> = UIResult<T, IambInfo>;
 
+/// Reaction events for some message.
+///
+/// The event identifier used as a key here is the ID for the reaction, and not for the message
+/// it's reacting to.
+pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
+
 pub type Receipts = HashMap<OwnedEventId, Vec<OwnedUserId>>;
 
 #[derive(thiserror::Error, Debug)]
@@ -292,32 +312,103 @@ pub enum RoomFetchStatus {
     NotStarted,
 }
 
+pub enum EventLocation {
+    Message(MessageKey),
+    Reaction(OwnedEventId),
+}
+
+impl EventLocation {
+    fn to_message_key(&self) -> Option<&MessageKey> {
+        if let EventLocation::Message(key) = self {
+            Some(key)
+        } else {
+            None
+        }
+    }
+}
+
 #[derive(Default)]
 pub struct RoomInfo {
+    /// The display name for this room.
     pub name: Option<String>,
+
+    /// The tags placed on this room.
     pub tags: Option<Tags>,
 
-    pub keys: HashMap<OwnedEventId, MessageKey>,
+    /// A map of event IDs to where they are stored in this struct.
+    pub keys: HashMap<OwnedEventId, EventLocation>,
+
+    /// The messages loaded for this room.
     pub messages: Messages,
 
+    /// A map of read markers to display on different events.
     pub receipts: HashMap<OwnedEventId, Vec<OwnedUserId>>,
+
+    /// An event ID for where we should indicate we've read up to.
     pub read_till: Option<OwnedEventId>,
 
+    /// A map of message identifiers to a map of reaction events.
+    pub reactions: HashMap<OwnedEventId, MessageReactions>,
+
+    /// Where to continue fetching from when we continue loading scrollback history.
     pub fetch_id: RoomFetchStatus,
+
+    /// The time that we last fetched scrollback for this room.
     pub fetch_last: Option<Instant>,
+
+    /// Users currently typing in this room, and when we received notification of them doing so.
     pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
 }
 
 impl RoomInfo {
+    pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize)> {
+        if let Some(reacts) = self.reactions.get(event_id) {
+            let mut counts = HashMap::new();
+
+            for (key, _) in reacts.values() {
+                let count = counts.entry(key.as_str()).or_default();
+                *count += 1;
+            }
+
+            let mut reactions = counts.into_iter().collect::<Vec<_>>();
+            reactions.sort();
+
+            reactions
+        } else {
+            vec![]
+        }
+    }
+
     pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
-        self.messages.get(self.keys.get(event_id)?)
+        self.messages.get(self.keys.get(event_id)?.to_message_key()?)
+    }
+
+    pub fn insert_reaction(&mut self, react: ReactionEvent) {
+        match react {
+            MessageLikeEvent::Original(react) => {
+                let rel_id = react.content.relates_to.event_id;
+                let key = react.content.relates_to.key;
+
+                let message = self.reactions.entry(rel_id.clone()).or_default();
+                let event_id = react.event_id;
+                let user_id = react.sender;
+
+                message.insert(event_id.clone(), (key, user_id));
+
+                let loc = EventLocation::Reaction(rel_id);
+                self.keys.insert(event_id, loc);
+            },
+            MessageLikeEvent::Redacted(_) => {
+                return;
+            },
+        }
     }
 
     pub fn insert_edit(&mut self, msg: Replacement) {
         let event_id = msg.event_id;
         let new_content = msg.new_content;
 
-        let key = if let Some(k) = self.keys.get(&event_id) {
+        let key = if let Some(EventLocation::Message(k)) = self.keys.get(&event_id) {
             k
         } else {
             return;
@@ -346,7 +437,7 @@ impl RoomInfo {
         let event_id = msg.event_id().to_owned();
         let key = (msg.origin_server_ts().into(), event_id.clone());
 
-        self.keys.insert(event_id.clone(), key.clone());
+        self.keys.insert(event_id.clone(), EventLocation::Message(key.clone()));
         self.messages.insert(key, msg.into());
 
         // Remove any echo.
@@ -519,7 +610,15 @@ impl ChatStore {
             match res {
                 Ok((fetch_id, msgs)) => {
                     for msg in msgs.into_iter() {
-                        info.insert(msg);
+                        match msg {
+                            AnyMessageLikeEvent::RoomMessage(msg) => {
+                                info.insert(msg);
+                            },
+                            AnyMessageLikeEvent::Reaction(ev) => {
+                                info.insert_reaction(ev);
+                            },
+                            _ => continue,
+                        }
                     }
 
                     info.fetch_id =

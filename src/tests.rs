@@ -20,7 +20,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use url::Url;
 
 use crate::{
-    base::{ChatStore, ProgramStore, RoomFetchStatus, RoomInfo},
+    base::{ChatStore, EventLocation, ProgramStore, RoomFetchStatus, RoomInfo},
     config::{
         user_color,
         user_style_from_color,
@@ -117,14 +117,14 @@ pub fn mock_message5() -> Message {
     mock_room1_message(content, TEST_USER2.clone(), MSG4_KEY.clone())
 }
 
-pub fn mock_keys() -> HashMap<OwnedEventId, MessageKey> {
+pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
     let mut keys = HashMap::new();
 
-    keys.insert(MSG1_EVID.clone(), MSG1_KEY.clone());
-    keys.insert(MSG2_EVID.clone(), MSG2_KEY.clone());
-    keys.insert(MSG3_EVID.clone(), MSG3_KEY.clone());
-    keys.insert(MSG4_EVID.clone(), MSG4_KEY.clone());
-    keys.insert(MSG5_EVID.clone(), MSG5_KEY.clone());
+    keys.insert(MSG1_EVID.clone(), EventLocation::Message(MSG1_KEY.clone()));
+    keys.insert(MSG2_EVID.clone(), EventLocation::Message(MSG2_KEY.clone()));
+    keys.insert(MSG3_EVID.clone(), EventLocation::Message(MSG3_KEY.clone()));
+    keys.insert(MSG4_EVID.clone(), EventLocation::Message(MSG4_KEY.clone()));
+    keys.insert(MSG5_EVID.clone(), EventLocation::Message(MSG5_KEY.clone()));
 
     keys
 }
@@ -151,6 +151,7 @@ pub fn mock_room() -> RoomInfo {
 
         receipts: HashMap::new(),
         read_till: None,
+        reactions: HashMap::new(),
 
         fetch_id: RoomFetchStatus::NotStarted,
         fetch_last: None,
@@ -169,6 +170,8 @@ pub fn mock_dirs() -> DirectoryValues {
 pub fn mock_tunables() -> TunableValues {
     TunableValues {
         default_room: None,
+        reaction_display: true,
+        reaction_shortcode_display: false,
         read_receipt_send: true,
         read_receipt_display: true,
         typing_notice_send: true,

@@ -19,6 +19,7 @@ chrono = "0.4"
 clap = {version = "4.0", features = ["derive"]}
 css-color-parser = "0.1.2"
 dirs = "4.0.0"
+emojis = "~0.5.2"
 gethostname = "0.4.1"
 html5ever = "0.26.0"
 markup5ever_rcdom = "0.2.0"

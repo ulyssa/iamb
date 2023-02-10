@@ -163,8 +163,8 @@ fn iamb_cancel(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let ract = IambAction::from(MessageAction::Cancel);
-    let step = CommandStep::Continue(ract.into(), ctx.context.take());
+    let mact = IambAction::from(MessageAction::Cancel);
+    let step = CommandStep::Continue(mact.into(), ctx.context.take());
 
     return Ok(step);
 }
@@ -174,8 +174,55 @@ fn iamb_edit(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let ract = IambAction::from(MessageAction::Edit);
-    let step = CommandStep::Continue(ract.into(), ctx.context.take());
+    let mact = IambAction::from(MessageAction::Edit);
+    let step = CommandStep::Continue(mact.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
+fn iamb_react(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let args = desc.arg.strings()?;
+
+    if args.len() != 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let k = args[0].as_str();
+
+    if let Some(emoji) = emojis::get(k).or_else(|| emojis::get_by_shortcode(k)) {
+        let mact = IambAction::from(MessageAction::React(emoji.to_string()));
+        let step = CommandStep::Continue(mact.into(), ctx.context.take());
+
+        return Ok(step);
+    } else {
+        let msg = format!("Invalid Emoji or shortcode: {k}");
+
+        return Result::Err(CommandError::Error(msg));
+    }
+}
+
+fn iamb_unreact(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let mact = if let Some(k) = args.pop() {
+        let k = k.as_str();
+
+        if let Some(emoji) = emojis::get(k).or_else(|| emojis::get_by_shortcode(k)) {
+            IambAction::from(MessageAction::Unreact(Some(emoji.to_string())))
+        } else {
+            let msg = format!("Invalid Emoji or shortcode: {k}");
+
+            return Result::Err(CommandError::Error(msg));
+        }
+    } else {
+        IambAction::from(MessageAction::Unreact(None))
+    };
+
+    let step = CommandStep::Continue(mact.into(), ctx.context.take());
 
     return Ok(step);
 }
@@ -356,11 +403,13 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { names: vec!["invite".into()], f: iamb_invite });
     cmds.add_command(ProgramCommand { names: vec!["join".into()], f: iamb_join });
     cmds.add_command(ProgramCommand { names: vec!["members".into()], f: iamb_members });
+    cmds.add_command(ProgramCommand { names: vec!["react".into()], f: iamb_react });
     cmds.add_command(ProgramCommand { names: vec!["redact".into()], f: iamb_redact });
     cmds.add_command(ProgramCommand { names: vec!["reply".into()], f: iamb_reply });
     cmds.add_command(ProgramCommand { names: vec!["rooms".into()], f: iamb_rooms });
     cmds.add_command(ProgramCommand { names: vec!["room".into()], f: iamb_room });
     cmds.add_command(ProgramCommand { names: vec!["spaces".into()], f: iamb_spaces });
+    cmds.add_command(ProgramCommand { names: vec!["unreact".into()], f: iamb_unreact });
     cmds.add_command(ProgramCommand { names: vec!["upload".into()], f: iamb_upload });
     cmds.add_command(ProgramCommand { names: vec!["verify".into()], f: iamb_verify });
     cmds.add_command(ProgramCommand { names: vec!["welcome".into()], f: iamb_welcome });

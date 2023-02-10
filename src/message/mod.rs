@@ -24,6 +24,7 @@ use matrix_sdk::ruma::{
             },
             redaction::SyncRoomRedactionEvent,
         },
+        AnyMessageLikeEvent,
         Redact,
     },
     EventId,
@@ -52,7 +53,7 @@ use crate::{
 mod html;
 mod printer;
 
-pub type MessageFetchResult = IambResult<(Option<String>, Vec<RoomMessageEvent>)>;
+pub type MessageFetchResult = IambResult<(Option<String>, Vec<AnyMessageLikeEvent>)>;
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 pub type Messages = BTreeMap<MessageKey, Message>;
 
@@ -680,6 +681,43 @@ impl Message {
         if text.lines.is_empty() {
             // If there was nothing in the body, just show an empty message.
             fmt.push_spans(space_span(width, style).into(), style, &mut text);
+        }
+
+        if settings.tunables.reaction_display {
+            let mut emojis = printer::TextPrinter::new(width, style, false);
+            let mut reactions = 0;
+
+            for (key, count) in info.get_reactions(self.event.event_id()).into_iter() {
+                if reactions != 0 {
+                    emojis.push_str(" ", style);
+                }
+
+                let name = if settings.tunables.reaction_shortcode_display {
+                    if let Some(emoji) = emojis::get(key) {
+                        if let Some(short) = emoji.shortcode() {
+                            short
+                        } else {
+                            // No ASCII shortcode name to show.
+                            continue;
+                        }
+                    } else if key.chars().all(|c| c.is_ascii_alphanumeric()) {
+                        key
+                    } else {
+                        // Not an Emoji or a printable ASCII string.
+                        continue;
+                    }
+                } else {
+                    key
+                };
+
+                emojis.push_str(format!("[{name} {count}]"), style);
+
+                reactions += 1;
+            }
+
+            if reactions > 0 {
+                fmt.push_text(emojis.finish(), style, &mut text);
+            }
         }
 
         return text;

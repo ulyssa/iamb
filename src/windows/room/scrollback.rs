@@ -62,7 +62,7 @@ use modalkit::editing::{
 use crate::{
     base::{IambBufferId, IambInfo, ProgramContext, ProgramStore, RoomFocus, RoomInfo},
     config::ApplicationSettings,
-    message::{Message, MessageCursor, MessageKey},
+    message::{Message, MessageCursor, MessageKey, Messages},
 };
 
 fn nth_key_before(pos: MessageKey, n: usize, info: &RoomInfo) -> MessageKey {
@@ -164,11 +164,11 @@ impl ScrollbackState {
             .or_else(|| info.messages.last_key_value().map(|kv| kv.0.clone()))
     }
 
-    pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
+    pub fn get_mut<'a>(&mut self, messages: &'a mut Messages) -> Option<&'a mut Message> {
         if let Some(k) = &self.cursor.timestamp {
-            info.messages.get_mut(k)
+            messages.get_mut(k)
         } else {
-            info.messages.last_entry().map(|o| o.into_mut())
+            messages.last_entry().map(|o| o.into_mut())
         }
     }
 

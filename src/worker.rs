@@ -32,6 +32,7 @@ use matrix_sdk::{
                 start::{OriginalSyncKeyVerificationStartEvent, ToDeviceKeyVerificationStartEvent},
                 VerificationMethod,
             },
+            reaction::ReactionEventContent,
             room::{
                 message::{MessageType, RoomMessageEventContent},
                 name::RoomNameEventContent,
@@ -39,7 +40,6 @@ use matrix_sdk::{
             },
             tag::Tags,
             typing::SyncTypingEvent,
-            AnyMessageLikeEvent,
             AnyTimelineEvent,
             SyncMessageLikeEvent,
             SyncStateEvent,
@@ -57,7 +57,7 @@ use matrix_sdk::{
 use modalkit::editing::action::{EditInfo, InfoMessage, UIError};
 
 use crate::{
-    base::{AsyncProgramStore, IambError, IambResult, Receipts, VerifyAction},
+    base::{AsyncProgramStore, EventLocation, IambError, IambResult, Receipts, VerifyAction},
     message::MessageFetchResult,
     ApplicationSettings,
 };
@@ -553,6 +553,20 @@ impl ClientWorker {
         );
 
         let _ = self.client.add_event_handler(
+            |ev: SyncMessageLikeEvent<ReactionEventContent>,
+             room: MatrixRoom,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+
+                    let mut locked = store.lock().await;
+                    let info = locked.application.get_room_info(room_id.to_owned());
+                    info.insert_reaction(ev.into_full_event(room_id.to_owned()));
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
             |ev: OriginalSyncRoomRedactionEvent,
              room: MatrixRoom,
              store: Ctx<AsyncProgramStore>| {
@@ -564,15 +578,21 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
 
-                    let key = if let Some(k) = info.keys.get(&ev.redacts) {
-                        k
-                    } else {
-                        return;
-                    };
+                    match info.keys.get(&ev.redacts) {
+                        None => return,
+                        Some(EventLocation::Message(key)) => {
+                            if let Some(msg) = info.messages.get_mut(key) {
+                                let ev = SyncRoomRedactionEvent::Original(ev);
+                                msg.event.redact(ev, room_version);
+                            }
+                        },
+                        Some(EventLocation::Reaction(event_id)) => {
+                            if let Some(reactions) = info.reactions.get_mut(event_id) {
+                                reactions.remove(&ev.redacts);
+                            }
 
-                    if let Some(msg) = info.messages.get_mut(key) {
-                        let ev = SyncRoomRedactionEvent::Original(ev);
-                        msg.event.redact(ev, room_version);
+                            info.keys.remove(&ev.redacts);
+                        },
                     }
                 }
             },
@@ -891,13 +911,7 @@ impl ClientWorker {
 
             let msgs = chunk.into_iter().filter_map(|ev| {
                 match ev.event.deserialize() {
-                    Ok(AnyTimelineEvent::MessageLike(msg)) => {
-                        if let AnyMessageLikeEvent::RoomMessage(msg) = msg {
-                            Some(msg)
-                        } else {
-                            None
-                        }
-                    },
+                    Ok(AnyTimelineEvent::MessageLike(msg)) => Some(msg),
                     Ok(AnyTimelineEvent::State(_)) => None,
                     Err(_) => None,
                 }

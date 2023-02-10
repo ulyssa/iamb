@@ -178,6 +178,8 @@ fn merge_users(a: Option<UserOverrides>, b: Option<UserOverrides>) -> Option<Use
 
 #[derive(Clone)]
 pub struct TunableValues {
+    pub reaction_display: bool,
+    pub reaction_shortcode_display: bool,
     pub read_receipt_send: bool,
     pub read_receipt_display: bool,
     pub typing_notice_send: bool,
@@ -188,6 +190,8 @@ pub struct TunableValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
+    pub reaction_display: Option<bool>,
+    pub reaction_shortcode_display: Option<bool>,
     pub read_receipt_send: Option<bool>,
     pub read_receipt_display: Option<bool>,
     pub typing_notice_send: Option<bool>,
@@ -199,6 +203,10 @@ pub struct Tunables {
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
+            reaction_display: self.reaction_display.or(other.reaction_display),
+            reaction_shortcode_display: self
+                .reaction_shortcode_display
+                .or(other.reaction_shortcode_display),
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
@@ -210,6 +218,8 @@ impl Tunables {
 
     fn values(self) -> TunableValues {
         TunableValues {
+            reaction_display: self.reaction_display.unwrap_or(true),
+            reaction_shortcode_display: self.reaction_shortcode_display.unwrap_or(false),
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
