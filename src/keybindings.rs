@@ -7,7 +7,9 @@ use modalkit::{
     input::key::TerminalKey,
 };
 
-use crate::base::{IambAction, Keybindings};
+use crate::base::{IambAction, IambInfo, Keybindings};
+
+type IambStep = InputStep<IambInfo>;
 
 /// Find the boundaries for a Matrix username, room alias, or room ID.
 ///
@@ -44,19 +46,27 @@ pub fn setup_keybindings() -> Keybindings {
         (EdgeRepeat::Once, ctrl_w.clone()),
         (EdgeRepeat::Once, ctrl_z),
     ];
-    let zoom = InputStep::new().actions(vec![WindowAction::ZoomToggle.into()]);
+    let zoom = IambStep::new()
+        .actions(vec![WindowAction::ZoomToggle.into()])
+        .goto(VimMode::Normal);
 
     ism.add_mapping(VimMode::Normal, &cwz, &zoom);
+    ism.add_mapping(VimMode::Visual, &cwz, &zoom);
     ism.add_mapping(VimMode::Normal, &cwcz, &zoom);
+    ism.add_mapping(VimMode::Visual, &cwcz, &zoom);
 
     let cwm = vec![
         (EdgeRepeat::Once, ctrl_w.clone()),
         (EdgeRepeat::Once, key_m_lc),
     ];
     let cwcm = vec![(EdgeRepeat::Once, ctrl_w), (EdgeRepeat::Once, ctrl_m)];
-    let stoggle = InputStep::new().actions(vec![IambAction::ToggleScrollbackFocus.into()]);
+    let stoggle = IambStep::new()
+        .actions(vec![IambAction::ToggleScrollbackFocus.into()])
+        .goto(VimMode::Normal);
     ism.add_mapping(VimMode::Normal, &cwm, &stoggle);
+    ism.add_mapping(VimMode::Visual, &cwm, &stoggle);
     ism.add_mapping(VimMode::Normal, &cwcm, &stoggle);
+    ism.add_mapping(VimMode::Visual, &cwcm, &stoggle);
 
     return ism;
 }

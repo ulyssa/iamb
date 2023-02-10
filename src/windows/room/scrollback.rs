@@ -591,7 +591,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let needle = match ctx.get_search_regex() {
                             Some(re) => re,
                             None => {
-                                let lsearch = store.registers.get(&Register::LastSearch);
+                                let lsearch = store.registers.get(&Register::LastSearch)?;
                                 let lsearch = lsearch.value.to_string();
 
                                 Regex::new(lsearch.as_ref())?
@@ -677,7 +677,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let needle = match ctx.get_search_regex() {
                             Some(re) => re,
                             None => {
-                                let lsearch = store.registers.get(&Register::LastSearch);
+                                let lsearch = store.registers.get(&Register::LastSearch)?;
                                 let lsearch = lsearch.value.to_string();
 
                                 Regex::new(lsearch.as_ref())?
@@ -725,7 +725,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         flags |= RegisterPutFlags::APPEND;
                     }
 
-                    store.registers.put(&register, cell, flags);
+                    store.registers.put(&register, cell, flags)?;
                 }
 
                 return Ok(None);
@@ -733,7 +733,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
             // Everything else is a modifying action.
             EditAction::ChangeCase(_) => Err(EditError::ReadOnly),
-            EditAction::ChangeNumber(_) => Err(EditError::ReadOnly),
+            EditAction::ChangeNumber(_, _) => Err(EditError::ReadOnly),
             EditAction::Delete => Err(EditError::ReadOnly),
             EditAction::Format => Err(EditError::ReadOnly),
             EditAction::Indent(_) => Err(EditError::ReadOnly),
