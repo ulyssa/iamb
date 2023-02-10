@@ -73,7 +73,7 @@ two other TUI clients and Element Web:
 | Multiple Matrix Accounts                | ✔️           | ❌       | ✔️                | ❌                  |
 | New user registration                   | ❌          | ❌       | ❌               | ✔️                   |
 | VOIP                                    | ❌          | ❌       | ❌               | ✔️                   |
-| Reactions                               | ❌  ([#2])  | ✔️        | ❌               | ✔️                   |
+| Reactions                               | ✔️           | ✔️        | ❌               | ✔️                   |
 | Message editing                         | ✔️           | ✔️        | ❌               | ✔️                   |
 | Room upgrades                           | ❌          | ✔️        | ❌               | ✔️                   |
 | Localisations                           | ❌          | 1        | ❌               | 44                  |
