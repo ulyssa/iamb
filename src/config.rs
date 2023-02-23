@@ -11,6 +11,7 @@ use std::process;
 
 use clap::Parser;
 use matrix_sdk::ruma::{OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use ratatui_image::picker::ProtocolType;
 use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer};
 use tracing::Level;
 use url::Url;
@@ -267,6 +268,41 @@ pub enum UserDisplayStyle {
 }
 
 #[derive(Clone)]
+pub struct ImagePreviewValues {
+    pub size: ImagePreviewSize,
+    pub protocol: Option<ImagePreviewProtocolValues>,
+}
+#[derive(Clone, Default, Deserialize)]
+pub struct ImagePreview {
+    pub size: Option<ImagePreviewSize>,
+    pub protocol: Option<ImagePreviewProtocolValues>,
+}
+impl ImagePreview {
+    fn values(self) -> ImagePreviewValues {
+        ImagePreviewValues {
+            size: self.size.unwrap_or_default(),
+            protocol: self.protocol,
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+pub struct ImagePreviewSize {
+    pub width: usize,
+    pub height: usize,
+}
+impl Default for ImagePreviewSize {
+    fn default() -> Self {
+        ImagePreviewSize { width: 66, height: 10 }
+    }
+}
+#[derive(Clone, Deserialize)]
+pub struct ImagePreviewProtocolValues {
+    pub r#type: Option<ProtocolType>,
+    pub font_size: Option<(u16, u16)>,
+}
+
+#[derive(Clone)]
 pub struct SortValues {
     pub dms: Vec<SortColumn<SortFieldRoom>>,
     pub rooms: Vec<SortColumn<SortFieldRoom>>,
@@ -308,6 +344,7 @@ pub struct TunableValues {
     pub username_display: UserDisplayStyle,
     pub default_room: Option<String>,
     pub open_command: Option<Vec<String>>,
+    pub image_preview: Option<ImagePreviewValues>,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -326,6 +363,7 @@ pub struct Tunables {
     pub username_display: Option<UserDisplayStyle>,
     pub default_room: Option<String>,
     pub open_command: Option<Vec<String>>,
+    pub image_preview: Option<ImagePreview>,
 }
 
 impl Tunables {
@@ -346,6 +384,7 @@ impl Tunables {
             username_display: self.username_display.or(other.username_display),
             default_room: self.default_room.or(other.default_room),
             open_command: self.open_command.or(other.open_command),
+            image_preview: self.image_preview.or(other.image_preview),
         }
     }
 
@@ -364,6 +403,7 @@ impl Tunables {
             username_display: self.username_display.unwrap_or_default(),
             default_room: self.default_room,
             open_command: self.open_command,
+            image_preview: self.image_preview.map(ImagePreview::values),
         }
     }
 }
@@ -373,6 +413,7 @@ pub struct DirectoryValues {
     pub cache: PathBuf,
     pub logs: PathBuf,
     pub downloads: Option<PathBuf>,
+    pub image_previews: PathBuf,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -380,6 +421,7 @@ pub struct Directories {
     pub cache: Option<PathBuf>,
     pub logs: Option<PathBuf>,
     pub downloads: Option<PathBuf>,
+    pub image_previews: Option<PathBuf>,
 }
 
 impl Directories {
@@ -388,6 +430,7 @@ impl Directories {
             cache: self.cache.or(other.cache),
             logs: self.logs.or(other.logs),
             downloads: self.downloads.or(other.downloads),
+            image_previews: self.image_previews.or(other.image_previews),
         }
     }
 
@@ -409,7 +452,13 @@ impl Directories {
 
         let downloads = self.downloads.or_else(dirs::download_dir);
 
-        DirectoryValues { cache, logs, downloads }
+        let image_previews = self.image_previews.unwrap_or_else(|| {
+            let mut dir = cache.clone();
+            dir.push("image_preview_downloads");
+            dir
+        });
+
+        DirectoryValues { cache, logs, downloads, image_previews }
     }
 }
 

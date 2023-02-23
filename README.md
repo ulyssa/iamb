@@ -104,6 +104,7 @@ two other TUI clients and Element Web:
 | Room upgrades                           | ❌ ([#41])  | ✔️        | ❌               | ✔️                   |
 | Localisations                           | ❌          | 1        | ❌               | 44                  |
 | SSO Support                             | ✔️           | ✔️        | ✔️                | ✔️                   |
+| Image preview                           | ✔️           | ❌       | ❌               | ✔️                   |
                                                                                        
 ## License
 

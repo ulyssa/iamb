@@ -22,18 +22,25 @@
           pname = "iamb";
           version = "0.0.7";
           src = ./.;
-          cargoLock.lockFile = ./Cargo.lock;
+          cargoLock = {
+            lockFile = ./Cargo.lock;
+            # Remove this once modalkit gets pinned by version again.
+            outputHashes = {
+              "modalkit-0.0.16" = "sha256-mjAD1v0r2+SzPdoB2wZ/5iJ1NZK+3OSvCYcUZ5Ef38Y=";
+            };
+          };
           nativeBuildInputs = [ pkgs.pkgconfig ];
           buildInputs = [ pkgs.openssl ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin
             (with pkgs.darwin.apple_sdk.frameworks; [ AppKit Security ]);
         };
         devShell = mkShell {
           buildInputs = [
-            (rustNightly.override { extensions = [ "rust-src" ]; })
+            (rustNightly.override {
+              extensions = [ "rust-src" "rust-analyzer-preview" "rustfmt" "clippy" ]; 
+            })
             pkg-config
             cargo-tarpaulin
-            rust-analyzer
-            rustfmt
+            cargo-watch
           ];
         };
       });
