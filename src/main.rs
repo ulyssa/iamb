@@ -54,13 +54,11 @@ use crate::{
         AsyncProgramStore,
         ChatStore,
         IambAction,
-        IambBufferId,
         IambError,
         IambId,
         IambInfo,
         IambResult,
         ProgramAction,
-        ProgramCommands,
         ProgramContext,
         ProgramStore,
     },
@@ -116,7 +114,6 @@ struct Application {
     terminal: Terminal<CrosstermBackend<Stdout>>,
     bindings: KeyManager<TerminalKey, ProgramAction, RepeatType, ProgramContext>,
     actstack: VecDeque<(ProgramAction, ProgramContext)>,
-    cmds: ProgramCommands,
     screen: ScreenState<IambWindow, IambInfo>,
 }
 
@@ -138,7 +135,6 @@ impl Application {
 
         let bindings = crate::keybindings::setup_keybindings();
         let bindings = KeyManager::new(bindings);
-        let cmds = crate::commands::setup_commands();
 
         let mut locked = store.lock().await;
 
@@ -149,7 +145,7 @@ impl Application {
             .or_else(|| IambWindow::open(IambId::Welcome, locked.deref_mut()).ok())
             .unwrap();
 
-        let cmd = CommandBarState::new(IambBufferId::Command, locked.deref_mut());
+        let cmd = CommandBarState::new(locked.deref_mut());
         let screen = ScreenState::new(win, cmd);
 
         let worker = locked.application.worker.clone();
@@ -163,7 +159,6 @@ impl Application {
             terminal,
             bindings,
             actstack,
-            cmds,
             screen,
         })
     }
@@ -321,7 +316,7 @@ impl Application {
                 None
             },
             Action::Command(act) => {
-                let acts = self.cmds.command(&act, &ctx)?;
+                let acts = store.application.cmds.command(&act, &ctx)?;
                 self.action_prepend(acts);
 
                 None

@@ -1,34 +1,21 @@
 use modalkit::{
     editing::action::WindowAction,
-    editing::base::WordStyle,
     env::vim::keybindings::{InputStep, VimBindings},
     env::vim::VimMode,
     input::bindings::{EdgeEvent, EdgeRepeat, InputBindings},
     input::key::TerminalKey,
 };
 
-use crate::base::{IambAction, IambInfo, Keybindings};
+use crate::base::{IambAction, IambInfo, Keybindings, MATRIX_ID_WORD};
 
 type IambStep = InputStep<IambInfo>;
-
-/// Find the boundaries for a Matrix username, room alias, or room ID.
-///
-/// Technically "[" and "]" should be here since IPv6 addresses are allowed
-/// in the server name, but in practice that should be uncommon, and people
-/// can just use `gf` and friends in Visual mode instead.
-fn is_mxid_char(c: char) -> bool {
-    return c >= 'a' && c <= 'z' ||
-        c >= 'A' && c <= 'Z' ||
-        c >= '0' && c <= '9' ||
-        ":-./@_#!".contains(c);
-}
 
 pub fn setup_keybindings() -> Keybindings {
     let mut ism = Keybindings::empty();
 
     let vim = VimBindings::default()
         .submit_on_enter()
-        .cursor_open(WordStyle::CharSet(is_mxid_char));
+        .cursor_open(MATRIX_ID_WORD.clone());
 
     vim.setup(&mut ism);
 

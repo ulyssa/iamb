@@ -208,6 +208,14 @@ pub async fn mock_store() -> ProgramStore {
     let worker = Requester { tx, client };
 
     let mut store = ChatStore::new(worker, mock_settings());
+
+    // Add presence information.
+    store.presences.get_or_default(TEST_USER1.clone());
+    store.presences.get_or_default(TEST_USER2.clone());
+    store.presences.get_or_default(TEST_USER3.clone());
+    store.presences.get_or_default(TEST_USER4.clone());
+    store.presences.get_or_default(TEST_USER5.clone());
+
     let room_id = TEST_ROOM1_ID.clone();
     let info = mock_room();
 

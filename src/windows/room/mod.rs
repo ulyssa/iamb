@@ -40,7 +40,9 @@ use modalkit::{
         PositionList,
         ScrollStyle,
         WordStyle,
+        WriteFlags,
     },
+    editing::completion::CompletionList,
     input::InputContext,
     widgets::{TermOffset, TerminalCursor, WindowOps},
 };
@@ -383,10 +385,30 @@ impl WindowOps<IambInfo> for RoomState {
         }
     }
 
-    fn close(&mut self, _: CloseFlags, _: &mut ProgramStore) -> bool {
-        // XXX: what's the right closing behaviour for a room?
-        // Should write send a message?
-        true
+    fn close(&mut self, flags: CloseFlags, store: &mut ProgramStore) -> bool {
+        match self {
+            RoomState::Chat(chat) => chat.close(flags, store),
+            RoomState::Space(space) => space.close(flags, store),
+        }
+    }
+
+    fn write(
+        &mut self,
+        path: Option<&str>,
+        flags: WriteFlags,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        match self {
+            RoomState::Chat(chat) => chat.write(path, flags, store),
+            RoomState::Space(space) => space.write(path, flags, store),
+        }
+    }
+
+    fn get_completions(&self) -> Option<CompletionList> {
+        match self {
+            RoomState::Chat(chat) => chat.get_completions(),
+            RoomState::Space(space) => space.get_completions(),
+        }
     }
 
     fn get_cursor_word(&self, style: &WordStyle) -> Option<String> {

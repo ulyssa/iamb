@@ -1,5 +1,4 @@
 use std::cmp::{Ord, Ordering, PartialOrd};
-use std::collections::hash_map::Entry;
 
 use matrix_sdk::{
     encryption::verification::{format_emojis, SasVerification},
@@ -45,7 +44,9 @@ use modalkit::{
             ScrollStyle,
             ViewportContext,
             WordStyle,
+            WriteFlags,
         },
+        completion::CompletionList,
     },
     widgets::{
         list::{List, ListCursor, ListItem, ListState},
@@ -469,6 +470,19 @@ impl WindowOps<IambInfo> for IambWindow {
         delegate!(self, w => w.close(flags, store))
     }
 
+    fn write(
+        &mut self,
+        path: Option<&str>,
+        flags: WriteFlags,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        delegate!(self, w => w.write(path, flags, store))
+    }
+
+    fn get_completions(&self) -> Option<CompletionList> {
+        delegate!(self, w => w.get_completions())
+    }
+
     fn get_cursor_word(&self, style: &WordStyle) -> Option<String> {
         delegate!(self, w => w.get_cursor_word(style))
     }
@@ -575,21 +589,18 @@ impl Window<IambInfo> for IambWindow {
     fn find(name: String, store: &mut ProgramStore) -> IambResult<Self> {
         let ChatStore { names, worker, .. } = &mut store.application;
 
-        match names.entry(name) {
-            Entry::Vacant(v) => {
-                let room_id = worker.join_room(v.key().to_string())?;
-                v.insert(room_id.clone());
+        if let Some(room) = names.get_mut(&name) {
+            let id = IambId::Room(room.clone());
 
-                let (room, name, tags) = store.application.worker.get_room(room_id)?;
-                let room = RoomState::new(room, name, tags, store);
+            IambWindow::open(id, store)
+        } else {
+            let room_id = worker.join_room(name.clone())?;
+            names.insert(name, room_id.clone());
 
-                Ok(room.into())
-            },
-            Entry::Occupied(o) => {
-                let id = IambId::Room(o.get().clone());
+            let (room, name, tags) = store.application.worker.get_room(room_id)?;
+            let room = RoomState::new(room, name, tags, store);
 
-                IambWindow::open(id, store)
-            },
+            Ok(room.into())
         }
     }
 
@@ -620,10 +631,15 @@ impl RoomItem {
         store: &mut ProgramStore,
     ) -> Self {
         let name = name.to_string();
+        let room_id = room.room_id();
 
-        let info = store.application.get_room_info(room.room_id().to_owned());
+        let info = store.application.get_room_info(room_id.to_owned());
         info.name = name.clone().into();
         info.tags = tags.clone();
+
+        if let Some(alias) = room.canonical_alias() {
+            store.application.names.insert(alias.to_string(), room_id.to_owned());
+        }
 
         RoomItem { room, tags, name }
     }
@@ -772,8 +788,13 @@ pub struct SpaceItem {
 impl SpaceItem {
     fn new(room: MatrixRoom, name: DisplayName, store: &mut ProgramStore) -> Self {
         let name = name.to_string();
+        let room_id = room.room_id();
 
-        store.application.set_room_name(room.room_id(), name.as_str());
+        store.application.set_room_name(room_id, name.as_str());
+
+        if let Some(alias) = room.canonical_alias() {
+            store.application.names.insert(alias.to_string(), room_id.to_owned());
+        }
 
         SpaceItem { room, name }
     }

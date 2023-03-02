@@ -52,7 +52,8 @@ use modalkit::editing::{
         Scrollable,
         UIError,
     },
-    base::{CloseFlags, Count, MoveDir1D, PositionList, ScrollStyle, WordStyle},
+    base::{CloseFlags, Count, MoveDir1D, PositionList, ScrollStyle, WordStyle, WriteFlags},
+    completion::CompletionList,
     context::Resolve,
     history::{self, HistoryList},
     rope::EditRope,
@@ -154,7 +155,7 @@ impl ChatState {
         let client = &store.application.worker.client;
 
         let settings = &store.application.settings;
-        let info = store.application.rooms.entry(self.room_id.clone()).or_default();
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
 
         let msg = self
             .scrollback
@@ -389,7 +390,7 @@ impl ChatState {
             .client
             .get_joined_room(self.id())
             .ok_or(IambError::NotJoined)?;
-        let info = store.application.rooms.entry(self.id().to_owned()).or_default();
+        let info = store.application.rooms.get_or_default(self.id().to_owned());
         let mut show_echo = true;
 
         let (event_id, msg) = match act {
@@ -548,6 +549,21 @@ impl WindowOps<IambInfo> for ChatState {
         // XXX: what's the right closing behaviour for a room?
         // Should write send a message?
         true
+    }
+
+    fn write(
+        &mut self,
+        _: Option<&str>,
+        _: WriteFlags,
+        _: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        // XXX: what's the right writing behaviour for a room?
+        // Should write send a message?
+        Ok(None)
+    }
+
+    fn get_completions(&self) -> Option<CompletionList> {
+        delegate!(self, w => w.get_completions())
     }
 
     fn get_cursor_word(&self, style: &WordStyle) -> Option<String> {

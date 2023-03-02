@@ -8,9 +8,11 @@ use modalkit::{
     widgets::{TermOffset, TerminalCursor},
 };
 
-use modalkit::editing::base::{CloseFlags, WordStyle};
+use modalkit::editing::action::EditInfo;
+use modalkit::editing::base::{CloseFlags, WordStyle, WriteFlags};
+use modalkit::editing::completion::CompletionList;
 
-use crate::base::{IambBufferId, IambInfo, ProgramStore};
+use crate::base::{IambBufferId, IambInfo, IambResult, ProgramStore};
 
 const WELCOME_TEXT: &str = include_str!("welcome.md");
 
@@ -61,6 +63,19 @@ impl WindowOps<IambInfo> for WelcomeState {
 
     fn close(&mut self, flags: CloseFlags, store: &mut ProgramStore) -> bool {
         self.tbox.close(flags, store)
+    }
+
+    fn write(
+        &mut self,
+        path: Option<&str>,
+        flags: WriteFlags,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        self.tbox.write(path, flags, store)
+    }
+
+    fn get_completions(&self) -> Option<CompletionList> {
+        self.tbox.get_completions()
     }
 
     fn get_cursor_word(&self, style: &WordStyle) -> Option<String> {

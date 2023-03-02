@@ -32,6 +32,7 @@ use matrix_sdk::{
                 start::{OriginalSyncKeyVerificationStartEvent, ToDeviceKeyVerificationStartEvent},
                 VerificationMethod,
             },
+            presence::PresenceEvent,
             reaction::ReactionEventContent,
             room::{
                 message::{MessageType, RoomMessageEventContent},
@@ -503,6 +504,15 @@ impl ClientWorker {
             },
         );
 
+        let _ =
+            self.client
+                .add_event_handler(|ev: PresenceEvent, store: Ctx<AsyncProgramStore>| {
+                    async move {
+                        let mut locked = store.lock().await;
+                        locked.application.presences.insert(ev.sender, ev.content.presence);
+                    }
+                });
+
         let _ = self.client.add_event_handler(
             |ev: SyncStateEvent<RoomNameEventContent>,
              room: MatrixRoom,
@@ -513,8 +523,7 @@ impl ClientWorker {
                             let room_id = room.room_id().to_owned();
                             let room_name = Some(room_name.to_string());
                             let mut locked = store.lock().await;
-                            let mut info =
-                                locked.application.rooms.entry(room_id.to_owned()).or_default();
+                            let mut info = locked.application.rooms.get_or_default(room_id.clone());
                             info.name = room_name;
                         }
                     }
@@ -529,8 +538,6 @@ impl ClientWorker {
              store: Ctx<AsyncProgramStore>| {
                 async move {
                     let room_id = room.room_id();
-                    let room_name = room.display_name().await.ok();
-                    let room_name = room_name.as_ref().map(ToString::to_string);
 
                     if let Some(msg) = ev.as_original() {
                         if let MessageType::VerificationRequest(_) = msg.content.msgtype {
@@ -545,8 +552,11 @@ impl ClientWorker {
                     }
 
                     let mut locked = store.lock().await;
-                    let mut info = locked.application.get_room_info(room_id.to_owned());
-                    info.name = room_name;
+
+                    let sender = ev.sender().to_owned();
+                    let _ = locked.application.presences.get_or_default(sender);
+
+                    let info = locked.application.get_room_info(room_id.to_owned());
                     info.insert(ev.into_full_event(room_id.to_owned()));
                 }
             },
@@ -560,6 +570,10 @@ impl ClientWorker {
                     let room_id = room.room_id();
 
                     let mut locked = store.lock().await;
+
+                    let sender = ev.sender().to_owned();
+                    let _ = locked.application.presences.get_or_default(sender);
+
                     let info = locked.application.get_room_info(room_id.to_owned());
                     info.insert_reaction(ev.into_full_event(room_id.to_owned()));
                 }

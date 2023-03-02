@@ -395,24 +395,76 @@ fn iamb_open(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 }
 
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
-    cmds.add_command(ProgramCommand { names: vec!["cancel".into()], f: iamb_cancel });
-    cmds.add_command(ProgramCommand { names: vec!["dms".into()], f: iamb_dms });
-    cmds.add_command(ProgramCommand { names: vec!["download".into()], f: iamb_download });
-    cmds.add_command(ProgramCommand { names: vec!["open".into()], f: iamb_open });
-    cmds.add_command(ProgramCommand { names: vec!["edit".into()], f: iamb_edit });
-    cmds.add_command(ProgramCommand { names: vec!["invite".into()], f: iamb_invite });
-    cmds.add_command(ProgramCommand { names: vec!["join".into()], f: iamb_join });
-    cmds.add_command(ProgramCommand { names: vec!["members".into()], f: iamb_members });
-    cmds.add_command(ProgramCommand { names: vec!["react".into()], f: iamb_react });
-    cmds.add_command(ProgramCommand { names: vec!["redact".into()], f: iamb_redact });
-    cmds.add_command(ProgramCommand { names: vec!["reply".into()], f: iamb_reply });
-    cmds.add_command(ProgramCommand { names: vec!["rooms".into()], f: iamb_rooms });
-    cmds.add_command(ProgramCommand { names: vec!["room".into()], f: iamb_room });
-    cmds.add_command(ProgramCommand { names: vec!["spaces".into()], f: iamb_spaces });
-    cmds.add_command(ProgramCommand { names: vec!["unreact".into()], f: iamb_unreact });
-    cmds.add_command(ProgramCommand { names: vec!["upload".into()], f: iamb_upload });
-    cmds.add_command(ProgramCommand { names: vec!["verify".into()], f: iamb_verify });
-    cmds.add_command(ProgramCommand { names: vec!["welcome".into()], f: iamb_welcome });
+    cmds.add_command(ProgramCommand {
+        name: "cancel".into(),
+        aliases: vec![],
+        f: iamb_cancel,
+    });
+    cmds.add_command(ProgramCommand { name: "dms".into(), aliases: vec![], f: iamb_dms });
+    cmds.add_command(ProgramCommand {
+        name: "download".into(),
+        aliases: vec![],
+        f: iamb_download,
+    });
+    cmds.add_command(ProgramCommand { name: "open".into(), aliases: vec![], f: iamb_open });
+    cmds.add_command(ProgramCommand { name: "edit".into(), aliases: vec![], f: iamb_edit });
+    cmds.add_command(ProgramCommand {
+        name: "invite".into(),
+        aliases: vec![],
+        f: iamb_invite,
+    });
+    cmds.add_command(ProgramCommand { name: "join".into(), aliases: vec![], f: iamb_join });
+    cmds.add_command(ProgramCommand {
+        name: "members".into(),
+        aliases: vec![],
+        f: iamb_members,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "react".into(),
+        aliases: vec![],
+        f: iamb_react,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "redact".into(),
+        aliases: vec![],
+        f: iamb_redact,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "reply".into(),
+        aliases: vec![],
+        f: iamb_reply,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "rooms".into(),
+        aliases: vec![],
+        f: iamb_rooms,
+    });
+    cmds.add_command(ProgramCommand { name: "room".into(), aliases: vec![], f: iamb_room });
+    cmds.add_command(ProgramCommand {
+        name: "spaces".into(),
+        aliases: vec![],
+        f: iamb_spaces,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "unreact".into(),
+        aliases: vec![],
+        f: iamb_unreact,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "upload".into(),
+        aliases: vec![],
+        f: iamb_upload,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "verify".into(),
+        aliases: vec![],
+        f: iamb_verify,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "welcome".into(),
+        aliases: vec![],
+        f: iamb_welcome,
+    });
 }
 
 pub fn setup_commands() -> ProgramCommands {

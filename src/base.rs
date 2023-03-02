@@ -1,8 +1,11 @@
+use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::hash::Hash;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use emojis::Emoji;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::warn;
 
@@ -23,6 +26,7 @@ use matrix_sdk::{
             AnyMessageLikeEvent,
             MessageLikeEvent,
         },
+        presence::PresenceState,
         EventId,
         OwnedEventId,
         OwnedRoomId,
@@ -42,11 +46,15 @@ use modalkit::{
             ApplicationStore,
             ApplicationWindowId,
         },
+        base::{CommandType, WordStyle},
+        completion::{complete_path, CompletionMap},
         context::EditContext,
+        cursor::Cursor,
+        rope::EditRope,
         store::Store,
     },
     env::vim::{
-        command::{CommandContext, VimCommand, VimCommandMachine},
+        command::{CommandContext, CommandDescription, VimCommand, VimCommandMachine},
         keybindings::VimMachine,
         VimContext,
     },
@@ -65,6 +73,20 @@ use crate::{
     worker::Requester,
     ApplicationSettings,
 };
+
+pub const MATRIX_ID_WORD: WordStyle = WordStyle::CharSet(is_mxid_char);
+
+/// Find the boundaries for a Matrix username, room alias, or room ID.
+///
+/// Technically "[" and "]" should be here since IPv6 addresses are allowed
+/// in the server name, but in practice that should be uncommon, and people
+/// can just use `gf` and friends in Visual mode instead.
+fn is_mxid_char(c: char) -> bool {
+    return c >= 'a' && c <= 'z' ||
+        c >= 'A' && c <= 'Z' ||
+        c >= '0' && c <= '9' ||
+        ":-./@_#!".contains(c);
+}
 
 const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
 
@@ -528,13 +550,28 @@ impl RoomInfo {
     }
 }
 
+fn emoji_map() -> CompletionMap<String, &'static Emoji> {
+    let mut emojis = CompletionMap::default();
+
+    for emoji in emojis::iter() {
+        for shortcode in emoji.shortcodes() {
+            emojis.insert(shortcode.to_string(), emoji);
+        }
+    }
+
+    return emojis;
+}
+
 pub struct ChatStore {
+    pub cmds: ProgramCommands,
     pub worker: Requester,
-    pub rooms: HashMap<OwnedRoomId, RoomInfo>,
-    pub names: HashMap<String, OwnedRoomId>,
+    pub rooms: CompletionMap<OwnedRoomId, RoomInfo>,
+    pub names: CompletionMap<String, OwnedRoomId>,
+    pub presences: CompletionMap<OwnedUserId, PresenceState>,
     pub verifications: HashMap<String, SasVerification>,
     pub settings: ApplicationSettings,
     pub need_load: HashSet<OwnedRoomId>,
+    pub emojis: CompletionMap<String, &'static Emoji>,
 }
 
 impl ChatStore {
@@ -543,10 +580,13 @@ impl ChatStore {
             worker,
             settings,
 
+            cmds: crate::commands::setup_commands(),
             names: Default::default(),
             rooms: Default::default(),
+            presences: Default::default(),
             verifications: Default::default(),
             need_load: Default::default(),
+            emojis: emoji_map(),
         }
     }
 
@@ -587,10 +627,10 @@ impl ChatStore {
     }
 
     pub fn load_older(&mut self, limit: u32) {
-        let ChatStore { need_load, rooms, worker, .. } = self;
+        let ChatStore { need_load, presences, rooms, worker, .. } = self;
 
         for room_id in std::mem::take(need_load).into_iter() {
-            let info = rooms.entry(room_id.clone()).or_default();
+            let info = rooms.get_or_default(room_id.clone());
 
             if info.recently_fetched() {
                 need_load.insert(room_id);
@@ -610,6 +650,9 @@ impl ChatStore {
             match res {
                 Ok((fetch_id, msgs)) => {
                     for msg in msgs.into_iter() {
+                        let sender = msg.sender().to_owned();
+                        let _ = presences.get_or_default(sender);
+
                         match msg {
                             AnyMessageLikeEvent::RoomMessage(msg) => {
                                 info.insert(msg);
@@ -639,11 +682,11 @@ impl ChatStore {
     }
 
     pub fn get_room_info(&mut self, room_id: OwnedRoomId) -> &mut RoomInfo {
-        self.rooms.entry(room_id).or_default()
+        self.rooms.get_or_default(room_id)
     }
 
     pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
-        self.rooms.entry(room_id.to_owned()).or_default().name = name.to_string().into();
+        self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
     }
 
     pub fn insert_sas(&mut self, sas: SasVerification) {
@@ -686,7 +729,7 @@ impl RoomFocus {
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IambBufferId {
-    Command,
+    Command(CommandType),
     Room(OwnedRoomId, RoomFocus),
     DirectList,
     MemberList(OwnedRoomId),
@@ -699,7 +742,7 @@ pub enum IambBufferId {
 impl IambBufferId {
     pub fn to_window(&self) -> Option<IambId> {
         match self {
-            IambBufferId::Command => None,
+            IambBufferId::Command(_) => None,
             IambBufferId::Room(room, _) => Some(IambId::Room(room.clone())),
             IambBufferId::DirectList => Some(IambId::DirectList),
             IambBufferId::MemberList(room) => Some(IambId::MemberList(room.clone())),
@@ -719,6 +762,133 @@ impl ApplicationInfo for IambInfo {
     type Action = IambAction;
     type WindowId = IambId;
     type ContentId = IambBufferId;
+
+    fn complete(
+        text: &EditRope,
+        cursor: &mut Cursor,
+        content: &IambBufferId,
+        store: &mut ProgramStore,
+    ) -> Vec<String> {
+        match content {
+            IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
+            IambBufferId::Command(CommandType::Search) => vec![],
+
+            IambBufferId::Room(_, RoomFocus::MessageBar) => {
+                complete_matrix_names(text, cursor, store)
+            },
+            IambBufferId::Room(_, RoomFocus::Scrollback) => vec![],
+
+            IambBufferId::DirectList => vec![],
+            IambBufferId::MemberList(_) => vec![],
+            IambBufferId::RoomList => vec![],
+            IambBufferId::SpaceList => vec![],
+            IambBufferId::VerifyList => vec![],
+            IambBufferId::Welcome => vec![],
+        }
+    }
+
+    fn content_of_command(ct: CommandType) -> IambBufferId {
+        IambBufferId::Command(ct)
+    }
+}
+
+fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
+    let id = text
+        .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
+        .unwrap_or_else(EditRope::empty);
+    let id = Cow::from(&id);
+
+    store
+        .application
+        .presences
+        .complete(id.as_ref())
+        .into_iter()
+        .map(|i| i.to_string())
+        .collect()
+}
+
+fn complete_matrix_names(
+    text: &EditRope,
+    cursor: &mut Cursor,
+    store: &ProgramStore,
+) -> Vec<String> {
+    let id = text
+        .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
+        .unwrap_or_else(EditRope::empty);
+    let id = Cow::from(&id);
+
+    let list = store.application.names.complete(id.as_ref());
+    if !list.is_empty() {
+        return list;
+    }
+
+    let list = store.application.presences.complete(id.as_ref());
+    if !list.is_empty() {
+        return list.into_iter().map(|i| i.to_string()).collect();
+    }
+
+    store
+        .application
+        .rooms
+        .complete(id.as_ref())
+        .into_iter()
+        .map(|i| i.to_string())
+        .collect()
+}
+
+fn complete_emoji(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
+    let sc = text.get_prefix_word_mut(cursor, &WordStyle::Little);
+    let sc = sc.unwrap_or_else(EditRope::empty);
+    let sc = Cow::from(&sc);
+
+    store.application.emojis.complete(sc.as_ref())
+}
+
+fn complete_cmdarg(
+    desc: CommandDescription,
+    text: &EditRope,
+    cursor: &mut Cursor,
+    store: &ProgramStore,
+) -> Vec<String> {
+    let cmd = match store.application.cmds.get(desc.command.as_str()) {
+        Ok(cmd) => cmd,
+        Err(_) => return vec![],
+    };
+
+    match cmd.name.as_str() {
+        "cancel" | "dms" | "edit" | "redact" | "reply" => vec![],
+        "members" | "rooms" | "spaces" | "welcome" => vec![],
+        "download" | "open" | "upload" => complete_path(text, cursor),
+        "react" | "unreact" => complete_emoji(text, cursor, store),
+
+        "invite" => complete_users(text, cursor, store),
+        "join" => complete_matrix_names(text, cursor, store),
+        "room" => vec![],
+        "verify" => vec![],
+        _ => panic!("unknown command {}", cmd.name.as_str()),
+    }
+}
+
+fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
+    let eo = text.cursor_to_offset(cursor);
+    let slice = text.slice(0.into(), eo, false);
+    let cow = Cow::from(&slice);
+
+    match CommandDescription::from_str(cow.as_ref()) {
+        Ok(desc) => {
+            if desc.arg.untrimmed.is_empty() {
+                // Complete command name and set cursor position.
+                let _ = text.get_prefix_word_mut(cursor, &WordStyle::Little);
+                store.application.cmds.complete_name(desc.command.as_str())
+            } else {
+                // Complete command argument.
+                complete_cmdarg(desc, text, cursor, store)
+            }
+        },
+
+        // Can't parse command text, so return zero completions.
+        Err(_) => vec![],
+    }
 }
 
 #[cfg(test)]
@@ -803,5 +973,45 @@ pub mod tests {
                 Span::from(" is typing...")
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn test_complete_cmdbar() {
+        let store = mock_store().await;
+
+        let text = EditRope::from("invite    ");
+        let mut cursor = Cursor::new(0, 7);
+        let id = text
+            .get_prefix_word_mut(&mut cursor, &MATRIX_ID_WORD)
+            .unwrap_or_else(EditRope::empty);
+        assert_eq!(id.to_string(), "");
+        assert_eq!(cursor, Cursor::new(0, 7));
+
+        let text = EditRope::from("invite    ");
+        let mut cursor = Cursor::new(0, 7);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec![
+            "@user1:example.com",
+            "@user2:example.com",
+            "@user3:example.com",
+            "@user4:example.com",
+            "@user5:example.com"
+        ]);
+
+        let text = EditRope::from("invite ignored");
+        let mut cursor = Cursor::new(0, 7);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec![
+            "@user1:example.com",
+            "@user2:example.com",
+            "@user3:example.com",
+            "@user4:example.com",
+            "@user5:example.com"
+        ]);
+
+        let text = EditRope::from("invite @user1ignored");
+        let mut cursor = Cursor::new(0, 13);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["@user1:example.com"]);
     }
 }

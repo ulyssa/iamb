@@ -32,6 +32,9 @@ use modalkit::editing::{
     base::{
         Axis,
         CloseFlags,
+        CompletionDisplay,
+        CompletionSelection,
+        CompletionType,
         Count,
         EditRange,
         EditTarget,
@@ -51,7 +54,9 @@ use modalkit::editing::{
         TargetShape,
         ViewportContext,
         WordStyle,
+        WriteFlags,
     },
+    completion::CompletionList,
     context::{EditContext, Resolve},
     cursor::{CursorGroup, CursorState},
     history::HistoryList,
@@ -60,7 +65,7 @@ use modalkit::editing::{
 };
 
 use crate::{
-    base::{IambBufferId, IambInfo, ProgramContext, ProgramStore, RoomFocus, RoomInfo},
+    base::{IambBufferId, IambInfo, IambResult, ProgramContext, ProgramStore, RoomFocus, RoomInfo},
     config::ApplicationSettings,
     message::{Message, MessageCursor, MessageKey, Messages},
 };
@@ -515,6 +520,23 @@ impl WindowOps<IambInfo> for ScrollbackState {
         true
     }
 
+    fn write(
+        &mut self,
+        _: Option<&str>,
+        flags: WriteFlags,
+        _: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        if flags.contains(WriteFlags::FORCE) {
+            Ok(None)
+        } else {
+            Err(EditError::ReadOnly.into())
+        }
+    }
+
+    fn get_completions(&self) -> Option<CompletionList> {
+        None
+    }
+
     fn get_cursor_word(&self, _: &WordStyle) -> Option<String> {
         None
     }
@@ -532,7 +554,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        let info = store.application.rooms.entry(self.room_id.clone()).or_default();
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
         let key = if let Some(k) = self.cursor.to_key(info) {
             k.clone()
         } else {
@@ -762,6 +784,17 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         }
     }
 
+    fn complete(
+        &mut self,
+        _: &CompletionType,
+        _: &CompletionSelection,
+        _: &CompletionDisplay,
+        _: &ProgramContext,
+        _: &mut ProgramStore,
+    ) -> EditResult<EditInfo, IambInfo> {
+        Err(EditError::ReadOnly)
+    }
+
     fn insert_text(
         &mut self,
         _: &InsertTextAction,
@@ -867,9 +900,9 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             EditorAction::Mark(name) => self.mark(ctx.resolve(name), ctx, store),
             EditorAction::Selection(act) => self.selection_command(act, ctx, store),
 
-            EditorAction::Complete(_, _) => {
-                let msg = "";
-                let err = EditError::Unimplemented(msg.into());
+            EditorAction::Complete(_, _, _) => {
+                let msg = "Nothing to complete in message scrollback";
+                let err = EditError::Failure(msg.into());
 
                 Err(err)
             },
@@ -991,7 +1024,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        let info = store.application.rooms.entry(self.room_id.clone()).or_default();
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
         let settings = &store.application.settings;
         let mut corner = self.viewctx.corner.clone();
 
@@ -1105,7 +1138,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 Err(err)
             },
             Axis::Vertical => {
-                let info = store.application.rooms.entry(self.room_id.clone()).or_default();
+                let info = store.application.rooms.get_or_default(self.room_id.clone());
                 let settings = &store.application.settings;
 
                 if let Some(key) = self.cursor.to_key(info).cloned() {
@@ -1193,7 +1226,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
     type State = ScrollbackState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let info = self.store.application.rooms.entry(state.room_id.clone()).or_default();
+        let info = self.store.application.rooms.get_or_default(state.room_id.clone());
         let settings = &self.store.application.settings;
         let area = info.render_typing(area, buf, &self.store.application.settings);
 
