@@ -24,6 +24,7 @@ use matrix_sdk::{
             room::Visibility,
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
         },
+        assign,
         events::{
             key::verification::{
                 done::{OriginalSyncKeyVerificationDoneEvent, ToDeviceKeyVerificationDoneEvent},
@@ -35,16 +36,22 @@ use matrix_sdk::{
             presence::PresenceEvent,
             reaction::ReactionEventContent,
             room::{
+                encryption::RoomEncryptionEventContent,
                 message::{MessageType, RoomMessageEventContent},
                 name::RoomNameEventContent,
                 redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
             },
             tag::Tags,
             typing::SyncTypingEvent,
+            AnyInitialStateEvent,
             AnyTimelineEvent,
+            EmptyStateKey,
+            InitialStateEvent,
             SyncMessageLikeEvent,
             SyncStateEvent,
         },
+        serde::Raw,
+        EventEncryptionAlgorithm,
         OwnedRoomId,
         OwnedRoomOrAliasId,
         OwnedUserId,
@@ -58,7 +65,16 @@ use matrix_sdk::{
 use modalkit::editing::action::{EditInfo, InfoMessage, UIError};
 
 use crate::{
-    base::{AsyncProgramStore, EventLocation, IambError, IambResult, Receipts, VerifyAction},
+    base::{
+        AsyncProgramStore,
+        CreateRoomFlags,
+        CreateRoomType,
+        EventLocation,
+        IambError,
+        IambResult,
+        Receipts,
+        VerifyAction,
+    },
     message::MessageFetchResult,
     ApplicationSettings,
 };
@@ -69,6 +85,69 @@ const REQ_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
+}
+
+pub async fn create_room(
+    client: &Client,
+    room_alias_name: Option<&str>,
+    rt: CreateRoomType,
+    flags: CreateRoomFlags,
+) -> IambResult<OwnedRoomId> {
+    let creation_content = None;
+    let mut initial_state = vec![];
+    let is_direct;
+    let preset;
+    let mut invite = vec![];
+
+    let visibility = if flags.contains(CreateRoomFlags::PUBLIC) {
+        Visibility::Public
+    } else {
+        Visibility::Private
+    };
+
+    match rt {
+        CreateRoomType::Direct(user) => {
+            invite.push(user);
+            is_direct = true;
+            preset = Some(RoomPreset::TrustedPrivateChat);
+        },
+    }
+
+    // Set up encryption.
+    if flags.contains(CreateRoomFlags::ENCRYPTED) {
+        // XXX: Once matrix-sdk uses ruma 0.8, then this can skip the cast.
+        let algo = EventEncryptionAlgorithm::MegolmV1AesSha2;
+        let content = RoomEncryptionEventContent::new(algo);
+        let encr = InitialStateEvent { content, state_key: EmptyStateKey };
+        let encr_raw = Raw::new(&encr).map_err(IambError::from)?;
+        let encr_raw = encr_raw.cast::<AnyInitialStateEvent>();
+        initial_state.push(encr_raw);
+    }
+
+    let request = assign!(CreateRoomRequest::new(), {
+        room_alias_name,
+        creation_content,
+        initial_state: initial_state.as_slice(),
+        invite: invite.as_slice(),
+        is_direct,
+        visibility,
+        preset,
+    });
+
+    let resp = client.create_room(request).await.map_err(IambError::from)?;
+
+    if is_direct {
+        if let Some(room) = client.get_room(&resp.room_id) {
+            room.set_is_direct(true).await.map_err(IambError::from)?;
+        } else {
+            error!(
+                room_id = resp.room_id.as_str(),
+                "Couldn't set is_direct for new direct message room"
+            );
+        }
+    }
+
+    return Ok(resp.room_id);
 }
 
 #[derive(Debug)]
@@ -788,15 +867,11 @@ impl ClientWorker {
             }
         }
 
-        let mut request = CreateRoomRequest::new();
-        let invite = [user.clone()];
-        request.is_direct = true;
-        request.invite = &invite;
-        request.visibility = Visibility::Private;
-        request.preset = Some(RoomPreset::PrivateChat);
+        let rt = CreateRoomType::Direct(user.clone());
+        let flags = CreateRoomFlags::ENCRYPTED;
 
-        match self.client.create_room(request).await {
-            Ok(resp) => self.get_room(resp.room_id).await,
+        match create_room(&self.client, None, rt, flags).await {
+            Ok(room_id) => self.get_room(room_id).await,
             Err(e) => {
                 error!(
                     user_id = user.as_str(),

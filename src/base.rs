@@ -131,6 +131,24 @@ pub enum MessageAction {
     Unreact(Option<String>),
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CreateRoomType {
+    /// A direct message room.
+    Direct(OwnedUserId),
+}
+
+bitflags::bitflags! {
+    pub struct CreateRoomFlags: u32 {
+        const NONE = 0b00000000;
+
+        /// Make the room public.
+        const PUBLIC = 0b00000001;
+
+        /// Encrypt this room.
+        const ENCRYPTED = 0b00000010;
+    }
+}
+
 bitflags::bitflags! {
     pub struct DownloadFlags: u32 {
         const NONE = 0b00000000;

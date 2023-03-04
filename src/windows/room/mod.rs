@@ -185,7 +185,15 @@ impl RoomState {
         match act {
             RoomAction::InviteAccept => {
                 if let Some(room) = store.application.worker.client.get_invited_room(self.id()) {
+                    let details = room.invite_details().await.map_err(IambError::from)?;
+                    let details = details.invitee.event().original_content();
+                    let is_direct = details.and_then(|ev| ev.is_direct).unwrap_or_default();
+
                     room.accept_invitation().await.map_err(IambError::from)?;
+
+                    if is_direct {
+                        room.set_is_direct(true).await.map_err(IambError::from)?;
+                    }
 
                     Ok(vec![])
                 } else {
