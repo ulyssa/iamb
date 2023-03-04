@@ -20,7 +20,7 @@ use matrix_sdk::{
     room::{Invited, Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
-            room::create_room::v3::{Request as CreateRoomRequest, RoomPreset},
+            room::create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
             room::Visibility,
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
         },
@@ -50,6 +50,7 @@ use matrix_sdk::{
             SyncMessageLikeEvent,
             SyncStateEvent,
         },
+        room::RoomType,
         serde::Raw,
         EventEncryptionAlgorithm,
         OwnedRoomId,
@@ -93,10 +94,10 @@ pub async fn create_room(
     rt: CreateRoomType,
     flags: CreateRoomFlags,
 ) -> IambResult<OwnedRoomId> {
-    let creation_content = None;
+    let mut creation_content = None;
     let mut initial_state = vec![];
-    let is_direct;
-    let preset;
+    let mut is_direct = false;
+    let mut preset = None;
     let mut invite = vec![];
 
     let visibility = if flags.contains(CreateRoomFlags::PUBLIC) {
@@ -111,6 +112,14 @@ pub async fn create_room(
             is_direct = true;
             preset = Some(RoomPreset::TrustedPrivateChat);
         },
+        CreateRoomType::Space => {
+            let mut cc = CreationContent::new();
+            cc.room_type = Some(RoomType::Space);
+
+            let raw_cc = Raw::new(&cc).map_err(IambError::from)?;
+            creation_content = Some(raw_cc);
+        },
+        CreateRoomType::Room => {},
     }
 
     // Set up encryption.

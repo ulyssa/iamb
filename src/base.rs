@@ -135,6 +135,12 @@ pub enum MessageAction {
 pub enum CreateRoomType {
     /// A direct message room.
     Direct(OwnedUserId),
+
+    /// A standard chat room.
+    Room,
+
+    /// A Matrix space.
+    Space,
 }
 
 bitflags::bitflags! {
@@ -185,13 +191,25 @@ pub enum SendAction {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub enum HomeserverAction {
+    CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambAction {
+    Homeserver(HomeserverAction),
     Message(MessageAction),
     Room(RoomAction),
     Send(SendAction),
     Verify(VerifyAction, String),
     VerifyRequest(String),
     ToggleScrollbackFocus,
+}
+
+impl From<HomeserverAction> for IambAction {
+    fn from(act: HomeserverAction) -> Self {
+        IambAction::Homeserver(act)
+    }
 }
 
 impl From<MessageAction> for IambAction {
@@ -215,6 +233,7 @@ impl From<SendAction> for IambAction {
 impl ApplicationAction for IambAction {
     fn is_edit_sequence<C: EditContext>(&self, _: &C) -> SequenceStatus {
         match self {
+            IambAction::Homeserver(..) => SequenceStatus::Break,
             IambAction::Message(..) => SequenceStatus::Break,
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
@@ -226,6 +245,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_action<C: EditContext>(&self, _: &C) -> SequenceStatus {
         match self {
+            IambAction::Homeserver(..) => SequenceStatus::Atom,
             IambAction::Message(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
@@ -237,6 +257,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_selection<C: EditContext>(&self, _: &C) -> SequenceStatus {
         match self {
+            IambAction::Homeserver(..) => SequenceStatus::Ignore,
             IambAction::Message(..) => SequenceStatus::Ignore,
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
@@ -248,6 +269,7 @@ impl ApplicationAction for IambAction {
 
     fn is_switchable<C: EditContext>(&self, _: &C) -> bool {
         match self {
+            IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
             IambAction::Room(..) => false,
             IambAction::Send(..) => false,

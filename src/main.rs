@@ -53,6 +53,7 @@ use crate::{
     base::{
         AsyncProgramStore,
         ChatStore,
+        HomeserverAction,
         IambAction,
         IambError,
         IambId,
@@ -64,7 +65,7 @@ use crate::{
     },
     config::{ApplicationSettings, Iamb},
     windows::IambWindow,
-    worker::{ClientWorker, LoginStyle, Requester},
+    worker::{create_room, ClientWorker, LoginStyle, Requester},
 };
 
 use modalkit::{
@@ -355,6 +356,12 @@ impl Application {
                 None
             },
 
+            IambAction::Homeserver(act) => {
+                let acts = self.homeserver_command(act, ctx, store).await?;
+                self.action_prepend(acts);
+
+                None
+            },
             IambAction::Message(act) => {
                 self.screen.current_window_mut()?.message_command(act, ctx, store).await?
             },
@@ -385,6 +392,25 @@ impl Application {
         };
 
         Ok(info)
+    }
+
+    async fn homeserver_command(
+        &mut self,
+        action: HomeserverAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
+        match action {
+            HomeserverAction::CreateRoom(alias, vis, flags) => {
+                let client = &store.application.worker.client;
+                let room_id = create_room(client, alias.as_deref(), vis, flags).await?;
+                let room = IambId::Room(room_id);
+                let target = OpenTarget::Application(room);
+                let action = WindowAction::Switch(target);
+
+                Ok(vec![(action.into(), ctx)])
+            },
+        }
     }
 
     pub async fn run(&mut self) -> Result<(), std::io::Error> {
@@ -518,7 +544,7 @@ fn main() -> IambResult<()> {
 
     let subscriber = FmtSubscriber::builder()
         .with_writer(appender)
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::INFO)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 

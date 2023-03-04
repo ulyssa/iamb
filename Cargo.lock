@@ -1882,9 +1882,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.12"
+version = "0.0.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a4e5226a5d33a7bdf5b4fc067baa211c94f21aa6667af5eec8b357a8af5e4ba"
+checksum = "038bb42efcd659fb123708bf8e4ea12ca9023f07d44514f9358b9334ea7ba80f"
 dependencies = [
  "anymap2",
  "arboard",

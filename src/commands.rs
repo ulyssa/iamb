@@ -4,13 +4,16 @@ use matrix_sdk::ruma::{events::tag::TagName, OwnedUserId};
 
 use modalkit::{
     editing::base::OpenTarget,
-    env::vim::command::{CommandContext, CommandDescription},
+    env::vim::command::{CommandContext, CommandDescription, OptionType},
     input::commands::{CommandError, CommandResult, CommandStep},
     input::InputContext,
 };
 
 use crate::base::{
+    CreateRoomFlags,
+    CreateRoomType,
     DownloadFlags,
+    HomeserverAction,
     IambAction,
     IambId,
     MessageAction,
@@ -297,6 +300,53 @@ fn iamb_join(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_create(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let args = desc.arg.options()?;
+    let mut flags = CreateRoomFlags::NONE;
+    let mut alias = None;
+    let mut ct = CreateRoomType::Room;
+
+    for arg in args {
+        match arg {
+            OptionType::Flag(name, Some(arg)) => {
+                match name.as_str() {
+                    "alias" => {
+                        if alias.is_some() {
+                            let msg = "Multiple ++alias arguments are not allowed";
+                            let err = CommandError::Error(msg.into());
+
+                            return Err(err);
+                        } else {
+                            alias = Some(arg);
+                        }
+                    },
+                    _ => return Err(CommandError::InvalidArgument),
+                }
+            },
+            OptionType::Flag(name, None) => {
+                match name.as_str() {
+                    "public" => flags |= CreateRoomFlags::PUBLIC,
+                    "space" => ct = CreateRoomType::Space,
+                    "enc" | "encrypted" => flags |= CreateRoomFlags::ENCRYPTED,
+                    _ => return Err(CommandError::InvalidArgument),
+                }
+            },
+            OptionType::Positional(_) => {
+                let msg = ":create doesn't take any positional arguments";
+                let err = CommandError::Error(msg.into());
+
+                return Err(err);
+            },
+        }
+    }
+
+    let hact = HomeserverAction::CreateRoom(alias, ct, flags);
+    let iact = IambAction::from(hact);
+    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
 fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut args = desc.arg.strings()?;
 
@@ -399,6 +449,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "cancel".into(),
         aliases: vec![],
         f: iamb_cancel,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "create".into(),
+        aliases: vec![],
+        f: iamb_create,
     });
     cmds.add_command(ProgramCommand { name: "dms".into(), aliases: vec![], f: iamb_dms });
     cmds.add_command(ProgramCommand {
