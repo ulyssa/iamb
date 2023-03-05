@@ -710,7 +710,11 @@ impl Message {
                     key
                 };
 
-                emojis.push_str(format!("[{name} {count}]"), style);
+                emojis.push_str("[", style);
+                emojis.push_str(name, style);
+                emojis.push_str(" ", style);
+                emojis.push_span_nobreak(Span::styled(count.to_string(), style));
+                emojis.push_str("]", style);
 
                 reactions += 1;
             }

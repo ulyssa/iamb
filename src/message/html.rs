@@ -6,7 +6,7 @@
 //! The Matrix specification recommends limiting rendered tags and attributes to a safe subset of
 //! HTML. You can read more in section 11.2.1.1, "m.room.message msgtypes":
 //!
-//!   https://spec.matrix.org/unstable/client-server-api/#mroommessage-msgtypes
+//!   <https://spec.matrix.org/unstable/client-server-api/#mroommessage-msgtypes>
 //!
 //! This isn't as important for iamb, since it isn't a browser environment, but we do still map
 //! input onto an enum of the safe list of tags to keep it easy to understand and process.
@@ -271,10 +271,12 @@ impl StyleTreeNode {
             },
             StyleTreeNode::Header(child, level) => {
                 let style = style.add_modifier(StyleModifier::BOLD);
-                let mut hashes = "#".repeat(*level);
-                hashes.push(' ');
 
-                printer.push_str(hashes, style);
+                for _ in 0..*level {
+                    printer.push_str("#", style);
+                }
+
+                printer.push_str(" ", style);
                 child.print(printer, style);
             },
             StyleTreeNode::Image(None) => {},
@@ -320,7 +322,9 @@ impl StyleTreeNode {
                 printer.commit();
             },
             StyleTreeNode::Ruler => {
-                printer.push_str(line::HORIZONTAL.repeat(width), style);
+                for _ in 0..width {
+                    printer.push_str(line::HORIZONTAL, style);
+                }
             },
             StyleTreeNode::Table(table) => {
                 let text = table.to_text(width, style);
@@ -636,8 +640,11 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("# ", bold),
-            Span::styled("Header 1", bold),
+            Span::styled("#", bold),
+            Span::styled(" ", bold),
+            Span::styled("Header", bold),
+            Span::styled(" ", bold),
+            Span::styled("1", bold),
             space_span(10, Style::default())
         ])]);
 
@@ -645,8 +652,12 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("## ", bold),
-            Span::styled("Header 2", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled(" ", bold),
+            Span::styled("Header", bold),
+            Span::styled(" ", bold),
+            Span::styled("2", bold),
             space_span(9, Style::default())
         ])]);
 
@@ -654,8 +665,13 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("### ", bold),
-            Span::styled("Header 3", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled(" ", bold),
+            Span::styled("Header", bold),
+            Span::styled(" ", bold),
+            Span::styled("3", bold),
             space_span(8, Style::default())
         ])]);
 
@@ -663,8 +679,14 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("#### ", bold),
-            Span::styled("Header 4", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled(" ", bold),
+            Span::styled("Header", bold),
+            Span::styled(" ", bold),
+            Span::styled("4", bold),
             space_span(7, Style::default())
         ])]);
 
@@ -672,8 +694,15 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("##### ", bold),
-            Span::styled("Header 5", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled(" ", bold),
+            Span::styled("Header", bold),
+            Span::styled(" ", bold),
+            Span::styled("5", bold),
             space_span(6, Style::default())
         ])]);
 
@@ -681,8 +710,16 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("###### ", bold),
-            Span::styled("Header 6", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled("#", bold),
+            Span::styled(" ", bold),
+            Span::styled("Header", bold),
+            Span::styled(" ", bold),
+            Span::styled("6", bold),
             space_span(5, Style::default())
         ])]);
     }
@@ -700,7 +737,8 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("Bold!", bold),
+            Span::styled("Bold", bold),
+            Span::styled("!", bold),
             space_span(15, def)
         ])]);
 
@@ -708,7 +746,8 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("Bold!", bold),
+            Span::styled("Bold", bold),
+            Span::styled("!", bold),
             space_span(15, def)
         ])]);
 
@@ -716,7 +755,8 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("Italic!", italic),
+            Span::styled("Italic", italic),
+            Span::styled("!", italic),
             space_span(13, def)
         ])]);
 
@@ -724,7 +764,8 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("Italic!", italic),
+            Span::styled("Italic", italic),
+            Span::styled("!", italic),
             space_span(13, def)
         ])]);
 
@@ -732,7 +773,8 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("Strikethrough!", strike),
+            Span::styled("Strikethrough", strike),
+            Span::styled("!", strike),
             space_span(6, def)
         ])]);
 
@@ -740,7 +782,8 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("Strikethrough!", strike),
+            Span::styled("Strikethrough", strike),
+            Span::styled("!", strike),
             space_span(6, def)
         ])]);
 
@@ -748,19 +791,28 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
         assert_eq!(text.lines, vec![Spans(vec![
-            Span::styled("Underline!", underl),
+            Span::styled("Underline", underl),
+            Span::styled("!", underl),
             space_span(10, def)
         ])]);
 
         let s = "<font color=\"#ff0000\">Red!</u>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
-        assert_eq!(text.lines, vec![Spans(vec![Span::styled("Red!", red), space_span(16, def)])]);
+        assert_eq!(text.lines, vec![Spans(vec![
+            Span::styled("Red", red),
+            Span::styled("!", red),
+            space_span(16, def)
+        ])]);
 
         let s = "<font color=\"red\">Red!</u>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false);
-        assert_eq!(text.lines, vec![Spans(vec![Span::styled("Red!", red), space_span(16, def)])]);
+        assert_eq!(text.lines, vec![Spans(vec![
+            Span::styled("Red", red),
+            Span::styled("!", red),
+            space_span(16, def)
+        ])]);
     }
 
     #[test]
@@ -769,13 +821,25 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(10, Style::default(), false);
         assert_eq!(text.lines.len(), 7);
-        assert_eq!(text.lines[0], Spans(vec![Span::raw("Hello worl")]));
-        assert_eq!(text.lines[1], Spans(vec![Span::raw("d!"), Span::raw("        ")]));
+        assert_eq!(
+            text.lines[0],
+            Spans(vec![Span::raw("Hello"), Span::raw(" "), Span::raw("    ")])
+        );
+        assert_eq!(
+            text.lines[1],
+            Spans(vec![Span::raw("world"), Span::raw("!"), Span::raw("    ")])
+        );
         assert_eq!(text.lines[2], Spans(vec![Span::raw("          ")]));
         assert_eq!(text.lines[3], Spans(vec![Span::raw("Content"), Span::raw("   ")]));
         assert_eq!(text.lines[4], Spans(vec![Span::raw("          ")]));
-        assert_eq!(text.lines[5], Spans(vec![Span::raw("Goodbye wo")]));
-        assert_eq!(text.lines[6], Spans(vec![Span::raw("rld!"), Span::raw("      ")]));
+        assert_eq!(
+            text.lines[5],
+            Spans(vec![Span::raw("Goodbye"), Span::raw(" "), Span::raw("  ")])
+        );
+        assert_eq!(
+            text.lines[6],
+            Spans(vec![Span::raw("world"), Span::raw("!"), Span::raw("    ")])
+        );
     }
 
     #[test]
@@ -784,8 +848,14 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(10, Style::default(), false);
         assert_eq!(text.lines.len(), 2);
-        assert_eq!(text.lines[0], Spans(vec![Span::raw("    "), Span::raw("Hello ")]));
-        assert_eq!(text.lines[1], Spans(vec![Span::raw("    "), Span::raw("world!")]));
+        assert_eq!(
+            text.lines[0],
+            Spans(vec![Span::raw("    "), Span::raw("Hello"), Span::raw(" ")])
+        );
+        assert_eq!(
+            text.lines[1],
+            Spans(vec![Span::raw("    "), Span::raw("world"), Span::raw("!")])
+        );
     }
 
     #[test]
@@ -794,12 +864,60 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(8, Style::default(), false);
         assert_eq!(text.lines.len(), 6);
-        assert_eq!(text.lines[0], Spans(vec![Span::raw("- "), Span::raw("List I")]));
-        assert_eq!(text.lines[1], Spans(vec![Span::raw("  "), Span::raw("tem 1"), Span::raw(" ")]));
-        assert_eq!(text.lines[2], Spans(vec![Span::raw("- "), Span::raw("List I")]));
-        assert_eq!(text.lines[3], Spans(vec![Span::raw("  "), Span::raw("tem 2"), Span::raw(" ")]));
-        assert_eq!(text.lines[4], Spans(vec![Span::raw("- "), Span::raw("List I")]));
-        assert_eq!(text.lines[5], Spans(vec![Span::raw("  "), Span::raw("tem 3"), Span::raw(" ")]));
+        assert_eq!(
+            text.lines[0],
+            Spans(vec![
+                Span::raw("- "),
+                Span::raw("List"),
+                Span::raw(" "),
+                Span::raw(" ")
+            ])
+        );
+        assert_eq!(
+            text.lines[1],
+            Spans(vec![
+                Span::raw("  "),
+                Span::raw("Item"),
+                Span::raw(" "),
+                Span::raw("1")
+            ])
+        );
+        assert_eq!(
+            text.lines[2],
+            Spans(vec![
+                Span::raw("- "),
+                Span::raw("List"),
+                Span::raw(" "),
+                Span::raw(" ")
+            ])
+        );
+        assert_eq!(
+            text.lines[3],
+            Spans(vec![
+                Span::raw("  "),
+                Span::raw("Item"),
+                Span::raw(" "),
+                Span::raw("2")
+            ])
+        );
+        assert_eq!(
+            text.lines[4],
+            Spans(vec![
+                Span::raw("- "),
+                Span::raw("List"),
+                Span::raw(" "),
+                Span::raw(" ")
+            ])
+        );
+        assert_eq!(
+            text.lines[5],
+            Spans(vec![
+                Span::raw("  "),
+                Span::raw("Item"),
+                Span::raw(" "),
+                Span::raw("3")
+            ])
+        );
     }
 
     #[test]
@@ -808,20 +926,59 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(9, Style::default(), false);
         assert_eq!(text.lines.len(), 6);
-        assert_eq!(text.lines[0], Spans(vec![Span::raw("1. "), Span::raw("List I")]));
+        assert_eq!(
+            text.lines[0],
+            Spans(vec![
+                Span::raw("1. "),
+                Span::raw("List"),
+                Span::raw(" "),
+                Span::raw(" ")
+            ])
+        );
         assert_eq!(
             text.lines[1],
-            Spans(vec![Span::raw("   "), Span::raw("tem 1"), Span::raw(" ")])
+            Spans(vec![
+                Span::raw("   "),
+                Span::raw("Item"),
+                Span::raw(" "),
+                Span::raw("1")
+            ])
         );
-        assert_eq!(text.lines[2], Spans(vec![Span::raw("2. "), Span::raw("List I")]));
+        assert_eq!(
+            text.lines[2],
+            Spans(vec![
+                Span::raw("2. "),
+                Span::raw("List"),
+                Span::raw(" "),
+                Span::raw(" ")
+            ])
+        );
         assert_eq!(
             text.lines[3],
-            Spans(vec![Span::raw("   "), Span::raw("tem 2"), Span::raw(" ")])
+            Spans(vec![
+                Span::raw("   "),
+                Span::raw("Item"),
+                Span::raw(" "),
+                Span::raw("2")
+            ])
         );
-        assert_eq!(text.lines[4], Spans(vec![Span::raw("3. "), Span::raw("List I")]));
+        assert_eq!(
+            text.lines[4],
+            Spans(vec![
+                Span::raw("3. "),
+                Span::raw("List"),
+                Span::raw(" "),
+                Span::raw(" ")
+            ])
+        );
         assert_eq!(
             text.lines[5],
-            Spans(vec![Span::raw("   "), Span::raw("tem 3"), Span::raw(" ")])
+            Spans(vec![
+                Span::raw("   "),
+                Span::raw("Item"),
+                Span::raw(" "),
+                Span::raw("3")
+            ])
         );
     }
 
@@ -854,9 +1011,13 @@ pub mod tests {
         ]);
         assert_eq!(text.lines[2].0, vec![
             Span::raw("│"),
-            Span::styled("mn 1", bold),
+            Span::styled("mn", bold),
+            Span::styled(" ", bold),
+            Span::styled("1", bold),
             Span::raw("│"),
-            Span::styled("mn 2", bold),
+            Span::styled("mn", bold),
+            Span::styled(" ", bold),
+            Span::styled("2", bold),
             Span::raw("│"),
             Span::styled("umn", bold),
             Span::raw("│")
@@ -867,7 +1028,8 @@ pub mod tests {
             Span::raw("│"),
             Span::raw("    "),
             Span::raw("│"),
-            Span::styled(" 3", bold),
+            Span::styled(" ", bold),
+            Span::styled("3", bold),
             Span::styled(" ", bold),
             Span::raw("│")
         ]);
@@ -928,15 +1090,61 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(10, Style::default(), false);
         assert_eq!(text.lines.len(), 4);
-        assert_eq!(text.lines[0], Spans(vec![Span::raw("This was r")]));
-        assert_eq!(text.lines[1], Spans(vec![Span::raw("eplied to"), Span::raw(" ")]));
-        assert_eq!(text.lines[2], Spans(vec![Span::raw("This is th")]));
-        assert_eq!(text.lines[3], Spans(vec![Span::raw("e reply"), Span::raw("   ")]));
+        assert_eq!(
+            text.lines[0],
+            Spans(vec![
+                Span::raw("This"),
+                Span::raw(" "),
+                Span::raw("was"),
+                Span::raw(" "),
+                Span::raw(" ")
+            ])
+        );
+        assert_eq!(
+            text.lines[1],
+            Spans(vec![Span::raw("replied"), Span::raw(" "), Span::raw("to")])
+        );
+        assert_eq!(
+            text.lines[2],
+            Spans(vec![
+                Span::raw("This"),
+                Span::raw(" "),
+                Span::raw("is"),
+                Span::raw(" "),
+                Span::raw("  ")
+            ])
+        );
+        assert_eq!(
+            text.lines[3],
+            Spans(vec![
+                Span::raw("the"),
+                Span::raw(" "),
+                Span::raw("reply"),
+                Span::raw(" ")
+            ])
+        );
 
         let tree = parse_matrix_html(s);
         let text = tree.to_text(10, Style::default(), true);
         assert_eq!(text.lines.len(), 2);
-        assert_eq!(text.lines[0], Spans(vec![Span::raw("This is th")]));
-        assert_eq!(text.lines[1], Spans(vec![Span::raw("e reply"), Span::raw("   ")]));
+        assert_eq!(
+            text.lines[0],
+            Spans(vec![
+                Span::raw("This"),
+                Span::raw(" "),
+                Span::raw("is"),
+                Span::raw(" "),
+                Span::raw("  ")
+            ])
+        );
+        assert_eq!(
+            text.lines[1],
+            Spans(vec![
+                Span::raw("the"),
+                Span::raw(" "),
+                Span::raw("reply"),
+                Span::raw(" ")
+            ])
+        );
     }
 }

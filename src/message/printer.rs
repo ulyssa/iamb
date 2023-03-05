@@ -3,6 +3,7 @@ use std::borrow::Cow;
 use modalkit::tui::layout::Alignment;
 use modalkit::tui::style::Style;
 use modalkit::tui::text::{Span, Spans, Text};
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::util::{space_span, take_width};
@@ -107,7 +108,7 @@ impl<'a> TextPrinter<'a> {
         self.push();
     }
 
-    pub fn push_str<T>(&mut self, s: T, style: Style)
+    fn push_str_wrapped<T>(&mut self, s: T, style: Style)
     where
         T: Into<Cow<'a, str>>,
     {
@@ -132,6 +133,55 @@ impl<'a> TextPrinter<'a> {
             self.curr_width += w;
 
             self.commit();
+        }
+
+        if self.curr_width == self.width {
+            // If the last bit fills the full line, start a new one.
+            self.push();
+        }
+    }
+
+    pub fn push_span_nobreak(&mut self, span: Span<'a>) {
+        let sw = UnicodeWidthStr::width(span.content.as_ref());
+
+        if self.curr_width + sw > self.width {
+            // Span doesn't fit on this line, so start a new one.
+            self.commit();
+        }
+
+        self.curr_spans.push(span);
+        self.curr_width += sw;
+    }
+
+    pub fn push_str(&mut self, s: &'a str, style: Style) {
+        let style = self.base_style.patch(style);
+
+        for word in UnicodeSegmentation::split_word_bounds(s) {
+            if self.width == 0 && word.chars().all(char::is_whitespace) {
+                // Drop leading whitespace.
+                continue;
+            }
+
+            let sw = UnicodeWidthStr::width(word);
+
+            if sw > self.width {
+                self.push_str_wrapped(word, style);
+                continue;
+            }
+
+            if self.curr_width + sw > self.width {
+                // Word doesn't fit on this line, so start a new one.
+                self.commit();
+
+                if word.chars().all(char::is_whitespace) {
+                    // Drop leading whitespace.
+                    continue;
+                }
+            }
+
+            let span = Span::styled(word, style);
+            self.curr_spans.push(span);
+            self.curr_width += sw;
         }
 
         if self.curr_width == self.width {
