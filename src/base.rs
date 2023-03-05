@@ -493,6 +493,8 @@ impl RoomInfo {
                 return;
             },
         }
+
+        msg.html = msg.event.html();
     }
 
     pub fn insert_message(&mut self, msg: RoomMessageEvent) {
