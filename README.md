@@ -11,6 +11,8 @@
 This project is a work-in-progress, and there's still a lot to be implemented,
 but much of the basic client functionality is already present.
 
+![Example Usage](https://iamb.chat/static/images/iamb-demo.gif)
+
 ## Documentation
 
 You can find documentation for installing, configuring, and using iamb on its
@@ -75,7 +77,7 @@ two other TUI clients and Element Web:
 | VOIP                                    | ❌          | ❌       | ❌               | ✔️                   |
 | Reactions                               | ✔️           | ✔️        | ❌               | ✔️                   |
 | Message editing                         | ✔️           | ✔️        | ❌               | ✔️                   |
-| Room upgrades                           | ❌          | ✔️        | ❌               | ✔️                   |
+| Room upgrades                           | ❌ ([#41])  | ✔️        | ❌               | ✔️                   |
 | Localisations                           | ❌          | 1        | ❌               | 44                  |
 | SSO Support                             | ❌          | ✔️        | ✔️                | ✔️                   |
                                                                                        
@@ -88,18 +90,7 @@ iamb is released under the [Apache License, Version 2.0].
 [iamb.chat]: https://iamb.chat
 [gomuks]: https://github.com/tulir/gomuks
 [weechat-matrix]: https://github.com/poljar/weechat-matrix
-[#2]: https://github.com/ulyssa/iamb/issues/2
-[#3]: https://github.com/ulyssa/iamb/issues/3
-[#4]: https://github.com/ulyssa/iamb/issues/4
-[#5]: https://github.com/ulyssa/iamb/issues/5
-[#6]: https://github.com/ulyssa/iamb/issues/6
-[#7]: https://github.com/ulyssa/iamb/issues/7
 [#8]: https://github.com/ulyssa/iamb/issues/8
-[#9]: https://github.com/ulyssa/iamb/issues/9
-[#10]: https://github.com/ulyssa/iamb/issues/10
-[#11]: https://github.com/ulyssa/iamb/issues/11
-[#12]: https://github.com/ulyssa/iamb/issues/12
-[#13]: https://github.com/ulyssa/iamb/issues/13
 [#14]: https://github.com/ulyssa/iamb/issues/14
-[#15]: https://github.com/ulyssa/iamb/issues/15
 [#16]: https://github.com/ulyssa/iamb/issues/16
+[#41]: https://github.com/ulyssa/iamb/issues/41
