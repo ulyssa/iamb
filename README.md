@@ -26,6 +26,14 @@ Install Rust and Cargo, and then run:
 cargo install --locked iamb
 ```
 
+### NetBSD
+
+On NetBSD a package is available from the official repositories. To install it simply run:
+
+```
+pkgin install iamb
+```
+
 ## Configuration
 
 You can create a basic configuration in `$CONFIG_DIR/iamb/config.json` that looks like:
