@@ -52,3 +52,7 @@ features = ["macros", "net", "rt-multi-thread", "sync", "time"]
 
 [dev-dependencies]
 lazy_static = "1.4.0"
+
+[profile.release]
+lto = true
+incremental = false
