@@ -25,6 +25,8 @@ macro_rules! usage {
     }
 }
 
+const DEFAULT_REQ_TIMEOUT: u64 = 120;
+
 const COLORS: [Color; 13] = [
     Color::Blue,
     Color::Cyan,
@@ -182,6 +184,7 @@ pub struct TunableValues {
     pub reaction_shortcode_display: bool,
     pub read_receipt_send: bool,
     pub read_receipt_display: bool,
+    pub request_timeout: u64,
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
     pub users: UserOverrides,
@@ -194,6 +197,7 @@ pub struct Tunables {
     pub reaction_shortcode_display: Option<bool>,
     pub read_receipt_send: Option<bool>,
     pub read_receipt_display: Option<bool>,
+    pub request_timeout: Option<u64>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
     pub users: Option<UserOverrides>,
@@ -209,6 +213,7 @@ impl Tunables {
                 .or(other.reaction_shortcode_display),
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
+            request_timeout: self.request_timeout.or(other.request_timeout),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
             users: merge_users(self.users, other.users),
@@ -222,6 +227,7 @@ impl Tunables {
             reaction_shortcode_display: self.reaction_shortcode_display.unwrap_or(false),
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
+            request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
             users: self.users.unwrap_or_default(),

@@ -174,6 +174,7 @@ pub fn mock_tunables() -> TunableValues {
         reaction_shortcode_display: false,
         read_receipt_send: true,
         read_receipt_display: true,
+        request_timeout: 120,
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {

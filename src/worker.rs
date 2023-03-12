@@ -82,7 +82,6 @@ use crate::{
 
 const IAMB_DEVICE_NAME: &str = "iamb";
 const IAMB_USER_AGENT: &str = "iamb";
-const REQ_TIMEOUT: Duration = Duration::from_secs(60);
 
 fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
@@ -447,19 +446,19 @@ impl ClientWorker {
         let (tx, rx) = unbounded_channel();
         let account = &settings.profile;
 
-        // Set up a custom client that only uses HTTP/1.
-        //
-        // During my testing, I kept stumbling across something weird with sync and HTTP/2 that
-        // will need to be revisited in the future.
+        let req_timeout = Duration::from_secs(settings.tunables.request_timeout);
+
+        // Set up the HTTP client.
         let http = reqwest::Client::builder()
             .user_agent(IAMB_USER_AGENT)
-            .timeout(Duration::from_secs(30))
+            .timeout(req_timeout)
             .pool_idle_timeout(Duration::from_secs(60))
             .pool_max_idle_per_host(10)
             .tcp_keepalive(Duration::from_secs(10))
-            .http1_only()
             .build()
             .unwrap();
+
+        let req_config = RequestConfig::new().timeout(req_timeout).retry_timeout(req_timeout);
 
         // Set up the Matrix client for the selected profile.
         let client = Client::builder()
@@ -468,7 +467,7 @@ impl ClientWorker {
             .store_config(StoreConfig::default())
             .sled_store(settings.matrix_dir.as_path(), None)
             .expect("Failed to setup up sled store for Matrix SDK")
-            .request_config(RequestConfig::new().timeout(REQ_TIMEOUT).retry_timeout(REQ_TIMEOUT))
+            .request_config(req_config)
             .build()
             .await
             .expect("Failed to instantiate Matrix client");
