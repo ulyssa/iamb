@@ -395,13 +395,13 @@ impl ChatState {
 
         let (event_id, msg) = match act {
             SendAction::Submit => {
-                let msg = self.tbox.get_text();
+                let msg = self.tbox.get();
 
-                if msg.is_empty() {
+                if msg.is_blank() {
                     return Ok(None);
                 }
 
-                let msg = TextMessageEventContent::markdown(msg);
+                let msg = TextMessageEventContent::markdown(msg.to_string());
                 let msg = MessageType::Text(msg);
 
                 let mut msg = RoomMessageEventContent::new(msg);
