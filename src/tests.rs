@@ -153,6 +153,7 @@ pub fn mock_room() -> RoomInfo {
         read_till: None,
         reactions: HashMap::new(),
 
+        fetching: false,
         fetch_id: RoomFetchStatus::NotStarted,
         fetch_last: None,
         users_typing: None,

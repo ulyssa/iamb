@@ -7,7 +7,6 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 use tokio::sync::Mutex as AsyncMutex;
-use tracing::warn;
 
 use matrix_sdk::{
     encryption::verification::SasVerification,
@@ -23,7 +22,6 @@ use matrix_sdk::{
                 RoomMessageEventContent,
             },
             tag::{TagName, Tags},
-            AnyMessageLikeEvent,
             MessageLikeEvent,
         },
         presence::PresenceState,
@@ -412,6 +410,9 @@ pub struct RoomInfo {
     /// A map of message identifiers to a map of reaction events.
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
 
+    /// Whether the scrollback for this room is currently being fetched.
+    pub fetching: bool,
+
     /// Where to continue fetching from when we continue loading scrollback history.
     pub fetch_id: RoomFetchStatus,
 
@@ -520,7 +521,7 @@ impl RoomInfo {
         }
     }
 
-    fn recently_fetched(&self) -> bool {
+    pub fn recently_fetched(&self) -> bool {
         self.fetch_last.map_or(false, |i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
     }
 
@@ -666,61 +667,6 @@ impl ChatStore {
 
     pub fn mark_for_load(&mut self, room_id: OwnedRoomId) {
         self.need_load.insert(room_id);
-    }
-
-    pub fn load_older(&mut self, limit: u32) {
-        let ChatStore { need_load, presences, rooms, worker, .. } = self;
-
-        for room_id in std::mem::take(need_load).into_iter() {
-            let info = rooms.get_or_default(room_id.clone());
-
-            if info.recently_fetched() {
-                need_load.insert(room_id);
-                continue;
-            } else {
-                info.fetch_last = Instant::now().into();
-            }
-
-            let fetch_id = match &info.fetch_id {
-                RoomFetchStatus::Done => continue,
-                RoomFetchStatus::HaveMore(fetch_id) => Some(fetch_id.clone()),
-                RoomFetchStatus::NotStarted => None,
-            };
-
-            let res = worker.load_older(room_id.clone(), fetch_id, limit);
-
-            match res {
-                Ok((fetch_id, msgs)) => {
-                    for msg in msgs.into_iter() {
-                        let sender = msg.sender().to_owned();
-                        let _ = presences.get_or_default(sender);
-
-                        match msg {
-                            AnyMessageLikeEvent::RoomMessage(msg) => {
-                                info.insert(msg);
-                            },
-                            AnyMessageLikeEvent::Reaction(ev) => {
-                                info.insert_reaction(ev);
-                            },
-                            _ => continue,
-                        }
-                    }
-
-                    info.fetch_id =
-                        fetch_id.map_or(RoomFetchStatus::Done, RoomFetchStatus::HaveMore);
-                },
-                Err(e) => {
-                    warn!(
-                        room_id = room_id.as_str(),
-                        err = e.to_string(),
-                        "Failed to load older messages"
-                    );
-
-                    // Wait and try again.
-                    need_load.insert(room_id);
-                },
-            }
-        }
     }
 
     pub fn get_room_info(&mut self, room_id: OwnedRoomId) -> &mut RoomInfo {

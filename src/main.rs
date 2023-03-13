@@ -101,14 +101,6 @@ use modalkit::{
     },
 };
 
-const MIN_MSG_LOAD: u32 = 50;
-
-fn msg_load_req(area: Rect) -> u32 {
-    let n = area.height as u32;
-
-    n.max(MIN_MSG_LOAD)
-}
-
 struct Application {
     store: AsyncProgramStore,
     worker: Requester,
@@ -190,8 +182,6 @@ impl Application {
                 }
                 f.set_cursor(cx, cy);
             }
-
-            store.application.load_older(msg_load_req(area));
         })?;
 
         Ok(())
