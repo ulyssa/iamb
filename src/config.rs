@@ -11,6 +11,7 @@ use std::process;
 use clap::Parser;
 use matrix_sdk::ruma::{OwnedUserId, UserId};
 use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer};
+use tracing::Level;
 use url::Url;
 
 use modalkit::tui::{
@@ -109,6 +110,47 @@ pub enum ConfigError {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LogLevel(pub Level);
+pub struct LogLevelVisitor;
+
+impl From<LogLevel> for Level {
+    fn from(level: LogLevel) -> Level {
+        level.0
+    }
+}
+
+impl<'de> Visitor<'de> for LogLevelVisitor {
+    type Value = LogLevel;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid log level (e.g. \"warn\" or \"debug\")")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        match value {
+            "info" => Ok(LogLevel(Level::INFO)),
+            "debug" => Ok(LogLevel(Level::DEBUG)),
+            "warn" => Ok(LogLevel(Level::WARN)),
+            "error" => Ok(LogLevel(Level::ERROR)),
+            "trace" => Ok(LogLevel(Level::TRACE)),
+            _ => Err(E::custom("Could not parse log level")),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for LogLevel {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(LogLevelVisitor)
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UserColor(pub Color);
 pub struct UserColorVisitor;
 
@@ -180,6 +222,7 @@ fn merge_users(a: Option<UserOverrides>, b: Option<UserOverrides>) -> Option<Use
 
 #[derive(Clone)]
 pub struct TunableValues {
+    pub log_level: Level,
     pub reaction_display: bool,
     pub reaction_shortcode_display: bool,
     pub read_receipt_send: bool,
@@ -193,6 +236,7 @@ pub struct TunableValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
+    pub log_level: Option<LogLevel>,
     pub reaction_display: Option<bool>,
     pub reaction_shortcode_display: Option<bool>,
     pub read_receipt_send: Option<bool>,
@@ -207,6 +251,7 @@ pub struct Tunables {
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
+            log_level: self.log_level.or(other.log_level),
             reaction_display: self.reaction_display.or(other.reaction_display),
             reaction_shortcode_display: self
                 .reaction_shortcode_display
@@ -223,6 +268,7 @@ impl Tunables {
 
     fn values(self) -> TunableValues {
         TunableValues {
+            log_level: self.log_level.map(Level::from).unwrap_or(Level::INFO),
             reaction_display: self.reaction_display.unwrap_or(true),
             reaction_shortcode_display: self.reaction_shortcode_display.unwrap_or(false),
             read_receipt_send: self.read_receipt_send.unwrap_or(true),

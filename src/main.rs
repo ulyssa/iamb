@@ -15,7 +15,6 @@ use std::time::Duration;
 
 use clap::Parser;
 use tokio::sync::Mutex as AsyncMutex;
-use tracing::{self, Level};
 use tracing_subscriber::FmtSubscriber;
 
 use matrix_sdk::ruma::OwnedUserId;
@@ -534,7 +533,7 @@ fn main() -> IambResult<()> {
 
     let subscriber = FmtSubscriber::builder()
         .with_writer(appender)
-        .with_max_level(Level::INFO)
+        .with_max_level(settings.tunables.log_level)
         .finish();
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
