@@ -485,16 +485,15 @@ impl RoomInfo {
         };
 
         match &mut msg.event {
-            MessageEvent::Encrypted(_) => {
-                return;
-            },
             MessageEvent::Original(orig) => {
                 orig.content = *new_content;
             },
             MessageEvent::Local(_, content) => {
                 *content = new_content;
             },
-            MessageEvent::Redacted(_) => {
+            MessageEvent::Redacted(_) |
+            MessageEvent::EncryptedOriginal(_) |
+            MessageEvent::EncryptedRedacted(_) => {
                 return;
             },
         }

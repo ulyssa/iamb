@@ -12,7 +12,11 @@ use unicode_width::UnicodeWidthStr;
 use matrix_sdk::ruma::{
     events::{
         room::{
-            encrypted::RoomEncryptedEvent,
+            encrypted::{
+                OriginalRoomEncryptedEvent,
+                RedactedRoomEncryptedEvent,
+                RoomEncryptedEvent,
+            },
             message::{
                 FormattedBody,
                 MessageFormat,
@@ -27,6 +31,7 @@ use matrix_sdk::ruma::{
         },
         AnyMessageLikeEvent,
         Redact,
+        RedactedUnsigned,
     },
     EventId,
     MilliSecondsSinceUnixEpoch,
@@ -319,7 +324,8 @@ impl PartialOrd for MessageCursor {
 
 #[derive(Clone)]
 pub enum MessageEvent {
-    Encrypted(Box<RoomEncryptedEvent>),
+    EncryptedOriginal(Box<OriginalRoomEncryptedEvent>),
+    EncryptedRedacted(Box<RedactedRoomEncryptedEvent>),
     Original(Box<OriginalRoomMessageEvent>),
     Redacted(Box<RedactedRoomMessageEvent>),
     Local(OwnedEventId, Box<RoomMessageEventContent>),
@@ -328,7 +334,8 @@ pub enum MessageEvent {
 impl MessageEvent {
     pub fn event_id(&self) -> &EventId {
         match self {
-            MessageEvent::Encrypted(msg) => msg.event_id(),
+            MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
+            MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
             MessageEvent::Original(ev) => ev.event_id.as_ref(),
             MessageEvent::Redacted(ev) => ev.event_id.as_ref(),
             MessageEvent::Local(event_id, _) => event_id.as_ref(),
@@ -337,29 +344,18 @@ impl MessageEvent {
 
     pub fn body(&self) -> Cow<'_, str> {
         match self {
-            MessageEvent::Encrypted(_) => "[Unable to decrypt message]".into(),
+            MessageEvent::EncryptedOriginal(_) => "[Unable to decrypt message]".into(),
             MessageEvent::Original(ev) => body_cow_content(&ev.content),
-            MessageEvent::Redacted(ev) => {
-                let reason = ev
-                    .unsigned
-                    .redacted_because
-                    .as_ref()
-                    .and_then(|e| e.as_original())
-                    .and_then(|r| r.content.reason.as_ref());
-
-                if let Some(r) = reason {
-                    Cow::Owned(format!("[Redacted: {r:?}]"))
-                } else {
-                    Cow::Borrowed("[Redacted]")
-                }
-            },
+            MessageEvent::EncryptedRedacted(ev) => body_cow_reason(&ev.unsigned),
+            MessageEvent::Redacted(ev) => body_cow_reason(&ev.unsigned),
             MessageEvent::Local(_, content) => body_cow_content(content),
         }
     }
 
     pub fn html(&self) -> Option<StyleTree> {
         let content = match self {
-            MessageEvent::Encrypted(_) => return None,
+            MessageEvent::EncryptedOriginal(_) => return None,
+            MessageEvent::EncryptedRedacted(_) => return None,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
             MessageEvent::Local(_, content) => content,
@@ -378,7 +374,8 @@ impl MessageEvent {
 
     pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, version: &RoomVersionId) {
         match self {
-            MessageEvent::Encrypted(_) => return,
+            MessageEvent::EncryptedOriginal(_) => return,
+            MessageEvent::EncryptedRedacted(_) => return,
             MessageEvent::Redacted(_) => return,
             MessageEvent::Local(_, _) => return,
             MessageEvent::Original(ev) => {
@@ -415,6 +412,20 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
     };
 
     Cow::Borrowed(s)
+}
+
+fn body_cow_reason(unsigned: &RedactedUnsigned) -> Cow<'_, str> {
+    let reason = unsigned
+        .redacted_because
+        .as_ref()
+        .and_then(|e| e.as_original())
+        .and_then(|r| r.content.reason.as_ref());
+
+    if let Some(r) = reason {
+        Cow::Owned(format!("[Redacted: {r:?}]"))
+    } else {
+        Cow::Borrowed("[Redacted]")
+    }
 }
 
 enum MessageColumns {
@@ -554,7 +565,8 @@ impl Message {
 
     pub fn reply_to(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
-            MessageEvent::Encrypted(_) => return None,
+            MessageEvent::EncryptedOriginal(_) => return None,
+            MessageEvent::EncryptedRedacted(_) => return None,
             MessageEvent::Local(_, content) => content,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
@@ -782,7 +794,10 @@ impl From<RoomEncryptedEvent> for Message {
     fn from(event: RoomEncryptedEvent) -> Self {
         let timestamp = event.origin_server_ts().into();
         let user_id = event.sender().to_owned();
-        let content = MessageEvent::Encrypted(event.into());
+        let content = match event {
+            RoomEncryptedEvent::Original(ev) => MessageEvent::EncryptedOriginal(ev.into()),
+            RoomEncryptedEvent::Redacted(ev) => MessageEvent::EncryptedRedacted(ev.into()),
+        };
 
         Message::new(content, user_id, timestamp)
     }
