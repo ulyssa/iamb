@@ -294,6 +294,7 @@ impl ChatState {
             MessageAction::React(emoji) => {
                 let room = self.get_joined(&store.application.worker)?;
                 let event_id = match &msg.event {
+                    MessageEvent::Encrypted(msg) => msg.event_id().to_owned(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::Redacted(_) => {
@@ -313,6 +314,7 @@ impl ChatState {
             MessageAction::Redact(reason) => {
                 let room = self.get_joined(&store.application.worker)?;
                 let event_id = match &msg.event {
+                    MessageEvent::Encrypted(msg) => msg.event_id().to_owned(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::Redacted(_) => {
@@ -338,6 +340,7 @@ impl ChatState {
             MessageAction::Unreact(emoji) => {
                 let room = self.get_joined(&store.application.worker)?;
                 let event_id: &EventId = match &msg.event {
+                    MessageEvent::Encrypted(msg) => msg.event_id(),
                     MessageEvent::Original(ev) => ev.event_id.as_ref(),
                     MessageEvent::Local(event_id, _) => event_id.as_ref(),
                     MessageEvent::Redacted(_) => {

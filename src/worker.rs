@@ -234,6 +234,9 @@ async fn load_insert(room_id: OwnedRoomId, res: MessageFetchResult, store: Async
                 let _ = presences.get_or_default(sender);
 
                 match msg {
+                    AnyMessageLikeEvent::RoomEncrypted(msg) => {
+                        info.insert_encrypted(msg);
+                    },
                     AnyMessageLikeEvent::RoomMessage(msg) => {
                         info.insert(msg);
                     },

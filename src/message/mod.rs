@@ -12,6 +12,7 @@ use unicode_width::UnicodeWidthStr;
 use matrix_sdk::ruma::{
     events::{
         room::{
+            encrypted::RoomEncryptedEvent,
             message::{
                 FormattedBody,
                 MessageFormat,
@@ -318,6 +319,7 @@ impl PartialOrd for MessageCursor {
 
 #[derive(Clone)]
 pub enum MessageEvent {
+    Encrypted(Box<RoomEncryptedEvent>),
     Original(Box<OriginalRoomMessageEvent>),
     Redacted(Box<RedactedRoomMessageEvent>),
     Local(OwnedEventId, Box<RoomMessageEventContent>),
@@ -326,6 +328,7 @@ pub enum MessageEvent {
 impl MessageEvent {
     pub fn event_id(&self) -> &EventId {
         match self {
+            MessageEvent::Encrypted(msg) => msg.event_id(),
             MessageEvent::Original(ev) => ev.event_id.as_ref(),
             MessageEvent::Redacted(ev) => ev.event_id.as_ref(),
             MessageEvent::Local(event_id, _) => event_id.as_ref(),
@@ -334,6 +337,7 @@ impl MessageEvent {
 
     pub fn body(&self) -> Cow<'_, str> {
         match self {
+            MessageEvent::Encrypted(_) => "[Unable to decrypt message]".into(),
             MessageEvent::Original(ev) => body_cow_content(&ev.content),
             MessageEvent::Redacted(ev) => {
                 let reason = ev
@@ -355,6 +359,7 @@ impl MessageEvent {
 
     pub fn html(&self) -> Option<StyleTree> {
         let content = match self {
+            MessageEvent::Encrypted(_) => return None,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
             MessageEvent::Local(_, content) => content,
@@ -373,6 +378,7 @@ impl MessageEvent {
 
     pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, version: &RoomVersionId) {
         match self {
+            MessageEvent::Encrypted(_) => return,
             MessageEvent::Redacted(_) => return,
             MessageEvent::Local(_, _) => return,
             MessageEvent::Original(ev) => {
@@ -548,6 +554,7 @@ impl Message {
 
     pub fn reply_to(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
+            MessageEvent::Encrypted(_) => return None,
             MessageEvent::Local(_, content) => content,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
@@ -768,6 +775,16 @@ impl Message {
         };
 
         Span::styled(sender, style).into()
+    }
+}
+
+impl From<RoomEncryptedEvent> for Message {
+    fn from(event: RoomEncryptedEvent) -> Self {
+        let timestamp = event.origin_server_ts().into();
+        let user_id = event.sender().to_owned();
+        let content = MessageEvent::Encrypted(event.into());
+
+        Message::new(content, user_id, timestamp)
     }
 }
 

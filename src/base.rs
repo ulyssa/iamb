@@ -14,6 +14,7 @@ use matrix_sdk::{
     ruma::{
         events::{
             reaction::ReactionEvent,
+            room::encrypted::RoomEncryptedEvent,
             room::message::{
                 OriginalRoomMessageEvent,
                 Relation,
@@ -484,6 +485,9 @@ impl RoomInfo {
         };
 
         match &mut msg.event {
+            MessageEvent::Encrypted(_) => {
+                return;
+            },
             MessageEvent::Original(orig) => {
                 orig.content = *new_content;
             },
@@ -496,6 +500,15 @@ impl RoomInfo {
         }
 
         msg.html = msg.event.html();
+    }
+
+    /// Inserts events that couldn't be decrypted into the scrollback.
+    pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
+        let event_id = msg.event_id().to_owned();
+        let key = (msg.origin_server_ts().into(), event_id.clone());
+
+        self.keys.insert(event_id, EventLocation::Message(key.clone()));
+        self.messages.insert(key, msg.into());
     }
 
     pub fn insert_message(&mut self, msg: RoomMessageEvent) {
