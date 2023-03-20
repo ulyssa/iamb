@@ -1,4 +1,5 @@
 use std::cmp::{Ord, Ordering, PartialOrd};
+use std::time::{Duration, Instant};
 
 use matrix_sdk::{
     encryption::verification::{format_emojis, SasVerification},
@@ -76,6 +77,8 @@ use self::{room::RoomState, welcome::WelcomeState};
 
 pub mod room;
 pub mod welcome;
+
+const MEMBER_FETCH_DEBOUNCE: Duration = Duration::from_secs(5);
 
 #[inline]
 fn bold_style() -> Style {
@@ -211,7 +214,7 @@ macro_rules! delegate {
         match $s {
             IambWindow::Room($id) => $e,
             IambWindow::DirectList($id) => $e,
-            IambWindow::MemberList($id, _) => $e,
+            IambWindow::MemberList($id, _, _) => $e,
             IambWindow::RoomList($id) => $e,
             IambWindow::SpaceList($id) => $e,
             IambWindow::VerifyList($id) => $e,
@@ -222,7 +225,7 @@ macro_rules! delegate {
 
 pub enum IambWindow {
     DirectList(DirectListState),
-    MemberList(MemberListState, OwnedRoomId),
+    MemberList(MemberListState, OwnedRoomId, Option<Instant>),
     Room(RoomState),
     VerifyList(VerifyListState),
     RoomList(RoomListState),
@@ -392,10 +395,18 @@ impl WindowOps<IambInfo> for IambWindow {
                     .focus(focused)
                     .render(area, buf, state);
             },
-            IambWindow::MemberList(state, room_id) => {
-                if let Ok(mems) = store.application.worker.members(room_id.clone()) {
-                    let items = mems.into_iter().map(MemberItem::new);
-                    state.set(items.collect());
+            IambWindow::MemberList(state, room_id, last_fetch) => {
+                let need_fetch = match last_fetch {
+                    Some(i) => i.elapsed() >= MEMBER_FETCH_DEBOUNCE,
+                    None => true,
+                };
+
+                if need_fetch {
+                    if let Ok(mems) = store.application.worker.members(room_id.clone()) {
+                        let items = mems.into_iter().map(MemberItem::new);
+                        state.set(items.collect());
+                        *last_fetch = Some(Instant::now());
+                    }
                 }
 
                 List::new(store)
@@ -456,8 +467,8 @@ impl WindowOps<IambInfo> for IambWindow {
         match self {
             IambWindow::Room(w) => w.dup(store).into(),
             IambWindow::DirectList(w) => w.dup(store).into(),
-            IambWindow::MemberList(w, room_id) => {
-                IambWindow::MemberList(w.dup(store), room_id.clone())
+            IambWindow::MemberList(w, room_id, last_fetch) => {
+                IambWindow::MemberList(w.dup(store), room_id.clone(), *last_fetch)
             },
             IambWindow::RoomList(w) => w.dup(store).into(),
             IambWindow::SpaceList(w) => w.dup(store).into(),
@@ -497,7 +508,7 @@ impl Window<IambInfo> for IambWindow {
         match self {
             IambWindow::Room(room) => IambId::Room(room.id().to_owned()),
             IambWindow::DirectList(_) => IambId::DirectList,
-            IambWindow::MemberList(_, room_id) => IambId::MemberList(room_id.clone()),
+            IambWindow::MemberList(_, room_id, _) => IambId::MemberList(room_id.clone()),
             IambWindow::RoomList(_) => IambId::RoomList,
             IambWindow::SpaceList(_) => IambId::SpaceList,
             IambWindow::VerifyList(_) => IambId::VerifyList,
@@ -518,7 +529,7 @@ impl Window<IambInfo> for IambWindow {
 
                 Spans::from(title)
             },
-            IambWindow::MemberList(_, room_id) => {
+            IambWindow::MemberList(_, room_id, _) => {
                 let title = store.application.get_room_title(room_id.as_ref());
 
                 Spans(vec![bold_span("Room Members: "), title.into()])
@@ -535,7 +546,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
 
             IambWindow::Room(w) => w.get_title(store),
-            IambWindow::MemberList(_, room_id) => {
+            IambWindow::MemberList(_, room_id, _) => {
                 let title = store.application.get_room_title(room_id.as_ref());
 
                 Spans(vec![bold_span("Room Members: "), title.into()])
@@ -559,7 +570,7 @@ impl Window<IambInfo> for IambWindow {
             IambId::MemberList(room_id) => {
                 let id = IambBufferId::MemberList(room_id.clone());
                 let list = MemberListState::new(id, vec![]);
-                let win = IambWindow::MemberList(list, room_id);
+                let win = IambWindow::MemberList(list, room_id, None);
 
                 return Ok(win);
             },

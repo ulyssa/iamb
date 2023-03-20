@@ -14,13 +14,14 @@ use tokio::task::JoinHandle;
 use tracing::{error, warn};
 
 use matrix_sdk::{
-    config::{RequestConfig, StoreConfig, SyncSettings},
+    config::{RequestConfig, SyncSettings},
     encryption::verification::{SasVerification, Verification},
     event_handler::Ctx,
     reqwest,
     room::{Invited, Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
+            filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
             room::create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
             room::Visibility,
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
@@ -557,7 +558,6 @@ impl ClientWorker {
         let client = Client::builder()
             .http_client(Arc::new(http))
             .homeserver_url(account.url.clone())
-            .store_config(StoreConfig::default())
             .sled_store(settings.matrix_dir.as_path(), None)
             .expect("Failed to setup up sled store for Matrix SDK")
             .request_config(req_config)
@@ -967,10 +967,19 @@ impl ClientWorker {
 
         self.sync_handle = Some(handle);
 
-        self.client
-            .sync_once(SyncSettings::default())
-            .await
-            .map_err(IambError::from)?;
+        // Perform an initial, lazily-loaded sync.
+        let mut room = RoomEventFilter::default();
+        room.lazy_load_options = LazyLoadOptions::Enabled { include_redundant_members: false };
+
+        let mut room_ev = RoomFilter::default();
+        room_ev.state = room;
+
+        let mut filter = FilterDefinition::default();
+        filter.room = room_ev;
+
+        let settings = SyncSettings::new().filter(filter.into());
+
+        self.client.sync_once(settings).await.map_err(IambError::from)?;
 
         Ok(Some(InfoMessage::from("Successfully logged in!")))
     }
