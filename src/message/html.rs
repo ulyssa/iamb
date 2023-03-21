@@ -619,7 +619,7 @@ pub fn parse_matrix_html(s: &str) -> StyleTree {
     let dom = parse_fragment(
         RcDom::default(),
         ParseOpts::default(),
-        QualName::new(None, ns!(), local_name!("div")),
+        QualName::new(None, ns!(html), local_name!("body")),
         vec![],
     )
     .one(StrTendril::from(s));
@@ -1146,5 +1146,16 @@ pub mod tests {
                 Span::raw(" ")
             ])
         );
+    }
+
+    #[test]
+    fn test_self_closing() {
+        let s = "Hello<br>World<br>Goodbye";
+        let tree = parse_matrix_html(s);
+        let text = tree.to_text(7, Style::default(), true);
+        assert_eq!(text.lines.len(), 3);
+        assert_eq!(text.lines[0], Spans(vec![Span::raw("Hello"), Span::raw("  "),]));
+        assert_eq!(text.lines[1], Spans(vec![Span::raw("World"), Span::raw("  "),]));
+        assert_eq!(text.lines[2], Spans(vec![Span::raw("Goodbye")]),);
     }
 }
