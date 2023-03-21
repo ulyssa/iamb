@@ -342,6 +342,23 @@ impl MessageEvent {
         }
     }
 
+    pub fn content(&self) -> Option<&RoomMessageEventContent> {
+        match self {
+            MessageEvent::EncryptedOriginal(_) => None,
+            MessageEvent::Original(ev) => Some(&ev.content),
+            MessageEvent::EncryptedRedacted(_) => None,
+            MessageEvent::Redacted(_) => None,
+            MessageEvent::Local(_, content) => Some(content),
+        }
+    }
+
+    pub fn is_emote(&self) -> bool {
+        matches!(
+            self.content(),
+            Some(RoomMessageEventContent { msgtype: MessageType::Emote(_), .. })
+        )
+    }
+
     pub fn body(&self) -> Cow<'_, str> {
         match self {
             MessageEvent::EncryptedOriginal(_) => "[Unable to decrypt message]".into(),
@@ -771,7 +788,10 @@ impl Message {
         settings: &ApplicationSettings,
     ) -> Option<Span> {
         if let Some(prev) = prev {
-            if self.sender == prev.sender && self.timestamp.same_day(&prev.timestamp) {
+            if self.sender == prev.sender &&
+                self.timestamp.same_day(&prev.timestamp) &&
+                !self.event.is_emote()
+            {
                 return None;
             }
         }
