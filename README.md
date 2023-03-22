@@ -35,6 +35,14 @@ On NetBSD a package is available from the official repositories. To install it s
 pkgin install iamb
 ```
 
+### Arch Linux
+
+On Arch Linux a package is available in the Arch User Repositories (AUR). To install it simply run with your favorite AUR helper:
+
+```
+paru iamb-git
+```
+
 ## Configuration
 
 You can create a basic configuration in `$CONFIG_DIR/iamb/config.json` that looks like:
