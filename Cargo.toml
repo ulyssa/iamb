@@ -1,6 +1,6 @@
 [package]
 name = "iamb"
-version = "0.0.6"
+version = "0.0.7"
 edition = "2018"
 authors = ["Ulyssa <git@ulyssa.dev>"]
 repository = "https://github.com/ulyssa/iamb"
@@ -39,7 +39,7 @@ unicode-width = "0.1.10"
 url = {version = "^2.2.2", features = ["serde"]}
 
 [dependencies.modalkit]
-version = "0.0.13"
+version = "0.0.14"
 
 [dependencies.matrix-sdk]
 version = "0.6"

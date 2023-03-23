@@ -1308,7 +1308,7 @@ dependencies = [
 
 [[package]]
 name = "iamb"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "bitflags",
  "chrono",
@@ -1882,9 +1882,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.13"
+version = "0.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "038bb42efcd659fb123708bf8e4ea12ca9023f07d44514f9358b9334ea7ba80f"
+checksum = "5c48c7d7e6d764a09435b43a7e4d342ba2d2e026626ca773b16a5ba34b90b933"
 dependencies = [
  "anymap2",
  "arboard",
