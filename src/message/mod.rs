@@ -389,7 +389,7 @@ impl MessageEvent {
         }
     }
 
-    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, version: &RoomVersionId) {
+    fn redact(&mut self, redaction: SyncRoomRedactionEvent, version: &RoomVersionId) {
         match self {
             MessageEvent::EncryptedOriginal(_) => return,
             MessageEvent::EncryptedRedacted(_) => return,
@@ -807,6 +807,11 @@ impl Message {
         };
 
         Span::styled(sender, style).into()
+    }
+
+    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, version: &RoomVersionId) {
+        self.event.redact(redaction, version);
+        self.html = None;
     }
 }
 

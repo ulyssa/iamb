@@ -774,7 +774,7 @@ impl ClientWorker {
                         Some(EventLocation::Message(key)) => {
                             if let Some(msg) = info.messages.get_mut(key) {
                                 let ev = SyncRoomRedactionEvent::Original(ev);
-                                msg.event.redact(ev, room_version);
+                                msg.redact(ev, room_version);
                             }
                         },
                         Some(EventLocation::Reaction(event_id)) => {
