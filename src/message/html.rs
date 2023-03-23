@@ -130,7 +130,6 @@ impl Table {
         let cell_min = cell_total / columns;
         let mut cell_slop = cell_total - cell_min * columns;
         let cell_widths = (0..columns)
-            .into_iter()
             .map(|_| {
                 let slopped = cell_slop.min(1);
                 cell_slop -= slopped;
