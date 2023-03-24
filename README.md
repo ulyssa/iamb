@@ -43,6 +43,12 @@ On Arch Linux a package is available in the Arch User Repositories (AUR). To ins
 paru iamb-git
 ```
 
+### Nix / NixOS (flake)
+
+```
+nix profile install "github:ulyssa/iamb"
+```
+
 ## Configuration
 
 You can create a basic configuration in `$CONFIG_DIR/iamb/config.json` that looks like:
