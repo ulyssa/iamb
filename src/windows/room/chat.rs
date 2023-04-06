@@ -75,7 +75,7 @@ use crate::base::{
     SendAction,
 };
 
-use crate::message::{Message, MessageEvent, MessageKey, MessageTimeStamp};
+use crate::message::{text_to_message, Message, MessageEvent, MessageKey, MessageTimeStamp};
 use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
@@ -407,10 +407,7 @@ impl ChatState {
                     return Ok(None);
                 }
 
-                let msg = TextMessageEventContent::markdown(msg.to_string());
-                let msg = MessageType::Text(msg);
-
-                let mut msg = RoomMessageEventContent::new(msg);
+                let mut msg = text_to_message(msg.to_string());
 
                 if let Some((_, event_id)) = &self.editing {
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(

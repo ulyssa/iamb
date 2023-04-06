@@ -156,8 +156,13 @@ impl<'a> TextPrinter<'a> {
     pub fn push_str(&mut self, s: &'a str, style: Style) {
         let style = self.base_style.patch(style);
 
-        for word in UnicodeSegmentation::split_word_bounds(s) {
-            if self.width == 0 && word.chars().all(char::is_whitespace) {
+        for mut word in UnicodeSegmentation::split_word_bounds(s) {
+            if let "\n" | "\r\n" = word {
+                // Render embedded newlines as spaces.
+                word = " ";
+            }
+
+            if self.curr_width == 0 && word.chars().all(char::is_whitespace) {
                 // Drop leading whitespace.
                 continue;
             }

@@ -1027,9 +1027,8 @@ pub mod tests {
             Span::raw("│"),
             Span::raw("    "),
             Span::raw("│"),
-            Span::styled(" ", bold),
             Span::styled("3", bold),
-            Span::styled(" ", bold),
+            Span::styled("  ", bold),
             Span::raw("│")
         ]);
 
@@ -1156,5 +1155,22 @@ pub mod tests {
         assert_eq!(text.lines[0], Spans(vec![Span::raw("Hello"), Span::raw("  "),]));
         assert_eq!(text.lines[1], Spans(vec![Span::raw("World"), Span::raw("  "),]));
         assert_eq!(text.lines[2], Spans(vec![Span::raw("Goodbye")]),);
+    }
+
+    #[test]
+    fn test_embedded_newline() {
+        let s = "<p>Hello\nWorld</p>";
+        let tree = parse_matrix_html(s);
+        let text = tree.to_text(15, Style::default(), true);
+        assert_eq!(text.lines.len(), 1);
+        assert_eq!(
+            text.lines[0],
+            Spans(vec![
+                Span::raw("Hello"),
+                Span::raw(" "),
+                Span::raw("World"),
+                Span::raw("    ")
+            ])
+        );
     }
 }

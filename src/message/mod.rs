@@ -7,6 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::slice::Iter;
 
 use chrono::{DateTime, Local as LocalTz, NaiveDateTime, TimeZone};
+use comrak::{markdown_to_html, ComrakOptions};
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
@@ -26,6 +27,7 @@ use matrix_sdk::ruma::{
                 Relation,
                 RoomMessageEvent,
                 RoomMessageEventContent,
+                TextMessageEventContent,
             },
             redaction::SyncRoomRedactionEvent,
         },
@@ -92,6 +94,19 @@ const USER_GUTTER_EMPTY_SPAN: Span<'static> = span_static(USER_GUTTER_EMPTY);
 
 const TIME_GUTTER_EMPTY: &str = "            ";
 const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
+
+fn text_to_message_content(input: String) -> TextMessageEventContent {
+    let mut options = ComrakOptions::default();
+    options.render.hardbreaks = true;
+    let html = markdown_to_html(input.as_str(), &options);
+
+    TextMessageEventContent::html(input, html)
+}
+
+pub fn text_to_message(input: String) -> RoomMessageEventContent {
+    let msg = MessageType::Text(text_to_message_content(input));
+    RoomMessageEventContent::new(msg)
+}
 
 #[inline]
 fn millis_to_datetime(ms: UInt) -> DateTime<LocalTz> {
@@ -971,5 +986,49 @@ pub mod tests {
 
         // MessageCursor::latest() should point at the most recent message after conversion.
         assert_eq!(identity(&mc6), mc1);
+    }
+
+    #[test]
+    fn test_markdown_message() {
+        let input = "**bold**\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(content.formatted.unwrap().body, "<p><strong>bold</strong></p>\n");
+
+        let input = "*emphasis*\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(content.formatted.unwrap().body, "<p><em>emphasis</em></p>\n");
+
+        let input = "`code`\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(content.formatted.unwrap().body, "<p><code>code</code></p>\n");
+
+        let input = "```rust\nconst A: usize = 1;\n```\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<pre><code class=\"language-rust\">const A: usize = 1;\n</code></pre>\n"
+        );
+
+        let input = "para 1\n\npara 2\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(content.formatted.unwrap().body, "<p>para 1</p>\n<p>para 2</p>\n");
+
+        let input = "line 1\nline 2\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(content.formatted.unwrap().body, "<p>line 1<br />\nline 2</p>\n");
+
+        let input = "# Heading\n## Subheading\n\ntext\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<h1>Heading</h1>\n<h2>Subheading</h2>\n<p>text</p>\n"
+        );
     }
 }
