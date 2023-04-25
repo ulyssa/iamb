@@ -324,7 +324,7 @@ impl Directories {
         let downloads = self
             .downloads
             .or_else(dirs::download_dir)
-            .expect("no dirs.download value configured!");
+            .expect("no dirs.downloads value configured!");
 
         DirectoryValues { cache, logs, downloads }
     }
