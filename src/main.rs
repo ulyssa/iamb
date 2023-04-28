@@ -76,12 +76,14 @@ use modalkit::{
             EditInfo,
             Editable,
             EditorAction,
+            InfoMessage,
             InsertTextAction,
             Jumpable,
             Promptable,
             Scrollable,
             TabContainer,
             TabCount,
+            UIError,
             WindowAction,
             WindowContainer,
         },
@@ -90,7 +92,7 @@ use modalkit::{
         key::KeyManager,
         store::Store,
     },
-    input::{bindings::BindingMachine, key::TerminalKey},
+    input::{bindings::BindingMachine, dialog::Pager, key::TerminalKey},
     widgets::{
         cmdbar::CommandBarState,
         screen::{Screen, ScreenState},
@@ -156,8 +158,7 @@ impl Application {
     }
 
     fn redraw(&mut self, full: bool, store: &mut ProgramStore) -> Result<(), std::io::Error> {
-        let modestr = self.bindings.showmode();
-        let cursor = self.bindings.get_cursor_indicator();
+        let bindings = &mut self.bindings;
         let sstate = &mut self.screen;
         let term = &mut self.terminal;
 
@@ -168,8 +169,19 @@ impl Application {
         term.draw(|f| {
             let area = f.size();
 
-            let screen = Screen::new(store).showmode(modestr).borders(true);
+            let modestr = bindings.show_mode();
+            let cursor = bindings.get_cursor_indicator();
+            let dialogstr = bindings.show_dialog(area.height as usize, area.width as usize);
+
+            // Don't show terminal cursor when we show a dialog.
+            let hide_cursor = !dialogstr.is_empty();
+
+            let screen = Screen::new(store).show_dialog(dialogstr).show_mode(modestr).borders(true);
             f.render_stateful_widget(screen, area, sstate);
+
+            if hide_cursor {
+                return;
+            }
 
             if let Some((cx, cy)) = sstate.get_term_cursor() {
                 if let Some(c) = cursor {
@@ -215,7 +227,8 @@ impl Application {
                     match self.screen.editor_command(&act, &ctx, store.deref_mut()) {
                         Ok(None) => {},
                         Ok(Some(info)) => {
-                            self.screen.push_info(info);
+                            drop(store);
+                            self.handle_info(info);
                         },
                         Err(e) => {
                             self.screen.push_error(e);
@@ -279,13 +292,18 @@ impl Application {
             Action::CommandBar(act) => self.screen.command_bar(&act, &ctx)?,
             Action::Macro(act) => self.bindings.macro_command(&act, &ctx, store)?,
             Action::Scroll(style) => self.screen.scroll(&style, &ctx, store)?,
-            Action::Suspend => self.terminal.program_suspend()?,
+            Action::ShowInfoMessage(info) => Some(info),
             Action::Tab(cmd) => self.screen.tab_command(&cmd, &ctx, store)?,
             Action::Window(cmd) => self.screen.window_command(&cmd, &ctx, store)?,
 
             Action::Jump(l, dir, count) => {
                 let count = ctx.resolve(&count);
                 let _ = self.screen.jump(l, dir, count, &ctx)?;
+
+                None
+            },
+            Action::Suspend => {
+                self.terminal.program_suspend()?;
 
                 None
             },
@@ -402,6 +420,18 @@ impl Application {
         }
     }
 
+    fn handle_info(&mut self, info: InfoMessage) {
+        match info {
+            InfoMessage::Message(info) => {
+                self.screen.push_info(info);
+            },
+            InfoMessage::Pager(text) => {
+                let pager = Box::new(Pager::new(text, vec![]));
+                self.bindings.run_dialog(pager);
+            },
+        }
+    }
+
     pub async fn run(&mut self) -> Result<(), std::io::Error> {
         self.terminal.clear()?;
 
@@ -422,9 +452,16 @@ impl Application {
                         continue;
                     },
                     Ok(Some(info)) => {
-                        self.screen.push_info(info);
+                        self.handle_info(info);
 
                         // Continue processing; we'll redraw later.
+                        continue;
+                    },
+                    Err(
+                        UIError::NeedConfirm(dialog) |
+                        UIError::EditingFailure(EditError::NeedConfirm(dialog)),
+                    ) => {
+                        self.bindings.run_dialog(dialog);
                         continue;
                     },
                     Err(e) => {

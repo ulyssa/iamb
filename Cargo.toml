@@ -40,7 +40,7 @@ unicode-width = "0.1.10"
 url = {version = "^2.2.2", features = ["serde"]}
 
 [dependencies.modalkit]
-version = "0.0.14"
+version = "0.0.15"
 
 [dependencies.matrix-sdk]
 version = "0.6"

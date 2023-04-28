@@ -199,7 +199,7 @@ fn room_prompt(
 
             Err(err)
         },
-        PromptAction::Recall(_, _) => {
+        PromptAction::Recall(..) => {
             let msg = "Cannot recall history inside a list";
             let err = EditError::Failure(msg.into());
 
@@ -1043,7 +1043,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for VerifyItem {
 
                 Err(err)
             },
-            PromptAction::Recall(_, _) => {
+            PromptAction::Recall(..) => {
                 let msg = "Cannot recall history inside a list";
                 let err = EditError::Failure(msg.into());
 
@@ -1120,7 +1120,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 
                 Err(err)
             },
-            PromptAction::Recall(_, _) => {
+            PromptAction::Recall(..) => {
                 let msg = "Cannot recall history inside a list";
                 let err = EditError::Failure(msg.into());
 

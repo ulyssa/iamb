@@ -118,7 +118,9 @@ pub enum MessageAction {
     React(String),
 
     /// Redact a message, with an optional reason.
-    Redact(Option<String>),
+    ///
+    /// The [bool] argument indicates whether to skip confirmation.
+    Redact(Option<String>, bool),
 
     /// Reply to a message.
     Reply,
@@ -178,6 +180,7 @@ pub enum RoomAction {
     InviteAccept,
     InviteReject,
     InviteSend(OwnedUserId),
+    Leave(bool),
     Members(Box<CommandContext<ProgramContext>>),
     Set(RoomField, String),
     Unset(RoomField),

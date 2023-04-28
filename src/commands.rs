@@ -161,6 +161,17 @@ fn iamb_members(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_leave(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let leave = IambAction::Room(RoomAction::Leave(desc.bang));
+    let step = CommandStep::Continue(leave.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
 fn iamb_cancel(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -237,7 +248,8 @@ fn iamb_redact(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let ract = IambAction::from(MessageAction::Redact(args.into_iter().next()));
+    let reason = args.into_iter().next();
+    let ract = IambAction::from(MessageAction::Redact(reason, desc.bang));
     let step = CommandStep::Continue(ract.into(), ctx.context.take());
 
     return Ok(step);
@@ -469,6 +481,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_invite,
     });
     cmds.add_command(ProgramCommand { name: "join".into(), aliases: vec![], f: iamb_join });
+    cmds.add_command(ProgramCommand {
+        name: "leave".into(),
+        aliases: vec![],
+        f: iamb_leave,
+    });
     cmds.add_command(ProgramCommand {
         name: "members".into(),
         aliases: vec![],
@@ -870,15 +887,19 @@ mod tests {
         let ctx = ProgramContext::default();
 
         let res = cmds.input_cmd("redact", ctx.clone()).unwrap();
-        let act = IambAction::Message(MessageAction::Redact(None));
+        let act = IambAction::Message(MessageAction::Redact(None, false));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("redact!", ctx.clone()).unwrap();
+        let act = IambAction::Message(MessageAction::Redact(None, true));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("redact Removed", ctx.clone()).unwrap();
-        let act = IambAction::Message(MessageAction::Redact(Some("Removed".into())));
+        let act = IambAction::Message(MessageAction::Redact(Some("Removed".into()), false));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("redact \"Removed\"", ctx.clone()).unwrap();
-        let act = IambAction::Message(MessageAction::Redact(Some("Removed".into())));
+        let act = IambAction::Message(MessageAction::Redact(Some("Removed".into()), false));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("redact Removed Removed", ctx.clone());

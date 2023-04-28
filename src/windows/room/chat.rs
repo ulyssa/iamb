@@ -27,6 +27,7 @@ use matrix_sdk::{
 };
 
 use modalkit::{
+    input::dialog::PromptYesNo,
     tui::{
         buffer::Buffer,
         layout::Rect,
@@ -40,6 +41,7 @@ use modalkit::{
 
 use modalkit::editing::{
     action::{
+        Action,
         EditError,
         EditInfo,
         EditResult,
@@ -310,7 +312,16 @@ impl ChatState {
 
                 Ok(None)
             },
-            MessageAction::Redact(reason) => {
+            MessageAction::Redact(reason, skip_confirm) => {
+                if !skip_confirm {
+                    let msg = "Are you sure you want to redact this message?";
+                    let act = IambAction::Message(MessageAction::Redact(reason, true));
+                    let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
+                    let prompt = Box::new(prompt);
+
+                    return Err(UIError::NeedConfirm(prompt));
+                }
+
                 let room = self.get_joined(&store.application.worker)?;
                 let event_id = match &msg.event {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
@@ -672,13 +683,14 @@ impl PromptActions<ProgramContext, ProgramStore, IambInfo> for ChatState {
         &mut self,
         dir: &MoveDir1D,
         count: &Count,
+        prefixed: bool,
         ctx: &ProgramContext,
         _: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
         let count = ctx.resolve(count);
         let rope = self.tbox.get();
 
-        let text = self.sent.recall(&rope, &mut self.sent_scrollback, *dir, count);
+        let text = self.sent.recall(&rope, &mut self.sent_scrollback, *dir, prefixed, count);
 
         if let Some(text) = text {
             self.tbox.set_text(text);
@@ -702,7 +714,9 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ChatState {
         match act {
             PromptAction::Submit => self.submit(ctx, store),
             PromptAction::Abort(empty) => self.abort(*empty, ctx, store),
-            PromptAction::Recall(dir, count) => self.recall(dir, count, ctx, store),
+            PromptAction::Recall(dir, count, prefixed) => {
+                self.recall(dir, count, *prefixed, ctx, store)
+            },
             _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
         }
     }

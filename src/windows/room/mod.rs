@@ -43,11 +43,13 @@ use modalkit::{
         WriteFlags,
     },
     editing::completion::CompletionList,
+    input::dialog::PromptYesNo,
     input::InputContext,
     widgets::{TermOffset, TerminalCursor, WindowOps},
 };
 
 use crate::base::{
+    IambAction,
     IambError,
     IambId,
     IambInfo,
@@ -214,6 +216,24 @@ impl RoomState {
                     room.invite_user_by_id(user.as_ref()).await.map_err(IambError::from)?;
 
                     Ok(vec![])
+                } else {
+                    Err(IambError::NotJoined.into())
+                }
+            },
+            RoomAction::Leave(skip_confirm) => {
+                if let Some(room) = store.application.worker.client.get_joined_room(self.id()) {
+                    if skip_confirm {
+                        room.leave().await.map_err(IambError::from)?;
+
+                        Ok(vec![])
+                    } else {
+                        let msg = "Do you really want to leave this room?";
+                        let leave = IambAction::Room(RoomAction::Leave(true));
+                        let prompt = PromptYesNo::new(msg, vec![Action::from(leave)]);
+                        let prompt = Box::new(prompt);
+
+                        Err(UIError::NeedConfirm(prompt))
+                    }
                 } else {
                     Err(IambError::NotJoined.into())
                 }

@@ -1215,7 +1215,7 @@ impl ClientWorker {
                 let _req = request.await.map_err(IambError::from)?;
                 let info = format!("Sent verification request to {user_id}");
 
-                Ok(InfoMessage::from(info).into())
+                Ok(Some(InfoMessage::from(info)))
             },
             None => {
                 let msg = format!("Could not find identity information for {user_id}");
