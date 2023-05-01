@@ -237,6 +237,7 @@ pub struct TunableValues {
     pub typing_notice_display: bool,
     pub users: UserOverrides,
     pub default_room: Option<String>,
+    pub open_command: Option<Vec<String>>,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -251,6 +252,7 @@ pub struct Tunables {
     pub typing_notice_display: Option<bool>,
     pub users: Option<UserOverrides>,
     pub default_room: Option<String>,
+    pub open_command: Option<Vec<String>>,
 }
 
 impl Tunables {
@@ -268,6 +270,7 @@ impl Tunables {
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
             users: merge_users(self.users, other.users),
             default_room: self.default_room.or(other.default_room),
+            open_command: self.open_command.or(other.open_command),
         }
     }
 
@@ -283,6 +286,7 @@ impl Tunables {
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
             users: self.users.unwrap_or_default(),
             default_room: self.default_room,
+            open_command: self.open_command,
         }
     }
 }

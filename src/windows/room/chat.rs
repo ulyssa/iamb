@@ -1,10 +1,11 @@
 use std::borrow::Cow;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use modalkit::editing::store::RegisterError;
+use std::process::Command;
 use tokio;
 
 use matrix_sdk::{
@@ -246,14 +247,21 @@ impl ChatState {
                     }
 
                     let info = if flags.contains(DownloadFlags::OPEN) {
-                        // open::that may not return until the spawned program closes.
                         let target = filename.clone().into_os_string();
-                        tokio::task::spawn_blocking(move || open::that(target));
-
-                        InfoMessage::from(format!(
-                            "Attachment downloaded to {} and opened",
-                            filename.display()
-                        ))
+                        match open_command(
+                            store.application.settings.tunables.open_command.as_ref(),
+                            target,
+                        ) {
+                            Ok(_) => {
+                                InfoMessage::from(format!(
+                                    "Attachment downloaded to {} and opened",
+                                    filename.display()
+                                ))
+                            },
+                            Err(err) => {
+                                return Err(err);
+                            },
+                        }
                     } else {
                         InfoMessage::from(format!(
                             "Attachment downloaded to {}",
@@ -843,4 +851,27 @@ impl<'a> StatefulWidget for Chat<'a> {
         let scrollback = Scrollback::new(self.store).focus(scrollback_focused);
         scrollback.render(scrollarea, buf, &mut state.scrollback);
     }
+}
+
+fn open_command(open_command: Option<&Vec<String>>, target: OsString) -> IambResult<()> {
+    if let Some(mut cmd) = open_command.and_then(cmd) {
+        cmd.arg(target);
+        cmd.spawn()?;
+        return Ok(());
+    } else {
+        // open::that may not return until the spawned program closes.
+        tokio::task::spawn_blocking(move || {
+            return open::that(target);
+        });
+        return Ok(());
+    }
+}
+
+fn cmd(open_command: &Vec<String>) -> Option<Command> {
+    if let [program, args @ ..] = open_command.as_slice() {
+        let mut cmd = Command::new(program);
+        cmd.args(args);
+        return Some(cmd);
+    }
+    None
 }

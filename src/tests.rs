@@ -188,6 +188,7 @@ pub fn mock_tunables() -> TunableValues {
         })]
         .into_iter()
         .collect::<HashMap<_, _>>(),
+        open_command: None,
     }
 }
 
