@@ -177,7 +177,7 @@ fn iamb_cancel(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let mact = IambAction::from(MessageAction::Cancel);
+    let mact = IambAction::from(MessageAction::Cancel(desc.bang));
     let step = CommandStep::Continue(mact.into(), ctx.context.take());
 
     return Ok(step);

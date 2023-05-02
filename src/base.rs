@@ -103,7 +103,9 @@ pub enum VerifyAction {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
     /// Cance the current reply or edit.
-    Cancel,
+    ///
+    /// The [bool] argument indicates whether to skip confirmation for clearing the message bar.
+    Cancel(bool),
 
     /// Download an attachment to the given path.
     ///
@@ -446,8 +448,12 @@ impl RoomInfo {
         }
     }
 
+    pub fn get_message_key(&self, event_id: &EventId) -> Option<&MessageKey> {
+        self.keys.get(event_id)?.to_message_key()
+    }
+
     pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
-        self.messages.get(self.keys.get(event_id)?.to_message_key()?)
+        self.messages.get(self.get_message_key(event_id)?)
     }
 
     pub fn insert_reaction(&mut self, react: ReactionEvent) {
@@ -489,10 +495,10 @@ impl RoomInfo {
 
         match &mut msg.event {
             MessageEvent::Original(orig) => {
-                orig.content = *new_content;
+                orig.content.msgtype = new_content.msgtype;
             },
             MessageEvent::Local(_, content) => {
-                *content = new_content;
+                content.msgtype = new_content.msgtype;
             },
             MessageEvent::Redacted(_) |
             MessageEvent::EncryptedOriginal(_) |

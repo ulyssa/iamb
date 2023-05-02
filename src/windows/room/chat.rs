@@ -165,11 +165,20 @@ impl ChatState {
             .ok_or(IambError::NoSelectedMessage)?;
 
         match act {
-            MessageAction::Cancel => {
+            MessageAction::Cancel(skip_confirm) => {
                 self.reply_to = None;
                 self.editing = None;
 
-                Ok(None)
+                if skip_confirm {
+                    return Ok(None);
+                }
+
+                let msg = "Would you like to clear the message bar?";
+                let act = PromptAction::Abort(false);
+                let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
+                let prompt = Box::new(prompt);
+
+                Err(UIError::NeedConfirm(prompt))
             },
             MessageAction::Download(filename, flags) => {
                 if let MessageEvent::Original(ev) = &msg.event {
@@ -286,6 +295,7 @@ impl ChatState {
                 };
 
                 self.tbox.set_text(text);
+                self.reply_to = msg.reply_to().and_then(|id| info.get_message_key(&id)).cloned();
                 self.editing = self.scrollback.get_key(info);
                 self.focus = RoomFocus::MessageBar;
 
@@ -742,10 +752,32 @@ impl<'a> StatefulWidget for Chat<'a> {
     type State = ChatState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        // Determine whether we have a description to show for the message bar.
+        let desc_spans = match (&state.editing, &state.reply_to) {
+            (None, None) => None,
+            (Some(_), None) => Some(Spans::from("Editing message")),
+            (editing, Some(_)) => {
+                state.reply_to.as_ref().and_then(|k| {
+                    let room = self.store.application.rooms.get(state.id())?;
+                    let msg = room.messages.get(k)?;
+                    let user = self.store.application.settings.get_user_span(msg.sender.as_ref());
+                    let prefix = if editing.is_some() {
+                        Span::from("Editing reply to ")
+                    } else {
+                        Span::from("Replying to ")
+                    };
+                    let spans = Spans(vec![prefix, user]);
+
+                    spans.into()
+                })
+            },
+        };
+
+        // Determine the region to show each UI element.
         let lines = state.tbox.has_lines(5).max(1) as u16;
         let drawh = area.height;
         let texth = lines.min(drawh).clamp(1, 5);
-        let desch = if state.reply_to.is_some() {
+        let desch = if desc_spans.is_some() {
             drawh.saturating_sub(texth).min(1)
         } else {
             0
@@ -756,25 +788,7 @@ impl<'a> StatefulWidget for Chat<'a> {
         let descarea = Rect::new(area.x, scrollarea.y + scrollh, area.width, desch);
         let textarea = Rect::new(area.x, descarea.y + desch, area.width, texth);
 
-        let scrollback_focused = state.focus.is_scrollback() && self.focused;
-        let scrollback = Scrollback::new(self.store).focus(scrollback_focused);
-        scrollback.render(scrollarea, buf, &mut state.scrollback);
-
-        let desc_spans = match (&state.editing, &state.reply_to) {
-            (None, None) => None,
-            (Some(_), _) => Some(Spans::from("Editing message")),
-            (_, Some(_)) => {
-                state.reply_to.as_ref().and_then(|k| {
-                    let room = self.store.application.rooms.get(state.id())?;
-                    let msg = room.messages.get(k)?;
-                    let user = self.store.application.settings.get_user_span(msg.sender.as_ref());
-                    let spans = Spans(vec![Span::from("Replying to "), user]);
-
-                    spans.into()
-                })
-            },
-        };
-
+        // Render the message bar and any description for it.
         if let Some(desc_spans) = desc_spans {
             Paragraph::new(desc_spans).render(descarea, buf);
         }
@@ -783,5 +797,10 @@ impl<'a> StatefulWidget for Chat<'a> {
 
         let tbox = TextBox::new().prompt(prompt);
         tbox.render(textarea, buf, &mut state.tbox);
+
+        // Render the message scrollback.
+        let scrollback_focused = state.focus.is_scrollback() && self.focused;
+        let scrollback = Scrollback::new(self.store).focus(scrollback_focused);
+        scrollback.render(scrollarea, buf, &mut state.scrollback);
     }
 }
