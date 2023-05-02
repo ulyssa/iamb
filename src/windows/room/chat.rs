@@ -185,12 +185,14 @@ impl ChatState {
 
         match act {
             MessageAction::Cancel(skip_confirm) => {
-                self.reply_to = None;
-                self.editing = None;
-
                 if skip_confirm {
+                    self.reset();
+
                     return Ok(None);
                 }
+
+                self.reply_to = None;
+                self.editing = None;
 
                 let msg = "Would you like to clear the message bar?";
                 let act = PromptAction::Abort(false);
