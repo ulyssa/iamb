@@ -847,6 +847,17 @@ fn complete_emoji(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) ->
     store.application.emojis.complete(sc.as_ref())
 }
 
+fn complete_cmdname(
+    desc: CommandDescription,
+    text: &EditRope,
+    cursor: &mut Cursor,
+    store: &ProgramStore,
+) -> Vec<String> {
+    // Complete command name and set cursor position.
+    let _ = text.get_prefix_word_mut(cursor, &WordStyle::Little);
+    store.application.cmds.complete_name(desc.command.as_str())
+}
+
 fn complete_cmdarg(
     desc: CommandDescription,
     text: &EditRope,
@@ -865,24 +876,26 @@ fn complete_cmdarg(
         "react" | "unreact" => complete_emoji(text, cursor, store),
 
         "invite" => complete_users(text, cursor, store),
-        "join" => complete_matrix_names(text, cursor, store),
+        "join" | "split" | "vsplit" | "tabedit" => complete_matrix_names(text, cursor, store),
         "room" => vec![],
         "verify" => vec![],
-        _ => panic!("unknown command {}", cmd.name.as_str()),
+        "vertical" | "horizontal" | "aboveleft" | "belowright" | "tab" => {
+            complete_cmd(desc.arg.text.as_str(), text, cursor, store)
+        },
+        _ => vec![],
     }
 }
 
-fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
-    let eo = text.cursor_to_offset(cursor);
-    let slice = text.slice(0.into(), eo, false);
-    let cow = Cow::from(&slice);
-
-    match CommandDescription::from_str(cow.as_ref()) {
+fn complete_cmd(
+    cmd: &str,
+    text: &EditRope,
+    cursor: &mut Cursor,
+    store: &ProgramStore,
+) -> Vec<String> {
+    match CommandDescription::from_str(cmd) {
         Ok(desc) => {
             if desc.arg.untrimmed.is_empty() {
-                // Complete command name and set cursor position.
-                let _ = text.get_prefix_word_mut(cursor, &WordStyle::Little);
-                store.application.cmds.complete_name(desc.command.as_str())
+                complete_cmdname(desc, text, cursor, store)
             } else {
                 // Complete command argument.
                 complete_cmdarg(desc, text, cursor, store)
@@ -892,6 +905,14 @@ fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -
         // Can't parse command text, so return zero completions.
         Err(_) => vec![],
     }
+}
+
+fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
+    let eo = text.cursor_to_offset(cursor);
+    let slice = text.slice(0.into(), eo, false);
+    let cow = Cow::from(&slice);
+
+    complete_cmd(cow.as_ref(), text, cursor, store)
 }
 
 #[cfg(test)]
@@ -981,6 +1002,13 @@ pub mod tests {
     #[tokio::test]
     async fn test_complete_cmdbar() {
         let store = mock_store().await;
+        let users = vec![
+            "@user1:example.com",
+            "@user2:example.com",
+            "@user3:example.com",
+            "@user4:example.com",
+            "@user5:example.com",
+        ];
 
         let text = EditRope::from("invite    ");
         let mut cursor = Cursor::new(0, 7);
@@ -993,28 +1021,31 @@ pub mod tests {
         let text = EditRope::from("invite    ");
         let mut cursor = Cursor::new(0, 7);
         let res = complete_cmdbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec![
-            "@user1:example.com",
-            "@user2:example.com",
-            "@user3:example.com",
-            "@user4:example.com",
-            "@user5:example.com"
-        ]);
+        assert_eq!(res, users);
 
         let text = EditRope::from("invite ignored");
         let mut cursor = Cursor::new(0, 7);
         let res = complete_cmdbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec![
-            "@user1:example.com",
-            "@user2:example.com",
-            "@user3:example.com",
-            "@user4:example.com",
-            "@user5:example.com"
-        ]);
+        assert_eq!(res, users);
 
         let text = EditRope::from("invite @user1ignored");
         let mut cursor = Cursor::new(0, 13);
         let res = complete_cmdbar(&text, &mut cursor, &store);
         assert_eq!(res, vec!["@user1:example.com"]);
+
+        let text = EditRope::from("abo hor");
+        let mut cursor = Cursor::new(0, 7);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["horizontal"]);
+
+        let text = EditRope::from("abo hor inv");
+        let mut cursor = Cursor::new(0, 11);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["invite"]);
+
+        let text = EditRope::from("abo hor invite \n");
+        let mut cursor = Cursor::new(0, 15);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, users);
     }
 }
