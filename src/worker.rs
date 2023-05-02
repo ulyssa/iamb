@@ -845,10 +845,11 @@ impl ClientWorker {
                     let request = client
                         .encryption()
                         .get_verification_request(&ev.sender, &ev.content.transaction_id)
-                        .await
-                        .unwrap();
+                        .await;
 
-                    request.accept().await.unwrap();
+                    if let Some(request) = request {
+                        request.accept().await.unwrap();
+                    }
                 }
             },
         );
