@@ -192,6 +192,7 @@ pub enum RoomAction {
 pub enum SendAction {
     Submit,
     Upload(String),
+    UploadImage(usize, usize, Cow<'static, [u8]>),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -360,6 +361,12 @@ pub enum IambError {
 
     #[error("Verification request error: {0}")]
     VerificationRequestError(#[from] matrix_sdk::encryption::identities::RequestVerificationError),
+
+    #[error("Image error: {0}")]
+    Image(#[from] image::ImageError),
+
+    #[error("Could not use system clipboard data")]
+    Clipboard,
 }
 
 impl From<IambError> for UIError<IambInfo> {

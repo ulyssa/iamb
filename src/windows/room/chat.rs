@@ -4,6 +4,7 @@ use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
+use modalkit::editing::store::RegisterError;
 use tokio;
 
 use matrix_sdk::{
@@ -473,6 +474,36 @@ impl ChatState {
 
                 (resp.event_id, msg)
             },
+            SendAction::UploadImage(width, height, bytes) => {
+                // Convert to png because arboard does not give us the mime type.
+                let bytes =
+                    image::ImageBuffer::from_raw(width as _, height as _, bytes.into_owned())
+                        .ok_or(IambError::Clipboard)
+                        .and_then(|imagebuf| {
+                            let dynimage = image::DynamicImage::ImageRgba8(imagebuf);
+                            let bytes = Vec::<u8>::new();
+                            let mut buff = std::io::Cursor::new(bytes);
+                            dynimage.write_to(&mut buff, image::ImageOutputFormat::Png)?;
+                            Ok(buff.into_inner())
+                        })
+                        .map_err(IambError::from)?;
+                let mime = mime::IMAGE_PNG;
+
+                let name = Cow::from(format!("Clipboard.png"));
+                let config = AttachmentConfig::new();
+
+                let resp = room
+                    .send_attachment(name.as_ref(), &mime, bytes.as_ref(), config)
+                    .await
+                    .map_err(IambError::from)?;
+
+                // Mock up the local echo message for the scrollback.
+                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
+                let msg = MessageType::Text(msg);
+                let msg = RoomMessageEventContent::new(msg);
+
+                (resp.event_id, msg)
+            },
         };
 
         if show_echo {
@@ -616,6 +647,15 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
 
                 // Run command again.
                 delegate!(self, w => w.editor_command(act, ctx, store))
+            },
+            Err(EditError::Register(RegisterError::ClipboardImage(data))) => {
+                let msg = "Do you really want to upload the image from your system clipboard?";
+                let send =
+                    IambAction::Send(SendAction::UploadImage(data.width, data.height, data.bytes));
+                let prompt = PromptYesNo::new(msg, vec![Action::from(send)]);
+                let prompt = Box::new(prompt);
+
+                Err(EditError::NeedConfirm(prompt))
             },
             res @ Err(_) => res,
         }
