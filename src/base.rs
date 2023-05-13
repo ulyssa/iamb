@@ -666,7 +666,10 @@ impl ChatStore {
             .unwrap_or_else(|| "Untitled Matrix Room".to_string())
     }
 
-    pub async fn set_receipts(&mut self, receipts: Vec<(OwnedRoomId, Receipts)>) {
+    pub async fn set_receipts(
+        &mut self,
+        receipts: Vec<(OwnedRoomId, Receipts)>,
+    ) -> Vec<(OwnedRoomId, OwnedEventId)> {
         let mut updates = vec![];
 
         for (room_id, receipts) in receipts.into_iter() {
@@ -679,11 +682,7 @@ impl ChatStore {
             }
         }
 
-        for (room_id, read_till) in updates.into_iter() {
-            if let Some(room) = self.worker.client.get_joined_room(&room_id) {
-                let _ = room.read_receipt(read_till.as_ref()).await;
-            }
-        }
+        return updates;
     }
 
     pub fn mark_for_load(&mut self, room_id: OwnedRoomId) {

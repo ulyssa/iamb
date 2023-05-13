@@ -56,6 +56,7 @@ use matrix_sdk::{
         room::RoomType,
         serde::Raw,
         EventEncryptionAlgorithm,
+        OwnedEventId,
         OwnedRoomId,
         OwnedRoomOrAliasId,
         OwnedUserId,
@@ -905,6 +906,7 @@ impl ClientWorker {
         self.rcpt_handle = tokio::spawn({
             let store = store.clone();
             let client = self.client.clone();
+            let mut sent = HashMap::<OwnedRoomId, OwnedEventId>::default();
 
             async move {
                 // Update the displayed read receipts every 5 seconds.
@@ -914,7 +916,22 @@ impl ClientWorker {
                     interval.tick().await;
 
                     let receipts = update_receipts(&client).await;
-                    store.lock().await.application.set_receipts(receipts).await;
+                    let read = store.lock().await.application.set_receipts(receipts).await;
+
+                    for (room_id, read_till) in read.into_iter() {
+                        if let Some(read_sent) = sent.get(&room_id) {
+                            if read_sent == &read_till {
+                                // Skip unchanged receipts.
+                                continue;
+                            }
+                        }
+
+                        if let Some(room) = client.get_joined_room(&room_id) {
+                            if room.read_receipt(&read_till).await.is_ok() {
+                                sent.insert(room_id, read_till);
+                            }
+                        }
+                    }
                 }
             }
         })
