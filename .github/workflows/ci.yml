@@ -63,3 +63,15 @@ jobs:
       uses: actions-rs/cargo@v1
       with:
           command: test
+    - name: Build artifacts
+      uses: actions-rs/cargo@v1
+      with:
+          command: build
+          args: '--release'
+    - name: Upload artifacts
+      uses: actions/upload-artifact@master
+      with:
+        name: iamb-${{ matrix.platform }}
+        path: |
+          ./target/release/iamb
+          ./target/release/iamb.exe
