@@ -494,6 +494,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "482aa5695bca086022be453c700a40c02893f1ba7098a2c88351de55341ae894"
 dependencies = [
  "clap",
+ "emojis",
  "entities",
  "memchr",
  "once_cell",

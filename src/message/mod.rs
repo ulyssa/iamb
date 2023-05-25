@@ -97,6 +97,7 @@ const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
 
 fn text_to_message_content(input: String) -> TextMessageEventContent {
     let mut options = ComrakOptions::default();
+    options.extension.shortcodes = true;
     options.render.hardbreaks = true;
     let html = markdown_to_html(input.as_str(), &options);
 
@@ -1012,6 +1013,11 @@ pub mod tests {
             content.formatted.unwrap().body,
             "<pre><code class=\"language-rust\">const A: usize = 1;\n</code></pre>\n"
         );
+
+        let input = ":heart:\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(content.formatted.unwrap().body, "<p>\u{2764}\u{FE0F}</p>\n");
 
         let input = "para 1\n\npara 2\n";
         let content = text_to_message_content(input.into());

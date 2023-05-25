@@ -42,6 +42,8 @@ use crate::{
     worker::Requester,
 };
 
+const TEST_ROOM1_ALIAS: &str = "#room1:example.com";
+
 lazy_static! {
     pub static ref TEST_ROOM1_ID: OwnedRoomId = RoomId::new(server_name!("example.com")).to_owned();
     pub static ref TEST_USER1: OwnedUserId = user_id!("@user1:example.com").to_owned();
@@ -223,7 +225,8 @@ pub async fn mock_store() -> ProgramStore {
     let room_id = TEST_ROOM1_ID.clone();
     let info = mock_room();
 
-    store.rooms.insert(room_id, info);
+    store.rooms.insert(room_id.clone(), info);
+    store.names.insert(TEST_ROOM1_ALIAS.to_string(), room_id);
 
     ProgramStore::new(store)
 }

@@ -18,7 +18,7 @@ arboard = "3.2.0"
 bitflags = "1.3.2"
 chrono = "0.4"
 clap = {version = "4.0", features = ["derive"]}
-comrak = "0.18.0"
+comrak = {version = "0.18.0", features = ["shortcodes"]}
 css-color-parser = "0.1.2"
 dirs = "4.0.0"
 emojis = "~0.5.2"

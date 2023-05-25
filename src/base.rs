@@ -788,9 +788,7 @@ impl ApplicationInfo for IambInfo {
             IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
             IambBufferId::Command(CommandType::Search) => vec![],
 
-            IambBufferId::Room(_, RoomFocus::MessageBar) => {
-                complete_matrix_names(text, cursor, store)
-            },
+            IambBufferId::Room(_, RoomFocus::MessageBar) => complete_msgbar(text, cursor, store),
             IambBufferId::Room(_, RoomFocus::Scrollback) => vec![],
 
             IambBufferId::DirectList => vec![],
@@ -820,6 +818,53 @@ fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) ->
         .into_iter()
         .map(|i| i.to_string())
         .collect()
+}
+
+fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
+    let id = text
+        .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
+        .unwrap_or_else(EditRope::empty);
+    let id = Cow::from(&id);
+
+    match id.chars().next() {
+        // Complete room aliases.
+        Some('#') => {
+            return store.application.names.complete(id.as_ref());
+        },
+
+        // Complete room identifiers.
+        Some('!') => {
+            return store
+                .application
+                .rooms
+                .complete(id.as_ref())
+                .into_iter()
+                .map(|i| i.to_string())
+                .collect();
+        },
+
+        // Complete Emoji shortcodes.
+        Some(':') => {
+            let list = store.application.emojis.complete(&id[1..]);
+            let iter = list.into_iter().take(200).map(|s| format!(":{}:", s));
+
+            return iter.collect();
+        },
+
+        // Complete usernames for @ and empty strings.
+        Some('@') | None => {
+            return store
+                .application
+                .presences
+                .complete(id.as_ref())
+                .into_iter()
+                .map(|i| i.to_string())
+                .collect();
+        },
+
+        // Unknown sigil.
+        Some(_) => return vec![],
+    }
 }
 
 fn complete_matrix_names(
@@ -1009,6 +1054,29 @@ pub mod tests {
                 Span::from(" is typing...")
             ])
         );
+    }
+
+    #[tokio::test]
+    async fn test_complete_msgbar() {
+        let store = mock_store().await;
+
+        let text = EditRope::from("going for a walk :walk ");
+        let mut cursor = Cursor::new(0, 22);
+        let res = complete_msgbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec![":walking:", ":walking_man:", ":walking_woman:"]);
+        assert_eq!(cursor, Cursor::new(0, 17));
+
+        let text = EditRope::from("hello @user1 ");
+        let mut cursor = Cursor::new(0, 12);
+        let res = complete_msgbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["@user1:example.com"]);
+        assert_eq!(cursor, Cursor::new(0, 6));
+
+        let text = EditRope::from("see #room ");
+        let mut cursor = Cursor::new(0, 9);
+        let res = complete_msgbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["#room1:example.com"]);
+        assert_eq!(cursor, Cursor::new(0, 4));
     }
 
     #[tokio::test]
