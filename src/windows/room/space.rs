@@ -1,11 +1,18 @@
 use std::ops::{Deref, DerefMut};
+use std::time::{Duration, Instant};
 
 use matrix_sdk::{
     room::Room as MatrixRoom,
     ruma::{OwnedRoomId, RoomId},
 };
 
-use modalkit::tui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
+use modalkit::tui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Color, Style},
+    text::{Span, Spans, Text},
+    widgets::StatefulWidget,
+};
 
 use modalkit::{
     widgets::list::{List, ListState},
@@ -16,10 +23,13 @@ use crate::base::{IambBufferId, IambInfo, ProgramStore, RoomFocus};
 
 use crate::windows::RoomItem;
 
+const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
+
 pub struct SpaceState {
     room_id: OwnedRoomId,
     room: MatrixRoom,
     list: ListState<RoomItem, IambInfo>,
+    last_fetch: Option<Instant>,
 }
 
 impl SpaceState {
@@ -27,8 +37,9 @@ impl SpaceState {
         let room_id = room.room_id().to_owned();
         let content = IambBufferId::Room(room_id.clone(), RoomFocus::Scrollback);
         let list = ListState::new(content, vec![]);
+        let last_fetch = None;
 
-        SpaceState { room_id, room, list }
+        SpaceState { room_id, room, list, last_fetch }
     }
 
     pub fn refresh_room(&mut self, store: &mut ProgramStore) {
@@ -50,6 +61,7 @@ impl SpaceState {
             room_id: self.room_id.clone(),
             room: self.room.clone(),
             list: self.list.dup(store),
+            last_fetch: self.last_fetch,
         }
     }
 }
@@ -94,30 +106,51 @@ impl<'a> StatefulWidget for Space<'a> {
     type State = SpaceState;
 
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
-        let members =
-            if let Ok(m) = self.store.application.worker.space_members(state.room_id.clone()) {
-                m
-            } else {
-                return;
-            };
+        let mut empty_message = None;
+        let need_fetch = match state.last_fetch {
+            Some(i) => i.elapsed() >= SPACE_HIERARCHY_DEBOUNCE,
+            None => true,
+        };
 
-        let items = members
-            .into_iter()
-            .filter_map(|id| {
-                let (room, name, tags) = self.store.application.worker.get_room(id.clone()).ok()?;
+        if need_fetch {
+            let res = self.store.application.worker.space_members(state.room_id.clone());
 
-                if id != state.room_id {
-                    Some(RoomItem::new(room, name, tags, self.store))
-                } else {
-                    None
-                }
-            })
-            .collect();
+            match res {
+                Ok(members) => {
+                    let items = members
+                        .into_iter()
+                        .filter_map(|id| {
+                            let (room, name, tags) =
+                                self.store.application.worker.get_room(id.clone()).ok()?;
 
-        state.list.set(items);
+                            if id != state.room_id {
+                                Some(RoomItem::new(room, name, tags, self.store))
+                            } else {
+                                None
+                            }
+                        })
+                        .collect();
 
-        List::new(self.store)
-            .focus(self.focused)
-            .render(area, buffer, &mut state.list)
+                    state.list.set(items);
+                    state.last_fetch = Some(Instant::now());
+                },
+                Err(e) => {
+                    let lines = vec![
+                        Spans::from("Unable to fetch space room hierarchy:"),
+                        Span::styled(e.to_string(), Style::default().fg(Color::Red)).into(),
+                    ];
+
+                    empty_message = Text { lines }.into();
+                },
+            }
+        }
+
+        let mut list = List::new(self.store).focus(self.focused);
+
+        if let Some(text) = empty_message {
+            list = list.empty_message(text);
+        }
+
+        list.render(area, buffer, &mut state.list)
     }
 }
