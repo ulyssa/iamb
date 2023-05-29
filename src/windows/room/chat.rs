@@ -489,7 +489,7 @@ impl ChatState {
                         .map_err(IambError::from)?;
                 let mime = mime::IMAGE_PNG;
 
-                let name = Cow::from(format!("Clipboard.png"));
+                let name = "Clipboard.png";
                 let config = AttachmentConfig::new();
 
                 let resp = room
