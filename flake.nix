@@ -23,8 +23,9 @@
           version = "0.0.7";
           src = ./.;
           cargoLock.lockFile = ./Cargo.lock;
-          nativeBuildInputs = [ pkgs.openssl pkgs.pkgconfig ];
-          buildInputs = [ pkgs.openssl ];
+          nativeBuildInputs = [ pkgs.pkgconfig ];
+          buildInputs = [ pkgs.openssl ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin
+            (with pkgs.darwin.apple_sdk.frameworks; [ AppKit Security ]);
         };
         devShell = mkShell {
           buildInputs = [
