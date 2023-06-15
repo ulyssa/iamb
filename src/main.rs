@@ -22,7 +22,15 @@ use matrix_sdk::ruma::OwnedUserId;
 use modalkit::crossterm::{
     self,
     cursor::Show as CursorShow,
-    event::{poll, read, DisableBracketedPaste, EnableBracketedPaste, Event},
+    event::{
+        poll,
+        read,
+        DisableBracketedPaste,
+        DisableFocusChange,
+        EnableBracketedPaste,
+        EnableFocusChange,
+        Event,
+    },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
 };
@@ -109,6 +117,7 @@ struct Application {
     bindings: KeyManager<TerminalKey, ProgramAction, RepeatType, ProgramContext>,
     actstack: VecDeque<(ProgramAction, ProgramContext)>,
     screen: ScreenState<IambWindow, IambInfo>,
+    focused: bool,
 }
 
 impl Application {
@@ -120,6 +129,7 @@ impl Application {
         crossterm::terminal::enable_raw_mode()?;
         crossterm::execute!(stdout, EnterAlternateScreen)?;
         crossterm::execute!(stdout, EnableBracketedPaste)?;
+        crossterm::execute!(stdout, EnableFocusChange)?;
 
         let title = format!("iamb ({})", settings.profile.user_id);
         crossterm::execute!(stdout, SetTitle(title))?;
@@ -154,11 +164,13 @@ impl Application {
             bindings,
             actstack,
             screen,
+            focused: true,
         })
     }
 
     fn redraw(&mut self, full: bool, store: &mut ProgramStore) -> Result<(), std::io::Error> {
         let bindings = &mut self.bindings;
+        let focused = self.focused;
         let sstate = &mut self.screen;
         let term = &mut self.terminal;
 
@@ -176,7 +188,11 @@ impl Application {
             // Don't show terminal cursor when we show a dialog.
             let hide_cursor = !dialogstr.is_empty();
 
-            let screen = Screen::new(store).show_dialog(dialogstr).show_mode(modestr).borders(true);
+            let screen = Screen::new(store)
+                .show_dialog(dialogstr)
+                .show_mode(modestr)
+                .borders(true)
+                .focus(focused);
             f.render_stateful_widget(screen, area, sstate);
 
             if hide_cursor {
@@ -212,8 +228,11 @@ impl Application {
                 Event::Mouse(_) => {
                     // Do nothing for now.
                 },
-                Event::FocusGained | Event::FocusLost => {
-                    // Do nothing for now.
+                Event::FocusGained => {
+                    self.focused = true;
+                },
+                Event::FocusLost => {
+                    self.focused = false;
                 },
                 Event::Resize(_, _) => {
                     // We'll redraw for the new size next time step() is called.
@@ -532,13 +551,18 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
 
     login(worker, &settings).await.unwrap_or_else(print_exit);
 
+    fn restore_tty() {
+        let _ = crossterm::terminal::disable_raw_mode();
+        let _ = crossterm::execute!(stdout(), DisableBracketedPaste);
+        let _ = crossterm::execute!(stdout(), DisableFocusChange);
+        let _ = crossterm::execute!(stdout(), LeaveAlternateScreen);
+        let _ = crossterm::execute!(stdout(), CursorShow);
+    }
+
     // Make sure panics clean up the terminal properly.
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(stdout(), DisableBracketedPaste);
-        let _ = crossterm::execute!(stdout(), LeaveAlternateScreen);
-        let _ = crossterm::execute!(stdout(), CursorShow);
+        restore_tty();
         orig_hook(panic_info);
         process::exit(1);
     }));
@@ -547,6 +571,7 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
 
     // We can now run the application.
     application.run().await?;
+    restore_tty();
 
     Ok(())
 }

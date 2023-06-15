@@ -52,7 +52,7 @@ url = {version = "^2.2.2", features = ["serde"]}
 
 [dependencies.modalkit]
 git = "https://github.com/ulyssa/modalkit"
-rev = "7979680"
+rev = "f641162"
 
 [dependencies.matrix-sdk]
 version = "0.6"

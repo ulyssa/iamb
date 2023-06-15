@@ -848,7 +848,9 @@ impl<'a> StatefulWidget for Chat<'a> {
 
         // Render the message scrollback.
         let scrollback_focused = state.focus.is_scrollback() && self.focused;
-        let scrollback = Scrollback::new(self.store).focus(scrollback_focused);
+        let scrollback = Scrollback::new(self.store)
+            .focus(scrollback_focused)
+            .room_focus(self.focused);
         scrollback.render(scrollarea, buf, &mut state.scrollback);
     }
 }

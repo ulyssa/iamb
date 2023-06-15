@@ -2137,7 +2137,7 @@ dependencies = [
 [[package]]
 name = "modalkit"
 version = "0.0.15"
-source = "git+https://github.com/ulyssa/modalkit?rev=7979680#797968002c53287d907ca3ae823e3482265c94bb"
+source = "git+https://github.com/ulyssa/modalkit?rev=f641162#f6411625caa1ddb764c91a3fc47e052cfdc405b5"
 dependencies = [
  "anymap2",
  "arboard",

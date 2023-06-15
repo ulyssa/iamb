@@ -1206,13 +1206,21 @@ impl TerminalCursor for ScrollbackState {
 }
 
 pub struct Scrollback<'a> {
+    room_focused: bool,
     focused: bool,
     store: &'a mut ProgramStore,
 }
 
 impl<'a> Scrollback<'a> {
     pub fn new(store: &'a mut ProgramStore) -> Self {
-        Scrollback { focused: false, store }
+        Scrollback { room_focused: false, focused: false, store }
+    }
+
+    /// Indicate whether the room window is currently focused, regardless of whether the scrollback
+    /// also is.
+    pub fn room_focus(mut self, focused: bool) -> Self {
+        self.room_focused = focused;
+        self
     }
 
     /// Indicate whether the scrollback is currently focused.
@@ -1307,7 +1315,10 @@ impl<'a> StatefulWidget for Scrollback<'a> {
             y += 1;
         }
 
-        if settings.tunables.read_receipt_send && state.cursor.timestamp.is_none() {
+        if self.room_focused &&
+            settings.tunables.read_receipt_send &&
+            state.cursor.timestamp.is_none()
+        {
             // If the cursor is at the last message, then update the read marker.
             info.read_till = info.messages.last_key_value().map(|(k, _)| k.1.clone());
         }
