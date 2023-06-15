@@ -37,7 +37,8 @@ pkgin install iamb
 
 ### Arch Linux
 
-On Arch Linux a package is available in the Arch User Repositories (AUR). To install it simply run with your favorite AUR helper:
+On Arch Linux a [package](https://aur.archlinux.org/packages/iamb-git) is available in the
+Arch User Repositories (AUR). To install it simply run with your favorite AUR helper:
 
 ```
 paru iamb-git
