@@ -529,11 +529,16 @@ impl Window<IambInfo> for IambWindow {
 
                 Spans::from(title)
             },
-            IambWindow::MemberList(_, room_id, _) => {
+            IambWindow::MemberList(state, room_id, _) => {
                 let title = store.application.get_room_title(room_id.as_ref());
-
-                Spans(vec![bold_span("Room Members: "), title.into()])
-            },
+                let n = state.len();
+                let v = vec![
+                    bold_span("Room Members "),
+                    Span::styled(format!("({n}): "), bold_style()),
+                    title.into(),
+                ];
+                Spans(v)
+            }
         }
     }
 
@@ -546,10 +551,15 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
 
             IambWindow::Room(w) => w.get_title(store),
-            IambWindow::MemberList(_, room_id, _) => {
+            IambWindow::MemberList(state, room_id, _) => {
                 let title = store.application.get_room_title(room_id.as_ref());
-
-                Spans(vec![bold_span("Room Members: "), title.into()])
+                let n = state.len();
+                let v = vec![
+                    bold_span("Room Members "),
+                    Span::styled(format!("({n}): "), bold_style()),
+                    title.into(),
+                ];
+                Spans(v)
             },
         }
     }
