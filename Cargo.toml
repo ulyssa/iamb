@@ -14,6 +14,9 @@ categories = ["command-line-utilities"]
 rust-version = "1.66"
 build = "build.rs"
 
+[build-dependencies]
+mandown = "0.1.3"
+
 [build-dependencies.vergen]
 version = "8"
 default-features = false

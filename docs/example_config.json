@@ -1,0 +1,32 @@
+{
+	"default_profile": "default",
+	"profiles": {
+		"default": {
+			"user_id":  "",
+			"url":      "https://matrix.org",
+			"settings": {},
+			"dirs":     {}
+		}
+	},
+	"settings": {
+		"log_level":                  "warn",
+		"reaction_display":           true,
+		"reaction_shortcode_display": false,
+		"read_receipt_send":          true,
+		"read_receipt_display":       true,
+		"request_timeout":            10000,
+		"typing_notice_send":         true,
+		"typing_notice_display":      true,
+		"users": {
+			"@user:matrix.org": {
+				"name":  "John Doe",
+				"color": "magenta"
+			}
+		},
+		"default_room": "#iamb-users:0x.badd.cafe"
+	},
+	"dirs": {
+		"cache":     "~/.cache/iamb/",
+		"logs":      "~/.local/share/iamb/logs/",
+		"downloads": "~/Downloads/"
+	}
