@@ -12,6 +12,12 @@ exclude = [".github", "CONTRIBUTING.md"]
 keywords = ["matrix", "chat", "tui", "vim"]
 categories = ["command-line-utilities"]
 rust-version = "1.66"
+build = "build.rs"
+
+[build-dependencies.vergen]
+version = "8"
+default-features = false
+features = ["build", "git", "gitcl",]
 
 [dependencies]
 arboard = "3.2.0"

@@ -89,8 +89,13 @@ fn validate_profile_names(names: &HashMap<String, ProfileConfig>) {
     }
 }
 
+const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
+    None => env!("CARGO_PKG_VERSION"),
+    Some(_) => concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")"),
+};
+
 #[derive(Parser)]
-#[clap(version, about, long_about = None)]
+#[clap(version = VERSION, about, long_about = None)]
 #[clap(propagate_version = true)]
 pub struct Iamb {
     #[clap(short = 'P', long, value_parser)]

@@ -538,7 +538,7 @@ impl Window<IambInfo> for IambWindow {
                     title.into(),
                 ];
                 Spans(v)
-            }
+            },
         }
     }
 
