@@ -2136,8 +2136,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.15"
-source = "git+https://github.com/ulyssa/modalkit?rev=f641162#f6411625caa1ddb764c91a3fc47e052cfdc405b5"
+version = "0.0.16"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3f38eef0b4f6377e73d1082d508cae1df4d99a94d25361538131d839f292aa49"
 dependencies = [
  "anymap2",
  "arboard",
@@ -2151,6 +2152,7 @@ dependencies = [
  "ratatui",
  "regex",
  "ropey",
+ "serde",
  "textwrap",
  "thiserror",
  "unicode-segmentation",

@@ -1,12 +1,23 @@
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
+use std::convert::TryFrom;
+use std::fmt::{self, Display};
 use std::hash::Hash;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
+use serde::{
+    de::Error as SerdeError,
+    de::Visitor,
+    Deserialize,
+    Deserializer,
+    Serialize,
+    Serializer,
+};
 use tokio::sync::Mutex as AsyncMutex;
+use url::Url;
 
 use matrix_sdk::{
     encryption::verification::SasVerification,
@@ -715,16 +726,158 @@ impl ApplicationStore for ChatStore {}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IambId {
+    /// A Matrix room.
     Room(OwnedRoomId),
+
+    /// The `:rooms` window.
     DirectList,
+
+    /// The `:members` window for a given Matrix room.
     MemberList(OwnedRoomId),
+
+    /// The `:rooms` window.
     RoomList,
+
+    /// The `:spaces` window.
     SpaceList,
+
+    /// The `:verify` window.
     VerifyList,
+
+    /// The `:welcome` window.
     Welcome,
 }
 
+impl Display for IambId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            IambId::Room(room_id) => {
+                write!(f, "iamb://room/{room_id}")
+            },
+            IambId::MemberList(room_id) => {
+                write!(f, "iamb://members/{room_id}")
+            },
+            IambId::DirectList => f.write_str("iamb://dms"),
+            IambId::RoomList => f.write_str("iamb://rooms"),
+            IambId::SpaceList => f.write_str("iamb://spaces"),
+            IambId::VerifyList => f.write_str("iamb://verify"),
+            IambId::Welcome => f.write_str("iamb://welcome"),
+        }
+    }
+}
+
 impl ApplicationWindowId for IambId {}
+
+impl Serialize for IambId {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&self.to_string())
+    }
+}
+
+impl<'de> Deserialize<'de> for IambId {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(IambIdVisitor)
+    }
+}
+
+struct IambIdVisitor;
+
+impl<'de> Visitor<'de> for IambIdVisitor {
+    type Value = IambId;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid window URL")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        let Ok(url) = Url::parse(value) else {
+            return Err(E::custom("Invalid iamb window URL"));
+        };
+
+        if url.scheme() != "iamb" {
+            return Err(E::custom("Invalid iamb window URL"));
+        }
+
+        match url.domain() {
+            Some("room") => {
+                let Some(path) = url.path_segments() else {
+                    return Err(E::custom("Invalid members window URL"));
+                };
+
+                let &[room_id] = path.collect::<Vec<_>>().as_slice() else {
+                    return Err(E::custom("Invalid members window URL"));
+                };
+
+                let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
+                    return Err(E::custom("Invalid room identifier"));
+                };
+
+                Ok(IambId::Room(room_id))
+            },
+            Some("members") => {
+                let Some(path) = url.path_segments() else {
+                    return Err(E::custom( "Invalid members window URL"));
+                };
+
+                let &[room_id] = path.collect::<Vec<_>>().as_slice() else {
+                    return Err(E::custom( "Invalid members window URL"));
+                };
+
+                let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
+                    return Err(E::custom("Invalid room identifier"));
+                };
+
+                Ok(IambId::MemberList(room_id))
+            },
+            Some("dms") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://dms takes no path"));
+                }
+
+                Ok(IambId::DirectList)
+            },
+            Some("rooms") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://rooms takes no path"));
+                }
+
+                Ok(IambId::RoomList)
+            },
+            Some("spaces") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://spaces takes no path"));
+                }
+
+                Ok(IambId::SpaceList)
+            },
+            Some("verify") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://verify takes no path"));
+                }
+
+                Ok(IambId::VerifyList)
+            },
+            Some("welcome") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://welcome takes no path"));
+                }
+
+                Ok(IambId::Welcome)
+            },
+            Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
+            None => Err(E::custom("Invalid iamb window URL")),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum RoomFocus {

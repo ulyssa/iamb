@@ -6,7 +6,7 @@ use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::Display;
 use std::fs::{create_dir_all, File};
-use std::io::{stdout, BufReader, Stdout};
+use std::io::{stdout, BufReader, BufWriter, Stdout};
 use std::ops::DerefMut;
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -89,6 +89,7 @@ use modalkit::{
             Jumpable,
             Promptable,
             Scrollable,
+            TabAction,
             TabContainer,
             TabCount,
             UIError,
@@ -103,21 +104,120 @@ use modalkit::{
     input::{bindings::BindingMachine, dialog::Pager, key::TerminalKey},
     widgets::{
         cmdbar::CommandBarState,
-        screen::{Screen, ScreenState},
+        screen::{FocusList, Screen, ScreenState, TabLayoutDescription},
+        windows::WindowLayoutDescription,
         TerminalCursor,
         TerminalExtOps,
         Window,
     },
 };
 
+fn config_tab_to_desc(
+    layout: config::WindowLayout,
+    store: &mut ProgramStore,
+) -> IambResult<WindowLayoutDescription<IambInfo>> {
+    let desc = match layout {
+        config::WindowLayout::Window { window } => {
+            let ChatStore { names, worker, .. } = &mut store.application;
+
+            let window = match window {
+                config::WindowPath::UserId(user_id) => {
+                    let name = user_id.to_string();
+                    let room_id = worker.join_room(name.clone())?;
+                    names.insert(name, room_id.clone());
+                    IambId::Room(room_id)
+                },
+                config::WindowPath::RoomId(room_id) => IambId::Room(room_id),
+                config::WindowPath::AliasId(alias) => {
+                    let name = alias.to_string();
+                    let room_id = worker.join_room(name.clone())?;
+                    names.insert(name, room_id.clone());
+                    IambId::Room(room_id)
+                },
+                config::WindowPath::Window(id) => id,
+            };
+
+            WindowLayoutDescription::Window { window, length: None }
+        },
+        config::WindowLayout::Split { split } => {
+            let children = split
+                .into_iter()
+                .map(|child| config_tab_to_desc(child, store))
+                .collect::<IambResult<Vec<_>>>()?;
+
+            WindowLayoutDescription::Split { children, length: None }
+        },
+    };
+
+    Ok(desc)
+}
+
+fn setup_screen(
+    settings: ApplicationSettings,
+    store: &mut ProgramStore,
+) -> IambResult<ScreenState<IambWindow, IambInfo>> {
+    let cmd = CommandBarState::new(store);
+    let dims = crossterm::terminal::size()?;
+    let area = Rect::new(0, 0, dims.0, dims.1);
+
+    match settings.layout {
+        config::Layout::Restore => {
+            if let Ok(layout) = std::fs::read(&settings.layout_json) {
+                let tabs: TabLayoutDescription<IambInfo> =
+                    serde_json::from_slice(&layout).map_err(IambError::from)?;
+                let tabs = tabs.to_layout(area.into(), store)?;
+
+                return Ok(ScreenState::from_list(tabs, cmd));
+            }
+        },
+        config::Layout::New => {},
+        config::Layout::Config { tabs } => {
+            let mut list = FocusList::default();
+
+            for tab in tabs.into_iter() {
+                let tab = config_tab_to_desc(tab, store)?;
+                let tab = tab.to_layout(area.into(), store)?;
+                list.push(tab);
+            }
+
+            return Ok(ScreenState::from_list(list, cmd));
+        },
+    }
+
+    let win = settings
+        .tunables
+        .default_room
+        .and_then(|room| IambWindow::find(room, store).ok())
+        .or_else(|| IambWindow::open(IambId::Welcome, store).ok())
+        .unwrap();
+
+    return Ok(ScreenState::new(win, cmd));
+}
+
 struct Application {
-    store: AsyncProgramStore,
-    worker: Requester,
+    /// Terminal backend.
     terminal: Terminal<CrosstermBackend<Stdout>>,
-    bindings: KeyManager<TerminalKey, ProgramAction, RepeatType, ProgramContext>,
-    actstack: VecDeque<(ProgramAction, ProgramContext)>,
+
+    /// State for the Matrix client, editing, etc.
+    store: AsyncProgramStore,
+
+    /// UI state (open tabs, command bar, etc.) to use when rendering.
     screen: ScreenState<IambWindow, IambInfo>,
+
+    /// Handle to communicate synchronously with the Matrix worker task.
+    worker: Requester,
+
+    /// Mapped keybindings.
+    bindings: KeyManager<TerminalKey, ProgramAction, RepeatType, ProgramContext>,
+
+    /// Pending actions to run.
+    actstack: VecDeque<(ProgramAction, ProgramContext)>,
+
+    /// Whether or not the terminal is currently focused.
     focused: bool,
+
+    /// The tab layout before the last executed [TabAction].
+    last_layout: Option<TabLayoutDescription<IambInfo>>,
 }
 
 impl Application {
@@ -141,16 +241,7 @@ impl Application {
         let bindings = KeyManager::new(bindings);
 
         let mut locked = store.lock().await;
-
-        let win = settings
-            .tunables
-            .default_room
-            .and_then(|room| IambWindow::find(room, locked.deref_mut()).ok())
-            .or_else(|| IambWindow::open(IambId::Welcome, locked.deref_mut()).ok())
-            .unwrap();
-
-        let cmd = CommandBarState::new(locked.deref_mut());
-        let screen = ScreenState::new(win, cmd);
+        let screen = setup_screen(settings, locked.deref_mut())?;
 
         let worker = locked.application.worker.clone();
         drop(locked);
@@ -165,6 +256,7 @@ impl Application {
             actstack,
             screen,
             focused: true,
+            last_layout: None,
         })
     }
 
@@ -312,7 +404,6 @@ impl Application {
             Action::Macro(act) => self.bindings.macro_command(&act, &ctx, store)?,
             Action::Scroll(style) => self.screen.scroll(&style, &ctx, store)?,
             Action::ShowInfoMessage(info) => Some(info),
-            Action::Tab(cmd) => self.screen.tab_command(&cmd, &ctx, store)?,
             Action::Window(cmd) => self.screen.window_command(&cmd, &ctx, store)?,
 
             Action::Jump(l, dir, count) => {
@@ -328,6 +419,13 @@ impl Application {
             },
 
             // UI actions.
+            Action::Tab(cmd) => {
+                if let TabAction::Close(_, _) = &cmd {
+                    self.last_layout = self.screen.as_description().into();
+                }
+
+                self.screen.tab_command(&cmd, &ctx, store)?
+            },
             Action::RedrawScreen => {
                 self.screen.clear_message();
                 self.redraw(true, store)?;
@@ -491,6 +589,19 @@ impl Application {
                         continue;
                     },
                 }
+            }
+        }
+
+        if let Some(ref layout) = self.last_layout {
+            let locked = self.store.lock().await;
+            let path = locked.application.settings.layout_json.as_path();
+            path.parent().map(create_dir_all).transpose()?;
+
+            let file = File::create(path)?;
+            let writer = BufWriter::new(file);
+
+            if let Err(e) = serde_json::to_writer(writer, layout) {
+                tracing::error!("Failed to save window layout while exiting: {}", e);
             }
         }
 

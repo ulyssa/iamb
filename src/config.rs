@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::Parser;
-use matrix_sdk::ruma::{OwnedUserId, UserId};
+use matrix_sdk::ruma::{OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
 use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer};
 use tracing::Level;
 use url::Url;
@@ -18,6 +18,8 @@ use modalkit::tui::{
     style::{Color, Modifier as StyleModifier, Style},
     text::Span,
 };
+
+use super::base::IambId;
 
 macro_rules! usage {
     ( $($args: tt)* ) => {
@@ -339,12 +341,43 @@ impl Directories {
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(untagged)]
+pub enum WindowPath {
+    AliasId(OwnedRoomAliasId),
+    RoomId(OwnedRoomId),
+    UserId(OwnedUserId),
+    Window(IambId),
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(untagged, deny_unknown_fields)]
+pub enum WindowLayout {
+    Window { window: WindowPath },
+    Split { split: Vec<WindowLayout> },
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase", tag = "style")]
+pub enum Layout {
+    /// Restore the layout from the previous session.
+    #[default]
+    Restore,
+
+    /// Open a single window using the `default_room` value.
+    New,
+
+    /// Open the window layouts described under `tabs`.
+    Config { tabs: Vec<WindowLayout> },
+}
+
 #[derive(Clone, Deserialize)]
 pub struct ProfileConfig {
     pub user_id: OwnedUserId,
     pub url: Url,
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
+    pub layout: Option<Layout>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -353,6 +386,7 @@ pub struct IambConfig {
     pub default_profile: Option<String>,
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
+    pub layout: Option<Layout>,
 }
 
 impl IambConfig {
@@ -376,11 +410,13 @@ impl IambConfig {
 #[derive(Clone)]
 pub struct ApplicationSettings {
     pub matrix_dir: PathBuf,
+    pub layout_json: PathBuf,
     pub session_json: PathBuf,
     pub profile_name: String,
     pub profile: ProfileConfig,
     pub tunables: TunableValues,
     pub dirs: DirectoryValues,
+    pub layout: Layout,
 }
 
 impl ApplicationSettings {
@@ -401,6 +437,7 @@ impl ApplicationSettings {
             default_profile,
             dirs,
             settings: global,
+            layout,
         } = IambConfig::load(config_json.as_path())?;
 
         validate_profile_names(&profiles);
@@ -424,10 +461,17 @@ impl ApplicationSettings {
             );
         };
 
+        let layout = profile.layout.take().or(layout).unwrap_or_default();
+
         let tunables = global.unwrap_or_default();
         let tunables = profile.settings.take().unwrap_or_default().merge(tunables);
         let tunables = tunables.values();
 
+        let dirs = dirs.unwrap_or_default();
+        let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
+        let dirs = dirs.values();
+
+        // Set up paths that live inside the profile's data directory.
         let mut profile_dir = config_dir.clone();
         profile_dir.push("profiles");
         profile_dir.push(profile_name.as_str());
@@ -438,17 +482,23 @@ impl ApplicationSettings {
         let mut session_json = profile_dir;
         session_json.push("session.json");
 
-        let dirs = dirs.unwrap_or_default();
-        let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
-        let dirs = dirs.values();
+        // Set up paths that live inside the profile's cache directory.
+        let mut cache_dir = dirs.cache.clone();
+        cache_dir.push("profiles");
+        cache_dir.push(profile_name.as_str());
+
+        let mut layout_json = cache_dir.clone();
+        layout_json.push("layout.json");
 
         let settings = ApplicationSettings {
             matrix_dir,
+            layout_json,
             session_json,
             profile_name,
             profile,
             tunables,
             dirs,
+            layout,
         };
 
         Ok(settings)
@@ -496,6 +546,7 @@ impl ApplicationSettings {
 mod tests {
     use super::*;
     use matrix_sdk::ruma::user_id;
+    use std::convert::TryFrom;
 
     #[test]
     fn test_profile_name_invalid() {
@@ -588,5 +639,63 @@ mod tests {
             name: Some("Tim".into()),
         })];
         assert_eq!(res.users, Some(users.into_iter().collect()));
+    }
+
+    #[test]
+    fn test_parse_layout() {
+        let user = WindowPath::UserId(user_id!("@user:example.com").to_owned());
+        let alias = WindowPath::AliasId(OwnedRoomAliasId::try_from("#room:example.com").unwrap());
+        let room = WindowPath::RoomId(OwnedRoomId::try_from("!room:example.com").unwrap());
+        let dms = WindowPath::Window(IambId::DirectList);
+        let welcome = WindowPath::Window(IambId::Welcome);
+
+        let res: Layout = serde_json::from_str("{\"style\": \"restore\"}").unwrap();
+        assert_eq!(res, Layout::Restore);
+
+        let res: Layout = serde_json::from_str("{\"style\": \"new\"}").unwrap();
+        assert_eq!(res, Layout::New);
+
+        let res: Layout = serde_json::from_str(
+            "{\"style\": \"config\", \"tabs\": [{\"window\":\"@user:example.com\"}]}",
+        )
+        .unwrap();
+        assert_eq!(res, Layout::Config {
+            tabs: vec![WindowLayout::Window { window: user.clone() }]
+        });
+
+        let res: Layout = serde_json::from_str(
+            "{\
+            \"style\": \"config\",\
+            \"tabs\": [\
+                {\"split\":[\
+                    {\"window\":\"@user:example.com\"},\
+                    {\"window\":\"#room:example.com\"}\
+                ]},\
+                {\"split\":[\
+                    {\"window\":\"!room:example.com\"},\
+                    {\"split\":[\
+                        {\"window\":\"iamb://dms\"},\
+                        {\"window\":\"iamb://welcome\"}\
+                    ]}\
+                ]}\
+            ]}",
+        )
+        .unwrap();
+        let split1 = WindowLayout::Split {
+            split: vec![
+                WindowLayout::Window { window: user.clone() },
+                WindowLayout::Window { window: alias },
+            ],
+        };
+        let split2 = WindowLayout::Split {
+            split: vec![WindowLayout::Window { window: dms }, WindowLayout::Window {
+                window: welcome,
+            }],
+        };
+        let split3 = WindowLayout::Split {
+            split: vec![WindowLayout::Window { window: room }, split2],
+        };
+        let tabs = vec![split1, split3];
+        assert_eq!(res, Layout::Config { tabs });
     }
 }

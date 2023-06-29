@@ -195,16 +195,20 @@ pub fn mock_tunables() -> TunableValues {
 pub fn mock_settings() -> ApplicationSettings {
     ApplicationSettings {
         matrix_dir: PathBuf::new(),
+        layout_json: PathBuf::new(),
         session_json: PathBuf::new(),
+
         profile_name: "test".into(),
         profile: ProfileConfig {
             user_id: user_id!("@user:example.com").to_owned(),
             url: Url::parse("https://example.com").unwrap(),
             settings: None,
             dirs: None,
+            layout: None,
         },
         tunables: mock_tunables(),
         dirs: mock_dirs(),
+        layout: Default::default(),
     }
 }
 

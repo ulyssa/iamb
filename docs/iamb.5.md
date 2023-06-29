@@ -36,6 +36,10 @@ These options are configured as a map under the profiles name.
 > Overwrite general settings for this account. The fields are identical to
 > those in *TUNABLES*.
 
+**layout** (type: startup layout object)
+> Overwrite general settings for this account. The fields are identical to
+> those in *STARTUP LAYOUT*.
+
 **dirs** (type: XDG overrides object)
 > Overwrite general settings for this account. The fields are identical to
 > those in *DIRECTORIES*.
@@ -91,6 +95,23 @@ maps containing the following key value pairs.
 > _blue_, _cyan_, _dark-gray_, _gray_, _green_, _light-blue_,
 > _light-cyan_, _light-green_, _light-magenta_, _light-red_,
 > _light-yellow_, _magenta_, _none_, _red_, _white_, _yellow_
+
+# STARTUP LAYOUT
+
+Specifies what initial set of tabs and windows to show when starting the
+client. Configured as an object under the key *layout*.
+
+**style** (type: string)
+> Specifies what window layout to load when starting. Valid values are
+> _restore_ to restore the layout from the last time the client was exited,
+> _new_ to open a single window (uses the value of _default\_room_ if set), or
+> _config_ to open the layout described under _tabs_.
+
+**tabs** (type: array of window objects)
+> If **style** is set to _config_, then this value will be used to open a set
+> of tabs and windows at startup. Each object can contain either a **window**
+> key specifying a username, room identifier or room alias to show, or a
+> **split** key specifying an array of window objects.
 
 # DIRECTORIES
 
