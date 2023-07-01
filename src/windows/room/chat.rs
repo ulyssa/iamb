@@ -35,7 +35,7 @@ use modalkit::{
     tui::{
         buffer::Buffer,
         layout::Rect,
-        text::{Span, Spans},
+        text::{Line, Span},
         widgets::{Paragraph, StatefulWidget, Widget},
     },
     widgets::textbox::{TextBox, TextBoxState},
@@ -812,7 +812,7 @@ impl<'a> StatefulWidget for Chat<'a> {
         // Determine whether we have a description to show for the message bar.
         let desc_spans = match (&state.editing, &state.reply_to) {
             (None, None) => None,
-            (Some(_), None) => Some(Spans::from("Editing message")),
+            (Some(_), None) => Some(Line::from("Editing message")),
             (editing, Some(_)) => {
                 state.reply_to.as_ref().and_then(|k| {
                     let room = self.store.application.rooms.get(state.id())?;
@@ -824,7 +824,7 @@ impl<'a> StatefulWidget for Chat<'a> {
                     } else {
                         Span::from("Replying to ")
                     };
-                    let spans = Spans(vec![prefix, user]);
+                    let spans = Line::from(vec![prefix, user]);
 
                     spans.into()
                 })

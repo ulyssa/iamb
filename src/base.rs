@@ -76,7 +76,7 @@ use modalkit::{
     tui::{
         buffer::Buffer,
         layout::{Alignment, Rect},
-        text::{Span, Spans},
+        text::{Line, Span},
         widgets::{Paragraph, Widget},
     },
 };
@@ -174,6 +174,7 @@ pub enum CreateRoomType {
 
 bitflags::bitflags! {
     /// Available options for newly created rooms.
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct CreateRoomFlags: u32 {
         /// No flags specified.
         const NONE = 0b00000000;
@@ -188,6 +189,7 @@ bitflags::bitflags! {
 
 bitflags::bitflags! {
     /// Available options when downloading files.
+    #[derive(Clone, Debug, Eq, PartialEq)]
     pub struct DownloadFlags: u32 {
         /// No flags specified.
         const NONE = 0b00000000;
@@ -701,30 +703,30 @@ impl RoomInfo {
         }
     }
 
-    fn get_typing_spans<'a>(&'a self, settings: &'a ApplicationSettings) -> Spans<'a> {
+    fn get_typing_spans<'a>(&'a self, settings: &'a ApplicationSettings) -> Line<'a> {
         let typers = self.get_typers();
         let n = typers.len();
 
         match n {
-            0 => Spans(vec![]),
+            0 => Line::from(vec![]),
             1 => {
                 let user = settings.get_user_span(typers[0].as_ref(), self);
 
-                Spans(vec![user, Span::from(" is typing...")])
+                Line::from(vec![user, Span::from(" is typing...")])
             },
             2 => {
                 let user1 = settings.get_user_span(typers[0].as_ref(), self);
                 let user2 = settings.get_user_span(typers[1].as_ref(), self);
 
-                Spans(vec![
+                Line::from(vec![
                     user1,
                     Span::raw(" and "),
                     user2,
                     Span::from(" are typing..."),
                 ])
             },
-            n if n < 5 => Spans::from("Several people are typing..."),
-            _ => Spans::from("Many people are typing..."),
+            n if n < 5 => Line::from("Several people are typing..."),
+            _ => Line::from("Many people are typing..."),
         }
     }
 
@@ -1364,19 +1366,19 @@ pub mod tests {
 
         // Nothing set.
         assert_eq!(info.users_typing, None);
-        assert_eq!(info.get_typing_spans(&settings), Spans(vec![]));
+        assert_eq!(info.get_typing_spans(&settings), Line::from(vec![]));
 
         // Empty typing list.
         info.set_typing(users0);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Spans(vec![]));
+        assert_eq!(info.get_typing_spans(&settings), Line::from(vec![]));
 
         // Single user typing.
         info.set_typing(users1);
         assert!(info.users_typing.is_some());
         assert_eq!(
             info.get_typing_spans(&settings),
-            Spans(vec![
+            Line::from(vec![
                 Span::styled("@user1:example.com", user_style("@user1:example.com")),
                 Span::from(" is typing...")
             ])
@@ -1387,7 +1389,7 @@ pub mod tests {
         assert!(info.users_typing.is_some());
         assert_eq!(
             info.get_typing_spans(&settings),
-            Spans(vec![
+            Line::from(vec![
                 Span::styled("@user1:example.com", user_style("@user1:example.com")),
                 Span::raw(" and "),
                 Span::styled("@user2:example.com", user_style("@user2:example.com")),
@@ -1398,19 +1400,19 @@ pub mod tests {
         // Four users typing.
         info.set_typing(users4);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Spans::from("Several people are typing..."));
+        assert_eq!(info.get_typing_spans(&settings), Line::from("Several people are typing..."));
 
         // Five users typing.
         info.set_typing(users5);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Spans::from("Many people are typing..."));
+        assert_eq!(info.get_typing_spans(&settings), Line::from("Many people are typing..."));
 
         // Test that USER5 gets rendered using the configured color and name.
         info.set_typing(vec![TEST_USER5.clone()]);
         assert!(info.users_typing.is_some());
         assert_eq!(
             info.get_typing_spans(&settings),
-            Spans(vec![
+            Line::from(vec![
                 Span::styled("USER 5", user_style_from_color(Color::Black)),
                 Span::from(" is typing...")
             ])

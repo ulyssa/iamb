@@ -7,7 +7,7 @@ use std::borrow::Cow;
 
 use modalkit::tui::layout::Alignment;
 use modalkit::tui::style::Style;
-use modalkit::tui::text::{Span, Spans, Text};
+use modalkit::tui::text::{Line, Span, Text};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -92,7 +92,7 @@ impl<'a> TextPrinter<'a> {
 
     fn push(&mut self) {
         self.curr_width = 0;
-        self.text.lines.push(Spans(std::mem::take(&mut self.curr_spans)));
+        self.text.lines.push(Line::from(std::mem::take(&mut self.curr_spans)));
     }
 
     /// Start a new line.
@@ -228,10 +228,10 @@ impl<'a> TextPrinter<'a> {
         }
     }
 
-    /// Push [Spans] into the printer.
-    pub fn push_line(&mut self, spans: Spans<'a>) {
+    /// Push a [Line] into the printer.
+    pub fn push_line(&mut self, line: Line<'a>) {
         self.commit();
-        self.text.lines.push(spans);
+        self.text.lines.push(line);
     }
 
     /// Push multiline [Text] into the printer.

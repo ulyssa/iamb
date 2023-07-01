@@ -9,7 +9,7 @@ use modalkit::tui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
-    text::{Span, Spans},
+    text::{Line, Span},
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 use modalkit::widgets::{ScrollActions, TerminalCursor, WindowOps};
@@ -1226,7 +1226,7 @@ fn render_jump_to_recent(area: Rect, buf: &mut Buffer, focused: bool) -> Rect {
         Span::raw(" to jump to latest message"),
     ];
 
-    Paragraph::new(Spans::from(msg))
+    Paragraph::new(Line::from(msg))
         .alignment(Alignment::Center)
         .render(bar, buf);
 
@@ -1342,7 +1342,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
         let x = area.left();
 
         for (_, _, txt) in lines.into_iter() {
-            let _ = buf.set_spans(x, y, &txt, area.width);
+            let _ = buf.set_line(x, y, &txt, area.width);
 
             y += 1;
         }

@@ -26,7 +26,7 @@ use modalkit::tui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
-    text::{Span, Spans, Text},
+    text::{Line, Span, Text},
     widgets::StatefulWidget,
 };
 
@@ -102,7 +102,7 @@ fn bold_span(s: &str) -> Span {
 }
 
 #[inline]
-fn bold_spans(s: &str) -> Spans {
+fn bold_spans(s: &str) -> Line {
     bold_span(s).into()
 }
 
@@ -537,7 +537,7 @@ impl Window<IambInfo> for IambWindow {
         }
     }
 
-    fn get_tab_title(&self, store: &mut ProgramStore) -> Spans {
+    fn get_tab_title(&self, store: &mut ProgramStore) -> Line {
         match self {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
@@ -548,7 +548,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Room(w) => {
                 let title = store.application.get_room_title(w.id());
 
-                Spans::from(title)
+                Line::from(title)
             },
             IambWindow::MemberList(state, room_id, _) => {
                 let title = store.application.get_room_title(room_id.as_ref());
@@ -558,12 +558,12 @@ impl Window<IambInfo> for IambWindow {
                     Span::styled(format!("({n}): "), bold_style()),
                     title.into(),
                 ];
-                Spans(v)
+                Line::from(v)
             },
         }
     }
 
-    fn get_win_title(&self, store: &mut ProgramStore) -> Spans {
+    fn get_win_title(&self, store: &mut ProgramStore) -> Line {
         match self {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
@@ -580,7 +580,7 @@ impl Window<IambInfo> for IambWindow {
                     Span::styled(format!("({n}): "), bold_style()),
                     title.into(),
                 ];
-                Spans(v)
+                Line::from(v)
             },
         }
     }
@@ -730,7 +730,7 @@ impl ListItem<IambInfo> for RoomItem {
 
             append_tags(tags, &mut spans, style);
 
-            Text::from(Spans(spans))
+            Text::from(Line::from(spans))
         } else {
             selected_text(self.name.as_str(), selected)
         }
@@ -796,7 +796,7 @@ impl ListItem<IambInfo> for DirectItem {
 
             append_tags(tags, &mut spans, style);
 
-            Text::from(Spans(spans))
+            Text::from(Line::from(spans))
         } else {
             selected_text(self.name.as_str(), selected)
         }
@@ -1023,47 +1023,47 @@ impl ListItem<IambInfo> for VerifyItem {
 
         let bold = Style::default().add_modifier(StyleModifier::BOLD);
         let item = Span::styled(self.show_item(), selected_style(selected));
-        lines.push(Spans::from(item));
+        lines.push(Line::from(item));
 
         if self.sasv1.is_done() {
             // Print nothing.
         } else if self.sasv1.is_cancelled() {
             if let Some(info) = self.sasv1.cancel_info() {
-                lines.push(Spans::from(format!("    Cancelled: {}", info.reason())));
-                lines.push(Spans::from(""));
+                lines.push(Line::from(format!("    Cancelled: {}", info.reason())));
+                lines.push(Line::from(""));
             }
 
-            lines.push(Spans::from("    You can start a new verification request with:"));
+            lines.push(Line::from("    You can start a new verification request with:"));
         } else if let Some(emoji) = self.sasv1.emoji() {
-            lines.push(Spans::from(
+            lines.push(Line::from(
                 "    Both devices should see the following Emoji sequence:".to_string(),
             ));
-            lines.push(Spans::from(""));
+            lines.push(Line::from(""));
 
             for line in format_emojis(emoji).lines() {
-                lines.push(Spans::from(format!("    {line}")));
+                lines.push(Line::from(format!("    {line}")));
             }
 
-            lines.push(Spans::from(""));
-            lines.push(Spans::from("    If they don't match, run:"));
-            lines.push(Spans::from(""));
-            lines.push(Spans::from(Span::styled(
+            lines.push(Line::from(""));
+            lines.push(Line::from("    If they don't match, run:"));
+            lines.push(Line::from(""));
+            lines.push(Line::from(Span::styled(
                 format!(":verify mismatch {}", self.user_dev),
                 bold,
             )));
-            lines.push(Spans::from(""));
-            lines.push(Spans::from("    If everything looks right, you can confirm with:"));
+            lines.push(Line::from(""));
+            lines.push(Line::from("    If everything looks right, you can confirm with:"));
         } else {
-            lines.push(Spans::from("    To accept this request, run:"));
+            lines.push(Line::from("    To accept this request, run:"));
         }
 
         let cmd = self.to_string();
 
         if !cmd.is_empty() {
-            lines.push(Spans::from(""));
-            lines.push(Spans(vec![Span::from("        "), Span::styled(cmd, bold)]));
-            lines.push(Spans::from(""));
-            lines.push(Spans(vec![
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![Span::from("        "), Span::styled(cmd, bold)]));
+            lines.push(Line::from(""));
+            lines.push(Line::from(vec![
                 Span::from("You can copy the above command with "),
                 Span::styled("yy", bold),
                 Span::from(" and then execute it with "),
@@ -1167,7 +1167,7 @@ impl ListItem<IambInfo> for MemberItem {
 
         spans.extend(state);
 
-        return Spans(spans).into();
+        return Line::from(spans).into();
     }
 
     fn get_word(&self) -> Option<String> {

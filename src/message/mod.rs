@@ -47,7 +47,7 @@ use matrix_sdk::ruma::{
 use modalkit::tui::{
     style::{Modifier as StyleModifier, Style},
     symbols::line::THICK_VERTICAL,
-    text::{Span, Spans, Text},
+    text::{Line, Span, Text},
 };
 
 use modalkit::editing::{base::ViewportContext, cursor::Cursor};
@@ -74,6 +74,7 @@ const fn span_static(s: &'static str) -> Span<'static> {
             bg: None,
             add_modifier: StyleModifier::empty(),
             sub_modifier: StyleModifier::empty(),
+            underline_color: None,
         },
     }
 }
@@ -83,6 +84,7 @@ const BOLD_STYLE: Style = Style {
     bg: None,
     add_modifier: StyleModifier::BOLD,
     sub_modifier: StyleModifier::empty(),
+    underline_color: None,
 };
 
 const USER_GUTTER: usize = 30;
@@ -508,14 +510,14 @@ impl<'a> MessageFormatter<'a> {
     }
 
     #[inline]
-    fn push_spans(&mut self, spans: Spans<'a>, style: Style, text: &mut Text<'a>) {
+    fn push_spans(&mut self, prev_line: Line<'a>, style: Style, text: &mut Text<'a>) {
         if let Some(date) = self.date.take() {
             let len = date.content.as_ref().len();
             let padding = self.orig.saturating_sub(len);
             let leading = space_span(padding / 2, Style::default());
             let trailing = space_span(padding.saturating_sub(padding / 2), Style::default());
 
-            text.lines.push(Spans(vec![leading, date, trailing]));
+            text.lines.push(Line::from(vec![leading, date, trailing]));
         }
 
         match self.cols {
@@ -525,7 +527,7 @@ impl<'a> MessageFormatter<'a> {
                 let time = self.time.take().unwrap_or(TIME_GUTTER_EMPTY_SPAN);
 
                 let mut line = vec![user];
-                line.extend(spans.0);
+                line.extend(prev_line.spans);
                 line.push(time);
 
                 // Show read receipts.
@@ -542,35 +544,35 @@ impl<'a> MessageFormatter<'a> {
                 line.push(a);
                 line.push(Span::raw(" "));
 
-                text.lines.push(Spans(line))
+                text.lines.push(Line::from(line))
             },
             MessageColumns::Three => {
                 let user = self.user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
                 let time = self.time.take().unwrap_or_else(|| Span::from(""));
 
                 let mut line = vec![user];
-                line.extend(spans.0);
+                line.extend(prev_line.spans);
                 line.push(time);
 
-                text.lines.push(Spans(line))
+                text.lines.push(Line::from(line))
             },
             MessageColumns::Two => {
                 let user = self.user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
                 let mut line = vec![user];
-                line.extend(spans.0);
+                line.extend(prev_line.spans);
 
-                text.lines.push(Spans(line));
+                text.lines.push(Line::from(line));
             },
             MessageColumns::One => {
                 if let Some(user) = self.user.take() {
-                    text.lines.push(Spans(vec![user]));
+                    text.lines.push(Line::from(vec![user]));
                 }
 
                 let leading = space_span(2, style);
                 let mut line = vec![leading];
-                line.extend(spans.0);
+                line.extend(prev_line.spans);
 
-                text.lines.push(Spans(line));
+                text.lines.push(Line::from(line));
             },
         }
     }
@@ -709,7 +711,7 @@ impl Message {
             sender.style = sender.style.patch(style);
 
             fmt.push_spans(
-                Spans(vec![
+                Line::from(vec![
                     Span::styled(" ", style),
                     Span::styled(THICK_VERTICAL, style),
                     sender,
@@ -721,8 +723,8 @@ impl Message {
             );
 
             for line in replied.lines.iter_mut() {
-                line.0.insert(0, Span::styled(THICK_VERTICAL, style));
-                line.0.insert(0, Span::styled(" ", style));
+                line.spans.insert(0, Span::styled(THICK_VERTICAL, style));
+                line.spans.insert(0, Span::styled(" ", style));
             }
 
             fmt.push_text(replied, style, &mut text);

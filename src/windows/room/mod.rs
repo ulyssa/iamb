@@ -15,7 +15,7 @@ use modalkit::tui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
-    text::{Span, Spans, Text},
+    text::{Line, Span, Text},
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
@@ -150,8 +150,8 @@ impl RoomState {
             invited.push(store.application.settings.get_user_span(inviter.user_id(), info));
         }
 
-        let l1 = Spans(invited);
-        let l2 = Spans::from(
+        let l1 = Line::from(invited);
+        let l2 = Line::from(
             "You can run `:invite accept` or `:invite reject` to accept or reject this invitation.",
         );
         let text = Text { lines: vec![l1, l2] };
@@ -305,7 +305,7 @@ impl RoomState {
         }
     }
 
-    pub fn get_title(&self, store: &mut ProgramStore) -> Spans {
+    pub fn get_title(&self, store: &mut ProgramStore) -> Line {
         let title = store.application.get_room_title(self.id());
         let style = Style::default().add_modifier(StyleModifier::BOLD);
         let mut spans = vec![Span::styled(title, style)];
@@ -319,7 +319,7 @@ impl RoomState {
             _ => {},
         }
 
-        Spans(spans)
+        Line::from(spans)
     }
 
     pub fn focus_toggle(&mut self) {

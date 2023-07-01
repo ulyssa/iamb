@@ -5,7 +5,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use modalkit::tui::style::Style;
-use modalkit::tui::text::{Span, Spans, Text};
+use modalkit::tui::text::{Line, Span, Text};
 
 pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) {
     match cow {
@@ -106,7 +106,7 @@ where
 
     for (line, w) in wrap(s, width) {
         let space = space_span(width.saturating_sub(w), style);
-        let spans = Spans(vec![Span::styled(line, style), space]);
+        let spans = Line::from(vec![Span::styled(line, style), space]);
 
         text.lines.push(spans);
     }
@@ -128,17 +128,19 @@ pub fn space_text(width: usize, style: Style) -> Text<'static> {
 
 pub fn join_cell_text<'a>(texts: Vec<(Text<'a>, usize)>, join: Span<'a>, style: Style) -> Text<'a> {
     let height = texts.iter().map(|t| t.0.height()).max().unwrap_or(0);
-    let mut text = Text { lines: vec![Spans(vec![join.clone()]); height] };
+    let mut text = Text {
+        lines: vec![Line::from(vec![join.clone()]); height],
+    };
 
     for (mut t, w) in texts.into_iter() {
         for i in 0..height {
-            if let Some(spans) = t.lines.get_mut(i) {
-                text.lines[i].0.append(&mut spans.0);
+            if let Some(line) = t.lines.get_mut(i) {
+                text.lines[i].spans.append(&mut line.spans);
             } else {
-                text.lines[i].0.push(space_span(w, style));
+                text.lines[i].spans.push(space_span(w, style));
             }
 
-            text.lines[i].0.push(join.clone());
+            text.lines[i].spans.push(join.clone());
         }
     }
 
