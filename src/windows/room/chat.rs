@@ -435,7 +435,7 @@ impl ChatState {
                     return Ok(None);
                 }
 
-                let mut msg = text_to_message(msg.to_string());
+                let mut msg = text_to_message(msg.trim_end().to_string());
 
                 if let Some((_, event_id)) = &self.editing {
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(
