@@ -31,6 +31,7 @@ comrak = {version = "0.18.0", features = ["shortcodes"]}
 css-color-parser = "0.1.2"
 dirs = "4.0.0"
 emojis = "~0.5.2"
+futures = "0.3"
 gethostname = "0.4.1"
 html5ever = "0.26.0"
 image = "0.24.5"

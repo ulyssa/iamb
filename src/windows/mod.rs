@@ -1,4 +1,6 @@
 use std::cmp::{Ord, Ordering, PartialOrd};
+use std::ops::Deref;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use matrix_sdk::{
@@ -10,7 +12,6 @@ use matrix_sdk::{
         OwnedRoomId,
         RoomId,
     },
-    DisplayName,
 };
 
 use modalkit::tui::{
@@ -77,6 +78,8 @@ use self::{room::RoomState, welcome::WelcomeState};
 
 pub mod room;
 pub mod welcome;
+
+type MatrixRoomInfo = Arc<(MatrixRoom, Option<Tags>)>;
 
 const MEMBER_FETCH_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -380,10 +383,13 @@ impl WindowOps<IambInfo> for IambWindow {
         match self {
             IambWindow::Room(state) => state.draw(area, buf, focused, store),
             IambWindow::DirectList(state) => {
-                let dms = store.application.worker.direct_messages();
-                let mut items = dms
+                let mut items = store
+                    .application
+                    .sync_info
+                    .dms
+                    .clone()
                     .into_iter()
-                    .map(|(id, name, tags)| DirectItem::new(id, name, tags, store))
+                    .map(|room_info| DirectItem::new(room_info, store))
                     .collect::<Vec<_>>();
                 items.sort();
 
@@ -416,10 +422,13 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::RoomList(state) => {
-                let joined = store.application.worker.active_rooms();
-                let mut items = joined
+                let mut items = store
+                    .application
+                    .sync_info
+                    .rooms
+                    .clone()
                     .into_iter()
-                    .map(|(room, name, tags)| RoomItem::new(room, name, tags, store))
+                    .map(|room_info| RoomItem::new(room_info, store))
                     .collect::<Vec<_>>();
                 items.sort();
 
@@ -432,9 +441,13 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::SpaceList(state) => {
-                let spaces = store.application.worker.spaces();
-                let items =
-                    spaces.into_iter().map(|(room, name)| SpaceItem::new(room, name, store));
+                let items = store
+                    .application
+                    .sync_info
+                    .spaces
+                    .clone()
+                    .into_iter()
+                    .map(|room| SpaceItem::new(room, store));
                 state.set(items.collect());
                 state.draw(area, buf, focused, store);
 
@@ -639,36 +652,45 @@ impl Window<IambInfo> for IambWindow {
 
 #[derive(Clone)]
 pub struct RoomItem {
-    room: MatrixRoom,
-    tags: Option<Tags>,
+    room_info: MatrixRoomInfo,
     name: String,
 }
 
 impl RoomItem {
-    fn new(
-        room: MatrixRoom,
-        name: DisplayName,
-        tags: Option<Tags>,
-        store: &mut ProgramStore,
-    ) -> Self {
-        let name = name.to_string();
+    fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
+        let room = &room_info.deref().0;
         let room_id = room.room_id();
 
         let info = store.application.get_room_info(room_id.to_owned());
-        info.name = name.clone().into();
-        info.tags = tags.clone();
+        let name = info.name.clone().unwrap_or_default();
+        info.tags = room_info.deref().1.clone();
 
         if let Some(alias) = room.canonical_alias() {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
         }
 
-        RoomItem { room, tags, name }
+        RoomItem { room_info, name }
+    }
+
+    #[inline]
+    fn room(&self) -> &MatrixRoom {
+        &self.room_info.deref().0
+    }
+
+    #[inline]
+    fn room_id(&self) -> &RoomId {
+        self.room().room_id()
+    }
+
+    #[inline]
+    fn tags(&self) -> &Option<Tags> {
+        &self.room_info.deref().1
     }
 }
 
 impl PartialEq for RoomItem {
     fn eq(&self, other: &Self) -> bool {
-        self.room.room_id() == other.room.room_id()
+        self.room_id() == other.room_id()
     }
 }
 
@@ -676,7 +698,7 @@ impl Eq for RoomItem {}
 
 impl Ord for RoomItem {
     fn cmp(&self, other: &Self) -> Ordering {
-        tag_cmp(&self.tags, &other.tags).then_with(|| room_cmp(&self.room, &other.room))
+        tag_cmp(self.tags(), other.tags()).then_with(|| room_cmp(self.room(), other.room()))
     }
 }
 
@@ -694,7 +716,7 @@ impl ToString for RoomItem {
 
 impl ListItem<IambInfo> for RoomItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
-        if let Some(tags) = &self.tags {
+        if let Some(tags) = &self.tags() {
             let style = selected_style(selected);
             let mut spans = vec![Span::styled(self.name.as_str(), style)];
 
@@ -707,7 +729,7 @@ impl ListItem<IambInfo> for RoomItem {
     }
 
     fn get_word(&self) -> Option<String> {
-        self.room.room_id().to_string().into()
+        self.room_id().to_string().into()
     }
 }
 
@@ -718,29 +740,37 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for RoomItem {
         ctx: &ProgramContext,
         _: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
-        room_prompt(self.room.room_id(), act, ctx)
+        room_prompt(self.room_id(), act, ctx)
     }
 }
 
 #[derive(Clone)]
 pub struct DirectItem {
-    room: MatrixRoom,
-    tags: Option<Tags>,
+    room_info: MatrixRoomInfo,
     name: String,
 }
 
 impl DirectItem {
-    fn new(
-        room: MatrixRoom,
-        name: DisplayName,
-        tags: Option<Tags>,
-        store: &mut ProgramStore,
-    ) -> Self {
-        let name = name.to_string();
+    fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
+        let room_id = room_info.deref().0.room_id().to_owned();
+        let name = store.application.get_room_info(room_id).name.clone().unwrap_or_default();
 
-        store.application.set_room_name(room.room_id(), name.as_str());
+        DirectItem { room_info, name }
+    }
 
-        DirectItem { room, tags, name }
+    #[inline]
+    fn room(&self) -> &MatrixRoom {
+        &self.room_info.deref().0
+    }
+
+    #[inline]
+    fn room_id(&self) -> &RoomId {
+        self.room().room_id()
+    }
+
+    #[inline]
+    fn tags(&self) -> &Option<Tags> {
+        &self.room_info.deref().1
     }
 }
 
@@ -752,7 +782,7 @@ impl ToString for DirectItem {
 
 impl ListItem<IambInfo> for DirectItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
-        if let Some(tags) = &self.tags {
+        if let Some(tags) = &self.tags() {
             let style = selected_style(selected);
             let mut spans = vec![Span::styled(self.name.as_str(), style)];
 
@@ -765,13 +795,13 @@ impl ListItem<IambInfo> for DirectItem {
     }
 
     fn get_word(&self) -> Option<String> {
-        self.room.room_id().to_string().into()
+        self.room_id().to_string().into()
     }
 }
 
 impl PartialEq for DirectItem {
     fn eq(&self, other: &Self) -> bool {
-        self.room.room_id() == other.room.room_id()
+        self.room_id() == other.room_id()
     }
 }
 
@@ -779,7 +809,7 @@ impl Eq for DirectItem {}
 
 impl Ord for DirectItem {
     fn cmp(&self, other: &Self) -> Ordering {
-        tag_cmp(&self.tags, &other.tags).then_with(|| room_cmp(&self.room, &other.room))
+        tag_cmp(self.tags(), other.tags()).then_with(|| room_cmp(self.room(), other.room()))
     }
 }
 
@@ -796,7 +826,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for DirectItem {
         ctx: &ProgramContext,
         _: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
-        room_prompt(self.room.room_id(), act, ctx)
+        room_prompt(self.room_id(), act, ctx)
     }
 }
 
@@ -807,11 +837,14 @@ pub struct SpaceItem {
 }
 
 impl SpaceItem {
-    fn new(room: MatrixRoom, name: DisplayName, store: &mut ProgramStore) -> Self {
-        let name = name.to_string();
+    fn new(room: MatrixRoom, store: &mut ProgramStore) -> Self {
         let room_id = room.room_id();
-
-        store.application.set_room_name(room_id, name.as_str());
+        let name = store
+            .application
+            .get_room_info(room_id.to_owned())
+            .name
+            .clone()
+            .unwrap_or_default();
 
         if let Some(alias) = room.canonical_alias() {
             store.application.names.insert(alias.to_string(), room_id.to_owned());

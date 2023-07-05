@@ -712,6 +712,7 @@ fn main() -> IambResult<()> {
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
+        .worker_threads(2)
         .thread_name_fn(|| {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
             let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);

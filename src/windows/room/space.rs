@@ -120,11 +120,12 @@ impl<'a> StatefulWidget for Space<'a> {
                     let items = members
                         .into_iter()
                         .filter_map(|id| {
-                            let (room, name, tags) =
+                            let (room, _, tags) =
                                 self.store.application.worker.get_room(id.clone()).ok()?;
+                            let room_info = std::sync::Arc::new((room, tags));
 
                             if id != state.room_id {
-                                Some(RoomItem::new(room, name, tags, self.store))
+                                Some(RoomItem::new(room_info, self.store))
                             } else {
                                 None
                             }

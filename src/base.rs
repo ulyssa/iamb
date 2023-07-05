@@ -21,7 +21,7 @@ use url::Url;
 
 use matrix_sdk::{
     encryption::verification::SasVerification,
-    room::Joined,
+    room::{Joined, Room as MatrixRoom},
     ruma::{
         events::{
             reaction::ReactionEvent,
@@ -644,6 +644,13 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
     return emojis;
 }
 
+#[derive(Default)]
+pub struct SyncInfo {
+    pub spaces: Vec<MatrixRoom>,
+    pub rooms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+}
+
 pub struct ChatStore {
     pub cmds: ProgramCommands,
     pub worker: Requester,
@@ -654,6 +661,7 @@ pub struct ChatStore {
     pub settings: ApplicationSettings,
     pub need_load: HashSet<OwnedRoomId>,
     pub emojis: CompletionMap<String, &'static Emoji>,
+    pub sync_info: SyncInfo,
 }
 
 impl ChatStore {
@@ -663,12 +671,14 @@ impl ChatStore {
             settings,
 
             cmds: crate::commands::setup_commands(),
+            emojis: emoji_map(),
+
             names: Default::default(),
             rooms: Default::default(),
             presences: Default::default(),
             verifications: Default::default(),
             need_load: Default::default(),
-            emojis: emoji_map(),
+            sync_info: Default::default(),
         }
     }
 

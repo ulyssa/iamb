@@ -1522,6 +1522,7 @@ dependencies = [
  "css-color-parser",
  "dirs",
  "emojis",
+ "futures",
  "gethostname 0.4.1",
  "html5ever",
  "image",
