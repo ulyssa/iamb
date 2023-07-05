@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::Display;
 use std::fs::{create_dir_all, File};
-use std::io::{stdout, BufReader, BufWriter, Stdout};
+use std::io::{stdout, BufWriter, Stdout};
 use std::ops::DerefMut;
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -27,7 +27,10 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::OwnedUserId;
+use rand::{distributions::Alphanumeric, Rng};
+use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing_subscriber::FmtSubscriber;
 
@@ -62,6 +65,7 @@ mod config;
 mod keybindings;
 mod message;
 mod preview;
+mod sled_export;
 mod util;
 mod windows;
 mod worker;
@@ -558,7 +562,7 @@ impl Application {
         match action {
             HomeserverAction::CreateRoom(alias, vis, flags) => {
                 let client = &store.application.worker.client;
-                let room_id = create_room(client, alias.as_deref(), vis, flags).await?;
+                let room_id = create_room(client, alias, vis, flags).await?;
                 let room = IambId::Room(room_id);
                 let target = OpenTarget::Application(room);
                 let action = WindowAction::Switch(target);
@@ -659,36 +663,57 @@ impl Application {
     }
 }
 
-async fn login(worker: Requester, settings: &ApplicationSettings) -> IambResult<()> {
-    println!("Logging in for {}...", settings.profile.user_id);
+fn gen_passphrase() -> String {
+    rand::thread_rng()
+        .sample_iter(&Alphanumeric)
+        .take(20)
+        .map(char::from)
+        .collect()
+}
 
+fn read_response(question: &str) -> String {
+    println!("{question}");
+    let mut input = String::new();
+    let _ = std::io::stdin().read_line(&mut input);
+    input
+}
+
+fn read_yesno(question: &str) -> Option<char> {
+    read_response(question).chars().next().map(|c| c.to_ascii_lowercase())
+}
+
+async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult<()> {
     if settings.session_json.is_file() {
-        let file = File::open(settings.session_json.as_path())?;
-        let reader = BufReader::new(file);
-        let session = serde_json::from_reader(reader).map_err(IambError::from)?;
+        let session = settings.read_session(&settings.session_json)?;
+        worker.login(LoginStyle::SessionRestore(session.into()))?;
 
-        worker.login(LoginStyle::SessionRestore(session))?;
+        return Ok(());
+    }
+
+    if settings.session_json_old.is_file() && !settings.sled_dir.is_dir() {
+        let session = settings.read_session(&settings.session_json_old)?;
+        worker.login(LoginStyle::SessionRestore(session.into()))?;
 
         return Ok(());
     }
 
     loop {
-        println!("Please select login type: [p]assword / [s]ingle sign on");
-
-        let mut input = String::new();
-        std::io::stdin().read_line(&mut input).unwrap();
-
-        let login_style = match input.chars().next().map(|c| c.to_ascii_lowercase()) {
-            None | Some('p') => {
-                let password = rpassword::prompt_password("Password: ")?;
-                LoginStyle::Password(password)
-            },
-            Some('s') => LoginStyle::SingleSignOn,
-            Some(_) => {
-                println!("Failed to login. Please enter 'p' or 's'");
-                continue;
-            },
-        };
+        let login_style =
+            match read_response("Please select login type: [p]assword / [s]ingle sign on")
+                .chars()
+                .next()
+                .map(|c| c.to_ascii_lowercase())
+            {
+                None | Some('p') => {
+                    let password = rpassword::prompt_password("Password: ")?;
+                    LoginStyle::Password(password)
+                },
+                Some('s') => LoginStyle::SingleSignOn,
+                Some(_) => {
+                    println!("Failed to login. Please enter 'p' or 's'");
+                    continue;
+                },
+            };
 
         match worker.login(login_style) {
             Ok(info) => {
@@ -713,17 +738,142 @@ fn print_exit<T: Display, N>(v: T) -> N {
     process::exit(2);
 }
 
+// We can't access the OlmMachine directly, so write the keys to a temporary
+// file first, and then import them later.
+async fn check_import_keys(
+    settings: &ApplicationSettings,
+) -> IambResult<Option<(temp_dir::TempDir, String)>> {
+    let do_import = settings.sled_dir.is_dir() && !settings.sqlite_dir.is_dir();
+
+    if !do_import {
+        return Ok(None);
+    }
+
+    let question = format!(
+        "Found old sled store in {}. Would you like to export room keys from it? [y]es/[n]o",
+        settings.sled_dir.display()
+    );
+
+    loop {
+        match read_yesno(&question) {
+            Some('y') => {
+                break;
+            },
+            Some('n') => {
+                return Ok(None);
+            },
+            Some(_) | None => {
+                continue;
+            },
+        }
+    }
+
+    let keys = sled_export::export_room_keys(&settings.sled_dir).await?;
+    let passphrase = gen_passphrase();
+
+    println!("* Encrypting {} room keys with the passphrase {passphrase:?}...", keys.len());
+
+    let encrypted = match encrypt_room_key_export(&keys, &passphrase, 500000) {
+        Ok(encrypted) => encrypted,
+        Err(e) => {
+            format!("* Failed to encrypt room keys during export: {e}");
+            process::exit(2);
+        },
+    };
+
+    let tmpdir = TempDir::new()?;
+    let exported = tmpdir.child("keys");
+
+    println!("* Writing encrypted room keys to {}...", exported.display());
+    tokio::fs::write(&exported, &encrypted).await?;
+
+    Ok(Some((tmpdir, passphrase)))
+}
+
+async fn login_upgrade(
+    keydir: TempDir,
+    passphrase: String,
+    worker: &Requester,
+    settings: &ApplicationSettings,
+    store: &AsyncProgramStore,
+) -> IambResult<()> {
+    println!(
+        "Please log in for {} to import the room keys into a new session",
+        settings.profile.user_id
+    );
+
+    login(worker, settings).await?;
+
+    println!("* Importing room keys...");
+
+    let exported = keydir.child("keys");
+    let imported = worker.client.encryption().import_room_keys(exported, &passphrase).await;
+
+    match imported {
+        Ok(res) => {
+            println!(
+                "* Successfully imported {} out of {} keys",
+                res.imported_count, res.total_count
+            );
+            let _ = keydir.cleanup();
+        },
+        Err(e) => {
+            println!(
+                "Failed to import room keys from {}/keys: {e}\n\n\
+                They have been encrypted with the passphrase {passphrase:?}.\
+                Please save them and try importing them manually instead\n",
+                keydir.path().display()
+            );
+
+            loop {
+                match read_yesno("Would you like to continue logging in? [y]es/[n]o") {
+                    Some('y') => break,
+                    Some('n') => print_exit("* Exiting..."),
+                    Some(_) | None => continue,
+                }
+            }
+        },
+    }
+
+    println!("* Syncing...");
+    worker::do_first_sync(&worker.client, store).await;
+
+    Ok(())
+}
+
+async fn login_normal(
+    worker: &Requester,
+    settings: &ApplicationSettings,
+    store: &AsyncProgramStore,
+) -> IambResult<()> {
+    println!("* Logging in for {}...", settings.profile.user_id);
+    login(worker, settings).await?;
+    worker::do_first_sync(&worker.client, store).await;
+    Ok(())
+}
+
 async fn run(settings: ApplicationSettings) -> IambResult<()> {
+    // Get old keys the first time we run w/ the upgraded SDK.
+    let import_keys = check_import_keys(&settings).await?;
+
+    // Set up client state.
+    create_dir_all(settings.sqlite_dir.as_path())?;
+    let client = worker::create_client(&settings).await;
+
     // Set up the async worker thread and global store.
-    let worker = ClientWorker::spawn(settings.clone()).await;
-    let client = worker.client.clone();
+    let worker = ClientWorker::spawn(client.clone(), settings.clone()).await;
     let store = ChatStore::new(worker.clone(), settings.clone());
     let store = Store::new(store);
     let store = Arc::new(AsyncMutex::new(store));
     worker.init(store.clone());
 
-    login(worker, &settings).await.unwrap_or_else(print_exit);
-    worker::do_first_sync(client, &store).await;
+    if let Some((keydir, pass)) = import_keys {
+        login_upgrade(keydir, pass, &worker, &settings, &store)
+            .await
+            .unwrap_or_else(print_exit);
+    } else {
+        login_normal(&worker, &settings, &store).await.unwrap_or_else(print_exit);
+    }
 
     fn restore_tty() {
         let _ = crossterm::terminal::disable_raw_mode();
@@ -766,10 +916,6 @@ fn main() -> IambResult<()> {
     // Set up the tracing subscriber so we can log client messages.
     let log_prefix = format!("iamb-log-{}", settings.profile_name);
     let log_dir = settings.dirs.logs.as_path();
-
-    create_dir_all(settings.matrix_dir.as_path())?;
-    create_dir_all(settings.dirs.image_previews.as_path())?;
-    create_dir_all(log_dir)?;
 
     let appender = tracing_appender::rolling::daily(log_dir, log_prefix);
     let (appender, guard) = tracing_appender::non_blocking(appender);

@@ -169,6 +169,7 @@ pub fn mock_room() -> RoomInfo {
 pub fn mock_dirs() -> DirectoryValues {
     DirectoryValues {
         cache: PathBuf::new(),
+        data: PathBuf::new(),
         logs: PathBuf::new(),
         downloads: None,
         image_previews: PathBuf::new(),
@@ -202,9 +203,11 @@ pub fn mock_tunables() -> TunableValues {
 
 pub fn mock_settings() -> ApplicationSettings {
     ApplicationSettings {
-        matrix_dir: PathBuf::new(),
         layout_json: PathBuf::new(),
         session_json: PathBuf::new(),
+        session_json_old: PathBuf::new(),
+        sled_dir: PathBuf::new(),
+        sqlite_dir: PathBuf::new(),
 
         profile_name: "test".into(),
         profile: ProfileConfig {

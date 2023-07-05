@@ -32,17 +32,18 @@ use url::Url;
 
 use matrix_sdk::{
     encryption::verification::SasVerification,
-    room::{Joined, Room as MatrixRoom},
+    room::Room as MatrixRoom,
     ruma::{
         events::{
             reaction::ReactionEvent,
+            relation::Replacement,
             room::encrypted::RoomEncryptedEvent,
             room::message::{
                 OriginalRoomMessageEvent,
                 Relation,
-                Replacement,
                 RoomMessageEvent,
                 RoomMessageEventContent,
+                RoomMessageEventContentWithoutRelation,
             },
             tag::{TagName, Tags},
             MessageLikeEvent,
@@ -55,6 +56,7 @@ use matrix_sdk::{
         RoomId,
         UserId,
     },
+    RoomState as MatrixRoomState,
 };
 
 use modalkit::{
@@ -581,6 +583,10 @@ pub enum IambError {
     #[error("Cryptographic storage error: {0}")]
     CryptoStore(#[from] matrix_sdk::encryption::CryptoStoreError),
 
+    /// A failure related to the cryptographic store.
+    #[error("Cannot export keys from sled: {0}")]
+    UpgradeSled(#[from] crate::sled_export::SledMigrationError),
+
     /// An HTTP error.
     #[error("HTTP client error: {0}")]
     Http(#[from] matrix_sdk::HttpError),
@@ -809,9 +815,9 @@ impl RoomInfo {
     }
 
     /// Insert an edit.
-    pub fn insert_edit(&mut self, msg: Replacement) {
+    pub fn insert_edit(&mut self, msg: Replacement<RoomMessageEventContentWithoutRelation>) {
         let event_id = msg.event_id;
-        let new_content = msg.new_content;
+        let new_msgtype = msg.new_content;
 
         let key = if let Some(EventLocation::Message(k)) = self.keys.get(&event_id) {
             k
@@ -827,10 +833,10 @@ impl RoomInfo {
 
         match &mut msg.event {
             MessageEvent::Original(orig) => {
-                orig.content.msgtype = new_content.msgtype;
+                orig.content.apply_replacement(new_msgtype);
             },
             MessageEvent::Local(_, content) => {
-                content.msgtype = new_content.msgtype;
+                content.apply_replacement(new_msgtype);
             },
             MessageEvent::Redacted(_) |
             MessageEvent::EncryptedOriginal(_) |
@@ -1182,8 +1188,16 @@ impl ChatStore {
     }
 
     /// Get a joined room.
-    pub fn get_joined_room(&self, room_id: &RoomId) -> Option<Joined> {
-        self.worker.client.get_joined_room(room_id)
+    pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
+        let Some(room) = self.worker.client.get_room(room_id) else {
+            return None;
+        };
+
+        if room.state() == MatrixRoomState::Joined {
+            Some(room)
+        } else {
+            None
+        }
     }
 
     /// Get the title for a room.
