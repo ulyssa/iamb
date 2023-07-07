@@ -40,6 +40,7 @@ use matrix_sdk::{
             reaction::ReactionEventContent,
             room::{
                 encryption::RoomEncryptionEventContent,
+                member::OriginalSyncRoomMemberEvent,
                 message::{MessageType, RoomMessageEventContent},
                 name::RoomNameEventContent,
                 redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
@@ -833,6 +834,38 @@ impl ClientWorker {
 
                             info.keys.remove(&ev.redacts);
                         },
+                    }
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |ev: OriginalSyncRoomMemberEvent,
+             room: MatrixRoom,
+             client: Client,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+                    let user_id = ev.state_key;
+
+                    let ambiguous_name =
+                        ev.content.displayname.as_deref().unwrap_or_else(|| user_id.localpart());
+                    let ambiguous = client
+                        .store()
+                        .get_users_with_display_name(room_id, ambiguous_name)
+                        .await
+                        .map(|users| users.len() > 1)
+                        .unwrap_or_default();
+
+                    let mut locked = store.lock().await;
+                    let info = locked.application.get_room_info(room_id.to_owned());
+
+                    if ambiguous {
+                        info.display_names.remove(&user_id);
+                    } else if let Some(display) = ev.content.displayname {
+                        info.display_names.insert(user_id, display);
+                    } else {
+                        info.display_names.remove(&user_id);
                     }
                 }
             },

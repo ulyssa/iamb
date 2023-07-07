@@ -30,6 +30,7 @@ use crate::{
         ProfileConfig,
         TunableValues,
         UserColor,
+        UserDisplayStyle,
         UserDisplayTunables,
     },
     message::{
@@ -160,6 +161,7 @@ pub fn mock_room() -> RoomInfo {
         fetch_id: RoomFetchStatus::NotStarted,
         fetch_last: None,
         users_typing: None,
+        display_names: HashMap::new(),
     }
 }
 
@@ -189,6 +191,7 @@ pub fn mock_tunables() -> TunableValues {
         .into_iter()
         .collect::<HashMap<_, _>>(),
         open_command: None,
+        username_display: UserDisplayStyle::Username,
     }
 }
 

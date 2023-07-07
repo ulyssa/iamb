@@ -19,7 +19,7 @@ use modalkit::tui::{
     text::Span,
 };
 
-use super::base::IambId;
+use super::base::{IambId, RoomInfo};
 
 macro_rules! usage {
     ( $($args: tt)* ) => {
@@ -227,6 +227,24 @@ fn merge_users(a: Option<UserOverrides>, b: Option<UserOverrides>) -> Option<Use
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum UserDisplayStyle {
+    // The Matrix username for the sender (e.g., "@user:example.com").
+    #[default]
+    Username,
+
+    // The localpart of the Matrix username (e.g., "@user").
+    LocalPart,
+
+    // The display name for the Matrix user, calculated according to the rules from the spec.
+    //
+    // This is usually something like "Ada Lovelace" if the user has configured a display name, but
+    // it can wind up being the Matrix username if there are display name collisions in the room,
+    // in order to avoid any confusion.
+    DisplayName,
+}
+
 #[derive(Clone)]
 pub struct TunableValues {
     pub log_level: Level,
@@ -238,6 +256,7 @@ pub struct TunableValues {
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
     pub users: UserOverrides,
+    pub username_display: UserDisplayStyle,
     pub default_room: Option<String>,
     pub open_command: Option<Vec<String>>,
 }
@@ -253,6 +272,7 @@ pub struct Tunables {
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
     pub users: Option<UserOverrides>,
+    pub username_display: Option<UserDisplayStyle>,
     pub default_room: Option<String>,
     pub open_command: Option<Vec<String>>,
 }
@@ -271,6 +291,7 @@ impl Tunables {
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
             users: merge_users(self.users, other.users),
+            username_display: self.username_display.or(other.username_display),
             default_room: self.default_room.or(other.default_room),
             open_command: self.open_command.or(other.open_command),
         }
@@ -287,6 +308,7 @@ impl Tunables {
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
             users: self.users.unwrap_or_default(),
+            username_display: self.username_display.unwrap_or_default(),
             default_room: self.default_room,
             open_command: self.open_command,
         }
@@ -525,18 +547,45 @@ impl ApplicationSettings {
         Span::styled(String::from(c), style)
     }
 
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId) -> Span<'a> {
-        let (color, name) = self
-            .tunables
+    pub fn get_user_overrides(
+        &self,
+        user_id: &UserId,
+    ) -> (Option<Color>, Option<Cow<'static, str>>) {
+        self.tunables
             .users
             .get(user_id)
             .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
-            .unwrap_or_default();
+            .unwrap_or_default()
+    }
 
-        let user_id = user_id.as_str();
-        let color = color.unwrap_or_else(|| user_color(user_id));
+    pub fn get_user_style(&self, user_id: &UserId) -> Style {
+        let color = self
+            .tunables
+            .users
+            .get(user_id)
+            .and_then(|user| user.color.as_ref().map(|c| c.0))
+            .unwrap_or_else(|| user_color(user_id.as_str()));
+
+        user_style_from_color(color)
+    }
+
+    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
+        let (color, name) = self.get_user_overrides(user_id);
+
+        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
         let style = user_style_from_color(color);
-        let name = name.unwrap_or(Cow::Borrowed(user_id));
+        let name = match (name, &self.tunables.username_display) {
+            (Some(name), _) => name,
+            (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
+            (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
+            (None, UserDisplayStyle::DisplayName) => {
+                if let Some(display) = info.display_names.get(user_id) {
+                    Cow::Borrowed(display.as_str())
+                } else {
+                    Cow::Borrowed(user_id.as_str())
+                }
+            },
+        };
 
         Span::styled(name, style)
     }
@@ -639,6 +688,19 @@ mod tests {
             name: Some("Tim".into()),
         })];
         assert_eq!(res.users, Some(users.into_iter().collect()));
+    }
+
+    #[test]
+    fn test_parse_tunables_username_display() {
+        let res: Tunables = serde_json::from_str("{\"username_display\": \"username\"}").unwrap();
+        assert_eq!(res.username_display, Some(UserDisplayStyle::Username));
+
+        let res: Tunables = serde_json::from_str("{\"username_display\": \"localpart\"}").unwrap();
+        assert_eq!(res.username_display, Some(UserDisplayStyle::LocalPart));
+
+        let res: Tunables =
+            serde_json::from_str("{\"username_display\": \"displayname\"}").unwrap();
+        assert_eq!(res.username_display, Some(UserDisplayStyle::DisplayName));
     }
 
     #[test]

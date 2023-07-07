@@ -409,7 +409,7 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 if need_fetch {
                     if let Ok(mems) = store.application.worker.members(room_id.clone()) {
-                        let items = mems.into_iter().map(MemberItem::new);
+                        let items = mems.into_iter().map(|m| MemberItem::new(m, room_id.clone()));
                         state.set(items.collect());
                         *last_fetch = Some(Instant::now());
                     }
@@ -1100,11 +1100,12 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for VerifyItem {
 #[derive(Clone)]
 pub struct MemberItem {
     member: RoomMember,
+    room_id: OwnedRoomId,
 }
 
 impl MemberItem {
-    fn new(member: RoomMember) -> Self {
-        Self { member }
+    fn new(member: RoomMember, room_id: OwnedRoomId) -> Self {
+        Self { member, room_id }
     }
 }
 
@@ -1121,11 +1122,31 @@ impl ListItem<IambInfo> for MemberItem {
         _: &ViewportContext<ListCursor>,
         store: &mut ProgramStore,
     ) -> Text {
-        let mut user = store.application.settings.get_user_span(self.member.user_id());
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        let user_id = self.member.user_id();
+
+        let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
+        let color = color.unwrap_or_else(|| super::config::user_color(user_id.as_str()));
+        let mut style = super::config::user_style_from_color(color);
 
         if selected {
-            user.style = user.style.add_modifier(StyleModifier::REVERSED);
+            style = style.add_modifier(StyleModifier::REVERSED);
         }
+
+        let mut spans = vec![];
+        let mut parens = false;
+
+        if let Some(name) = name {
+            spans.push(Span::styled(name, style));
+            parens = true;
+        } else if let Some(display) = info.display_names.get(user_id) {
+            spans.push(Span::styled(display.clone(), style));
+            parens = true;
+        }
+
+        spans.extend(parens.then_some(Span::styled(" (", style)));
+        spans.push(Span::styled(user_id.as_str(), style));
+        spans.extend(parens.then_some(Span::styled(")", style)));
 
         let state = match self.member.membership() {
             MembershipState::Ban => Span::raw(" (banned)").into(),
@@ -1136,11 +1157,9 @@ impl ListItem<IambInfo> for MemberItem {
             _ => None,
         };
 
-        if let Some(state) = state {
-            Spans(vec![user, state]).into()
-        } else {
-            user.into()
-        }
+        spans.extend(state);
+
+        return Spans(spans).into();
     }
 
     fn get_word(&self) -> Option<String> {

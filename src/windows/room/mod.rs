@@ -139,8 +139,9 @@ impl RoomState {
         let mut invited = vec![Span::from(format!("You have been invited to join {name}"))];
 
         if let Ok(Some(inviter)) = &inviter {
+            let info = store.application.rooms.get_or_default(self.id().to_owned());
             invited.push(Span::from(" by "));
-            invited.push(store.application.settings.get_user_span(inviter.user_id()));
+            invited.push(store.application.settings.get_user_span(inviter.user_id(), info));
         }
 
         let l1 = Spans(invited);

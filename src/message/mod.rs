@@ -644,7 +644,7 @@ impl Message {
         {
             let cols = MessageColumns::Four;
             let fill = width - USER_GUTTER - TIME_GUTTER - READ_GUTTER;
-            let user = self.show_sender(prev, true, settings);
+            let user = self.show_sender(prev, true, info, settings);
             let time = self.timestamp.show_time();
             let read = match info.receipts.get(self.event.event_id()) {
                 Some(read) => read.iter(),
@@ -655,7 +655,7 @@ impl Message {
         } else if USER_GUTTER + TIME_GUTTER + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
             let fill = width - USER_GUTTER - TIME_GUTTER;
-            let user = self.show_sender(prev, true, settings);
+            let user = self.show_sender(prev, true, info, settings);
             let time = self.timestamp.show_time();
             let read = [].iter();
 
@@ -663,7 +663,7 @@ impl Message {
         } else if USER_GUTTER + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Two;
             let fill = width - USER_GUTTER;
-            let user = self.show_sender(prev, true, settings);
+            let user = self.show_sender(prev, true, info, settings);
             let time = None;
             let read = [].iter();
 
@@ -671,7 +671,7 @@ impl Message {
         } else {
             let cols = MessageColumns::One;
             let fill = width.saturating_sub(2);
-            let user = self.show_sender(prev, false, settings);
+            let user = self.show_sender(prev, false, info, settings);
             let time = None;
             let read = [].iter();
 
@@ -700,7 +700,7 @@ impl Message {
         if let Some(r) = &reply {
             let w = width.saturating_sub(2);
             let mut replied = r.show_msg(w, style, true);
-            let mut sender = r.sender_span(settings);
+            let mut sender = r.sender_span(info, settings);
             let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
             let trailing = w.saturating_sub(sender_width + 1);
 
@@ -793,16 +793,21 @@ impl Message {
         }
     }
 
-    fn sender_span(&self, settings: &ApplicationSettings) -> Span {
-        settings.get_user_span(self.sender.as_ref())
+    fn sender_span<'a>(
+        &'a self,
+        info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
+    ) -> Span<'a> {
+        settings.get_user_span(self.sender.as_ref(), info)
     }
 
-    fn show_sender(
-        &self,
+    fn show_sender<'a>(
+        &'a self,
         prev: Option<&Message>,
         align_right: bool,
-        settings: &ApplicationSettings,
-    ) -> Option<Span> {
+        info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
+    ) -> Option<Span<'a>> {
         if let Some(prev) = prev {
             if self.sender == prev.sender &&
                 self.timestamp.same_day(&prev.timestamp) &&
@@ -812,7 +817,7 @@ impl Message {
             }
         }
 
-        let Span { content, style } = self.sender_span(settings);
+        let Span { content, style } = self.sender_span(info, settings);
         let stop = content.len().min(28);
         let s = &content[..stop];
 

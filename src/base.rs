@@ -445,6 +445,9 @@ pub struct RoomInfo {
 
     /// Users currently typing in this room, and when we received notification of them doing so.
     pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
+
+    /// The display names for users in this room.
+    pub display_names: HashMap<OwnedUserId, String>,
 }
 
 impl RoomInfo {
@@ -583,13 +586,13 @@ impl RoomInfo {
         match n {
             0 => Spans(vec![]),
             1 => {
-                let user = settings.get_user_span(typers[0].as_ref());
+                let user = settings.get_user_span(typers[0].as_ref(), self);
 
                 Spans(vec![user, Span::from(" is typing...")])
             },
             2 => {
-                let user1 = settings.get_user_span(typers[0].as_ref());
-                let user2 = settings.get_user_span(typers[1].as_ref());
+                let user1 = settings.get_user_span(typers[0].as_ref(), self);
+                let user2 = settings.get_user_span(typers[1].as_ref(), self);
 
                 Spans(vec![
                     user1,
@@ -835,11 +838,11 @@ impl<'de> Visitor<'de> for IambIdVisitor {
             },
             Some("members") => {
                 let Some(path) = url.path_segments() else {
-                    return Err(E::custom( "Invalid members window URL"));
+                    return Err(E::custom("Invalid members window URL"));
                 };
 
                 let &[room_id] = path.collect::<Vec<_>>().as_slice() else {
-                    return Err(E::custom( "Invalid members window URL"));
+                    return Err(E::custom("Invalid members window URL"));
                 };
 
                 let Ok(room_id) = OwnedRoomId::try_from(room_id) else {

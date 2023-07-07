@@ -808,7 +808,8 @@ impl<'a> StatefulWidget for Chat<'a> {
                 state.reply_to.as_ref().and_then(|k| {
                     let room = self.store.application.rooms.get(state.id())?;
                     let msg = room.messages.get(k)?;
-                    let user = self.store.application.settings.get_user_span(msg.sender.as_ref());
+                    let user =
+                        self.store.application.settings.get_user_span(msg.sender.as_ref(), room);
                     let prefix = if editing.is_some() {
                         Span::from("Editing reply to ")
                     } else {
