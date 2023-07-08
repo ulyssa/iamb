@@ -169,7 +169,7 @@ pub fn mock_dirs() -> DirectoryValues {
     DirectoryValues {
         cache: PathBuf::new(),
         logs: PathBuf::new(),
-        downloads: PathBuf::new(),
+        downloads: None,
     }
 }
 

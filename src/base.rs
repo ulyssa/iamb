@@ -349,6 +349,9 @@ pub enum IambError {
     #[error("Serialization/deserialization error: {0}")]
     Serde(#[from] serde_json::Error),
 
+    #[error("No download directory configured")]
+    NoDownloadDir,
+
     #[error("Selected message does not have any attachments")]
     NoAttachment,
 

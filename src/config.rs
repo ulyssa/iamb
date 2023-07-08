@@ -319,7 +319,7 @@ impl Tunables {
 pub struct DirectoryValues {
     pub cache: PathBuf,
     pub logs: PathBuf,
-    pub downloads: PathBuf,
+    pub downloads: Option<PathBuf>,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -354,10 +354,7 @@ impl Directories {
             dir
         });
 
-        let downloads = self
-            .downloads
-            .or_else(dirs::download_dir)
-            .expect("no dirs.downloads value configured!");
+        let downloads = self.downloads.or_else(dirs::download_dir);
 
         DirectoryValues { cache, logs, downloads }
     }

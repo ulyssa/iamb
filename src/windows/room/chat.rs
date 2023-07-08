@@ -186,9 +186,10 @@ impl ChatState {
                 if let MessageEvent::Original(ev) = &msg.event {
                     let media = client.media();
 
-                    let mut filename = match filename {
-                        Some(f) => PathBuf::from(f),
-                        None => settings.dirs.downloads.clone(),
+                    let mut filename = match (filename, &settings.dirs.downloads) {
+                        (Some(f), _) => PathBuf::from(f),
+                        (None, Some(downloads)) => downloads.clone(),
+                        (None, None) => return Err(IambError::NoDownloadDir.into()),
                     };
 
                     let (source, msg_filename) = match &ev.content.msgtype {
