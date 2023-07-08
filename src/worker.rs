@@ -22,7 +22,6 @@ use matrix_sdk::{
     room::{Invited, Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
-            filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
             room::create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
             room::Visibility,
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
@@ -1020,29 +1019,14 @@ impl ClientWorker {
             },
         }
 
-        let handle = tokio::spawn(async move {
+        self.sync_handle = tokio::spawn(async move {
             loop {
                 let settings = SyncSettings::default();
 
                 let _ = client.sync(settings).await;
             }
-        });
-
-        self.sync_handle = Some(handle);
-
-        // Perform an initial, lazily-loaded sync.
-        let mut room = RoomEventFilter::default();
-        room.lazy_load_options = LazyLoadOptions::Enabled { include_redundant_members: false };
-
-        let mut room_ev = RoomFilter::default();
-        room_ev.state = room;
-
-        let mut filter = FilterDefinition::default();
-        filter.room = room_ev;
-
-        let settings = SyncSettings::new().filter(filter.into());
-
-        self.client.sync_once(settings).await.map_err(IambError::from)?;
+        })
+        .into();
 
         Ok(Some(InfoMessage::from("Successfully logged in!")))
     }
