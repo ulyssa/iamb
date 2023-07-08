@@ -4,7 +4,13 @@ use regex::Regex;
 
 use matrix_sdk::ruma::OwnedRoomId;
 
-use modalkit::tui::{buffer::Buffer, layout::Rect, widgets::StatefulWidget};
+use modalkit::tui::{
+    buffer::Buffer,
+    layout::{Alignment, Rect},
+    style::{Modifier as StyleModifier, Style},
+    text::{Span, Spans},
+    widgets::{Paragraph, StatefulWidget, Widget},
+};
 use modalkit::widgets::{ScrollActions, TerminalCursor, WindowOps};
 
 use modalkit::editing::{
@@ -1205,6 +1211,27 @@ impl TerminalCursor for ScrollbackState {
     }
 }
 
+fn render_jump_to_recent(area: Rect, buf: &mut Buffer, focused: bool) -> Rect {
+    if area.height <= 5 || area.width <= 20 {
+        return area;
+    }
+
+    let top = Rect::new(area.x, area.y, area.width, area.height - 1);
+    let bar = Rect::new(area.x, area.y + top.height, area.width, 1);
+    let msg = vec![
+        Span::raw("Use "),
+        Span::styled("G", Style::default().add_modifier(StyleModifier::BOLD)),
+        Span::raw(if focused { "" } else { " in scrollback" }),
+        Span::raw(" to jump to latest message"),
+    ];
+
+    Paragraph::new(Spans::from(msg))
+        .alignment(Alignment::Center)
+        .render(bar, buf);
+
+    return top;
+}
+
 pub struct Scrollback<'a> {
     room_focused: bool,
     focused: bool,
@@ -1236,7 +1263,11 @@ impl<'a> StatefulWidget for Scrollback<'a> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let info = self.store.application.rooms.get_or_default(state.room_id.clone());
         let settings = &self.store.application.settings;
-        let area = info.render_typing(area, buf, &self.store.application.settings);
+        let area = if state.cursor.timestamp.is_some() {
+            render_jump_to_recent(area, buf, self.focused)
+        } else {
+            info.render_typing(area, buf, &self.store.application.settings)
+        };
 
         state.set_term_info(area);
 
