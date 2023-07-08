@@ -694,6 +694,12 @@ fn main() -> IambResult<()> {
     // Load configuration and set up the Matrix SDK.
     let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);
 
+    // Set umask on Unix platforms so that tokens, keys, etc. are only readable by the user.
+    #[cfg(unix)]
+    unsafe {
+        libc::umask(0o077);
+    };
+
     // Set up the tracing subscriber so we can log client messages.
     let log_prefix = format!("iamb-log-{}", settings.profile_name);
     let log_dir = settings.dirs.logs.as_path();

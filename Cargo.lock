@@ -1527,6 +1527,7 @@ dependencies = [
  "html5ever",
  "image",
  "lazy_static 1.4.0",
+ "libc",
  "mandown",
  "markup5ever_rcdom",
  "matrix-sdk",
