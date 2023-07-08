@@ -19,8 +19,11 @@ fn main() -> Result<(), Box<dyn Error>> {
     let iamb_1 = convert(IAMB_1_MD, "IAMB", 1);
     let iamb_5 = convert(IAMB_5_MD, "IAMB", 5);
 
-    fs::write(PathBuf::from_iter(["docs", "iamb.1"]), iamb_1.as_bytes())?;
-    fs::write(PathBuf::from_iter(["docs", "iamb.5"]), iamb_5.as_bytes())?;
+    let out_dir = std::env::var("OUT_DIR");
+    let out_dir = out_dir.as_deref().unwrap_or("docs");
+
+    fs::write(PathBuf::from_iter([out_dir, "iamb.1"]), iamb_1.as_bytes())?;
+    fs::write(PathBuf::from_iter([out_dir, "iamb.5"]), iamb_5.as_bytes())?;
 
     Ok(())
 }
