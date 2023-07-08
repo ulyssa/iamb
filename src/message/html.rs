@@ -237,6 +237,7 @@ pub enum StyleTreeNode {
     Image(Option<String>),
     List(StyleTreeChildren, ListStyle),
     Paragraph(Box<StyleTreeNode>),
+    Pre(Box<StyleTreeNode>),
     Reply(Box<StyleTreeNode>),
     Ruler,
     Style(Box<StyleTreeNode>, Style),
@@ -309,6 +310,39 @@ impl StyleTreeNode {
             StyleTreeNode::Paragraph(child) => {
                 printer.push_break();
                 child.print(printer, style);
+                printer.commit();
+            },
+            StyleTreeNode::Pre(child) => {
+                let mut subp = printer.sub(2).literal(true);
+                let subw = subp.width();
+
+                child.print(&mut subp, style);
+
+                printer.commit();
+                printer.push_line(
+                    vec![
+                        Span::styled(line::TOP_LEFT, style),
+                        Span::styled(line::HORIZONTAL.repeat(subw), style),
+                        Span::styled(line::TOP_RIGHT, style),
+                    ]
+                    .into(),
+                );
+
+                for mut line in subp.finish() {
+                    line.0.insert(0, Span::styled(line::VERTICAL, style));
+                    line.0.push(Span::styled(line::VERTICAL, style));
+                    printer.push_line(line);
+                }
+
+                printer.push_line(
+                    vec![
+                        Span::styled(line::BOTTOM_LEFT, style),
+                        Span::styled(line::HORIZONTAL.repeat(subw), style),
+                        Span::styled(line::BOTTOM_RIGHT, style),
+                    ]
+                    .into(),
+                );
+
                 printer.commit();
             },
             StyleTreeNode::Reply(child) => {
@@ -585,6 +619,7 @@ fn h2t(hdl: &Handle) -> StyleTreeChildren {
                 // Other text blocks.
                 "blockquote" => StyleTreeNode::Blockquote(c2t(&node.children.borrow())),
                 "div" | "p" => StyleTreeNode::Paragraph(c2t(&node.children.borrow())),
+                "pre" => StyleTreeNode::Pre(c2t(&node.children.borrow())),
 
                 // No children.
                 "hr" => StyleTreeNode::Ruler,
@@ -593,7 +628,7 @@ fn h2t(hdl: &Handle) -> StyleTreeChildren {
                 "img" => StyleTreeNode::Image(attrs_to_alt(&attrs.borrow())),
 
                 // These don't render in any special way.
-                "a" | "details" | "html" | "pre" | "summary" | "sub" | "sup" => {
+                "a" | "details" | "html" | "summary" | "sub" | "sup" => {
                     *c2t(&node.children.borrow())
                 },
 
@@ -630,6 +665,7 @@ pub fn parse_matrix_html(s: &str) -> StyleTree {
 pub mod tests {
     use super::*;
     use crate::util::space_span;
+    use pretty_assertions::assert_eq;
 
     #[test]
     fn test_header() {
@@ -1170,6 +1206,78 @@ pub mod tests {
                 Span::raw(" "),
                 Span::raw("World"),
                 Span::raw("    ")
+            ])
+        );
+    }
+
+    #[test]
+    fn test_pre_tag() {
+        let s = concat!(
+            "<pre><code class=\"language-rust\">",
+            "fn hello() -&gt; usize {\n",
+            "    return 5;\n",
+            "}\n",
+            "</code></pre>\n"
+        );
+        let tree = parse_matrix_html(s);
+        let text = tree.to_text(25, Style::default(), true);
+        assert_eq!(text.lines.len(), 5);
+        assert_eq!(
+            text.lines[0],
+            Spans(vec![
+                Span::raw(line::TOP_LEFT),
+                Span::raw(line::HORIZONTAL.repeat(23)),
+                Span::raw(line::TOP_RIGHT)
+            ])
+        );
+        assert_eq!(
+            text.lines[1],
+            Spans(vec![
+                Span::raw(line::VERTICAL),
+                Span::raw("fn"),
+                Span::raw(" "),
+                Span::raw("hello"),
+                Span::raw("("),
+                Span::raw(")"),
+                Span::raw(" "),
+                Span::raw("-"),
+                Span::raw(">"),
+                Span::raw(" "),
+                Span::raw("usize"),
+                Span::raw(" "),
+                Span::raw("{"),
+                Span::raw("  "),
+                Span::raw(line::VERTICAL)
+            ])
+        );
+        assert_eq!(
+            text.lines[2],
+            Spans(vec![
+                Span::raw(line::VERTICAL),
+                Span::raw("    "),
+                Span::raw("return"),
+                Span::raw(" "),
+                Span::raw("5"),
+                Span::raw(";"),
+                Span::raw("          "),
+                Span::raw(line::VERTICAL)
+            ])
+        );
+        assert_eq!(
+            text.lines[3],
+            Spans(vec![
+                Span::raw(line::VERTICAL),
+                Span::raw("}"),
+                Span::raw(" ".repeat(22)),
+                Span::raw(line::VERTICAL)
+            ])
+        );
+        assert_eq!(
+            text.lines[4],
+            Spans(vec![
+                Span::raw(line::BOTTOM_LEFT),
+                Span::raw(line::HORIZONTAL.repeat(23)),
+                Span::raw(line::BOTTOM_RIGHT)
             ])
         );
     }

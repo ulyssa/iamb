@@ -17,6 +17,7 @@ pub struct TextPrinter<'a> {
     alignment: Alignment,
     curr_spans: Vec<Span<'a>>,
     curr_width: usize,
+    literal: bool,
 }
 
 impl<'a> TextPrinter<'a> {
@@ -30,11 +31,17 @@ impl<'a> TextPrinter<'a> {
             alignment: Alignment::Left,
             curr_spans: vec![],
             curr_width: 0,
+            literal: false,
         }
     }
 
     pub fn align(mut self, alignment: Alignment) -> Self {
         self.alignment = alignment;
+        self
+    }
+
+    pub fn literal(mut self, literal: bool) -> Self {
+        self.literal = literal;
         self
     }
 
@@ -56,6 +63,7 @@ impl<'a> TextPrinter<'a> {
             alignment: self.alignment,
             curr_spans: vec![],
             curr_width: 0,
+            literal: self.literal,
         }
     }
 
@@ -162,11 +170,16 @@ impl<'a> TextPrinter<'a> {
 
         for mut word in UnicodeSegmentation::split_word_bounds(s) {
             if let "\n" | "\r\n" = word {
+                if self.literal {
+                    self.commit();
+                    continue;
+                }
+
                 // Render embedded newlines as spaces.
                 word = " ";
             }
 
-            if self.curr_width == 0 && word.chars().all(char::is_whitespace) {
+            if !self.literal && self.curr_width == 0 && word.chars().all(char::is_whitespace) {
                 // Drop leading whitespace.
                 continue;
             }
@@ -182,7 +195,7 @@ impl<'a> TextPrinter<'a> {
                 // Word doesn't fit on this line, so start a new one.
                 self.commit();
 
-                if word.chars().all(char::is_whitespace) {
+                if !self.literal && word.chars().all(char::is_whitespace) {
                     // Drop leading whitespace.
                     continue;
                 }
