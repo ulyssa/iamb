@@ -50,7 +50,7 @@ tracing-appender = "0.2.2"
 tracing-subscriber = "0.3.17"
 unicode-segmentation = "1.10.1"
 unicode-width = "0.1.10"
-url = {version = "2.4.2", features = ["serde"]}
+url = {version = "2.4.0", features = ["serde"]}
 
 [dependencies.modalkit]
 version = "0.0.16"
