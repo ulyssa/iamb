@@ -61,7 +61,7 @@ default-features = false
 features = ["e2e-encryption", "sled", "rustls-tls"]
 
 [dependencies.tokio]
-version = "1.24.1"
+version = "1.29.1"
 features = ["macros", "net", "rt-multi-thread", "sync", "time"]
 
 [dev-dependencies]
