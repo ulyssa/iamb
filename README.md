@@ -104,7 +104,7 @@ two other TUI clients and Element Web:
 | Room upgrades                           | :x: ([#41])        | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
 | Localisations                           | :x:                | 1                  | :x:                | 44                  |
 | SSO Support                             | :x:                | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
-                                                                                       
+
 ## License
 
 iamb is released under the [Apache License, Version 2.0].
