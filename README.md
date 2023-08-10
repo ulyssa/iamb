@@ -72,7 +72,7 @@ Matrix website's [features comparison table][client-comparison-matrix], showing
 two other TUI clients and Element Web:
 
 |                                         | iamb               | [gomuks]           | [weechat-matrix]   | Element Web/Desktop |
-| --------------------------------------- | :----------------- | :----------------: | :------------- --: | :-----------------: |
+| --------------------------------------- | :----------------- | :----------------: | :----------------: | :-----------------: |
 | Room directory                          | :x:  ([#14])       | :x:                | :heavy_check_mark: | :heavy_check_mark:  |
 | Room tag showing                        | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
 | Room tag editing                        | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
