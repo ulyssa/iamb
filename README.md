@@ -71,39 +71,39 @@ To get an idea of what is and isn't yet implemented, here is a subset of the
 Matrix website's [features comparison table][client-comparison-matrix], showing
 two other TUI clients and Element Web:
 
-|                                         | iamb        | [gomuks] | [weechat-matrix] | Element Web/Desktop |
-| --------------------------------------- | :---------- | :------: | :--------------: | :-----------------: |
-| Room directory                          | ❌  ([#14]) | ❌       | ✔️                | ✔️                   |
-| Room tag showing                        | ✔️           | ✔️        | ❌               | ✔️                   |
-| Room tag editing                        | ✔️           | ✔️        | ❌               | ✔️                   |
-| Search joined rooms                     | ❌  ([#16]) | ✔️        | ❌               | ✔️                   |
-| Room user list                          | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Display Room Description                | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Edit Room Description                   | ✔️           | ❌       | ✔️                | ✔️                   |
-| Highlights                              | ❌  ([#8])  | ✔️        | ✔️                | ✔️                   |
-| Pushrules                               | ❌          | ✔️        | ❌               | ✔️                   |
-| Send read markers                       | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Display read markers                    | ✔️           | ❌       | ❌               | ✔️                   |
-| Sending Invites                         | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Accepting Invites                       | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Typing Notification                     | ✔️           | ✔️        | ✔️                | ✔️                   |
-| E2E                                     | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Replies                                 | ✔️           | ✔️        | ❌               | ✔️                   |
-| Attachment uploading                    | ✔️           | ❌       | ✔️                | ✔️                   |
-| Attachment downloading                  | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Send stickers                           | ❌          | ❌       | ❌               | ✔️                   |
-| Send formatted messages (markdown)      | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Rich Text Editor for formatted messages | ❌          | ❌       | ❌               | ✔️                   |
-| Display formatted messages              | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Redacting                               | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Multiple Matrix Accounts                | ✔️           | ❌       | ✔️                | ❌                  |
-| New user registration                   | ❌          | ❌       | ❌               | ✔️                   |
-| VOIP                                    | ❌          | ❌       | ❌               | ✔️                   |
-| Reactions                               | ✔️           | ✔️        | ❌               | ✔️                   |
-| Message editing                         | ✔️           | ✔️        | ❌               | ✔️                   |
-| Room upgrades                           | ❌ ([#41])  | ✔️        | ❌               | ✔️                   |
-| Localisations                           | ❌          | 1        | ❌               | 44                  |
-| SSO Support                             | ❌          | ✔️        | ✔️                | ✔️                   |
+|                                         | iamb               | [gomuks]           | [weechat-matrix]   | Element Web/Desktop |
+| --------------------------------------- | :----------------- | :----------------: | :------------- --: | :-----------------: |
+| Room directory                          | :x:  ([#14])       | :x:                | :heavy_check_mark: | :heavy_check_mark:  |
+| Room tag showing                        | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
+| Room tag editing                        | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
+| Search joined rooms                     | :x:  ([#16])       | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
+| Room user list                          | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Display Room Description                | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Edit Room Description                   | :heavy_check_mark: | :x:                | :heavy_check_mark: | :heavy_check_mark:  |
+| Highlights                              | :x:  ([#8])        | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Pushrules                               | :x:                | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
+| Send read markers                       | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Display read markers                    | :heavy_check_mark: | :x:                | :x:                | :heavy_check_mark:  |
+| Sending Invites                         | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Accepting Invites                       | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Typing Notification                     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| E2E                                     | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Replies                                 | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
+| Attachment uploading                    | :heavy_check_mark: | :x:                | :heavy_check_mark: | :heavy_check_mark:  |
+| Attachment downloading                  | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Send stickers                           | :x:                | :x:                | :x:                | :heavy_check_mark:  |
+| Send formatted messages (markdown)      | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Rich Text Editor for formatted messages | :x:                | :x:                | :x:                | :heavy_check_mark:  |
+| Display formatted messages              | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Redacting                               | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
+| Multiple Matrix Accounts                | :heavy_check_mark: | :x:                | :heavy_check_mark: | :x:                 |
+| New user registration                   | :x:                | :x:                | :x:                | :heavy_check_mark:  |
+| VOIP                                    | :x:                | :x:                | :x:                | :heavy_check_mark:  |
+| Reactions                               | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
+| Message editing                         | :heavy_check_mark: | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
+| Room upgrades                           | :x: ([#41])        | :heavy_check_mark: | :x:                | :heavy_check_mark:  |
+| Localisations                           | :x:                | 1                  | :x:                | 44                  |
+| SSO Support                             | :x:                | :heavy_check_mark: | :heavy_check_mark: | :heavy_check_mark:  |
                                                                                        
 ## License
 
