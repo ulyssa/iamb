@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use modalkit::editing::store::RegisterError;
 use std::process::Command;
 use tokio;
+use edit::edit as external_edit;
 
 use matrix_sdk::{
     attachment::AttachmentConfig,
@@ -429,14 +430,18 @@ impl ChatState {
         let mut show_echo = true;
 
         let (event_id, msg) = match act {
-            SendAction::Submit => {
+            SendAction::Submit | SendAction::SubmitFromEditor => {
                 let msg = self.tbox.get();
 
-                if msg.is_blank() {
+                let msg = if let SendAction::SubmitFromEditor = act {
+                    external_edit(msg.trim_end().to_string())?
+                } else if msg.is_blank() {
                     return Ok(None);
-                }
+                } else {
+                    msg.trim_end().to_string()
+                };
 
-                let mut msg = text_to_message(msg.trim_end().to_string());
+                let mut msg = text_to_message(msg);
 
                 if let Some((_, event_id)) = &self.editing {
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(

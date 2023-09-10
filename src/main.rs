@@ -224,6 +224,9 @@ struct Application {
 
     /// The tab layout before the last executed [TabAction].
     last_layout: Option<TabLayoutDescription<IambInfo>>,
+
+    /// Whether we need to do a full redraw (e.g., after running a subprocess).
+    dirty: bool,
 }
 
 impl Application {
@@ -263,6 +266,7 @@ impl Application {
             screen,
             focused: true,
             last_layout: None,
+            dirty: true,
         })
     }
 
@@ -314,7 +318,8 @@ impl Application {
 
     async fn step(&mut self) -> Result<TerminalKey, std::io::Error> {
         loop {
-            self.redraw(false, self.store.clone().lock().await.deref_mut())?;
+            self.redraw(self.dirty, self.store.clone().lock().await.deref_mut())?;
+            self.dirty = false;
 
             if !poll(Duration::from_secs(1))? {
                 // Redraw in case there's new messages to show.
@@ -479,6 +484,10 @@ impl Application {
         ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
+        if action.scribbles() {
+            self.dirty = true;
+        }
+
         let info = match action {
             IambAction::ToggleScrollbackFocus => {
                 self.screen.current_window_mut()?.focus_toggle();

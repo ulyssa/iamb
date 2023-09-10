@@ -266,6 +266,18 @@ fn iamb_reply(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_editor(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+
+    let sact = IambAction::from(SendAction::SubmitFromEditor);
+    let step = CommandStep::Continue(sact.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
 fn iamb_rooms(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -536,6 +548,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "welcome".into(),
         aliases: vec![],
         f: iamb_welcome,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "editor".into(),
+        aliases: vec![],
+        f: iamb_editor,
     });
 }
 

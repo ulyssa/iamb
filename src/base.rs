@@ -202,6 +202,7 @@ pub enum RoomAction {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SendAction {
     Submit,
+    SubmitFromEditor,
     Upload(String),
     UploadImage(usize, usize, Cow<'static, [u8]>),
 }
@@ -220,6 +221,16 @@ pub enum IambAction {
     Verify(VerifyAction, String),
     VerifyRequest(String),
     ToggleScrollbackFocus,
+}
+
+impl IambAction {
+    /// Indicates whether this action will draw over the screen.
+    pub fn scribbles(&self) -> bool {
+        match self {
+            IambAction::Send(SendAction::SubmitFromEditor) => true,
+            _ => false,
+        }
+    }
 }
 
 impl From<HomeserverAction> for IambAction {
