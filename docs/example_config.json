@@ -26,7 +26,8 @@
 		"default_room": "#iamb-users:0x.badd.cafe"
 	},
 	"dirs": {
-		"cache":     "~/.cache/iamb/",
-		"logs":      "~/.local/share/iamb/logs/",
-		"downloads": "~/Downloads/"
+		"cache":     "/home/user/.cache/iamb/",
+		"logs":      "/home/user/.local/share/iamb/logs/",
+		"downloads": "/home/user/Downloads/"
 	}
+}
