@@ -98,6 +98,7 @@ const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
 fn text_to_message_content(input: String) -> TextMessageEventContent {
     let mut options = ComrakOptions::default();
     options.extension.shortcodes = true;
+    options.extension.strikethrough = true;
     options.render.hardbreaks = true;
     let html = markdown_to_html(input.as_str(), &options);
 
