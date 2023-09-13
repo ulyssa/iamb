@@ -271,7 +271,6 @@ fn iamb_editor(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-
     let sact = IambAction::from(SendAction::SubmitFromEditor);
     let step = CommandStep::Continue(sact.into(), ctx.context.take());
 

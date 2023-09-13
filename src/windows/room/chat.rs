@@ -4,10 +4,10 @@ use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
+use edit::edit as external_edit;
 use modalkit::editing::store::RegisterError;
 use std::process::Command;
 use tokio;
-use edit::edit as external_edit;
 
 use matrix_sdk::{
     attachment::AttachmentConfig,

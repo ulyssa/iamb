@@ -226,10 +226,7 @@ pub enum IambAction {
 impl IambAction {
     /// Indicates whether this action will draw over the screen.
     pub fn scribbles(&self) -> bool {
-        match self {
-            IambAction::Send(SendAction::SubmitFromEditor) => true,
-            _ => false,
-        }
+        matches!(self, IambAction::Send(SendAction::SubmitFromEditor))
     }
 }
 
