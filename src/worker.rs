@@ -1020,9 +1020,11 @@ impl ClientWorker {
             },
             LoginStyle::SingleSignOn => {
                 let resp = client
-                    .login_sso(|url| async move {
-                        println!("Open {} in a browser", url);
-                        Ok(())
+                    .login_sso(|url| {
+                        async move {
+                            println!("Open {} in a browser", url);
+                            Ok(())
+                        }
                     })
                     .initial_device_display_name(initial_devname().as_str())
                     .send()

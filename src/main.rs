@@ -648,21 +648,17 @@ async fn login(worker: Requester, settings: &ApplicationSettings) -> IambResult<
         let mut input = String::new();
         std::io::stdin().read_line(&mut input).unwrap();
 
-        let login_style = 
-        match input.chars().nth(0).map(|x| char::to_ascii_lowercase(&x)) {
+        let login_style = match input.chars().nth(0).map(|x| char::to_ascii_lowercase(&x)) {
             None | Some('p') => {
                 let password = rpassword::prompt_password("Password: ")?;
                 LoginStyle::Password(password)
             },
-            Some('s') => {
-                LoginStyle::SingleSignOn
-            }
+            Some('s') => LoginStyle::SingleSignOn,
             Some(_) => {
                 println!("Failed to login. Please enter 'p' or 's'");
                 break;
             },
         };
-
 
         match worker.login(login_style) {
             Ok(info) => {
