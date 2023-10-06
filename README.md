@@ -21,7 +21,7 @@ website, [iamb.chat].
 
 ## Installation
 
-Install Rust (1.66.0 or above) and Cargo, and then run:
+Install Rust (1.67.0 or above) and Cargo, and then run:
 
 ```
 cargo install --locked iamb
