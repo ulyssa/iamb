@@ -1,3 +1,4 @@
+//! # Utility functions
 use std::borrow::Cow;
 
 use unicode_segmentation::UnicodeSegmentation;

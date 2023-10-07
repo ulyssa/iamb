@@ -1,3 +1,4 @@
+//! # Logic for loading and validating application configuration
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::HashMap;

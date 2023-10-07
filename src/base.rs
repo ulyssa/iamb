@@ -1,3 +1,6 @@
+//! # Common types and utilities
+//!
+//! The types defined here get used throughout iamb. 
 use std::borrow::Cow;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
@@ -84,6 +87,7 @@ use crate::{
     ApplicationSettings,
 };
 
+/// The set of characters used in different Matrix IDs.
 pub const MATRIX_ID_WORD: WordStyle = WordStyle::CharSet(is_mxid_char);
 
 /// Find the boundaries for a Matrix username, room alias, or room ID.
@@ -100,17 +104,27 @@ fn is_mxid_char(c: char) -> bool {
 
 const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
 
+/// Empty type used solely to implement [ApplicationInfo]. 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambInfo {}
 
+/// An action taken against an ongoing verification request.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum VerifyAction {
+    /// Accept a verification request.
     Accept,
+
+    /// Cancel an in-progress verification.
     Cancel,
+
+    /// Confirm an in-progress verification.
     Confirm,
+
+    /// Reject an in-progress verification due to mismatched Emoji.
     Mismatch,
 }
 
+/// An action taken against the currently selected message.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
     /// Cance the current reply or edit.
@@ -145,6 +159,7 @@ pub enum MessageAction {
     Unreact(Option<String>),
 }
 
+/// The type of room being created.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CreateRoomType {
     /// A direct message room.
@@ -158,7 +173,9 @@ pub enum CreateRoomType {
 }
 
 bitflags::bitflags! {
+    /// Available options for newly created rooms.
     pub struct CreateRoomFlags: u32 {
+        /// No flags specified.
         const NONE = 0b00000000;
 
         /// Make the room public.
@@ -170,7 +187,9 @@ bitflags::bitflags! {
 }
 
 bitflags::bitflags! {
+    /// Available options when downloading files.
     pub struct DownloadFlags: u32 {
+        /// No flags specified.
         const NONE = 0b00000000;
 
         /// Overwrite file if it already exists.
@@ -181,45 +200,91 @@ bitflags::bitflags! {
     }
 }
 
+/// A room property.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomField {
+    /// The room name.
     Name,
+
+    /// A room tag.
     Tag(TagName),
+
+    /// The room topic.
     Topic,
 }
 
+/// An action that operates on a focused room.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomAction {
+    /// Accept an invitation to join this room.
     InviteAccept,
+
+    /// Reject an invitation to join this room.
     InviteReject,
+
+    /// Invite a user to this room.
     InviteSend(OwnedUserId),
+
+    /// Leave this room.
     Leave(bool),
+
+    /// Open the members window.
     Members(Box<CommandContext<ProgramContext>>),
+
+    /// Set a room property.
     Set(RoomField, String),
+
+    /// Unset a room property.
     Unset(RoomField),
 }
 
+/// An action that sends a message to a room.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SendAction {
+    /// Send the text in the message bar.
     Submit,
+
+    /// Send text provided from an external editor.
     SubmitFromEditor,
+
+    /// Upload a file.
     Upload(String),
+
+    /// Upload the image data.
     UploadImage(usize, usize, Cow<'static, [u8]>),
 }
 
+/// An action performed against the user's homeserver.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum HomeserverAction {
+    /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
 }
 
+/// An action that the main program loop should.
+///
+/// See [the commands module][super::commands] for where these are usually created.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambAction {
+    /// Perform an action against the homeserver.
     Homeserver(HomeserverAction),
+
+    /// Perform an action on the currently selected message.
     Message(MessageAction),
+
+    /// Perform an action on the currently focused room.
     Room(RoomAction),
+
+    /// Send a message to the currently focused room.
     Send(SendAction),
+
+    /// Perform an action for an in-progress verification.
     Verify(VerifyAction, String),
+
+    /// Request a new verification with the specified user.
     VerifyRequest(String),
+
+    /// Toggle the focus within the focused room.
     ToggleScrollbackFocus,
 }
 
@@ -316,14 +381,21 @@ impl From<IambAction> for ProgramAction {
     }
 }
 
+/// Alias for program actions.
 pub type ProgramAction = Action<IambInfo>;
+/// Alias for program context.
 pub type ProgramContext = VimContext<IambInfo>;
+/// Alias for program keybindings.
 pub type Keybindings = VimMachine<TerminalKey, IambInfo>;
+/// Alias for a program command.
 pub type ProgramCommand = VimCommand<ProgramContext, IambInfo>;
+/// Alias for mapped program commands.
 pub type ProgramCommands = VimCommandMachine<ProgramContext, IambInfo>;
+/// Alias for program store.
 pub type ProgramStore = Store<IambInfo>;
+/// Alias for shared program store.
 pub type AsyncProgramStore = Arc<AsyncMutex<ProgramStore>>;
-
+/// Alias for an action result.
 pub type IambResult<T> = UIResult<T, IambInfo>;
 
 /// Reaction events for some message.
@@ -332,61 +404,81 @@ pub type IambResult<T> = UIResult<T, IambInfo>;
 /// it's reacting to.
 pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
 
+/// Map of read receipts for different events.
 pub type Receipts = HashMap<OwnedEventId, Vec<OwnedUserId>>;
 
+/// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
+    /// An invalid user identifier was specified.
     #[error("Invalid user identifier: {0}")]
     InvalidUserId(String),
 
+    /// An invalid verification identifier was specified.
     #[error("Invalid verification user/device pair: {0}")]
     InvalidVerificationId(String),
 
+    /// A failure related to the cryptographic store.
     #[error("Cryptographic storage error: {0}")]
     CryptoStore(#[from] matrix_sdk::encryption::CryptoStoreError),
 
+    /// An HTTP error. 
     #[error("HTTP client error: {0}")]
     Http(#[from] matrix_sdk::HttpError),
 
+    /// A failure from the Matrix client. 
     #[error("Matrix client error: {0}")]
     Matrix(#[from] matrix_sdk::Error),
 
+    /// A failure in the sled storage. 
     #[error("Matrix client storage error: {0}")]
     Store(#[from] matrix_sdk::StoreError),
 
+    /// A failure during serialization or deserialization. 
     #[error("Serialization/deserialization error: {0}")]
     Serde(#[from] serde_json::Error),
 
+    /// A failure due to not having a configured download directory. 
     #[error("No download directory configured")]
     NoDownloadDir,
 
+    /// A failure due to not having a message with an attachment selected. 
     #[error("Selected message does not have any attachments")]
     NoAttachment,
 
+    /// A failure due to not having a message selected. 
     #[error("No message currently selected")]
     NoSelectedMessage,
 
+    /// A failure due to not having a room or space selected. 
     #[error("Current window is not a room or space")]
     NoSelectedRoomOrSpace,
 
+    /// A failure due to not having a room selected. 
     #[error("Current window is not a room")]
     NoSelectedRoom,
 
+    /// A failure due to not having an outstanding room invitation. 
     #[error("You do not have a current invitation to this room")]
     NotInvited,
 
+    /// A failure due to not being a joined room member. 
     #[error("You need to join the room before you can do that")]
     NotJoined,
 
+    /// An unknown room was specified.
     #[error("Unknown room identifier: {0}")]
     UnknownRoom(OwnedRoomId),
 
+    /// A failure occurred during verification.
     #[error("Verification request error: {0}")]
     VerificationRequestError(#[from] matrix_sdk::encryption::identities::RequestVerificationError),
 
+    /// A failure related to images.
     #[error("Image error: {0}")]
     Image(#[from] image::ImageError),
 
+    /// A failure to access the system's clipboard.
     #[error("Could not use system clipboard data")]
     Clipboard,
 }
@@ -399,16 +491,26 @@ impl From<IambError> for UIError<IambInfo> {
 
 impl ApplicationError for IambError {}
 
+/// Status for tracking how much room scrollback we've fetched.
 #[derive(Default)]
 pub enum RoomFetchStatus {
+    /// Room history has been completely fetched.
     Done,
+
+    /// More room history can be fetched.
     HaveMore(String),
+
+    /// We have not yet started fetching history for this room.
     #[default]
     NotStarted,
 }
 
+/// Indicates where an [EventId] lives in the [ChatStore].
 pub enum EventLocation {
+    /// The [EventId] belongs to a message.
     Message(MessageKey),
+
+    /// The [EventId] belongs to a reaction to the given event.
     Reaction(OwnedEventId),
 }
 
@@ -422,6 +524,7 @@ impl EventLocation {
     }
 }
 
+/// Information about room's the user's joined.
 #[derive(Default)]
 pub struct RoomInfo {
     /// The display name for this room.
@@ -462,6 +565,7 @@ pub struct RoomInfo {
 }
 
 impl RoomInfo {
+    /// Get the reactions and their counts for a message.
     pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize)> {
         if let Some(reacts) = self.reactions.get(event_id) {
             let mut counts = HashMap::new();
@@ -480,14 +584,17 @@ impl RoomInfo {
         }
     }
 
+    /// Map an event identifier to its [MessageKey].
     pub fn get_message_key(&self, event_id: &EventId) -> Option<&MessageKey> {
         self.keys.get(event_id)?.to_message_key()
     }
 
+    /// Get an event for an identifier.
     pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
         self.messages.get(self.get_message_key(event_id)?)
     }
 
+    /// Insert a reaction to a message.
     pub fn insert_reaction(&mut self, react: ReactionEvent) {
         match react {
             MessageLikeEvent::Original(react) => {
@@ -509,6 +616,7 @@ impl RoomInfo {
         }
     }
 
+    /// Insert an edit.
     pub fn insert_edit(&mut self, msg: Replacement) {
         let event_id = msg.event_id;
         let new_content = msg.new_content;
@@ -551,6 +659,7 @@ impl RoomInfo {
         self.messages.insert(key, msg.into());
     }
 
+    /// Insert a new message.
     pub fn insert_message(&mut self, msg: RoomMessageEvent) {
         let event_id = msg.event_id().to_owned();
         let key = (msg.origin_server_ts().into(), event_id.clone());
@@ -563,6 +672,7 @@ impl RoomInfo {
         let _ = self.messages.remove(&key);
     }
 
+    /// Insert a new message event.
     pub fn insert(&mut self, msg: RoomMessageEvent) {
         match msg {
             RoomMessageEvent::Original(OriginalRoomMessageEvent {
@@ -574,6 +684,7 @@ impl RoomInfo {
         }
     }
 
+    /// Indicates whether we've recently fetched scrollback for this room.
     pub fn recently_fetched(&self) -> bool {
         self.fetch_last.map_or(false, |i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
     }
@@ -617,10 +728,12 @@ impl RoomInfo {
         }
     }
 
+    /// Update typing information for this room.
     pub fn set_typing(&mut self, user_ids: Vec<OwnedUserId>) {
         self.users_typing = (Instant::now(), user_ids).into();
     }
 
+    /// Create a [Rect] that displays what users are typing.
     pub fn render_typing(
         &mut self,
         area: Rect,
@@ -646,6 +759,7 @@ impl RoomInfo {
     }
 }
 
+/// Generate a [CompletionMap] for Emoji shortcodes.
 fn emoji_map() -> CompletionMap<String, &'static Emoji> {
     let mut emojis = CompletionMap::default();
 
@@ -658,27 +772,54 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
     return emojis;
 }
 
+/// Information gathered during server syncs about joined rooms.
 #[derive(Default)]
 pub struct SyncInfo {
+    /// Spaces that the user is a member of.
     pub spaces: Vec<MatrixRoom>,
+
+    /// Rooms that the user is a member of.
     pub rooms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+
+    /// DMs that the user is a member of.
     pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
 }
 
+/// The main application state.
 pub struct ChatStore {
+    /// `:`-commands
     pub cmds: ProgramCommands,
+
+    /// Handle for communicating w/ the worker thread.
     pub worker: Requester,
+
+    /// Map of joined rooms.
     pub rooms: CompletionMap<OwnedRoomId, RoomInfo>,
+
+    /// Map of room names.
     pub names: CompletionMap<String, OwnedRoomId>,
+
+    /// Presence information for other users.
     pub presences: CompletionMap<OwnedUserId, PresenceState>,
+
+    /// In-progress and completed verifications.
     pub verifications: HashMap<String, SasVerification>,
+
+    /// Settings for the current profile loaded from config file.
     pub settings: ApplicationSettings,
+
+    /// Set of rooms that need more messages loaded in their scrollback.
     pub need_load: HashSet<OwnedRoomId>,
+
+    /// [CompletionMap] of Emoji shortcodes.
     pub emojis: CompletionMap<String, &'static Emoji>,
+
+    /// Information gathered by the background thread.
     pub sync_info: SyncInfo,
 }
 
 impl ChatStore {
+    /// Create a new [ChatStore].
     pub fn new(worker: Requester, settings: ApplicationSettings) -> Self {
         ChatStore {
             worker,
@@ -696,10 +837,12 @@ impl ChatStore {
         }
     }
 
+    /// Get a joined room. 
     pub fn get_joined_room(&self, room_id: &RoomId) -> Option<Joined> {
         self.worker.client.get_joined_room(room_id)
     }
 
+    /// Get the title for a room. 
     pub fn get_room_title(&self, room_id: &RoomId) -> String {
         self.rooms
             .get(room_id)
@@ -708,6 +851,7 @@ impl ChatStore {
             .unwrap_or_else(|| "Untitled Matrix Room".to_string())
     }
 
+    /// Update the receipts for multiple rooms.
     pub async fn set_receipts(
         &mut self,
         receipts: Vec<(OwnedRoomId, Receipts)>,
@@ -727,18 +871,22 @@ impl ChatStore {
         return updates;
     }
 
+    /// Mark a room for loading more scrollback.
     pub fn mark_for_load(&mut self, room_id: OwnedRoomId) {
         self.need_load.insert(room_id);
     }
 
+    /// Get the [RoomInfo] for a given room identifier.
     pub fn get_room_info(&mut self, room_id: OwnedRoomId) -> &mut RoomInfo {
         self.rooms.get_or_default(room_id)
     }
 
+    /// Set the name for a room.
     pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
         self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
     }
 
+    /// Insert a new E2EE verification.
     pub fn insert_sas(&mut self, sas: SasVerification) {
         let key = format!("{}/{}", sas.other_user_id(), sas.other_device().device_id());
 
@@ -748,6 +896,7 @@ impl ChatStore {
 
 impl ApplicationStore for ChatStore {}
 
+/// Identified used to track window content.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IambId {
     /// A Matrix room.
@@ -810,6 +959,7 @@ impl<'de> Deserialize<'de> for IambId {
     }
 }
 
+/// [serde] visitor for deserializing [IambId].
 struct IambIdVisitor;
 
 impl<'de> Visitor<'de> for IambIdVisitor {
@@ -903,35 +1053,61 @@ impl<'de> Visitor<'de> for IambIdVisitor {
     }
 }
 
+/// Which part of the room window's UI is focused.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum RoomFocus {
+    /// The scrollback for a room window is focused.
     Scrollback,
+
+    /// The message bar for a room window is focused.
     MessageBar,
 }
 
 impl RoomFocus {
+    /// Whether this is [RoomFocus::Scrollback].
     pub fn is_scrollback(&self) -> bool {
         matches!(self, RoomFocus::Scrollback)
     }
 
+    /// Whether this is [RoomFocus::MessageBar].
     pub fn is_msgbar(&self) -> bool {
         matches!(self, RoomFocus::MessageBar)
     }
 }
 
+/// Identifiers used to track where a mark was placed.
+///
+/// While this is the "buffer identifier" for the mark,
+/// not all of these are necessarily actual buffers.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IambBufferId {
+    /// The command bar buffer.
     Command(CommandType),
+
+    /// The message buffer or a specific message in a room.
     Room(OwnedRoomId, RoomFocus),
+
+    /// The `:dms` window.
     DirectList,
+
+    /// The `:members` window for a room.
     MemberList(OwnedRoomId),
+
+    /// The `:rooms` window.
     RoomList,
+
+    /// The `:spaces` window.
     SpaceList,
+
+    /// The `:verify` window.
     VerifyList,
+
+    /// The buffer for the `:rooms` window.
     Welcome,
 }
 
 impl IambBufferId {
+    /// Get the identifier for the window that contains this buffer.
     pub fn to_window(&self) -> Option<IambId> {
         match self {
             IambBufferId::Command(_) => None,
@@ -982,6 +1158,7 @@ impl ApplicationInfo for IambInfo {
     }
 }
 
+/// Tab completion for user IDs.
 fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
     let id = text
         .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
@@ -997,6 +1174,7 @@ fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) ->
         .collect()
 }
 
+/// Tab completion within the message bar.
 fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
     let id = text
         .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
@@ -1044,6 +1222,7 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -
     }
 }
 
+/// Tab completion for Matrix identifiers (usernames, room aliases, etc.)
 fn complete_matrix_names(
     text: &EditRope,
     cursor: &mut Cursor,
@@ -1073,6 +1252,7 @@ fn complete_matrix_names(
         .collect()
 }
 
+/// Tab completion for Emoji shortcode names.
 fn complete_emoji(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
     let sc = text.get_prefix_word_mut(cursor, &WordStyle::Little);
     let sc = sc.unwrap_or_else(EditRope::empty);
@@ -1081,6 +1261,7 @@ fn complete_emoji(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) ->
     store.application.emojis.complete(sc.as_ref())
 }
 
+/// Tab completion for command names.
 fn complete_cmdname(
     desc: CommandDescription,
     text: &EditRope,
@@ -1092,6 +1273,7 @@ fn complete_cmdname(
     store.application.cmds.complete_name(desc.command.as_str())
 }
 
+/// Tab completion for command arguments.
 fn complete_cmdarg(
     desc: CommandDescription,
     text: &EditRope,
@@ -1120,6 +1302,7 @@ fn complete_cmdarg(
     }
 }
 
+/// Tab completion for commands.
 fn complete_cmd(
     cmd: &str,
     text: &EditRope,
@@ -1141,6 +1324,7 @@ fn complete_cmd(
     }
 }
 
+/// Tab completion for the command bar.
 fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
     let eo = text.cursor_to_offset(cursor);
     let slice = text.slice(0.into(), eo, false);

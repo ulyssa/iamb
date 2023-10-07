@@ -1,3 +1,4 @@
+//! Message scrollback
 use std::collections::HashSet;
 
 use regex::Regex;

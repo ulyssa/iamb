@@ -1,3 +1,7 @@
+//! # Default Commands
+//!
+//! The command-bar commands are set up here, and iamb-specific commands are defined here. See
+//! [modalkit::env::vim::command] for additional Vim commands we pull in.
 use std::convert::TryFrom;
 
 use matrix_sdk::ruma::{events::tag::TagName, OwnedUserId};
@@ -555,6 +559,7 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
 }
 
+/// Initialize the default command state.
 pub fn setup_commands() -> ProgramCommands {
     let mut cmds = ProgramCommands::default();
 

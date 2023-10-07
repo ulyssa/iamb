@@ -1,3 +1,4 @@
+//! Window for Matrix rooms
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::fs;
@@ -85,6 +86,7 @@ use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
 
+/// State needed for rendering [Chat].
 pub struct ChatState {
     room_id: OwnedRoomId,
     room: MatrixRoom,
@@ -786,6 +788,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ChatState {
     }
 }
 
+/// [StatefulWidget] for Matrix rooms.
 pub struct Chat<'a> {
     store: &'a mut ProgramStore,
     focused: bool,

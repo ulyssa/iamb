@@ -1,3 +1,4 @@
+//! # Windows for Matrix rooms and spaces
 use matrix_sdk::{
     room::{Invited, Room as MatrixRoom},
     ruma::{
@@ -79,6 +80,11 @@ macro_rules! delegate {
     };
 }
 
+/// State for a Matrix room or space.
+///
+/// Since spaces function as special rooms within Matrix, we wrap their window state together, so
+/// that operations like sending and accepting invites, opening the members window, etc., all work
+/// similarly.
 pub enum RoomState {
     Chat(ChatState),
     Space(SpaceState),
