@@ -1,3 +1,7 @@
+//! # Default Keybindings
+//!
+//! The keybindings are set up here. We define some iamb-specific keybindings, but the default Vim
+//! keys come from [modalkit::env::vim::keybindings].
 use modalkit::{
     editing::action::WindowAction,
     env::vim::keybindings::{InputStep, VimBindings},
@@ -10,6 +14,7 @@ use crate::base::{IambAction, IambInfo, Keybindings, MATRIX_ID_WORD};
 
 type IambStep = InputStep<IambInfo>;
 
+/// Initialize the default keybinding state.
 pub fn setup_keybindings() -> Keybindings {
     let mut ism = Keybindings::empty();
 

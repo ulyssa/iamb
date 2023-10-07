@@ -1,3 +1,4 @@
+//! Window for Matrix spaces
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};
 
@@ -25,6 +26,7 @@ use crate::windows::RoomItem;
 
 const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 
+/// State needed for rendering [Space].
 pub struct SpaceState {
     room_id: OwnedRoomId,
     room: MatrixRoom,
@@ -86,6 +88,7 @@ impl DerefMut for SpaceState {
     }
 }
 
+/// [StatefulWidget] for Matrix spaces.
 pub struct Space<'a> {
     focused: bool,
     store: &'a mut ProgramStore,

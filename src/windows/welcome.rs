@@ -1,3 +1,4 @@
+//! Welcome Window
 use std::ops::{Deref, DerefMut};
 
 use modalkit::tui::{buffer::Buffer, layout::Rect};

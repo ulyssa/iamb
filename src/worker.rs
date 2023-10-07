@@ -1,3 +1,7 @@
+//! # Async Matrix Client Worker
+//!
+//! The worker thread handles asynchronous work, and can receive messages from the main thread that
+//! block on a reply from the async worker.
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};

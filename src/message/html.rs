@@ -37,7 +37,8 @@ use crate::{
     util::{join_cell_text, space_text},
 };
 
-struct BulletIterator {
+/// Generate bullet points from a [ListStyle].
+pub struct BulletIterator {
     style: ListStyle,
     pos: usize,
     len: usize,
@@ -74,6 +75,7 @@ impl Iterator for BulletIterator {
     }
 }
 
+/// Whether this list is ordered or unordered.
 #[derive(Clone, Copy, Debug)]
 pub enum ListStyle {
     Ordered,
@@ -88,11 +90,13 @@ impl ListStyle {
 
 pub type StyleTreeChildren = Vec<StyleTreeNode>;
 
+/// Type of contents in a table cell.
 pub enum CellType {
     Data,
     Header,
 }
 
+/// A collection of cells for a single row in a table.
 pub struct TableRow {
     cells: Vec<(CellType, StyleTreeNode)>,
 }
@@ -103,6 +107,7 @@ impl TableRow {
     }
 }
 
+/// A collection of rows in a table.
 pub struct TableSection {
     rows: Vec<TableRow>,
 }
@@ -113,6 +118,7 @@ impl TableSection {
     }
 }
 
+/// A table.
 pub struct Table {
     caption: Option<Box<StyleTreeNode>>,
     sections: Vec<TableSection>,
@@ -229,6 +235,7 @@ impl Table {
     }
 }
 
+/// A processed HTML element that we can render to the terminal.
 pub enum StyleTreeNode {
     Blockquote(Box<StyleTreeNode>),
     Break,
@@ -380,6 +387,7 @@ impl StyleTreeNode {
     }
 }
 
+/// A processed HTML document.
 pub struct StyleTree {
     children: StyleTreeChildren,
 }
@@ -649,6 +657,7 @@ fn dom_to_style_tree(dom: RcDom) -> StyleTree {
     StyleTree { children: h2t(&dom.document) }
 }
 
+/// Parse an HTML document from a string.
 pub fn parse_matrix_html(s: &str) -> StyleTree {
     let dom = parse_fragment(
         RcDom::default(),

@@ -1,3 +1,8 @@
+//! # Line Wrapping Logic
+//!
+//! The [TextPrinter] handles wrapping stylized text and inserting spaces for padding at the end of
+//! lines to make concatenation work right (e.g., combining table cells after wrapping their
+//! contents).
 use std::borrow::Cow;
 
 use modalkit::tui::layout::Alignment;
@@ -8,6 +13,7 @@ use unicode_width::UnicodeWidthStr;
 
 use crate::util::{space_span, take_width};
 
+/// Wrap styled text for the current terminal width.
 pub struct TextPrinter<'a> {
     text: Text<'a>,
     width: usize,
@@ -21,6 +27,7 @@ pub struct TextPrinter<'a> {
 }
 
 impl<'a> TextPrinter<'a> {
+    /// Create a new printer.
     pub fn new(width: usize, base_style: Style, hide_reply: bool) -> Self {
         TextPrinter {
             text: Text::default(),
@@ -35,24 +42,29 @@ impl<'a> TextPrinter<'a> {
         }
     }
 
+    /// Configure the alignment for each line.
     pub fn align(mut self, alignment: Alignment) -> Self {
         self.alignment = alignment;
         self
     }
 
+    /// Set whether newlines should be treated literally, or turned into spaces.
     pub fn literal(mut self, literal: bool) -> Self {
         self.literal = literal;
         self
     }
 
+    /// Indicates whether replies should be pushed to the printer.
     pub fn hide_reply(&self) -> bool {
         self.hide_reply
     }
 
+    /// Indicates the current printer's width.
     pub fn width(&self) -> usize {
         self.width
     }
 
+    /// Create a new printer with a smaller width.
     pub fn sub(&self, indent: usize) -> Self {
         TextPrinter {
             text: Text::default(),
@@ -71,6 +83,7 @@ impl<'a> TextPrinter<'a> {
         self.width - self.curr_width
     }
 
+    /// If there is any text on the current line, start a new one.
     pub fn commit(&mut self) {
         if self.curr_width > 0 {
             self.push_break();
@@ -82,6 +95,7 @@ impl<'a> TextPrinter<'a> {
         self.text.lines.push(Spans(std::mem::take(&mut self.curr_spans)));
     }
 
+    /// Start a new line.
     pub fn push_break(&mut self) {
         if self.curr_width == 0 && self.text.lines.is_empty() {
             // Disallow leading breaks.
@@ -149,6 +163,7 @@ impl<'a> TextPrinter<'a> {
         }
     }
 
+    /// Push a [Span] that isn't allowed to break across lines.
     pub fn push_span_nobreak(&mut self, span: Span<'a>) {
         let sw = UnicodeWidthStr::width(span.content.as_ref());
 
@@ -161,6 +176,7 @@ impl<'a> TextPrinter<'a> {
         self.curr_width += sw;
     }
 
+    /// Push text with a [Style].
     pub fn push_str(&mut self, s: &'a str, style: Style) {
         let style = self.base_style.patch(style);
 
@@ -212,16 +228,19 @@ impl<'a> TextPrinter<'a> {
         }
     }
 
+    /// Push [Spans] into the printer.
     pub fn push_line(&mut self, spans: Spans<'a>) {
         self.commit();
         self.text.lines.push(spans);
     }
 
+    /// Push multiline [Text] into the printer.
     pub fn push_text(&mut self, text: Text<'a>) {
         self.commit();
         self.text.lines.extend(text.lines);
     }
 
+    /// Render the contents of this printer as [Text].
     pub fn finish(mut self) -> Text<'a> {
         self.commit();
         self.text

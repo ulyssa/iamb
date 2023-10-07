@@ -1,3 +1,11 @@
+//! # Windows for the User Interface
+//!
+//! This module contains the logic for rendering windows, and handling UI actions that get
+//! delegated to individual windows/UI elements (e.g., typing text or selecting a list item).
+//!
+//! Additionally, some of the iamb commands delegate behaviour to the current UI element. For
+//! example, [sending messages][crate::base::SendAction] delegate to the [room window][RoomState],
+//! where we have the message bar and room ID easily accesible and resetable.
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::ops::Deref;
 use std::sync::Arc;
