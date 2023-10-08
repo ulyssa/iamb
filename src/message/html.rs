@@ -15,6 +15,7 @@ use std::ops::Deref;
 use css_color_parser::Color as CssColor;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use unicode_segmentation::UnicodeSegmentation;
+use url::Url;
 
 use html5ever::{
     driver::{parse_fragment, ParseOpts},
@@ -102,6 +103,12 @@ pub struct TableRow {
 }
 
 impl TableRow {
+    pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
+        for (_, cell) in &self.cells {
+            cell.gather_links(urls);
+        }
+    }
+
     fn columns(&self) -> usize {
         self.cells.len()
     }
@@ -113,6 +120,12 @@ pub struct TableSection {
 }
 
 impl TableSection {
+    pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
+        for row in &self.rows {
+            row.gather_links(urls);
+        }
+    }
+
     fn columns(&self) -> usize {
         self.rows.iter().map(TableRow::columns).max().unwrap_or(0)
     }
@@ -127,6 +140,12 @@ pub struct Table {
 impl Table {
     fn columns(&self) -> usize {
         self.sections.iter().map(TableSection::columns).max().unwrap_or(0)
+    }
+
+    pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
+        for section in &self.sections {
+            section.gather_links(urls);
+        }
     }
 
     fn to_text(&self, width: usize, style: Style) -> Text {
@@ -237,6 +256,7 @@ impl Table {
 
 /// A processed HTML element that we can render to the terminal.
 pub enum StyleTreeNode {
+    Anchor(Box<StyleTreeNode>, char, Url),
     Blockquote(Box<StyleTreeNode>),
     Break,
     Code(Box<StyleTreeNode>, Option<String>),
@@ -260,10 +280,51 @@ impl StyleTreeNode {
         printer.finish()
     }
 
+    pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
+        match self {
+            StyleTreeNode::Anchor(_, c, url) => {
+                urls.push((*c, url.clone()));
+            },
+
+            StyleTreeNode::Blockquote(child) |
+            StyleTreeNode::Code(child, _) |
+            StyleTreeNode::Header(child, _) |
+            StyleTreeNode::Paragraph(child) |
+            StyleTreeNode::Pre(child) |
+            StyleTreeNode::Reply(child) |
+            StyleTreeNode::Style(child, _) => {
+                child.gather_links(urls);
+            },
+
+            StyleTreeNode::List(children, _) | StyleTreeNode::Sequence(children) => {
+                for child in children {
+                    child.gather_links(urls);
+                }
+            },
+
+            StyleTreeNode::Table(table) => {
+                table.gather_links(urls);
+            },
+
+            StyleTreeNode::Image(_) => {},
+            StyleTreeNode::Ruler => {},
+            StyleTreeNode::Text(_) => {},
+            StyleTreeNode::Break => {},
+        }
+    }
+
     pub fn print<'a>(&'a self, printer: &mut TextPrinter<'a>, style: Style) {
         let width = printer.width();
 
         match self {
+            StyleTreeNode::Anchor(child, c, _) => {
+                let bold = style.add_modifier(StyleModifier::BOLD);
+                child.print(printer, bold);
+
+                let link = format!("[{c}]");
+                let span = Span::styled(link, style);
+                printer.push_span_nobreak(span);
+            },
             StyleTreeNode::Blockquote(child) => {
                 let mut subp = printer.sub(4);
                 child.print(&mut subp, style);
@@ -393,6 +454,16 @@ pub struct StyleTree {
 }
 
 impl StyleTree {
+    pub fn get_links(&self) -> Vec<(char, Url)> {
+        let mut links = Vec::new();
+
+        for child in &self.children {
+            child.gather_links(&mut links);
+        }
+
+        return links;
+    }
+
     pub fn to_text(&self, width: usize, style: Style, hide_reply: bool) -> Text<'_> {
         let mut printer = TextPrinter::new(width, style, hide_reply);
 
@@ -404,17 +475,41 @@ impl StyleTree {
     }
 }
 
-fn c2c(handles: &[Handle]) -> Vec<StyleTreeNode> {
-    handles.iter().flat_map(h2t).collect()
+pub struct TreeGenState {
+    link_num: u8,
 }
 
-fn c2t(handles: &[Handle]) -> Box<StyleTreeNode> {
-    let node = StyleTreeNode::Sequence(c2c(handles));
+impl TreeGenState {
+    fn next_link_char(&mut self) -> Option<char> {
+        let num = self.link_num;
+
+        if num < 62 {
+            self.link_num = num + 1;
+        }
+
+        if num < 10 {
+            Some((num + b'0') as char)
+        } else if num < 36 {
+            Some((num - 10 + b'a') as char)
+        } else if num < 62 {
+            Some((num - 36 + b'A') as char)
+        } else {
+            None
+        }
+    }
+}
+
+fn c2c(handles: &[Handle], state: &mut TreeGenState) -> Vec<StyleTreeNode> {
+    handles.iter().flat_map(|h| h2t(h, state)).collect()
+}
+
+fn c2t(handles: &[Handle], state: &mut TreeGenState) -> Box<StyleTreeNode> {
+    let node = StyleTreeNode::Sequence(c2c(handles, state));
 
     Box::new(node)
 }
 
-fn get_node(hdl: &Handle, want: &str) -> Option<StyleTreeNode> {
+fn get_node(hdl: &Handle, want: &str, state: &mut TreeGenState) -> Option<StyleTreeNode> {
     let node = hdl.deref();
 
     if let NodeData::Element { name, .. } = &node.data {
@@ -422,26 +517,26 @@ fn get_node(hdl: &Handle, want: &str) -> Option<StyleTreeNode> {
             return None;
         }
 
-        let c = c2c(&node.children.borrow());
+        let c = c2c(&node.children.borrow(), state);
         return Some(StyleTreeNode::Sequence(c));
     } else {
         return None;
     }
 }
 
-fn li2t(hdl: &Handle) -> Option<StyleTreeNode> {
-    get_node(hdl, "li")
+fn li2t(hdl: &Handle, state: &mut TreeGenState) -> Option<StyleTreeNode> {
+    get_node(hdl, "li", state)
 }
 
-fn table_cell(hdl: &Handle) -> Option<(CellType, StyleTreeNode)> {
-    if let Some(node) = get_node(hdl, "th") {
+fn table_cell(hdl: &Handle, state: &mut TreeGenState) -> Option<(CellType, StyleTreeNode)> {
+    if let Some(node) = get_node(hdl, "th", state) {
         return Some((CellType::Header, node));
     }
 
-    Some((CellType::Data, get_node(hdl, "td")?))
+    Some((CellType::Data, get_node(hdl, "td", state)?))
 }
 
-fn table_row(hdl: &Handle) -> Option<TableRow> {
+fn table_row(hdl: &Handle, state: &mut TreeGenState) -> Option<TableRow> {
     let node = hdl.deref();
 
     if let NodeData::Element { name, .. } = &node.data {
@@ -449,20 +544,20 @@ fn table_row(hdl: &Handle) -> Option<TableRow> {
             return None;
         }
 
-        let cells = table_cells(&node.children.borrow());
+        let cells = table_cells(&node.children.borrow(), state);
         return Some(TableRow { cells });
     } else {
         return None;
     }
 }
 
-fn table_section(hdl: &Handle) -> Option<TableSection> {
+fn table_section(hdl: &Handle, state: &mut TreeGenState) -> Option<TableSection> {
     let node = hdl.deref();
 
     if let NodeData::Element { name, .. } = &node.data {
         match name.local.as_ref() {
             "thead" | "tbody" => {
-                let rows = table_rows(&node.children.borrow());
+                let rows = table_rows(&node.children.borrow(), state);
 
                 Some(TableSection { rows })
             },
@@ -473,25 +568,37 @@ fn table_section(hdl: &Handle) -> Option<TableSection> {
     }
 }
 
-fn table_cells(handles: &[Handle]) -> Vec<(CellType, StyleTreeNode)> {
-    handles.iter().filter_map(table_cell).collect()
+fn table_cells(handles: &[Handle], state: &mut TreeGenState) -> Vec<(CellType, StyleTreeNode)> {
+    handles.iter().filter_map(|h| table_cell(h, state)).collect()
 }
 
-fn table_rows(handles: &[Handle]) -> Vec<TableRow> {
-    handles.iter().filter_map(table_row).collect()
+fn table_rows(handles: &[Handle], state: &mut TreeGenState) -> Vec<TableRow> {
+    handles.iter().filter_map(|h| table_row(h, state)).collect()
 }
 
-fn table_sections(handles: &[Handle]) -> Vec<TableSection> {
-    handles.iter().filter_map(table_section).collect()
+fn table_sections(handles: &[Handle], state: &mut TreeGenState) -> Vec<TableSection> {
+    handles.iter().filter_map(|h| table_section(h, state)).collect()
 }
 
-fn lic2t(handles: &[Handle]) -> StyleTreeChildren {
-    handles.iter().filter_map(li2t).collect()
+fn lic2t(handles: &[Handle], state: &mut TreeGenState) -> StyleTreeChildren {
+    handles.iter().filter_map(|h| li2t(h, state)).collect()
 }
 
 fn attrs_to_alt(attrs: &[Attribute]) -> Option<String> {
     for attr in attrs {
         if attr.name.local.as_ref() != "alt" {
+            continue;
+        }
+
+        return Some(attr.value.to_string());
+    }
+
+    return None;
+}
+
+fn attrs_to_href(attrs: &[Attribute]) -> Option<String> {
+    for attr in attrs {
+        if attr.name.local.as_ref() != "href" {
             continue;
         }
 
@@ -541,75 +648,95 @@ fn attrs_to_style(attrs: &[Attribute]) -> Style {
     return style;
 }
 
-fn h2t(hdl: &Handle) -> StyleTreeChildren {
+fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
     let node = hdl.deref();
 
     let tree = match &node.data {
-        NodeData::Document => *c2t(node.children.borrow().as_slice()),
+        NodeData::Document => *c2t(node.children.borrow().as_slice(), state),
         NodeData::Text { contents } => StyleTreeNode::Text(contents.borrow().to_string()),
         NodeData::Element { name, attrs, .. } => {
             match name.local.as_ref() {
                 // Message that this one replies to.
-                "mx-reply" => StyleTreeNode::Reply(c2t(&node.children.borrow())),
+                "mx-reply" => StyleTreeNode::Reply(c2t(&node.children.borrow(), state)),
+
+                // Links
+                "a" => {
+                    let c = c2t(&node.children.borrow(), state);
+                    let h = attrs_to_href(&attrs.borrow()).and_then(|u| Url::parse(&u).ok());
+
+                    if let Some(h) = h {
+                        if let Some(n) = state.next_link_char() {
+                            StyleTreeNode::Anchor(c, n, h)
+                        } else {
+                            *c
+                        }
+                    } else {
+                        *c
+                    }
+                },
 
                 // Style change
                 "b" | "strong" => {
-                    let c = c2t(&node.children.borrow());
+                    let c = c2t(&node.children.borrow(), state);
                     let s = Style::default().add_modifier(StyleModifier::BOLD);
 
                     StyleTreeNode::Style(c, s)
                 },
                 "font" => {
-                    let c = c2t(&node.children.borrow());
+                    let c = c2t(&node.children.borrow(), state);
                     let s = attrs_to_style(&attrs.borrow());
 
                     StyleTreeNode::Style(c, s)
                 },
                 "em" | "i" => {
-                    let c = c2t(&node.children.borrow());
+                    let c = c2t(&node.children.borrow(), state);
                     let s = Style::default().add_modifier(StyleModifier::ITALIC);
 
                     StyleTreeNode::Style(c, s)
                 },
                 "span" => {
-                    let c = c2t(&node.children.borrow());
+                    let c = c2t(&node.children.borrow(), state);
                     let s = attrs_to_style(&attrs.borrow());
 
                     StyleTreeNode::Style(c, s)
                 },
                 "del" | "strike" => {
-                    let c = c2t(&node.children.borrow());
+                    let c = c2t(&node.children.borrow(), state);
                     let s = Style::default().add_modifier(StyleModifier::CROSSED_OUT);
 
                     StyleTreeNode::Style(c, s)
                 },
                 "u" => {
-                    let c = c2t(&node.children.borrow());
+                    let c = c2t(&node.children.borrow(), state);
                     let s = Style::default().add_modifier(StyleModifier::UNDERLINED);
 
                     StyleTreeNode::Style(c, s)
                 },
 
                 // Lists
-                "ol" => StyleTreeNode::List(lic2t(&node.children.borrow()), ListStyle::Ordered),
-                "ul" => StyleTreeNode::List(lic2t(&node.children.borrow()), ListStyle::Unordered),
+                "ol" => {
+                    StyleTreeNode::List(lic2t(&node.children.borrow(), state), ListStyle::Ordered)
+                },
+                "ul" => {
+                    StyleTreeNode::List(lic2t(&node.children.borrow(), state), ListStyle::Unordered)
+                },
 
                 // Headers
-                "h1" => StyleTreeNode::Header(c2t(&node.children.borrow()), 1),
-                "h2" => StyleTreeNode::Header(c2t(&node.children.borrow()), 2),
-                "h3" => StyleTreeNode::Header(c2t(&node.children.borrow()), 3),
-                "h4" => StyleTreeNode::Header(c2t(&node.children.borrow()), 4),
-                "h5" => StyleTreeNode::Header(c2t(&node.children.borrow()), 5),
-                "h6" => StyleTreeNode::Header(c2t(&node.children.borrow()), 6),
+                "h1" => StyleTreeNode::Header(c2t(&node.children.borrow(), state), 1),
+                "h2" => StyleTreeNode::Header(c2t(&node.children.borrow(), state), 2),
+                "h3" => StyleTreeNode::Header(c2t(&node.children.borrow(), state), 3),
+                "h4" => StyleTreeNode::Header(c2t(&node.children.borrow(), state), 4),
+                "h5" => StyleTreeNode::Header(c2t(&node.children.borrow(), state), 5),
+                "h6" => StyleTreeNode::Header(c2t(&node.children.borrow(), state), 6),
 
                 // Table
                 "table" => {
-                    let sections = table_sections(&node.children.borrow());
+                    let sections = table_sections(&node.children.borrow(), state);
                     let caption = node
                         .children
                         .borrow()
                         .iter()
-                        .find_map(|hdl| get_node(hdl, "caption"))
+                        .find_map(|hdl| get_node(hdl, "caption", state))
                         .map(Box::new);
                     let table = Table { caption, sections };
 
@@ -618,16 +745,16 @@ fn h2t(hdl: &Handle) -> StyleTreeChildren {
 
                 // Code blocks.
                 "code" => {
-                    let c = c2t(&node.children.borrow());
+                    let c = c2t(&node.children.borrow(), state);
                     let l = attrs_to_language(&attrs.borrow());
 
                     StyleTreeNode::Code(c, l)
                 },
 
                 // Other text blocks.
-                "blockquote" => StyleTreeNode::Blockquote(c2t(&node.children.borrow())),
-                "div" | "p" => StyleTreeNode::Paragraph(c2t(&node.children.borrow())),
-                "pre" => StyleTreeNode::Pre(c2t(&node.children.borrow())),
+                "blockquote" => StyleTreeNode::Blockquote(c2t(&node.children.borrow(), state)),
+                "div" | "p" => StyleTreeNode::Paragraph(c2t(&node.children.borrow(), state)),
+                "pre" => StyleTreeNode::Pre(c2t(&node.children.borrow(), state)),
 
                 // No children.
                 "hr" => StyleTreeNode::Ruler,
@@ -636,8 +763,8 @@ fn h2t(hdl: &Handle) -> StyleTreeChildren {
                 "img" => StyleTreeNode::Image(attrs_to_alt(&attrs.borrow())),
 
                 // These don't render in any special way.
-                "a" | "details" | "html" | "summary" | "sub" | "sup" => {
-                    *c2t(&node.children.borrow())
+                "details" | "html" | "summary" | "sub" | "sup" => {
+                    *c2t(&node.children.borrow(), state)
                 },
 
                 _ => return vec![],
@@ -654,7 +781,10 @@ fn h2t(hdl: &Handle) -> StyleTreeChildren {
 }
 
 fn dom_to_style_tree(dom: RcDom) -> StyleTree {
-    StyleTree { children: h2t(&dom.document) }
+    let mut state = TreeGenState { link_num: 0 };
+    let children = h2t(&dom.document, &mut state);
+
+    StyleTree { children }
 }
 
 /// Parse an HTML document from a string.

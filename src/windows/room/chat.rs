@@ -9,6 +9,7 @@ use edit::edit as external_edit;
 use modalkit::editing::store::RegisterError;
 use std::process::Command;
 use tokio;
+use url::Url;
 
 use matrix_sdk::{
     attachment::AttachmentConfig,
@@ -31,7 +32,7 @@ use matrix_sdk::{
 };
 
 use modalkit::{
-    input::dialog::PromptYesNo,
+    input::dialog::{MultiChoice, MultiChoiceItem, PromptYesNo},
     tui::{
         buffer::Buffer,
         layout::Rect,
@@ -203,7 +204,34 @@ impl ChatState {
                         MessageType::Image(c) => (c.source.clone(), c.body.as_str()),
                         MessageType::Video(c) => (c.source.clone(), c.body.as_str()),
                         _ => {
-                            return Err(IambError::NoAttachment.into());
+                            if !flags.contains(DownloadFlags::OPEN) {
+                                return Err(IambError::NoAttachment.into());
+                            }
+
+                            let links = if let Some(html) = &msg.html {
+                                html.get_links()
+                            } else if let Ok(url) = Url::parse(&msg.event.body()) {
+                                vec![('0', url)]
+                            } else {
+                                vec![]
+                            };
+
+                            if links.is_empty() {
+                                return Err(IambError::NoAttachment.into());
+                            }
+
+                            let choices = links
+                                .into_iter()
+                                .map(|l| {
+                                    let url = l.1.to_string();
+                                    let act = IambAction::OpenLink(url.clone()).into();
+                                    MultiChoiceItem::new(l.0, url, vec![act])
+                                })
+                                .collect();
+                            let dialog = MultiChoice::new(choices);
+                            let err = UIError::NeedConfirm(Box::new(dialog));
+
+                            return Err(err);
                         },
                     };
 

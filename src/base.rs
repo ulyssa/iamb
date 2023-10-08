@@ -274,6 +274,9 @@ pub enum IambAction {
     /// Perform an action on the currently selected message.
     Message(MessageAction),
 
+    /// Open a URL.
+    OpenLink(String),
+
     /// Perform an action on the currently focused room.
     Room(RoomAction),
 
@@ -327,6 +330,7 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => SequenceStatus::Break,
             IambAction::Message(..) => SequenceStatus::Break,
             IambAction::Room(..) => SequenceStatus::Break,
+            IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
@@ -338,6 +342,7 @@ impl ApplicationAction for IambAction {
         match self {
             IambAction::Homeserver(..) => SequenceStatus::Atom,
             IambAction::Message(..) => SequenceStatus::Atom,
+            IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
@@ -351,6 +356,7 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => SequenceStatus::Ignore,
             IambAction::Message(..) => SequenceStatus::Ignore,
             IambAction::Room(..) => SequenceStatus::Ignore,
+            IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
@@ -364,6 +370,7 @@ impl ApplicationAction for IambAction {
             IambAction::Message(..) => false,
             IambAction::Room(..) => false,
             IambAction::Send(..) => false,
+            IambAction::OpenLink(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,

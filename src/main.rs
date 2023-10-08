@@ -528,6 +528,14 @@ impl Application {
                 self.screen.current_window_mut()?.send_command(act, ctx, store).await?
             },
 
+            IambAction::OpenLink(url) => {
+                tokio::task::spawn_blocking(move || {
+                    return open::that(url);
+                });
+
+                None
+            },
+
             IambAction::Verify(act, user_dev) => {
                 if let Some(sas) = store.application.verifications.get(&user_dev) {
                     self.worker.verify(act, sas.clone())?
