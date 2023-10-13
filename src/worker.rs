@@ -455,6 +455,7 @@ pub type FetchedRoom = (MatrixRoom, DisplayName, Option<Tags>);
 pub enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
+    Logout(String, ClientReply<IambResult<EditInfo>>),
     GetInviter(Invited, ClientReply<IambResult<Option<RoomMember>>>),
     GetRoom(OwnedRoomId, ClientReply<IambResult<FetchedRoom>>),
     JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
@@ -479,6 +480,9 @@ impl Debug for WorkerTask {
                     .field(style)
                     .field(&format_args!("_"))
                     .finish()
+            },
+            WorkerTask::Logout(user_id, _) => {
+                f.debug_tuple("WorkerTask::Logout").field(user_id).finish()
             },
             WorkerTask::GetInviter(invite, _) => {
                 f.debug_tuple("WorkerTask::GetInviter").field(invite).finish()
@@ -546,6 +550,14 @@ impl Requester {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::Login(style, reply)).unwrap();
+
+        return response.recv();
+    }
+
+    pub fn logout(&self, user_id: String) -> IambResult<EditInfo> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::Logout(user_id, reply)).unwrap();
 
         return response.recv();
     }
@@ -703,6 +715,10 @@ impl ClientWorker {
             WorkerTask::Login(style, reply) => {
                 assert!(self.initialized);
                 reply.send(self.login_and_sync(style).await);
+            },
+            WorkerTask::Logout(user_id, reply) => {
+                assert!(self.initialized);
+                reply.send(self.logout(user_id).await);
             },
             WorkerTask::Members(room_id, reply) => {
                 assert!(self.initialized);
@@ -1071,6 +1087,31 @@ impl ClientWorker {
         .into();
 
         Ok(Some(InfoMessage::from("Successfully logged in!")))
+    }
+
+    async fn logout(&mut self, user_id: String) -> IambResult<EditInfo> {
+        // Verify that the user is logging out of the correct profile.
+        let curr = self.settings.profile.user_id.as_ref();
+
+        if user_id != curr {
+            let msg = format!("Incorrect user ID (currently logged in as {curr})");
+            let err = UIError::Failure(msg);
+
+            return Err(err);
+        }
+
+        // Send the logout request.
+        if let Err(e) = self.client.logout().await {
+            let msg = format!("Failed to logout: {e}");
+            let err = UIError::Failure(msg);
+
+            return Err(err);
+        }
+
+        // Remove the session.json file.
+        std::fs::remove_file(&self.settings.session_json)?;
+
+        Ok(Some(InfoMessage::from("Sucessfully logged out")))
     }
 
     async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<OwnedRoomId> {

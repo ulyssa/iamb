@@ -115,12 +115,12 @@ use modalkit::{
             WindowAction,
             WindowContainer,
         },
-        base::{MoveDir1D, OpenTarget, RepeatType},
+        base::{CloseFlags, MoveDir1D, OpenTarget, RepeatType, TabTarget},
         context::Resolve,
         key::KeyManager,
         store::Store,
     },
-    input::{bindings::BindingMachine, dialog::Pager, key::TerminalKey},
+    input::{bindings::BindingMachine, dialog::Pager, dialog::PromptYesNo, key::TerminalKey},
     widgets::{
         cmdbar::CommandBarState,
         screen::{FocusList, Screen, ScreenState, TabLayoutDescription},
@@ -570,6 +570,21 @@ impl Application {
                 let action = WindowAction::Switch(target);
 
                 Ok(vec![(action.into(), ctx)])
+            },
+            HomeserverAction::Logout(user, true) => {
+                self.worker.logout(user)?;
+                let flags = CloseFlags::QUIT | CloseFlags::FORCE;
+                let act = TabAction::Close(TabTarget::All, flags);
+
+                Ok(vec![(act.into(), ctx)])
+            },
+            HomeserverAction::Logout(user, false) => {
+                let msg = "Would you like to logout?";
+                let act = IambAction::from(HomeserverAction::Logout(user, true));
+                let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
+                let prompt = Box::new(prompt);
+
+                Err(UIError::NeedConfirm(prompt))
             },
         }
     }

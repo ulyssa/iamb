@@ -261,6 +261,7 @@ pub enum SendAction {
 pub enum HomeserverAction {
     /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
+    Logout(String, bool),
 }
 
 /// An action that the main program loop should.

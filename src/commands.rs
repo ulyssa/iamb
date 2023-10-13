@@ -471,6 +471,19 @@ fn iamb_open(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let args = desc.arg.strings()?;
+
+    if args.len() != 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let iact = IambAction::from(HomeserverAction::Logout(args[0].clone(), desc.bang));
+    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+
+    return Ok(step);
+}
+
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand {
         name: "cancel".into(),
@@ -556,6 +569,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "editor".into(),
         aliases: vec![],
         f: iamb_editor,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "logout".into(),
+        aliases: vec![],
+        f: iamb_logout,
     });
 }
 
