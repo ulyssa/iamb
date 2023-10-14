@@ -546,7 +546,14 @@ pub struct RoomInfo {
     pub messages: Messages,
 
     /// A map of read markers to display on different events.
-    pub receipts: HashMap<OwnedEventId, Vec<OwnedUserId>>,
+    pub event_receipts: HashMap<OwnedEventId, HashSet<OwnedUserId>>,
+
+    /// A map of the most recent read marker for each user.
+    ///
+    /// Every receipt in this map should also have an entry in [`event_receipts`],
+    /// however not every user has an entry. If a user's most recent receipt is
+    /// older than the oldest loaded event, that user will not be included.
+    pub user_receipts: HashMap<OwnedUserId, OwnedEventId>,
 
     /// An event ID for where we should indicate we've read up to.
     pub read_till: Option<OwnedEventId>,
@@ -693,6 +700,22 @@ impl RoomInfo {
     /// Indicates whether we've recently fetched scrollback for this room.
     pub fn recently_fetched(&self) -> bool {
         self.fetch_last.map_or(false, |i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
+    }
+
+    pub fn set_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
+        if let Some(old_event_id) = self.user_receipts.get(&user_id) {
+            // Panics if event_receipts and user_receipts are out-of-sync
+            let old_receipts = self.event_receipts.get_mut(old_event_id).unwrap();
+            old_receipts.remove(&user_id);
+            if old_receipts.is_empty() {
+                self.event_receipts.remove(old_event_id);
+            }
+        }
+        self.event_receipts
+            .entry(event_id.clone())
+            .or_default()
+            .insert(user_id.clone());
+        self.user_receipts.insert(user_id, event_id);
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {

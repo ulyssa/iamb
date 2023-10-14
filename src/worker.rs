@@ -41,6 +41,7 @@ use matrix_sdk::{
             },
             presence::PresenceEvent,
             reaction::ReactionEventContent,
+            receipt::{ReceiptEventContent, ReceiptType},
             room::{
                 encryption::RoomEncryptionEventContent,
                 member::OriginalSyncRoomMemberEvent,
@@ -55,6 +56,7 @@ use matrix_sdk::{
             AnyTimelineEvent,
             EmptyStateKey,
             InitialStateEvent,
+            SyncEphemeralRoomEvent,
             SyncMessageLikeEvent,
             SyncStateEvent,
         },
@@ -755,6 +757,28 @@ impl ClientWorker {
 
                     let info = locked.application.get_room_info(room_id.to_owned());
                     info.insert_reaction(ev.into_full_event(room_id.to_owned()));
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |ev: SyncEphemeralRoomEvent<ReceiptEventContent>,
+             room: MatrixRoom,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+
+                    let mut locked = store.lock().await;
+
+                    let info = locked.application.get_room_info(room_id.to_owned());
+                    for (event_id, receipts) in ev.content.0.into_iter() {
+                        let Some(receipts) = receipts.get(&ReceiptType::Read) else {
+                            continue;
+                        };
+                        for (user_id, _) in receipts.into_iter() {
+                            info.set_receipt(user_id.to_owned(), event_id.clone());
+                        }
+                    }
                 }
             },
         );
