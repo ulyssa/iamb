@@ -84,7 +84,6 @@ use crate::{
         EventLocation,
         IambError,
         IambResult,
-        Receipts,
         RoomFetchStatus,
         VerifyAction,
     },
@@ -357,33 +356,6 @@ async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
-async fn refresh_receipts_forever(client: &Client, store: &AsyncProgramStore) {
-    // Update the displayed read receipts every 5 seconds.
-    let mut interval = tokio::time::interval(Duration::from_secs(5));
-    let mut sent = HashMap::<OwnedRoomId, OwnedEventId>::default();
-
-    loop {
-        interval.tick().await;
-        let receipts = update_receipts(client).await;
-        let read = store.lock().await.application.set_receipts(receipts).await;
-
-        for (room_id, read_till) in read.into_iter() {
-            if let Some(read_sent) = sent.get(&room_id) {
-                if read_sent == &read_till {
-                    // Skip unchanged receipts.
-                    continue;
-                }
-            }
-
-            if let Some(room) = client.get_joined_room(&room_id) {
-                if room.read_receipt(&read_till).await.is_ok() {
-                    sent.insert(room_id, read_till);
-                }
-            }
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum LoginStyle {
     SessionRestore(Session),
@@ -411,29 +383,6 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
     let response = ClientResponse(rx);
 
     return (reply, response);
-}
-
-async fn update_receipts(client: &Client) -> Vec<(OwnedRoomId, Receipts)> {
-    let mut rooms = vec![];
-
-    for room in client.joined_rooms() {
-        if let Ok(users) = room.active_members_no_sync().await {
-            let mut receipts = Receipts::new();
-
-            for member in users {
-                let res = room.user_read_receipt(member.user_id()).await;
-
-                if let Ok(Some((event_id, _))) = res {
-                    let user_id = member.user_id().to_owned();
-                    receipts.entry(event_id).or_default().push(user_id);
-                }
-            }
-
-            rooms.push((room.room_id().to_owned(), receipts));
-        }
-    }
-
-    return rooms;
 }
 
 pub type FetchedRoom = (MatrixRoom, DisplayName, Option<Tags>);
@@ -992,9 +941,8 @@ impl ClientWorker {
 
             async move {
                 let load = load_older_forever(&client, &store);
-                let rcpt = refresh_receipts_forever(&client, &store);
                 let room = refresh_rooms_forever(&client, &store);
-                let ((), (), ()) = tokio::join!(load, rcpt, room);
+                let ((), ()) = tokio::join!(load, room);
             }
         })
         .into();

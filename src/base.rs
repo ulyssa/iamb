@@ -413,9 +413,6 @@ pub type IambResult<T> = UIResult<T, IambInfo>;
 /// it's reacting to.
 pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
 
-/// Map of read receipts for different events.
-pub type Receipts = HashMap<OwnedEventId, Vec<OwnedUserId>>;
-
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
@@ -858,26 +855,6 @@ impl ChatStore {
             .and_then(|i| i.name.as_ref())
             .map(String::from)
             .unwrap_or_else(|| "Untitled Matrix Room".to_string())
-    }
-
-    /// Update the receipts for multiple rooms.
-    pub async fn set_receipts(
-        &mut self,
-        receipts: Vec<(OwnedRoomId, Receipts)>,
-    ) -> Vec<(OwnedRoomId, OwnedEventId)> {
-        let mut updates = vec![];
-
-        for (room_id, receipts) in receipts.into_iter() {
-            if let Some(info) = self.rooms.get_mut(&room_id) {
-                info.receipts = receipts;
-
-                if let Some(read_till) = info.read_till.take() {
-                    updates.push((room_id, read_till));
-                }
-            }
-        }
-
-        return updates;
     }
 
     /// Mark a room for loading more scrollback.
