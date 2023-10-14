@@ -381,6 +381,45 @@ async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
+async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
+    let mut interval = tokio::time::interval(Duration::from_secs(2));
+    let mut sent = HashMap::<OwnedRoomId, OwnedEventId>::default();
+
+    loop {
+        interval.tick().await;
+
+        let locked = store.lock().await;
+        let updates = client
+            .joined_rooms()
+            .into_iter()
+            .filter_map(|room| {
+                let room_id = room.room_id().to_owned();
+                let info = locked.application.rooms.get(&room_id)?;
+                let new_receipt = info.read_till.as_ref()?;
+                let old_receipt = sent.get(&room_id);
+                if Some(new_receipt) != old_receipt {
+                    Some((room_id, new_receipt.clone()))
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+        drop(locked);
+
+        for (room_id, new_receipt) in updates {
+            let Some(room) = client.get_joined_room(&room_id) else {
+                continue;
+            };
+            match room.read_receipt(&new_receipt).await {
+                Ok(()) => {
+                    sent.insert(room_id, new_receipt);
+                },
+                Err(e) => tracing::warn!(?room_id, "Failed to set read receipt: {e}"),
+            }
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum LoginStyle {
     SessionRestore(Session),
@@ -990,8 +1029,9 @@ impl ClientWorker {
 
             async move {
                 let load = load_older_forever(&client, &store);
+                let rcpt = send_receipts_forever(&client, &store);
                 let room = refresh_rooms_forever(&client, &store);
-                let ((), ()) = tokio::join!(load, room);
+                let ((), (), ()) = tokio::join!(load, rcpt, room);
             }
         })
         .into();
