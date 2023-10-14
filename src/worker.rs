@@ -63,6 +63,7 @@ use matrix_sdk::{
         room::RoomType,
         serde::Raw,
         EventEncryptionAlgorithm,
+        EventId,
         OwnedEventId,
         OwnedRoomId,
         OwnedRoomOrAliasId,
@@ -87,6 +88,7 @@ use crate::{
         IambError,
         IambResult,
         RoomFetchStatus,
+        RoomInfo,
         VerifyAction,
     },
     message::MessageFetchResult,
@@ -172,6 +174,19 @@ pub async fn create_room(
     return Ok(resp.room_id);
 }
 
+async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id: &EventId) {
+    let receipts = match room.event_read_receipts(event_id).await {
+        Ok(receipts) => receipts,
+        Err(e) => {
+            tracing::warn!(?event_id, "failed to get event receipts: {e}");
+            return;
+        },
+    };
+    for (user_id, _) in receipts {
+        info.set_receipt(user_id, event_id.to_owned());
+    }
+}
+
 async fn load_plan(store: &AsyncProgramStore) -> HashMap<OwnedRoomId, Option<String>> {
     let mut locked = store.lock().await;
     let ChatStore { need_load, rooms, .. } = &mut locked.application;
@@ -201,7 +216,7 @@ async fn load_plan(store: &AsyncProgramStore) -> HashMap<OwnedRoomId, Option<Str
 }
 
 async fn load_older_one(
-    client: Client,
+    client: &Client,
     room_id: &RoomId,
     fetch_id: Option<String>,
     limit: u32,
@@ -229,8 +244,14 @@ async fn load_older_one(
     }
 }
 
-async fn load_insert(room_id: OwnedRoomId, res: MessageFetchResult, store: AsyncProgramStore) {
+async fn load_insert(
+    client: &Client,
+    room_id: OwnedRoomId,
+    res: MessageFetchResult,
+    store: AsyncProgramStore,
+) {
     let mut locked = store.lock().await;
+    let room = client.get_room(&room_id).unwrap();
     let ChatStore { need_load, presences, rooms, .. } = &mut locked.application;
     let info = rooms.get_or_default(room_id.clone());
     info.fetching = false;
@@ -240,6 +261,8 @@ async fn load_insert(room_id: OwnedRoomId, res: MessageFetchResult, store: Async
             for msg in msgs.into_iter() {
                 let sender = msg.sender().to_owned();
                 let _ = presences.get_or_default(sender);
+
+                update_event_receipts(info, &room, msg.event_id()).await;
 
                 match msg {
                     AnyMessageLikeEvent::RoomEncrypted(msg) => {
@@ -278,8 +301,8 @@ async fn load_older(client: &Client, store: &AsyncProgramStore) -> usize {
             let store = store.clone();
 
             async move {
-                let res = load_older_one(client, room_id.as_ref(), fetch_id, limit).await;
-                load_insert(room_id, res, store).await;
+                let res = load_older_one(&client, room_id.as_ref(), fetch_id, limit).await;
+                load_insert(&client, room_id, res, store).await;
             }
         })
         .collect::<FuturesUnordered<_>>()
@@ -738,6 +761,7 @@ impl ClientWorker {
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let info = locked.application.get_room_info(room_id.to_owned());
+                    update_event_receipts(info, &room, ev.event_id()).await;
                     info.insert(ev.into_full_event(room_id.to_owned()));
                 }
             },
@@ -756,6 +780,7 @@ impl ClientWorker {
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let info = locked.application.get_room_info(room_id.to_owned());
+                    update_event_receipts(info, &room, ev.event_id()).await;
                     info.insert_reaction(ev.into_full_event(room_id.to_owned()));
                 }
             },
