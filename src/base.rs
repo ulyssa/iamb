@@ -702,15 +702,20 @@ impl RoomInfo {
         self.fetch_last.map_or(false, |i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
     }
 
-    pub fn set_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
-        if let Some(old_event_id) = self.user_receipts.get(&user_id) {
-            // Panics if event_receipts and user_receipts are out-of-sync
-            let old_receipts = self.event_receipts.get_mut(old_event_id).unwrap();
-            old_receipts.remove(&user_id);
-            if old_receipts.is_empty() {
-                self.event_receipts.remove(old_event_id);
-            }
+    fn clear_receipt(&mut self, user_id: &OwnedUserId) -> Option<()> {
+        let old_event_id = self.user_receipts.get(user_id)?;
+        let old_receipts = self.event_receipts.get_mut(old_event_id)?;
+        old_receipts.remove(user_id);
+
+        if old_receipts.is_empty() {
+            self.event_receipts.remove(old_event_id);
         }
+
+        None
+    }
+
+    pub fn set_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
+        self.clear_receipt(&user_id);
         self.event_receipts
             .entry(event_id.clone())
             .or_default()

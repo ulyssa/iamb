@@ -251,7 +251,6 @@ async fn load_insert(
     store: AsyncProgramStore,
 ) {
     let mut locked = store.lock().await;
-    let room = client.get_room(&room_id).unwrap();
     let ChatStore { need_load, presences, rooms, .. } = &mut locked.application;
     let info = rooms.get_or_default(room_id.clone());
     info.fetching = false;
@@ -262,7 +261,9 @@ async fn load_insert(
                 let sender = msg.sender().to_owned();
                 let _ = presences.get_or_default(sender);
 
-                update_event_receipts(info, &room, msg.event_id()).await;
+                if let Some(room) = client.get_room(&room_id) {
+                    update_event_receipts(info, &room, msg.event_id()).await;
+                }
 
                 match msg {
                     AnyMessageLikeEvent::RoomEncrypted(msg) => {
@@ -839,7 +840,7 @@ impl ClientWorker {
                         let Some(receipts) = receipts.get(&ReceiptType::Read) else {
                             continue;
                         };
-                        for (user_id, _) in receipts.into_iter() {
+                        for user_id in receipts.keys() {
                             info.set_receipt(user_id.to_owned(), event_id.clone());
                         }
                     }

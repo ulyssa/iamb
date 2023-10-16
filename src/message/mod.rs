@@ -533,7 +533,7 @@ impl<'a> MessageFormatter<'a> {
                 // Show read receipts.
                 let user_char =
                     |user: &'a OwnedUserId| -> Span<'a> { settings.get_user_char_span(user) };
-                let mut read = self.read.take().into_iter().flatten();
+                let mut read = self.read.iter_mut().flatten();
 
                 let a = read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
                 let b = read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
