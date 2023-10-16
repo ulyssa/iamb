@@ -413,9 +413,6 @@ pub type IambResult<T> = UIResult<T, IambInfo>;
 /// it's reacting to.
 pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
 
-/// Map of read receipts for different events.
-pub type Receipts = HashMap<OwnedEventId, Vec<OwnedUserId>>;
-
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
@@ -549,7 +546,14 @@ pub struct RoomInfo {
     pub messages: Messages,
 
     /// A map of read markers to display on different events.
-    pub receipts: HashMap<OwnedEventId, Vec<OwnedUserId>>,
+    pub event_receipts: HashMap<OwnedEventId, HashSet<OwnedUserId>>,
+
+    /// A map of the most recent read marker for each user.
+    ///
+    /// Every receipt in this map should also have an entry in [`event_receipts`],
+    /// however not every user has an entry. If a user's most recent receipt is
+    /// older than the oldest loaded event, that user will not be included.
+    pub user_receipts: HashMap<OwnedUserId, OwnedEventId>,
 
     /// An event ID for where we should indicate we've read up to.
     pub read_till: Option<OwnedEventId>,
@@ -696,6 +700,27 @@ impl RoomInfo {
     /// Indicates whether we've recently fetched scrollback for this room.
     pub fn recently_fetched(&self) -> bool {
         self.fetch_last.map_or(false, |i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
+    }
+
+    fn clear_receipt(&mut self, user_id: &OwnedUserId) -> Option<()> {
+        let old_event_id = self.user_receipts.get(user_id)?;
+        let old_receipts = self.event_receipts.get_mut(old_event_id)?;
+        old_receipts.remove(user_id);
+
+        if old_receipts.is_empty() {
+            self.event_receipts.remove(old_event_id);
+        }
+
+        None
+    }
+
+    pub fn set_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
+        self.clear_receipt(&user_id);
+        self.event_receipts
+            .entry(event_id.clone())
+            .or_default()
+            .insert(user_id.clone());
+        self.user_receipts.insert(user_id, event_id);
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {
@@ -858,26 +883,6 @@ impl ChatStore {
             .and_then(|i| i.name.as_ref())
             .map(String::from)
             .unwrap_or_else(|| "Untitled Matrix Room".to_string())
-    }
-
-    /// Update the receipts for multiple rooms.
-    pub async fn set_receipts(
-        &mut self,
-        receipts: Vec<(OwnedRoomId, Receipts)>,
-    ) -> Vec<(OwnedRoomId, OwnedEventId)> {
-        let mut updates = vec![];
-
-        for (room_id, receipts) in receipts.into_iter() {
-            if let Some(info) = self.rooms.get_mut(&room_id) {
-                info.receipts = receipts;
-
-                if let Some(read_till) = info.read_till.take() {
-                    updates.push((room_id, read_till));
-                }
-            }
-        }
-
-        return updates;
     }
 
     /// Mark a room for loading more scrollback.

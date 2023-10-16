@@ -2,10 +2,10 @@
 use std::borrow::Cow;
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::hash_set;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
-use std::slice::Iter;
 
 use chrono::{DateTime, Local as LocalTz, NaiveDateTime, TimeZone};
 use comrak::{markdown_to_html, ComrakOptions};
@@ -501,7 +501,7 @@ struct MessageFormatter<'a> {
     date: Option<Span<'a>>,
 
     /// Iterator over the users who have read up to this message.
-    read: Iter<'a, OwnedUserId>,
+    read: Option<hash_set::Iter<'a, OwnedUserId>>,
 }
 
 impl<'a> MessageFormatter<'a> {
@@ -533,10 +533,11 @@ impl<'a> MessageFormatter<'a> {
                 // Show read receipts.
                 let user_char =
                     |user: &'a OwnedUserId| -> Span<'a> { settings.get_user_char_span(user) };
+                let mut read = self.read.iter_mut().flatten();
 
-                let a = self.read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
-                let b = self.read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
-                let c = self.read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
+                let a = read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
+                let b = read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
+                let c = read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
 
                 line.push(Span::raw(" "));
                 line.push(c);
@@ -650,10 +651,7 @@ impl Message {
             let fill = width - USER_GUTTER - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
             let time = self.timestamp.show_time();
-            let read = match info.receipts.get(self.event.event_id()) {
-                Some(read) => read.iter(),
-                None => [].iter(),
-            };
+            let read = info.event_receipts.get(self.event.event_id()).map(|read| read.iter());
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         } else if USER_GUTTER + TIME_GUTTER + MIN_MSG_LEN <= width {
@@ -661,7 +659,7 @@ impl Message {
             let fill = width - USER_GUTTER - TIME_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
             let time = self.timestamp.show_time();
-            let read = [].iter();
+            let read = None;
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         } else if USER_GUTTER + MIN_MSG_LEN <= width {
@@ -669,7 +667,7 @@ impl Message {
             let fill = width - USER_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
             let time = None;
-            let read = [].iter();
+            let read = None;
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         } else {
@@ -677,7 +675,7 @@ impl Message {
             let fill = width.saturating_sub(2);
             let user = self.show_sender(prev, false, info, settings);
             let time = None;
-            let read = [].iter();
+            let read = None;
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         }

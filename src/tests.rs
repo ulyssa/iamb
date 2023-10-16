@@ -153,7 +153,8 @@ pub fn mock_room() -> RoomInfo {
         keys: mock_keys(),
         messages: mock_messages(),
 
-        receipts: HashMap::new(),
+        event_receipts: HashMap::new(),
+        user_receipts: HashMap::new(),
         read_till: None,
         reactions: HashMap::new(),
 
