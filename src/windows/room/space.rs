@@ -22,7 +22,7 @@ use modalkit::{
 
 use crate::base::{IambBufferId, IambInfo, ProgramStore, RoomFocus};
 
-use crate::windows::RoomItem;
+use crate::windows::{room_fields_cmp, RoomItem};
 
 const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -120,7 +120,7 @@ impl<'a> StatefulWidget for Space<'a> {
 
             match res {
                 Ok(members) => {
-                    let items = members
+                    let mut items = members
                         .into_iter()
                         .filter_map(|id| {
                             let (room, _, tags) =
@@ -133,7 +133,9 @@ impl<'a> StatefulWidget for Space<'a> {
                                 None
                             }
                         })
-                        .collect();
+                        .collect::<Vec<_>>();
+                    let fields = &self.store.application.settings.tunables.sort.rooms;
+                    items.sort_by(|a, b| room_fields_cmp(a, b, fields));
 
                     state.list.set(items);
                     state.last_fetch = Some(Instant::now());
