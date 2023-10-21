@@ -14,6 +14,9 @@ jobs:
       matrix:
         platform: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.platform }}
+    env:
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
     steps:
     - name: Checkout code
       uses: actions/checkout@v3
@@ -30,11 +33,8 @@ jobs:
       with:
         path: ~/.cargo/registry
         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
-    - name: Cache cargo build
-      uses: actions/cache@v3
-      with:
-        path: target
-        key: ${{ runner.os }}-cargo-build-${{ hashFiles('**/Cargo.lock') }}
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.3
     - name: Check formatting
       run: cargo +nightly fmt --all -- --check
     - name: Check Clippy
