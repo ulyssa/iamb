@@ -20,7 +20,7 @@ use modalkit::tui::{
     text::Span,
 };
 
-use super::base::{IambId, RoomInfo};
+use super::base::{IambId, RoomInfo, SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 
 macro_rules! usage {
     ( $($args: tt)* ) => {
@@ -28,6 +28,17 @@ macro_rules! usage {
         process::exit(2);
     }
 }
+
+const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 2] = [
+    SortColumn(SortFieldUser::PowerLevel, SortOrder::Ascending),
+    SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
+];
+
+const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 3] = [
+    SortColumn(SortFieldRoom::Favorite, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::LowPriority, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+];
 
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
 
@@ -213,6 +224,15 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
+fn merge_sorts(a: SortOverrides, b: SortOverrides) -> SortOverrides {
+    SortOverrides {
+        dms: b.dms.or(a.dms),
+        rooms: b.rooms.or(a.rooms),
+        spaces: b.spaces.or(a.spaces),
+        members: b.members.or(a.members),
+    }
+}
+
 fn merge_users(a: Option<UserOverrides>, b: Option<UserOverrides>) -> Option<UserOverrides> {
     match (a, b) {
         (Some(a), None) => Some(a),
@@ -247,6 +267,33 @@ pub enum UserDisplayStyle {
 }
 
 #[derive(Clone)]
+pub struct SortValues {
+    pub dms: Vec<SortColumn<SortFieldRoom>>,
+    pub rooms: Vec<SortColumn<SortFieldRoom>>,
+    pub spaces: Vec<SortColumn<SortFieldRoom>>,
+    pub members: Vec<SortColumn<SortFieldUser>>,
+}
+
+#[derive(Clone, Default, Deserialize)]
+pub struct SortOverrides {
+    pub dms: Option<Vec<SortColumn<SortFieldRoom>>>,
+    pub rooms: Option<Vec<SortColumn<SortFieldRoom>>>,
+    pub spaces: Option<Vec<SortColumn<SortFieldRoom>>>,
+    pub members: Option<Vec<SortColumn<SortFieldUser>>>,
+}
+
+impl SortOverrides {
+    pub fn values(self) -> SortValues {
+        let rooms = self.rooms.unwrap_or_else(|| Vec::from(DEFAULT_ROOM_SORT));
+        let dms = self.dms.unwrap_or_else(|| rooms.clone());
+        let spaces = self.spaces.unwrap_or_else(|| rooms.clone());
+        let members = self.members.unwrap_or_else(|| Vec::from(DEFAULT_MEMBERS_SORT));
+
+        SortValues { rooms, members, dms, spaces }
+    }
+}
+
+#[derive(Clone)]
 pub struct TunableValues {
     pub log_level: Level,
     pub reaction_display: bool,
@@ -254,6 +301,7 @@ pub struct TunableValues {
     pub read_receipt_send: bool,
     pub read_receipt_display: bool,
     pub request_timeout: u64,
+    pub sort: SortValues,
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
     pub users: UserOverrides,
@@ -270,6 +318,8 @@ pub struct Tunables {
     pub read_receipt_send: Option<bool>,
     pub read_receipt_display: Option<bool>,
     pub request_timeout: Option<u64>,
+    #[serde(default)]
+    pub sort: SortOverrides,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
     pub users: Option<UserOverrides>,
@@ -289,6 +339,7 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
             request_timeout: self.request_timeout.or(other.request_timeout),
+            sort: merge_sorts(self.sort, other.sort),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
             users: merge_users(self.users, other.users),
@@ -306,6 +357,7 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
+            sort: self.sort.values(),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
             users: self.users.unwrap_or_default(),
@@ -699,6 +751,43 @@ mod tests {
         let res: Tunables =
             serde_json::from_str("{\"username_display\": \"displayname\"}").unwrap();
         assert_eq!(res.username_display, Some(UserDisplayStyle::DisplayName));
+    }
+
+    #[test]
+    fn test_parse_tunables_sort() {
+        let res: Tunables = serde_json::from_str(
+            r#"{"sort": {"members": ["server","~localpart"],"spaces":["~favorite", "alias"]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            res.sort.members,
+            Some(vec![
+                SortColumn(SortFieldUser::Server, SortOrder::Ascending),
+                SortColumn(SortFieldUser::LocalPart, SortOrder::Descending),
+            ])
+        );
+        assert_eq!(
+            res.sort.spaces,
+            Some(vec![
+                SortColumn(SortFieldRoom::Favorite, SortOrder::Descending),
+                SortColumn(SortFieldRoom::Alias, SortOrder::Ascending),
+            ])
+        );
+        assert_eq!(res.sort.rooms, None);
+        assert_eq!(res.sort.dms, None);
+
+        // Check that we get the right default "rooms" and "dms" values.
+        let res = res.values();
+        assert_eq!(res.sort.members, vec![
+            SortColumn(SortFieldUser::Server, SortOrder::Ascending),
+            SortColumn(SortFieldUser::LocalPart, SortOrder::Descending),
+        ]);
+        assert_eq!(res.sort.spaces, vec![
+            SortColumn(SortFieldRoom::Favorite, SortOrder::Descending),
+            SortColumn(SortFieldRoom::Alias, SortOrder::Ascending),
+        ]);
+        assert_eq!(res.sort.rooms, Vec::from(DEFAULT_ROOM_SORT));
+        assert_eq!(res.sort.dms, Vec::from(DEFAULT_ROOM_SORT));
     }
 
     #[test]

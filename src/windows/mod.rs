@@ -17,7 +17,9 @@ use matrix_sdk::{
     ruma::{
         events::room::member::MembershipState,
         events::tag::{TagName, Tags},
+        OwnedRoomAliasId,
         OwnedRoomId,
+        RoomAliasId,
         RoomId,
     },
 };
@@ -80,6 +82,10 @@ use crate::base::{
     ProgramStore,
     RoomAction,
     SendAction,
+    SortColumn,
+    SortFieldRoom,
+    SortFieldUser,
+    SortOrder,
 };
 
 use self::{room::RoomState, welcome::WelcomeState};
@@ -125,42 +131,87 @@ fn selected_text(s: &str, selected: bool) -> Text {
     Text::from(selected_span(s, selected))
 }
 
-fn room_cmp(a: &MatrixRoom, b: &MatrixRoom) -> Ordering {
-    let ca1 = a.canonical_alias();
-    let ca2 = b.canonical_alias();
-
-    let ord = match (ca1, ca2) {
+/// Sort `Some` to be less than `None` so that list items with values come before those without.
+#[inline]
+fn some_cmp<T: Ord>(a: Option<T>, b: Option<T>) -> Ordering {
+    match (a, b) {
+        (Some(a), Some(b)) => a.cmp(&b),
         (None, None) => Ordering::Equal,
         (None, Some(_)) => Ordering::Greater,
         (Some(_), None) => Ordering::Less,
-        (Some(ca1), Some(ca2)) => ca1.cmp(&ca2),
-    };
-
-    ord.then_with(|| a.room_id().cmp(b.room_id()))
+    }
 }
 
-fn tag_cmp(a: &Option<Tags>, b: &Option<Tags>) -> Ordering {
-    let (fava, lowa) = a
-        .as_ref()
-        .map(|tags| {
-            (tags.contains_key(&TagName::Favorite), tags.contains_key(&TagName::LowPriority))
-        })
-        .unwrap_or((false, false));
+fn user_cmp(a: &MemberItem, b: &MemberItem, field: &SortFieldUser) -> Ordering {
+    let a_id = a.member.user_id();
+    let b_id = b.member.user_id();
 
-    let (favb, lowb) = b
-        .as_ref()
-        .map(|tags| {
-            (tags.contains_key(&TagName::Favorite), tags.contains_key(&TagName::LowPriority))
-        })
-        .unwrap_or((false, false));
+    match field {
+        SortFieldUser::UserId => a_id.cmp(b_id),
+        SortFieldUser::LocalPart => a_id.localpart().cmp(b_id.localpart()),
+        SortFieldUser::Server => a_id.server_name().cmp(b_id.server_name()),
+        SortFieldUser::PowerLevel => {
+            // Sort higher power levels towards the top of the list.
+            b.member.power_level().cmp(&a.member.power_level())
+        },
+    }
+}
 
-    // If a has Favorite and b doesn't, it should sort earlier in room list.
-    let cmpf = favb.cmp(&fava);
+fn room_cmp<T: RoomLikeItem>(a: &T, b: &T, field: &SortFieldRoom) -> Ordering {
+    match field {
+        SortFieldRoom::Favorite => {
+            let fava = a.has_tag(TagName::Favorite);
+            let favb = b.has_tag(TagName::Favorite);
 
-    // If a has LowPriority and b doesn't, it should sort later in room list.
-    let cmpl = lowa.cmp(&lowb);
+            // If a has Favorite and b doesn't, it should sort earlier in room list.
+            favb.cmp(&fava)
+        },
+        SortFieldRoom::LowPriority => {
+            let lowa = a.has_tag(TagName::LowPriority);
+            let lowb = b.has_tag(TagName::LowPriority);
 
-    cmpl.then(cmpf)
+            // If a has LowPriority and b doesn't, it should sort later in room list.
+            lowa.cmp(&lowb)
+        },
+        SortFieldRoom::Name => a.name().cmp(b.name()),
+        SortFieldRoom::Alias => some_cmp(a.alias(), b.alias()),
+        SortFieldRoom::RoomId => a.room_id().cmp(b.room_id()),
+    }
+}
+
+/// Compare two rooms according the configured sort criteria.
+fn room_fields_cmp<T: RoomLikeItem>(
+    a: &T,
+    b: &T,
+    fields: &[SortColumn<SortFieldRoom>],
+) -> Ordering {
+    for SortColumn(field, order) in fields {
+        match (room_cmp(a, b, field), order) {
+            (Ordering::Equal, _) => continue,
+            (o, SortOrder::Ascending) => return o,
+            (o, SortOrder::Descending) => return o.reverse(),
+        }
+    }
+
+    // Break ties on ascending room id.
+    room_cmp(a, b, &SortFieldRoom::RoomId)
+}
+
+fn user_fields_cmp(
+    a: &MemberItem,
+    b: &MemberItem,
+    fields: &[SortColumn<SortFieldUser>],
+) -> Ordering {
+    for SortColumn(field, order) in fields {
+        match (user_cmp(a, b, field), order) {
+            (Ordering::Equal, _) => continue,
+            (o, SortOrder::Ascending) => return o,
+            (o, SortOrder::Descending) => return o.reverse(),
+        }
+    }
+
+    // Break ties on ascending user id.
+    user_cmp(a, b, &SortFieldUser::UserId)
 }
 
 fn append_tags<'a>(tags: &'a Tags, spans: &mut Vec<Span<'a>>, style: Style) {
@@ -188,6 +239,13 @@ fn append_tags<'a>(tags: &'a Tags, spans: &mut Vec<Span<'a>>, style: Style) {
     }
 
     spans.push(Span::styled(")", style));
+}
+
+trait RoomLikeItem {
+    fn room_id(&self) -> &RoomId;
+    fn has_tag(&self, tag: TagName) -> bool;
+    fn alias(&self) -> Option<&RoomAliasId>;
+    fn name(&self) -> &str;
 }
 
 #[inline]
@@ -399,7 +457,8 @@ impl WindowOps<IambInfo> for IambWindow {
                     .into_iter()
                     .map(|room_info| DirectItem::new(room_info, store))
                     .collect::<Vec<_>>();
-                items.sort();
+                let fields = &store.application.settings.tunables.sort.dms;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
 
                 state.set(items);
 
@@ -417,8 +476,13 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 if need_fetch {
                     if let Ok(mems) = store.application.worker.members(room_id.clone()) {
-                        let items = mems.into_iter().map(|m| MemberItem::new(m, room_id.clone()));
-                        state.set(items.collect());
+                        let mut items = mems
+                            .into_iter()
+                            .map(|m| MemberItem::new(m, room_id.clone()))
+                            .collect::<Vec<_>>();
+                        let fields = &store.application.settings.tunables.sort.members;
+                        items.sort_by(|a, b| user_fields_cmp(a, b, fields));
+                        state.set(items);
                         *last_fetch = Some(Instant::now());
                     }
                 }
@@ -438,7 +502,8 @@ impl WindowOps<IambInfo> for IambWindow {
                     .into_iter()
                     .map(|room_info| RoomItem::new(room_info, store))
                     .collect::<Vec<_>>();
-                items.sort();
+                let fields = &store.application.settings.tunables.sort.rooms;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
 
                 state.set(items);
 
@@ -449,15 +514,18 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::SpaceList(state) => {
-                let items = store
+                let mut items = store
                     .application
                     .sync_info
                     .spaces
                     .clone()
                     .into_iter()
-                    .map(|room| SpaceItem::new(room, store));
-                state.set(items.collect());
-                state.draw(area, buf, focused, store);
+                    .map(|room| SpaceItem::new(room, store))
+                    .collect::<Vec<_>>();
+                let fields = &store.application.settings.tunables.sort.spaces;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+
+                state.set(items);
 
                 List::new(store)
                     .empty_message("You haven't joined any spaces yet")
@@ -662,6 +730,7 @@ impl Window<IambInfo> for IambWindow {
 pub struct RoomItem {
     room_info: MatrixRoomInfo,
     name: String,
+    alias: Option<OwnedRoomAliasId>,
 }
 
 impl RoomItem {
@@ -671,13 +740,14 @@ impl RoomItem {
 
         let info = store.application.get_room_info(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
+        let alias = room.canonical_alias();
         info.tags = room_info.deref().1.clone();
 
-        if let Some(alias) = room.canonical_alias() {
+        if let Some(alias) = &alias {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
         }
 
-        RoomItem { room_info, name }
+        RoomItem { room_info, name, alias }
     }
 
     #[inline]
@@ -686,33 +756,30 @@ impl RoomItem {
     }
 
     #[inline]
-    fn room_id(&self) -> &RoomId {
-        self.room().room_id()
-    }
-
-    #[inline]
     fn tags(&self) -> &Option<Tags> {
         &self.room_info.deref().1
     }
 }
 
-impl PartialEq for RoomItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.room_id() == other.room_id()
+impl RoomLikeItem for RoomItem {
+    fn name(&self) -> &str {
+        self.name.as_str()
     }
-}
 
-impl Eq for RoomItem {}
-
-impl Ord for RoomItem {
-    fn cmp(&self, other: &Self) -> Ordering {
-        tag_cmp(self.tags(), other.tags()).then_with(|| room_cmp(self.room(), other.room()))
+    fn alias(&self) -> Option<&RoomAliasId> {
+        self.alias.as_deref()
     }
-}
 
-impl PartialOrd for RoomItem {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.cmp(other).into()
+    fn room_id(&self) -> &RoomId {
+        self.room().room_id()
+    }
+
+    fn has_tag(&self, tag: TagName) -> bool {
+        if let Some(tags) = &self.room_info.deref().1 {
+            tags.contains_key(&tag)
+        } else {
+            false
+        }
     }
 }
 
@@ -756,14 +823,16 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for RoomItem {
 pub struct DirectItem {
     room_info: MatrixRoomInfo,
     name: String,
+    alias: Option<OwnedRoomAliasId>,
 }
 
 impl DirectItem {
     fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
-        let room_id = room_info.deref().0.room_id().to_owned();
+        let room_id = room_info.0.room_id().to_owned();
         let name = store.application.get_room_info(room_id).name.clone().unwrap_or_default();
+        let alias = room_info.0.canonical_alias();
 
-        DirectItem { room_info, name }
+        DirectItem { room_info, name, alias }
     }
 
     #[inline]
@@ -772,13 +841,30 @@ impl DirectItem {
     }
 
     #[inline]
-    fn room_id(&self) -> &RoomId {
-        self.room().room_id()
-    }
-
-    #[inline]
     fn tags(&self) -> &Option<Tags> {
         &self.room_info.deref().1
+    }
+}
+
+impl RoomLikeItem for DirectItem {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    fn alias(&self) -> Option<&RoomAliasId> {
+        self.alias.as_deref()
+    }
+
+    fn has_tag(&self, tag: TagName) -> bool {
+        if let Some(tags) = &self.room_info.deref().1 {
+            tags.contains_key(&tag)
+        } else {
+            false
+        }
+    }
+
+    fn room_id(&self) -> &RoomId {
+        self.room().room_id()
     }
 }
 
@@ -807,26 +893,6 @@ impl ListItem<IambInfo> for DirectItem {
     }
 }
 
-impl PartialEq for DirectItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.room_id() == other.room_id()
-    }
-}
-
-impl Eq for DirectItem {}
-
-impl Ord for DirectItem {
-    fn cmp(&self, other: &Self) -> Ordering {
-        tag_cmp(self.tags(), other.tags()).then_with(|| room_cmp(self.room(), other.room()))
-    }
-}
-
-impl PartialOrd for DirectItem {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.cmp(other).into()
-    }
-}
-
 impl Promptable<ProgramContext, ProgramStore, IambInfo> for DirectItem {
     fn prompt(
         &mut self,
@@ -840,51 +906,58 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for DirectItem {
 
 #[derive(Clone)]
 pub struct SpaceItem {
-    room: MatrixRoom,
+    room_info: MatrixRoomInfo,
     name: String,
+    alias: Option<OwnedRoomAliasId>,
 }
 
 impl SpaceItem {
-    fn new(room: MatrixRoom, store: &mut ProgramStore) -> Self {
-        let room_id = room.room_id();
+    fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
+        let room_id = room_info.0.room_id();
         let name = store
             .application
             .get_room_info(room_id.to_owned())
             .name
             .clone()
             .unwrap_or_default();
+        let alias = room_info.0.canonical_alias();
 
-        if let Some(alias) = room.canonical_alias() {
+        if let Some(alias) = &alias {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
         }
 
-        SpaceItem { room, name }
+        SpaceItem { room_info, name, alias }
+    }
+
+    #[inline]
+    fn room(&self) -> &MatrixRoom {
+        &self.room_info.deref().0
     }
 }
 
-impl PartialEq for SpaceItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.room.room_id() == other.room.room_id()
+impl RoomLikeItem for SpaceItem {
+    fn name(&self) -> &str {
+        self.name.as_str()
     }
-}
 
-impl Eq for SpaceItem {}
-
-impl Ord for SpaceItem {
-    fn cmp(&self, other: &Self) -> Ordering {
-        room_cmp(&self.room, &other.room)
+    fn room_id(&self) -> &RoomId {
+        self.room().room_id()
     }
-}
 
-impl PartialOrd for SpaceItem {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.cmp(other).into()
+    fn alias(&self) -> Option<&RoomAliasId> {
+        self.alias.as_deref()
+    }
+
+    fn has_tag(&self, _: TagName) -> bool {
+        // I think that spaces can technically have tags, but afaik no client
+        // exposes them, so we'll just always return false here for now.
+        false
     }
 }
 
 impl ToString for SpaceItem {
     fn to_string(&self) -> String {
-        return self.room.room_id().to_string();
+        return self.room_id().to_string();
     }
 }
 
@@ -894,7 +967,7 @@ impl ListItem<IambInfo> for SpaceItem {
     }
 
     fn get_word(&self) -> Option<String> {
-        self.room.room_id().to_string().into()
+        self.room_id().to_string().into()
     }
 }
 
@@ -905,7 +978,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for SpaceItem {
         ctx: &ProgramContext,
         _: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
-        room_prompt(self.room.room_id(), act, ctx)
+        room_prompt(self.room_id(), act, ctx)
     }
 }
 
@@ -1198,5 +1271,95 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
             },
             _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use matrix_sdk::ruma::{room_alias_id, server_name};
+
+    #[derive(Debug, Eq, PartialEq)]
+    struct TestRoomItem {
+        room_id: OwnedRoomId,
+        tags: Vec<TagName>,
+        alias: Option<OwnedRoomAliasId>,
+        name: &'static str,
+    }
+
+    impl RoomLikeItem for &TestRoomItem {
+        fn room_id(&self) -> &RoomId {
+            self.room_id.as_ref()
+        }
+
+        fn has_tag(&self, tag: TagName) -> bool {
+            self.tags.contains(&tag)
+        }
+
+        fn alias(&self) -> Option<&RoomAliasId> {
+            self.alias.as_deref()
+        }
+
+        fn name(&self) -> &str {
+            self.name
+        }
+    }
+
+    #[test]
+    fn test_sort_rooms() {
+        let server = server_name!("example.com");
+
+        let room1 = TestRoomItem {
+            room_id: RoomId::new(server).to_owned(),
+            tags: vec![TagName::Favorite],
+            alias: Some(room_alias_id!("#room1:example.com").to_owned()),
+            name: "Z",
+        };
+
+        let room2 = TestRoomItem {
+            room_id: RoomId::new(server).to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#a:example.com").to_owned()),
+            name: "Unnamed Room",
+        };
+
+        let room3 = TestRoomItem {
+            room_id: RoomId::new(server).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Cool Room",
+        };
+
+        // Sort by Name ascending.
+        let mut rooms = vec![&room1, &room2, &room3];
+        let fields = &[SortColumn(SortFieldRoom::Name, SortOrder::Ascending)];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        assert_eq!(rooms, vec![&room3, &room2, &room1]);
+
+        // Sort by Name descending.
+        let mut rooms = vec![&room1, &room2, &room3];
+        let fields = &[SortColumn(SortFieldRoom::Name, SortOrder::Descending)];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        assert_eq!(rooms, vec![&room1, &room2, &room3]);
+
+        // Sort by Favorite and Alias before Name to show order matters.
+        let mut rooms = vec![&room1, &room2, &room3];
+        let fields = &[
+            SortColumn(SortFieldRoom::Favorite, SortOrder::Ascending),
+            SortColumn(SortFieldRoom::Alias, SortOrder::Ascending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        assert_eq!(rooms, vec![&room1, &room2, &room3]);
+
+        // Now flip order of Favorite with Descending
+        let mut rooms = vec![&room1, &room2, &room3];
+        let fields = &[
+            SortColumn(SortFieldRoom::Favorite, SortOrder::Descending),
+            SortColumn(SortFieldRoom::Alias, SortOrder::Ascending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        assert_eq!(rooms, vec![&room2, &room3, &room1]);
     }
 }

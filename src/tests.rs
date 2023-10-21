@@ -28,6 +28,7 @@ use crate::{
         ApplicationSettings,
         DirectoryValues,
         ProfileConfig,
+        SortOverrides,
         TunableValues,
         UserColor,
         UserDisplayStyle,
@@ -183,6 +184,7 @@ pub fn mock_tunables() -> TunableValues {
         read_receipt_send: true,
         read_receipt_display: true,
         request_timeout: 120,
+        sort: SortOverrides::default().values(),
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {

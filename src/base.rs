@@ -202,6 +202,135 @@ bitflags::bitflags! {
     }
 }
 
+/// Fields that rooms and spaces can be sorted by.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SortFieldRoom {
+    Favorite,
+    LowPriority,
+    Name,
+    Alias,
+    RoomId,
+}
+
+/// Fields that users can be sorted by.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SortFieldUser {
+    PowerLevel,
+    UserId,
+    LocalPart,
+    Server,
+}
+
+/// Whether to use the default sort direction for a field, or to reverse it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SortOrder {
+    Ascending,
+    Descending,
+}
+
+/// One of the columns to sort on.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SortColumn<T>(pub T, pub SortOrder);
+
+impl<'de> Deserialize<'de> for SortColumn<SortFieldRoom> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SortRoomVisitor)
+    }
+}
+
+/// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
+struct SortRoomVisitor;
+
+impl<'de> Visitor<'de> for SortRoomVisitor {
+    type Value = SortColumn<SortFieldRoom>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid field for sorting rooms")
+    }
+
+    fn visit_str<E>(self, mut value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        if value.is_empty() {
+            return Err(E::custom("Invalid sort field"));
+        }
+
+        let order = if value.starts_with('~') {
+            value = &value[1..];
+            SortOrder::Descending
+        } else {
+            SortOrder::Ascending
+        };
+
+        let field = match value {
+            "favorite" => SortFieldRoom::Favorite,
+            "lowpriority" => SortFieldRoom::LowPriority,
+            "name" => SortFieldRoom::Name,
+            "alias" => SortFieldRoom::Alias,
+            "id" => SortFieldRoom::RoomId,
+            _ => {
+                let msg = format!("Unknown sort field: {value:?}");
+                return Err(E::custom(msg));
+            },
+        };
+
+        Ok(SortColumn(field, order))
+    }
+}
+
+impl<'de> Deserialize<'de> for SortColumn<SortFieldUser> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SortUserVisitor)
+    }
+}
+
+/// [serde] visitor for deserializing [SortColumn] for users.
+struct SortUserVisitor;
+
+impl<'de> Visitor<'de> for SortUserVisitor {
+    type Value = SortColumn<SortFieldUser>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid field for sorting rooms")
+    }
+
+    fn visit_str<E>(self, mut value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        if value.is_empty() {
+            return Err(E::custom("Invalid field for sorting users"));
+        }
+
+        let order = if value.starts_with('~') {
+            value = &value[1..];
+            SortOrder::Descending
+        } else {
+            SortOrder::Ascending
+        };
+
+        let field = match value {
+            "id" => SortFieldUser::UserId,
+            "localpart" => SortFieldUser::LocalPart,
+            "server" => SortFieldUser::Server,
+            "power" => SortFieldUser::PowerLevel,
+            _ => {
+                let msg = format!("Unknown sort field: {value:?}");
+                return Err(E::custom(msg));
+            },
+        };
+
+        Ok(SortColumn(field, order))
+    }
+}
+
 /// A room property.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomField {
@@ -811,7 +940,7 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
 #[derive(Default)]
 pub struct SyncInfo {
     /// Spaces that the user is a member of.
-    pub spaces: Vec<MatrixRoom>,
+    pub spaces: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
 
     /// Rooms that the user is a member of.
     pub rooms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
