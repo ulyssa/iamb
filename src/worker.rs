@@ -421,6 +421,7 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
 pub enum LoginStyle {
     SessionRestore(Session),
     Password(String),
+    SingleSignOn,
 }
 
 pub struct ClientResponse<T>(Receiver<T>);
@@ -1066,6 +1067,29 @@ impl ClientWorker {
                     .send()
                     .await
                     .map_err(IambError::from)?;
+                let file = File::create(self.settings.session_json.as_path())?;
+                let writer = BufWriter::new(file);
+                let session = Session::from(resp);
+                serde_json::to_writer(writer, &session).map_err(IambError::from)?;
+            },
+            LoginStyle::SingleSignOn => {
+                let resp = client
+                    .login_sso(|url| {
+                        let opened = format!(
+                            "The following URL should have been opened in your browser:\n    {url}"
+                        );
+
+                        async move {
+                            tokio::task::spawn_blocking(move || open::that(url));
+                            println!("\n{opened}\n");
+                            Ok(())
+                        }
+                    })
+                    .initial_device_display_name(initial_devname().as_str())
+                    .send()
+                    .await
+                    .map_err(IambError::from)?;
+
                 let file = File::create(self.settings.session_json.as_path())?;
                 let writer = BufWriter::new(file);
                 let session = Session::from(resp);

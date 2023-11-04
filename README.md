@@ -103,7 +103,7 @@ two other TUI clients and Element Web:
 | Message editing                         | ✔️           | ✔️        | ❌               | ✔️                   |
 | Room upgrades                           | ❌ ([#41])  | ✔️        | ❌               | ✔️                   |
 | Localisations                           | ❌          | 1        | ❌               | 44                  |
-| SSO Support                             | ❌          | ✔️        | ✔️                | ✔️                   |
+| SSO Support                             | ✔️           | ✔️        | ✔️                | ✔️                   |
                                                                                        
 ## License
 

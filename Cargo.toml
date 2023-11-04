@@ -61,7 +61,7 @@ rev = "f9f0517ed6a6152c1eab36d2e71b11f38831d5e6"
 [dependencies.matrix-sdk]
 version = "^0.6.2"
 default-features = false
-features = ["e2e-encryption", "sled", "rustls-tls"]
+features = ["e2e-encryption", "sled", "rustls-tls", "sso-login"]
 
 [dependencies.tokio]
 version = "1.24.1"
