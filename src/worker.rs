@@ -1021,8 +1021,13 @@ impl ClientWorker {
             LoginStyle::SingleSignOn => {
                 let resp = client
                     .login_sso(|url| {
+                        let opened = format!(
+                            "The following URL should have been opened in your browser:\n    {url}"
+                        );
+
                         async move {
-                            println!("Open {} in a browser", url);
+                            tokio::task::spawn_blocking(move || open::that(url));
+                            println!("\n{opened}\n");
                             Ok(())
                         }
                     })
