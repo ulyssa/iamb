@@ -27,8 +27,6 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
-use config::ImagePreviewProtocolValues;
-use ratatui_image::picker::Picker;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing_subscriber::FmtSubscriber;
 
@@ -267,40 +265,6 @@ impl Application {
         let bindings = KeyManager::new(bindings);
 
         let mut locked = store.lock().await;
-
-        if let Some(image_preview) = settings.tunables.image_preview.as_ref() {
-            let picker_from_settings = match image_preview.protocol.as_ref() {
-                // User forced type and font_size: use that.
-                Some(&ImagePreviewProtocolValues {
-                    r#type: Some(protocol_type),
-                    font_size: Some(font_size),
-                }) => {
-                    let mut picker = Picker::new(font_size);
-                    picker.protocol_type = protocol_type;
-                    Ok(picker)
-                },
-                // Guess, but use type if forced.
-                #[cfg(unix)]
-                image_preview_protocol => {
-                    Picker::from_termios().map(|mut picker| {
-                        if let Some(&ImagePreviewProtocolValues { r#type: Some(protocol_type), .. }) = image_preview_protocol {
-                            picker.protocol_type = protocol_type;
-                        } else {
-                            picker.guess_protocol();
-                        }
-                        picker
-                    })
-                },
-                // Windows: always needs type and font_size.
-                #[cfg(windows)]
-                _ => Err(Into::<Box<dyn std::error::Error>>::into("\"image_preview\" requires \"protocol\" with \"type\" and \"font_size\" options for windows.")),
-            };
-            match picker_from_settings {
-                Ok(picker) => locked.application.picker = Some(picker),
-                Err(err) => tracing::error!("{}", err),
-            }
-        }
-
         let screen = setup_screen(settings, locked.deref_mut())?;
 
         let worker = locked.application.worker.clone();
@@ -824,6 +788,7 @@ fn main() -> IambResult<()> {
     let log_dir = settings.dirs.logs.as_path();
 
     create_dir_all(settings.matrix_dir.as_path())?;
+    create_dir_all(settings.dirs.image_previews.as_path())?;
     create_dir_all(log_dir)?;
 
     let appender = tracing_appender::rolling::daily(log_dir, log_prefix);

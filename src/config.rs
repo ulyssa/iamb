@@ -272,11 +272,13 @@ pub struct ImagePreviewValues {
     pub size: ImagePreviewSize,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
+
 #[derive(Clone, Default, Deserialize)]
 pub struct ImagePreview {
     pub size: Option<ImagePreviewSize>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
+
 impl ImagePreview {
     fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
@@ -291,11 +293,13 @@ pub struct ImagePreviewSize {
     pub width: usize,
     pub height: usize,
 }
+
 impl Default for ImagePreviewSize {
     fn default() -> Self {
         ImagePreviewSize { width: 66, height: 10 }
     }
 }
+
 #[derive(Clone, Deserialize)]
 pub struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,

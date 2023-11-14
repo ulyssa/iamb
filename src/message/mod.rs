@@ -846,7 +846,7 @@ impl Message {
                 ImageStatus::Loaded(backend) => {
                     Some(Message::placeholder_frame(None, &backend.rect().into()))
                 },
-                ImageStatus::Error(err) => Some(format!("[Image error: {err}]")),
+                ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
             } {
                 msg.to_mut().insert_str(0, &placeholder);
             }

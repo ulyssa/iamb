@@ -86,7 +86,7 @@ overridden as described in *PROFILES*.
 > Enable image previews and configure it. An empty object will enable the
 > feature with default settings, omitting it will disable the feature.
 > *size* is an optional object with *width* and *height* numbers, which are
-> used te set the preview size in characters. Defaults to 66 and 10.
+> used to set the preview size in characters. Defaults to 66 and 10.
 > *protocol* is an optional object to override settings that should normally
 > be guessed automatically.
 > *protocol.type* is an optional string with one of the protocol types:

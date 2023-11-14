@@ -1359,7 +1359,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
         for ((_, _), _, txt, line_preview) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
             if let Some((backend, msg_x, _)) = line_preview {
-                image_previews.push((msg_x, y, backend));
+                image_previews.push((x + msg_x, y, backend));
             }
 
             y += 1;
