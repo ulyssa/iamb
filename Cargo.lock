@@ -687,6 +687,22 @@ dependencies = [
 
 [[package]]
 name = "crossterm"
+version = "0.25.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e64e6c0fbe2c17357405f7c758c1ef960fce08bdfb2c03d88d2a18d7e09c4b67"
+dependencies = [
+ "bitflags 1.3.2",
+ "crossterm_winapi",
+ "libc",
+ "mio",
+ "parking_lot 0.12.1",
+ "signal-hook",
+ "signal-hook-mio",
+ "winapi",
+]
+
+[[package]]
+name = "crossterm"
 version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
@@ -939,6 +955,12 @@ dependencies = [
  "quote",
  "syn 2.0.38",
 ]
+
+[[package]]
+name = "dyn-clone"
+version = "1.0.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "23d2f3407d9a573d666de4b5bdf10569d73ca9478087346697dcbae6244bfbcd"
 
 [[package]]
 name = "ed25519"
@@ -1595,6 +1617,7 @@ dependencies = [
  "modalkit",
  "open",
  "pretty_assertions",
+ "ratatui-image",
  "regex",
  "rpassword",
  "serde",
@@ -1911,6 +1934,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
 
 [[package]]
+name = "make-cmd"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a8ca8afbe8af1785e09636acb5a41e08a765f5f0340568716c18a8700ba3c0d3"
+
+[[package]]
 name = "malloc_buf"
 version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2219,7 +2248,7 @@ dependencies = [
  "anymap2",
  "arboard",
  "bitflags 1.3.2",
- "crossterm",
+ "crossterm 0.27.0",
  "derive_more",
  "intervaltree",
  "libc",
@@ -2842,13 +2871,30 @@ checksum = "2e2e4cd95294a85c3b4446e63ef054eea43e0205b1fd60120c16b74ff7ff96ad"
 dependencies = [
  "bitflags 2.4.0",
  "cassowary",
- "crossterm",
+ "crossterm 0.27.0",
  "indoc",
  "itertools 0.11.0",
  "paste",
  "strum",
  "unicode-segmentation",
  "unicode-width",
+]
+
+[[package]]
+name = "ratatui-image"
+version = "0.4.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a3a43ba44f10847b9f76f54e528832b0d63029ce48be7663fb8ddded27ac1457"
+dependencies = [
+ "base64 0.21.4",
+ "crossterm 0.25.0",
+ "dyn-clone",
+ "image",
+ "rand 0.8.5",
+ "ratatui",
+ "rustix 0.38.17",
+ "serde",
+ "sixel-bytes",
 ]
 
 [[package]]
@@ -3391,6 +3437,25 @@ name = "siphasher"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
+
+[[package]]
+name = "sixel-bytes"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "45cad296a72571e80953823496e9a55caf893e264de9a7c5cfd29427fca720fc"
+dependencies = [
+ "sixel-sys-static",
+]
+
+[[package]]
+name = "sixel-sys-static"
+version = "0.3.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2988846c5099382a880a7dd385d38b203a60430710a9c22e538d500e6908f4f9"
+dependencies = [
+ "make-cmd",
+ "pkg-config",
+]
 
 [[package]]
 name = "slab"

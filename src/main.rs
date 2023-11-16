@@ -68,6 +68,7 @@ mod commands;
 mod config;
 mod keybindings;
 mod message;
+mod preview;
 mod util;
 mod windows;
 mod worker;
@@ -267,6 +268,7 @@ impl Application {
         let screen = setup_screen(settings, locked.deref_mut())?;
 
         let worker = locked.application.worker.clone();
+
         drop(locked);
 
         let actstack = VecDeque::new();
@@ -786,6 +788,7 @@ fn main() -> IambResult<()> {
     let log_dir = settings.dirs.logs.as_path();
 
     create_dir_all(settings.matrix_dir.as_path())?;
+    create_dir_all(settings.dirs.image_previews.as_path())?;
     create_dir_all(log_dir)?;
 
     let appender = tracing_appender::rolling::daily(log_dir, log_prefix);

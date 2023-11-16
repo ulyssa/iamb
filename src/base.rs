@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
+use ratatui_image::picker::{Picker, ProtocolType};
 use serde::{
     de::Error as SerdeError,
     de::Visitor,
@@ -81,6 +82,9 @@ use modalkit::{
     },
 };
 
+use crate::config::ImagePreviewProtocolValues;
+use crate::message::ImageStatus;
+use crate::preview::{source_from_event, spawn_insert_preview};
 use crate::{
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     worker::Requester,
@@ -617,6 +621,14 @@ pub enum IambError {
     /// A failure to access the system's clipboard.
     #[error("Could not use system clipboard data")]
     Clipboard,
+
+    /// An failure during disk/network/ipc/etc. I/O.
+    #[error("Input/Output error: {0}")]
+    IOError(#[from] std::io::Error),
+
+    /// A failure while trying to show an image preview.
+    #[error("Preview error: {0}")]
+    Preview(String),
 }
 
 impl From<IambError> for UIError<IambInfo> {
@@ -737,6 +749,11 @@ impl RoomInfo {
         self.messages.get(self.get_message_key(event_id)?)
     }
 
+    /// Get an event for an identifier as mutable.
+    pub fn get_event_mut(&mut self, event_id: &EventId) -> Option<&mut Message> {
+        self.messages.get_mut(self.keys.get(event_id)?.to_message_key()?)
+    }
+
     /// Insert a reaction to a message.
     pub fn insert_reaction(&mut self, react: ReactionEvent) {
         match react {
@@ -824,6 +841,37 @@ impl RoomInfo {
                 ..
             }) => self.insert_edit(repl),
             _ => self.insert_message(msg),
+        }
+    }
+
+    /// Insert a new message event, and spawn a task for image-preview if it has an image
+    /// attachment.
+    pub fn insert_with_preview(
+        &mut self,
+        room_id: OwnedRoomId,
+        store: AsyncProgramStore,
+        picker: Option<Picker>,
+        ev: RoomMessageEvent,
+        settings: &mut ApplicationSettings,
+        media: matrix_sdk::Media,
+    ) {
+        let source = picker.and_then(|_| source_from_event(&ev));
+        self.insert(ev);
+
+        if let Some((event_id, source)) = source {
+            if let (Some(msg), Some(image_preview)) =
+                (self.get_event_mut(&event_id), &settings.tunables.image_preview)
+            {
+                msg.image_preview = ImageStatus::Downloading(image_preview.size.clone());
+                spawn_insert_preview(
+                    store,
+                    room_id,
+                    event_id,
+                    source,
+                    media,
+                    settings.dirs.image_previews.clone(),
+                )
+            }
         }
     }
 
@@ -936,6 +984,51 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
     return emojis;
 }
 
+#[cfg(unix)]
+fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
+    let mut picker = match Picker::from_termios() {
+        Ok(picker) => picker,
+        Err(e) => {
+            tracing::error!("Failed to setup image previews: {e}");
+            return None;
+        },
+    };
+
+    if let Some(protocol_type) = protocol_type {
+        picker.protocol_type = protocol_type;
+    } else {
+        picker.guess_protocol();
+    }
+
+    Some(picker)
+}
+
+/// Windows cannot guess the right protocol, and always needs type and font_size.
+#[cfg(windows)]
+fn picker_from_termios(_: Option<ProtocolType>) -> Option<Picker> {
+    tracing::error!("\"image_preview\" requires \"protocol\" with \"type\" and \"font_size\" options on Windows.");
+    None
+}
+
+fn picker_from_settings(settings: &ApplicationSettings) -> Option<Picker> {
+    let image_preview = settings.tunables.image_preview.as_ref()?;
+    let image_preview_protocol = image_preview.protocol.as_ref();
+
+    if let Some(&ImagePreviewProtocolValues {
+        r#type: Some(protocol_type),
+        font_size: Some(font_size),
+    }) = image_preview_protocol
+    {
+        // User forced type and font_size: use that.
+        let mut picker = Picker::new(font_size);
+        picker.protocol_type = protocol_type;
+        Some(picker)
+    } else {
+        // Guess, but use type if forced.
+        picker_from_termios(image_preview_protocol.and_then(|p| p.r#type))
+    }
+}
+
 /// Information gathered during server syncs about joined rooms.
 #[derive(Default)]
 pub struct SyncInfo {
@@ -980,15 +1073,20 @@ pub struct ChatStore {
 
     /// Information gathered by the background thread.
     pub sync_info: SyncInfo,
+
+    /// Image preview "protocol" picker.
+    pub picker: Option<Picker>,
 }
 
 impl ChatStore {
     /// Create a new [ChatStore].
     pub fn new(worker: Requester, settings: ApplicationSettings) -> Self {
+        let picker = picker_from_settings(&settings);
+
         ChatStore {
             worker,
             settings,
-
+            picker,
             cmds: crate::commands::setup_commands(),
             emojis: emoji_map(),
 

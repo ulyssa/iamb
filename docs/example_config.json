@@ -23,7 +23,16 @@
 				"color": "magenta"
 			}
 		},
-		"default_room": "#iamb-users:0x.badd.cafe"
+		"default_room": "#iamb-users:0x.badd.cafe",
+		"image_preview": {
+			"protocol": {
+				"type": "sixel"
+			},
+			"size": {
+				"width": 66,
+				"height": 10
+			}
+		}
 	},
 	"dirs": {
 		"cache":     "/home/user/.cache/iamb/",

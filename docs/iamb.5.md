@@ -82,6 +82,18 @@ overridden as described in *PROFILES*.
 **default_room** (type: string)
 > The room to show by default instead of a welcome-screen.
 
+**image_preview** (type: image_preview object)
+> Enable image previews and configure it. An empty object will enable the
+> feature with default settings, omitting it will disable the feature.
+> *size* is an optional object with *width* and *height* numbers, which are
+> used to set the preview size in characters. Defaults to 66 and 10.
+> *protocol* is an optional object to override settings that should normally
+> be guessed automatically.
+> *protocol.type* is an optional string with one of the protocol types:
+> _sixel_, _kitty_, _halfblocks_.
+> *protocol.font_size* is an optional list of two numbers representing font
+> width and height in pixels.
+
 ## USER OVERRIDES
 
 Overrides are mapped onto matrix User IDs such as _@user:matrix.org_ and are
@@ -126,6 +138,9 @@ Specifies the directories to save data in. Configured as a map under the key
 
 **downloads** (type: string)
 > Specifies where to store downloaded files.
+
+**image_previews** (type: string)
+> Specifies where to store automatically downloaded image previews.
 
 # SEE ALSO
 

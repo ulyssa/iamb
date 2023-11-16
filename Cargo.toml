@@ -40,6 +40,7 @@ markup5ever_rcdom = "0.2.0"
 mime = "^0.3.16"
 mime_guess = "^2.0.4"
 open = "3.2.0"
+ratatui-image = { version = "0.4.1", features = ["serde"] }
 regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"
@@ -74,3 +75,7 @@ pretty_assertions = "1.4.0"
 [profile.release]
 lto = true
 incremental = false
+
+[features]
+default = ["sixel"]
+sixel = ["ratatui-image/sixel"]
