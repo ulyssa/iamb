@@ -711,7 +711,7 @@ impl Message {
             USER_GUTTER
         } else {
             0
-        } + 1) as u16;
+        }) as u16;
         // See get_render_format; account for possible "date" line.
         let date_y = match &prev {
             Some(prev) if !prev.timestamp.same_day(&self.timestamp) => 1,
