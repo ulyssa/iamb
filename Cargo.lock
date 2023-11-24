@@ -1657,6 +1657,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "icy_sixel"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1dc4d30216c3fc247730a4c6c74db2bd217a5454361ce24d70e504bda0cd345e"
+
+[[package]]
 name = "ident_case"
 version = "1.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1932,12 +1938,6 @@ name = "mac"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c41e0c4fef86961ac6d6f8a82609f55f31b05e4fce149ac5710e439df7619ba4"
-
-[[package]]
-name = "make-cmd"
-version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a8ca8afbe8af1785e09636acb5a41e08a765f5f0340568716c18a8700ba3c0d3"
 
 [[package]]
 name = "malloc_buf"
@@ -2882,19 +2882,19 @@ dependencies = [
 
 [[package]]
 name = "ratatui-image"
-version = "0.4.1"
+version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a3a43ba44f10847b9f76f54e528832b0d63029ce48be7663fb8ddded27ac1457"
+checksum = "d864e8e24222cc289906cc53fede6f8751ce2935d636842a04dc65dfb9958e62"
 dependencies = [
  "base64 0.21.4",
  "crossterm 0.25.0",
  "dyn-clone",
+ "icy_sixel",
  "image",
  "rand 0.8.5",
  "ratatui",
  "rustix 0.38.17",
  "serde",
- "sixel-bytes",
 ]
 
 [[package]]
@@ -3437,25 +3437,6 @@ name = "siphasher"
 version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "38b58827f4464d87d377d175e90bf58eb00fd8716ff0a62f80356b5e61555d0d"
-
-[[package]]
-name = "sixel-bytes"
-version = "0.2.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "45cad296a72571e80953823496e9a55caf893e264de9a7c5cfd29427fca720fc"
-dependencies = [
- "sixel-sys-static",
-]
-
-[[package]]
-name = "sixel-sys-static"
-version = "0.3.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2988846c5099382a880a7dd385d38b203a60430710a9c22e538d500e6908f4f9"
-dependencies = [
- "make-cmd",
- "pkg-config",
-]
 
 [[package]]
 name = "slab"
