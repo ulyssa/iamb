@@ -44,9 +44,9 @@ jobs:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         reporter: 'github-check'
     - name: Run tests
-      run: cargo test ${{ matrix.platform == 'windows-latest' && '--no-default-features' || '' }}
+      run: cargo test
     - name: Build artifacts
-      run: cargo build --release ${{ matrix.platform == 'windows-latest' && '--no-default-features' || '' }}
+      run: cargo build --release
     - name: Upload artifacts
       uses: actions/upload-artifact@master
       with:
