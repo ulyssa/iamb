@@ -78,6 +78,7 @@ use matrix_sdk::{
 
 use modalkit::editing::action::{EditInfo, InfoMessage, UIError};
 
+use crate::base::Need;
 use crate::{
     base::{
         AsyncProgramStore,
@@ -187,32 +188,61 @@ async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id:
     }
 }
 
-async fn load_plan(store: &AsyncProgramStore) -> HashMap<OwnedRoomId, Option<String>> {
+#[derive(Debug)]
+enum Plan {
+    Messages(OwnedRoomId, Option<String>),
+    Members(OwnedRoomId),
+}
+async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
     let mut locked = store.lock().await;
     let ChatStore { need_load, rooms, .. } = &mut locked.application;
-    let mut plan = HashMap::new();
+    let mut plan = vec![];
 
-    for room_id in std::mem::take(need_load).into_iter() {
-        let info = rooms.get_or_default(room_id.clone());
+    for (room_id, mut need) in std::mem::take(need_load).into_iter() {
+        if need.contains(Need::MESSAGES) {
+            let info = rooms.get_or_default(room_id.clone());
 
-        if info.recently_fetched() || info.fetching {
-            need_load.insert(room_id);
-            continue;
-        } else {
-            info.fetch_last = Instant::now().into();
-            info.fetching = true;
+            if !info.recently_fetched() && !info.fetching {
+                info.fetch_last = Instant::now().into();
+                info.fetching = true;
+
+                let fetch_id = match &info.fetch_id {
+                    RoomFetchStatus::Done => continue,
+                    RoomFetchStatus::HaveMore(fetch_id) => Some(fetch_id.clone()),
+                    RoomFetchStatus::NotStarted => None,
+                };
+
+                plan.push(Plan::Messages(room_id.to_owned(), fetch_id));
+                need.remove(Need::MESSAGES);
+            }
         }
-
-        let fetch_id = match &info.fetch_id {
-            RoomFetchStatus::Done => continue,
-            RoomFetchStatus::HaveMore(fetch_id) => Some(fetch_id.clone()),
-            RoomFetchStatus::NotStarted => None,
-        };
-
-        plan.insert(room_id, fetch_id);
+        if need.contains(Need::MEMBERS) {
+            plan.push(Plan::Members(room_id.to_owned()));
+            need.remove(Need::MEMBERS);
+        }
+        if !need.is_empty() {
+            need_load.insert(room_id, need);
+        }
     }
 
     return plan;
+}
+
+async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan) {
+    match plan {
+        Plan::Messages(room_id, fetch_id) => {
+            let limit = MIN_MSG_LOAD;
+            let client = client.clone();
+            let store = store.clone();
+
+            let res = load_older_one(&client, &room_id, fetch_id, limit).await;
+            load_insert(room_id, res, store).await;
+        },
+        Plan::Members(room_id) => {
+            let res = members_load(client, &room_id).await;
+            members_insert(room_id, res, store).await
+        },
+    }
 }
 
 async fn load_older_one(
@@ -246,15 +276,7 @@ async fn load_older_one(
 
 async fn load_insert(room_id: OwnedRoomId, res: MessageFetchResult, store: AsyncProgramStore) {
     let mut locked = store.lock().await;
-    let ChatStore {
-        need_load,
-        presences,
-        rooms,
-        worker,
-        picker,
-        settings,
-        ..
-    } = &mut locked.application;
+    let ChatStore { presences, rooms, worker, picker, settings, .. } = &mut locked.application;
     let info = rooms.get_or_default(room_id.clone());
     info.fetching = false;
     let client = &worker.client;
@@ -296,33 +318,52 @@ async fn load_insert(room_id: OwnedRoomId, res: MessageFetchResult, store: Async
             warn!(room_id = room_id.as_str(), err = e.to_string(), "Failed to load older messages");
 
             // Wait and try again.
-            need_load.insert(room_id);
+            locked.application.need_load.insert(room_id, Need::MESSAGES);
         },
     }
 }
 
 async fn load_older(client: &Client, store: &AsyncProgramStore) -> usize {
-    let limit = MIN_MSG_LOAD;
-
-    // Fetch each room separately, so they don't block each other.
-    load_plan(store)
+    // Plans are run in parallel. Any room *may* have several plans.
+    load_plans(store)
         .await
         .into_iter()
-        .map(|(room_id, fetch_id)| {
-            let store = store.clone();
-
-            async move {
-                let res = load_older_one(client, room_id.as_ref(), fetch_id, limit).await;
-                load_insert(room_id, res, store).await;
-            }
-        })
+        .map(|plan| run_plan(client, store, plan))
         .collect::<FuturesUnordered<_>>()
         .count()
         .await
 }
 
+async fn members_load(client: &Client, room_id: &RoomId) -> IambResult<Vec<RoomMember>> {
+    if let Some(room) = client.get_room(room_id) {
+        Ok(room.members_no_sync().await.map_err(IambError::from)?)
+    } else {
+        Err(IambError::UnknownRoom(room_id.to_owned()).into())
+    }
+}
+
+async fn members_insert(
+    room_id: OwnedRoomId,
+    res: IambResult<Vec<RoomMember>>,
+    store: &AsyncProgramStore,
+) {
+    if let Ok(members) = res {
+        let mut locked = store.lock().await;
+        let ChatStore { rooms, .. } = &mut locked.application;
+        let info = rooms.get_or_default(room_id.clone());
+
+        for member in members {
+            let user_id = member.user_id();
+            let display_name =
+                member.display_name().map_or(user_id.to_string(), |str| str.to_string());
+            info.display_names.insert(user_id.to_owned(), display_name);
+        }
+    }
+    // else ???
+}
+
 async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
-    // Load older messages every 2 seconds.
+    // Load any pending older messages or members every 2 seconds.
     let mut interval = tokio::time::interval(Duration::from_secs(2));
 
     loop {

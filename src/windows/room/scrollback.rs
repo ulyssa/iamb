@@ -1,5 +1,4 @@
 //! Message scrollback
-use std::collections::HashSet;
 
 use ratatui_image::FixedImage;
 use regex::Regex;
@@ -73,7 +72,16 @@ use modalkit::editing::{
 };
 
 use crate::{
-    base::{IambBufferId, IambInfo, IambResult, ProgramContext, ProgramStore, RoomFocus, RoomInfo},
+    base::{
+        IambBufferId,
+        IambInfo,
+        IambResult,
+        Need,
+        ProgramContext,
+        ProgramStore,
+        RoomFocus,
+        RoomInfo,
+    },
     config::ApplicationSettings,
     message::{Message, MessageCursor, MessageKey, Messages},
 };
@@ -468,8 +476,7 @@ impl ScrollbackState {
         needle: &Regex,
         mut count: usize,
         info: &RoomInfo,
-        need_load: &mut HashSet<OwnedRoomId>,
-    ) -> Option<MessageCursor> {
+    ) -> (Option<MessageCursor>, bool) {
         let mut mc = None;
 
         for (key, msg) in info.messages.range(..&end).rev() {
@@ -483,11 +490,7 @@ impl ScrollbackState {
             }
         }
 
-        if count > 0 {
-            need_load.insert(self.room_id.clone());
-        }
-
-        return mc;
+        return (mc, count > 0);
     }
 
     fn find_message(
@@ -497,11 +500,10 @@ impl ScrollbackState {
         needle: &Regex,
         count: usize,
         info: &RoomInfo,
-        need_load: &mut HashSet<OwnedRoomId>,
-    ) -> Option<MessageCursor> {
+    ) -> (Option<MessageCursor>, bool) {
         match dir {
-            MoveDir1D::Next => self.find_message_next(key, needle, count, info),
-            MoveDir1D::Previous => self.find_message_prev(key, needle, count, info, need_load),
+            MoveDir1D::Next => (self.find_message_next(key, needle, count, info), false),
+            MoveDir1D::Previous => self.find_message_prev(key, needle, count, info),
         }
     }
 }
@@ -628,14 +630,14 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                             },
                         };
 
-                        self.find_message(
-                            key,
-                            dir,
-                            &needle,
-                            count,
-                            info,
-                            &mut store.application.need_load,
-                        )
+                        let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
+                        if needs_load {
+                            store
+                                .application
+                                .need_load
+                                .insert(self.room_id.clone(), Need::MESSAGES);
+                        }
+                        mc
                     },
                     EditTarget::Search(SearchType::Word(_, _), _, _) => {
                         let msg = "Cannot perform word search in a list";
@@ -714,15 +716,15 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                             },
                         };
 
-                        self.find_message(
-                            key,
-                            dir,
-                            &needle,
-                            count,
-                            info,
-                            &mut store.application.need_load,
-                        )
-                        .map(|c| self._range_to(c))
+                        let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
+                        if needs_load {
+                            store
+                                .application
+                                .need_load
+                                .insert(self.room_id.to_owned(), Need::MESSAGES);
+                        }
+
+                        mc.map(|c| self._range_to(c))
                     },
                     EditTarget::Search(SearchType::Word(_, _), _, _) => {
                         let msg = "Cannot perform word search in a list";
@@ -1288,7 +1290,10 @@ impl<'a> StatefulWidget for Scrollback<'a> {
         let cursor_key = if let Some(k) = cursor.to_key(info) {
             k
         } else {
-            self.store.application.mark_for_load(state.room_id.clone());
+            self.store
+                .application
+                .need_load
+                .insert(state.room_id.to_owned(), Need::MESSAGES);
             return;
         };
 
@@ -1389,7 +1394,10 @@ impl<'a> StatefulWidget for Scrollback<'a> {
         let first_key = info.messages.first_key_value().map(|(k, _)| k.clone());
         if first_key == state.viewctx.corner.timestamp {
             // If the top of the screen is the older message, load more.
-            self.store.application.mark_for_load(state.room_id.clone());
+            self.store
+                .application
+                .need_load
+                .insert(state.room_id.to_owned(), Need::MESSAGES);
         }
     }
 }
@@ -1427,12 +1435,23 @@ mod tests {
         // Search backwards to MSG2.
         scrollback.search(prev.clone(), 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
-        assert_eq!(store.application.need_load.contains(&room_id), false);
+        assert_eq!(
+            std::mem::take(&mut store.application.need_load)
+                .into_iter()
+                .collect::<Vec<(OwnedRoomId, Need)>>()
+                .is_empty(),
+            true,
+        );
 
         // Can't go any further; need_load now contains the room ID.
         scrollback.search(prev.clone(), 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
-        assert_eq!(store.application.need_load.contains(&room_id), true);
+        assert_eq!(
+            std::mem::take(&mut store.application.need_load)
+                .into_iter()
+                .collect::<Vec<(OwnedRoomId, Need)>>(),
+            vec![(room_id.clone(), Need::MESSAGES)]
+        );
 
         // Search forward twice to MSG1.
         scrollback.search(next.clone(), 2.into(), &ctx, &mut store).unwrap();
