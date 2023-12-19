@@ -2,6 +2,7 @@
 //!
 //! The types defined here get used throughout iamb.
 use std::borrow::Cow;
+use std::collections::hash_map::IntoIter;
 use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
@@ -1042,6 +1043,38 @@ pub struct SyncInfo {
     pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
 }
 
+bitflags::bitflags! {
+    /// Load-needs
+    #[derive(Debug, Default, PartialEq)]
+    pub struct Need: u32 {
+        const EMPTY = 0b00000000;
+        const MESSAGES = 0b00000001;
+        const MEMBERS =  0b00000010;
+    }
+}
+
+/// Things that need loading for different rooms.
+#[derive(Default)]
+pub struct RoomNeeds {
+    needs: HashMap<OwnedRoomId, Need>,
+}
+
+impl RoomNeeds {
+    /// Mark a room for needing something to be loaded.
+    pub fn insert(&mut self, room_id: OwnedRoomId, need: Need) {
+        self.needs.entry(room_id).or_default().insert(need);
+    }
+}
+
+impl IntoIterator for RoomNeeds {
+    type Item = (OwnedRoomId, Need);
+    type IntoIter = IntoIter<OwnedRoomId, Need>;
+
+    fn into_iter(self) -> Self::IntoIter {
+        self.needs.into_iter()
+    }
+}
+
 /// The main application state.
 pub struct ChatStore {
     /// `:`-commands
@@ -1066,7 +1099,7 @@ pub struct ChatStore {
     pub settings: ApplicationSettings,
 
     /// Set of rooms that need more messages loaded in their scrollback.
-    pub need_load: HashSet<OwnedRoomId>,
+    pub need_load: RoomNeeds,
 
     /// [CompletionMap] of Emoji shortcodes.
     pub emojis: CompletionMap<String, &'static Emoji>,
@@ -1111,11 +1144,6 @@ impl ChatStore {
             .and_then(|i| i.name.as_ref())
             .map(String::from)
             .unwrap_or_else(|| "Untitled Matrix Room".to_string())
-    }
-
-    /// Mark a room for loading more scrollback.
-    pub fn mark_for_load(&mut self, room_id: OwnedRoomId) {
-        self.need_load.insert(room_id);
     }
 
     /// Get the [RoomInfo] for a given room identifier.
@@ -1657,6 +1685,21 @@ pub mod tests {
                 Span::from(" is typing...")
             ])
         );
+    }
+
+    #[test]
+    fn test_need_load() {
+        let room_id = TEST_ROOM1_ID.clone();
+
+        let mut need_load = RoomNeeds::default();
+
+        need_load.insert(room_id.clone(), Need::MESSAGES);
+        need_load.insert(room_id.clone(), Need::MEMBERS);
+
+        assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
+            room_id,
+            Need::MESSAGES | Need::MEMBERS,
+        )],);
     }
 
     #[tokio::test]

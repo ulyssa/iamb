@@ -77,6 +77,7 @@ use crate::base::{
     IambInfo,
     IambResult,
     MessageAction,
+    Need,
     ProgramAction,
     ProgramContext,
     ProgramStore,
@@ -659,6 +660,7 @@ impl Window<IambInfo> for IambWindow {
                 let (room, name, tags) = store.application.worker.get_room(room_id)?;
                 let room = RoomState::new(room, name, tags, store);
 
+                store.application.need_load.insert(room.id().to_owned(), Need::MEMBERS);
                 return Ok(room.into());
             },
             IambId::DirectList => {
@@ -710,6 +712,7 @@ impl Window<IambInfo> for IambWindow {
             let (room, name, tags) = store.application.worker.get_room(room_id)?;
             let room = RoomState::new(room, name, tags, store);
 
+            store.application.need_load.insert(room.id().to_owned(), Need::MEMBERS);
             Ok(room.into())
         }
     }
