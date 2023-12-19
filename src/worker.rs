@@ -193,6 +193,7 @@ enum Plan {
     Messages(OwnedRoomId, Option<String>),
     Members(OwnedRoomId),
 }
+
 async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
     let mut locked = store.lock().await;
     let ChatStore { need_load, rooms, .. } = &mut locked.application;

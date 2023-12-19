@@ -1045,8 +1045,9 @@ pub struct SyncInfo {
 
 bitflags::bitflags! {
     /// Load-needs
-    #[derive(Debug, PartialEq)]
+    #[derive(Debug, Default, PartialEq)]
     pub struct Need: u32 {
+        const EMPTY = 0b00000000;
         const MESSAGES = 0b00000001;
         const MEMBERS =  0b00000010;
     }
@@ -1061,13 +1062,7 @@ pub struct RoomNeeds {
 impl RoomNeeds {
     /// Mark a room for needing something to be loaded.
     pub fn insert(&mut self, room_id: OwnedRoomId, need: Need) {
-        let new_need = if let Some(mut existing_need) = self.needs.remove(&room_id) {
-            existing_need.insert(need);
-            existing_need
-        } else {
-            need
-        };
-        self.needs.insert(room_id, new_need);
+        self.needs.entry(room_id).or_default().insert(need);
     }
 }
 

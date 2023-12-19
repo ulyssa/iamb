@@ -1,5 +1,4 @@
 //! # Windows for Matrix rooms and spaces
-
 use matrix_sdk::{
     room::{Invited, Room as MatrixRoom},
     ruma::{
@@ -110,8 +109,8 @@ impl RoomState {
         tags: Option<Tags>,
         store: &mut ProgramStore,
     ) -> Self {
-        let room_id = room.room_id();
-        let info = store.application.get_room_info(room_id.to_owned());
+        let room_id = room.room_id().to_owned();
+        let info = store.application.get_room_info(room_id);
         info.name = name.to_string().into();
         info.tags = tags;
 
