@@ -1437,6 +1437,8 @@ impl<'a> StatefulWidget for Scrollback<'a> {
                 .need_load
                 .insert(state.room_id.to_owned(), Need::MESSAGES);
         }
+
+        info.draw_last = self.store.application.draw_curr;
     }
 }
 

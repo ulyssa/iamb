@@ -85,6 +85,16 @@ overridden as described in *PROFILES*.
 **message_user_color** (type: boolean)
 > Defines whether or not the message body is colored like the username.
 
+**notifications** (type: notifications object)
+> Configures push-notifications, which are delivered as desktop 
+> notifications if available.
+> *enabled* `true` to enable the feature, defaults to `false`.
+> *show_message* to show the message in the desktop notification. Defaults
+> to `true`. Messages are truncated beyond a small length.
+> The notification _rules_ are stored server side, loaded once at startup,
+> and are currently not configurable in iamb. In other words, you can
+> simply change the rules with another client.
+
 **image_preview** (type: image_preview object)
 > Enable image previews and configure it. An empty object will enable the
 > feature with default settings, omitting it will disable the feature.

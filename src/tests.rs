@@ -27,6 +27,7 @@ use crate::{
         user_style_from_color,
         ApplicationSettings,
         DirectoryValues,
+        Notifications,
         ProfileConfig,
         SortOverrides,
         TunableValues,
@@ -164,6 +165,7 @@ pub fn mock_room() -> RoomInfo {
         fetch_last: None,
         users_typing: None,
         display_names: HashMap::new(),
+        draw_last: None,
     }
 }
 
@@ -198,6 +200,7 @@ pub fn mock_tunables() -> TunableValues {
         open_command: None,
         username_display: UserDisplayStyle::Username,
         message_user_color: false,
+        notifications: Notifications { enabled: false, show_message: None },
         image_preview: None,
     }
 }

@@ -24,7 +24,7 @@ use std::ops::DerefMut;
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use clap::Parser;
 use matrix_sdk::crypto::encrypt_room_key_export;
@@ -66,6 +66,7 @@ mod commands;
 mod config;
 mod keybindings;
 mod message;
+mod notifications;
 mod preview;
 mod sled_export;
 mod util;
@@ -305,6 +306,7 @@ impl Application {
             // Don't show terminal cursor when we show a dialog.
             let hide_cursor = !dialogstr.is_empty();
 
+            store.application.draw_curr = Some(Instant::now());
             let screen = Screen::new(store)
                 .show_dialog(dialogstr)
                 .show_mode(modestr)

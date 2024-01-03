@@ -391,6 +391,12 @@ pub enum UserDisplayStyle {
     DisplayName,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct Notifications {
+    pub enabled: bool,
+    pub show_message: Option<bool>,
+}
+
 #[derive(Clone)]
 pub struct ImagePreviewValues {
     pub size: ImagePreviewSize,
@@ -476,6 +482,7 @@ pub struct TunableValues {
     pub message_user_color: bool,
     pub default_room: Option<String>,
     pub open_command: Option<Vec<String>>,
+    pub notifications: Notifications,
     pub image_preview: Option<ImagePreviewValues>,
 }
 
@@ -496,6 +503,7 @@ pub struct Tunables {
     pub message_user_color: Option<bool>,
     pub default_room: Option<String>,
     pub open_command: Option<Vec<String>>,
+    pub notifications: Option<Notifications>,
     pub image_preview: Option<ImagePreview>,
 }
 
@@ -518,6 +526,7 @@ impl Tunables {
             message_user_color: self.message_user_color.or(other.message_user_color),
             default_room: self.default_room.or(other.default_room),
             open_command: self.open_command.or(other.open_command),
+            notifications: self.notifications.or(other.notifications),
             image_preview: self.image_preview.or(other.image_preview),
         }
     }
@@ -538,6 +547,7 @@ impl Tunables {
             message_user_color: self.message_user_color.unwrap_or(false),
             default_room: self.default_room,
             open_command: self.open_command,
+            notifications: self.notifications.unwrap_or_default(),
             image_preview: self.image_preview.map(ImagePreview::values),
         }
     }
