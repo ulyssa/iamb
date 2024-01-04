@@ -634,7 +634,7 @@ impl Message {
         }
     }
 
-    fn get_render_style(&self, selected: bool) -> Style {
+    fn get_render_style(&self, selected: bool, settings: &ApplicationSettings) -> Style {
         let mut style = Style::default();
 
         if selected {
@@ -643,6 +643,11 @@ impl Message {
 
         if self.timestamp.is_local_echo() {
             style = style.add_modifier(StyleModifier::ITALIC);
+        }
+
+        if settings.tunables.message_user_color {
+            let color = crate::config::user_color(self.sender.as_str());
+            style = style.fg(color);
         }
 
         return style;
@@ -738,7 +743,7 @@ impl Message {
     ) -> Text<'a> {
         let width = vwctx.get_width();
 
-        let style = self.get_render_style(selected);
+        let style = self.get_render_style(selected, settings);
         let mut fmt = self.get_render_format(prev, width, info, settings);
         let mut text = Text { lines: vec![] };
         let width = fmt.width();
