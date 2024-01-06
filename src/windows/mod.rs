@@ -87,6 +87,7 @@ use crate::base::{
     SortFieldRoom,
     SortFieldUser,
     SortOrder,
+    SyncInfo,
 };
 
 use self::{room::RoomState, welcome::WelcomeState};
@@ -450,24 +451,29 @@ impl WindowOps<IambInfo> for IambWindow {
         match self {
             IambWindow::Room(state) => state.draw(area, buf, focused, store),
             IambWindow::DirectList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
-                    .dms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| DirectItem::new(room_info, store))
-                    .collect::<Vec<_>>();
-                let fields = &store.application.settings.tunables.sort.dms;
-                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+                let list = match &store.application.sync_info {
+                    None => {
+                        List::new(store)
+                            .empty_message("Syncing...")
+                            .empty_alignment(Alignment::Center)
+                    },
+                    Some(SyncInfo { dms, .. }) => {
+                        let mut items = dms
+                            .clone()
+                            .into_iter()
+                            .map(|room_info| DirectItem::new(room_info, store))
+                            .collect::<Vec<_>>();
+                        let fields = &store.application.settings.tunables.sort.dms;
+                        items.sort_by(|a, b| room_fields_cmp(a, b, fields));
 
-                state.set(items);
+                        state.set(items);
 
-                List::new(store)
-                    .empty_message("No direct messages yet!")
-                    .empty_alignment(Alignment::Center)
-                    .focus(focused)
-                    .render(area, buf, state);
+                        List::new(store)
+                            .empty_message("No direct messages yet!")
+                            .empty_alignment(Alignment::Center)
+                    },
+                };
+                list.focus(focused).render(area, buf, state);
             },
             IambWindow::MemberList(state, room_id, last_fetch) => {
                 let need_fetch = match last_fetch {
@@ -495,44 +501,54 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::RoomList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
-                    .rooms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| RoomItem::new(room_info, store))
-                    .collect::<Vec<_>>();
-                let fields = &store.application.settings.tunables.sort.rooms;
-                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+                let list = match &store.application.sync_info {
+                    None => {
+                        List::new(store)
+                            .empty_message("Syncing...")
+                            .empty_alignment(Alignment::Center)
+                    },
+                    Some(SyncInfo { rooms, .. }) => {
+                        let mut items = rooms
+                            .clone()
+                            .into_iter()
+                            .map(|room_info| RoomItem::new(room_info, store))
+                            .collect::<Vec<_>>();
+                        let fields = &store.application.settings.tunables.sort.dms;
+                        items.sort_by(|a, b| room_fields_cmp(a, b, fields));
 
-                state.set(items);
+                        state.set(items);
 
-                List::new(store)
-                    .empty_message("You haven't joined any rooms yet")
-                    .empty_alignment(Alignment::Center)
-                    .focus(focused)
-                    .render(area, buf, state);
+                        List::new(store)
+                            .empty_message("You haven't joined any rooms yet")
+                            .empty_alignment(Alignment::Center)
+                    },
+                };
+                list.focus(focused).render(area, buf, state);
             },
             IambWindow::SpaceList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
-                    .spaces
-                    .clone()
-                    .into_iter()
-                    .map(|room| SpaceItem::new(room, store))
-                    .collect::<Vec<_>>();
-                let fields = &store.application.settings.tunables.sort.spaces;
-                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+                let list = match &store.application.sync_info {
+                    None => {
+                        List::new(store)
+                            .empty_message("Syncing...")
+                            .empty_alignment(Alignment::Center)
+                    },
+                    Some(SyncInfo { spaces, .. }) => {
+                        let mut items = spaces
+                            .clone()
+                            .into_iter()
+                            .map(|room| SpaceItem::new(room, store))
+                            .collect::<Vec<_>>();
+                        let fields = &store.application.settings.tunables.sort.dms;
+                        items.sort_by(|a, b| room_fields_cmp(a, b, fields));
 
-                state.set(items);
+                        state.set(items);
 
-                List::new(store)
-                    .empty_message("You haven't joined any spaces yet")
-                    .empty_alignment(Alignment::Center)
-                    .focus(focused)
-                    .render(area, buf, state);
+                        List::new(store)
+                            .empty_message("You haven't joined any spaces yet")
+                            .empty_alignment(Alignment::Center)
+                    },
+                };
+                list.focus(focused).render(area, buf, state);
             },
             IambWindow::VerifyList(state) => {
                 let verifications = &store.application.verifications;

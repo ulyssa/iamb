@@ -1105,7 +1105,7 @@ pub struct ChatStore {
     pub emojis: CompletionMap<String, &'static Emoji>,
 
     /// Information gathered by the background thread.
-    pub sync_info: SyncInfo,
+    pub sync_info: Option<SyncInfo>,
 
     /// Image preview "protocol" picker.
     pub picker: Option<Picker>,

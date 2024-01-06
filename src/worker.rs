@@ -78,7 +78,7 @@ use matrix_sdk::{
 
 use modalkit::editing::action::{EditInfo, InfoMessage, UIError};
 
-use crate::base::Need;
+use crate::base::{Need, SyncInfo};
 use crate::{
     base::{
         AsyncProgramStore,
@@ -374,6 +374,10 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
 }
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
+    if client.sync_token().await.is_none() {
+        return;
+    }
+
     let mut names = vec![];
 
     let mut spaces = vec![];
@@ -411,9 +415,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     }
 
     let mut locked = store.lock().await;
-    locked.application.sync_info.spaces = spaces;
-    locked.application.sync_info.rooms = rooms;
-    locked.application.sync_info.dms = dms;
+    locked.application.sync_info = Some(SyncInfo { spaces, rooms, dms });
 
     for (room_id, name) in names {
         locked.application.set_room_name(&room_id, &name);
