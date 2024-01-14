@@ -38,6 +38,9 @@
 		"style": "restore"
 	},
 	"macros": {
+		"n|v": {
+			"V": "<C-W>m"
+		},
 		"i": {
 			"jj": "<Esc>"
 		}
