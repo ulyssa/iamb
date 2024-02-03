@@ -19,7 +19,7 @@ use matrix_sdk::{
     },
     Media,
 };
-use modalkit::tui::layout::Rect;
+use ratatui::layout::Rect;
 use ratatui_image::Resize;
 
 use crate::{

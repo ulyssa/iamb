@@ -11,7 +11,7 @@ use matrix_sdk::{
     DisplayName,
 };
 
-use modalkit::tui::{
+use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
@@ -19,6 +19,7 @@ use modalkit::tui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
+use modalkit::prelude::*;
 use modalkit::{
     editing::action::{
         Action,
@@ -32,22 +33,10 @@ use modalkit::{
         Scrollable,
         UIError,
     },
-    editing::base::{
-        Axis,
-        CloseFlags,
-        Count,
-        MoveDir1D,
-        OpenTarget,
-        PositionList,
-        ScrollStyle,
-        WordStyle,
-        WriteFlags,
-    },
     editing::completion::CompletionList,
-    input::dialog::PromptYesNo,
-    input::InputContext,
-    widgets::{TermOffset, TerminalCursor, WindowOps},
+    keybindings::dialog::PromptYesNo,
 };
+use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
 
 use crate::base::{
     IambAction,
@@ -253,7 +242,7 @@ impl RoomState {
                         width.into(),
                     );
 
-                Ok(vec![(act, cmd.context.take())])
+                Ok(vec![(act, cmd.context.clone())])
             },
             RoomAction::Set(field, value) => {
                 let room = store

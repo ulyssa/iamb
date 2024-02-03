@@ -44,13 +44,14 @@ use matrix_sdk::ruma::{
     UInt,
 };
 
-use modalkit::tui::{
+use ratatui::{
     style::{Modifier as StyleModifier, Style},
     symbols::line::THICK_VERTICAL,
     text::{Line, Span, Text},
 };
 
-use modalkit::editing::{base::ViewportContext, cursor::Cursor};
+use modalkit::editing::cursor::Cursor;
+use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
 use crate::config::ImagePreviewSize;

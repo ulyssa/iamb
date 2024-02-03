@@ -26,7 +26,7 @@ use html5ever::{
     tendril::{StrTendril, TendrilSink},
 };
 
-use modalkit::tui::{
+use ratatui::{
     layout::Alignment,
     style::{Color, Modifier as StyleModifier, Style},
     symbols::line,

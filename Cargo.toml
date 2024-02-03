@@ -23,7 +23,7 @@ default-features = false
 features = ["build", "git", "gitcl",]
 
 [dependencies]
-arboard = "3.2.0"
+arboard = "3.3.0"
 bitflags = "^2.3"
 chrono = "0.4"
 clap = {version = "~4.3", features = ["derive"]}
@@ -40,6 +40,7 @@ markup5ever_rcdom = "0.2.0"
 mime = "^0.3.16"
 mime_guess = "^2.0.4"
 open = "3.2.0"
+ratatui = "0.23"
 ratatui-image = { version = "0.4.3", features = ["serde"] }
 regex = "^1.5"
 rpassword = "^7.2"
@@ -55,9 +56,14 @@ url = {version = "^2.2.2", features = ["serde"]}
 edit = "0.1.4"
 
 [dependencies.modalkit]
-# version = "0.0.16"
+version = "0.0.17"
 git = "https://github.com/ulyssa/modalkit"
-rev = "f9f0517ed6a6152c1eab36d2e71b11f38831d5e6"
+rev = "5ebcaf1"
+
+[dependencies.modalkit-ratatui]
+version = "0.0.17"
+git = "https://github.com/ulyssa/modalkit"
+rev = "5ebcaf1"
 
 [dependencies.matrix-sdk]
 version = "^0.6.2"

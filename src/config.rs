@@ -11,15 +11,12 @@ use std::process;
 
 use clap::Parser;
 use matrix_sdk::ruma::{OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use ratatui::style::{Color, Modifier as StyleModifier, Style};
+use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
 use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer};
 use tracing::Level;
 use url::Url;
-
-use modalkit::tui::{
-    style::{Color, Modifier as StyleModifier, Style},
-    text::Span,
-};
 
 use super::base::{IambId, RoomInfo, SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 

@@ -12,6 +12,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
+use ratatui::{
+    buffer::Buffer,
+    layout::{Alignment, Rect},
+    text::{Line, Span},
+    widgets::{Paragraph, Widget},
+};
 use ratatui_image::picker::{Picker, ProtocolType};
 use serde::{
     de::Error as SerdeError,
@@ -61,7 +67,6 @@ use modalkit::{
             ApplicationStore,
             ApplicationWindowId,
         },
-        base::{CommandType, WordStyle},
         completion::{complete_path, CompletionMap},
         context::EditContext,
         cursor::Cursor,
@@ -71,16 +76,10 @@ use modalkit::{
     env::vim::{
         command::{CommandContext, CommandDescription, VimCommand, VimCommandMachine},
         keybindings::VimMachine,
-        VimContext,
     },
-    input::bindings::SequenceStatus,
-    input::key::TerminalKey,
-    tui::{
-        buffer::Buffer,
-        layout::{Alignment, Rect},
-        text::{Line, Span},
-        widgets::{Paragraph, Widget},
-    },
+    key::TerminalKey,
+    keybindings::SequenceStatus,
+    prelude::{CommandType, WordStyle},
 };
 
 use crate::config::ImagePreviewProtocolValues;
@@ -365,7 +364,7 @@ pub enum RoomAction {
     Leave(bool),
 
     /// Open the members window.
-    Members(Box<CommandContext<ProgramContext>>),
+    Members(Box<CommandContext>),
 
     /// Set a room property.
     Set(RoomField, String),
@@ -460,7 +459,7 @@ impl From<SendAction> for IambAction {
 }
 
 impl ApplicationAction for IambAction {
-    fn is_edit_sequence<C: EditContext>(&self, _: &C) -> SequenceStatus {
+    fn is_edit_sequence(&self, _: &EditContext) -> SequenceStatus {
         match self {
             IambAction::Homeserver(..) => SequenceStatus::Break,
             IambAction::Message(..) => SequenceStatus::Break,
@@ -473,7 +472,7 @@ impl ApplicationAction for IambAction {
         }
     }
 
-    fn is_last_action<C: EditContext>(&self, _: &C) -> SequenceStatus {
+    fn is_last_action(&self, _: &EditContext) -> SequenceStatus {
         match self {
             IambAction::Homeserver(..) => SequenceStatus::Atom,
             IambAction::Message(..) => SequenceStatus::Atom,
@@ -486,7 +485,7 @@ impl ApplicationAction for IambAction {
         }
     }
 
-    fn is_last_selection<C: EditContext>(&self, _: &C) -> SequenceStatus {
+    fn is_last_selection(&self, _: &EditContext) -> SequenceStatus {
         match self {
             IambAction::Homeserver(..) => SequenceStatus::Ignore,
             IambAction::Message(..) => SequenceStatus::Ignore,
@@ -499,7 +498,7 @@ impl ApplicationAction for IambAction {
         }
     }
 
-    fn is_switchable<C: EditContext>(&self, _: &C) -> bool {
+    fn is_switchable(&self, _: &EditContext) -> bool {
         match self {
             IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
@@ -528,13 +527,13 @@ impl From<IambAction> for ProgramAction {
 /// Alias for program actions.
 pub type ProgramAction = Action<IambInfo>;
 /// Alias for program context.
-pub type ProgramContext = VimContext<IambInfo>;
+pub type ProgramContext = EditContext;
 /// Alias for program keybindings.
 pub type Keybindings = VimMachine<TerminalKey, IambInfo>;
 /// Alias for a program command.
-pub type ProgramCommand = VimCommand<ProgramContext, IambInfo>;
+pub type ProgramCommand = VimCommand<IambInfo>;
 /// Alias for mapped program commands.
-pub type ProgramCommands = VimCommandMachine<ProgramContext, IambInfo>;
+pub type ProgramCommands = VimCommandMachine<IambInfo>;
 /// Alias for program store.
 pub type ProgramStore = Store<IambInfo>;
 /// Alias for shared program store.
@@ -1612,7 +1611,7 @@ fn complete_cmd(
 /// Tab completion for the command bar.
 fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
     let eo = text.cursor_to_offset(cursor);
-    let slice = text.slice(0.into(), eo, false);
+    let slice = text.slice(..eo);
     let cow = Cow::from(&slice);
 
     complete_cmd(cow.as_ref(), text, cursor, store)
@@ -1623,7 +1622,7 @@ pub mod tests {
     use super::*;
     use crate::config::user_style_from_color;
     use crate::tests::*;
-    use modalkit::tui::style::Color;
+    use ratatui::style::Color;
 
     #[test]
     fn test_typing_spans() {

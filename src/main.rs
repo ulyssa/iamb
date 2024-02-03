@@ -54,7 +54,7 @@ use modalkit::crossterm::{
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
 };
 
-use modalkit::tui::{
+use ratatui::{
     backend::CrosstermBackend,
     layout::Rect,
     style::{Color, Style},
@@ -116,20 +116,26 @@ use modalkit::{
             WindowAction,
             WindowContainer,
         },
-        base::{CloseFlags, MoveDir1D, OpenTarget, RepeatType, TabTarget},
         context::Resolve,
         key::KeyManager,
         store::Store,
     },
-    input::{bindings::BindingMachine, dialog::Pager, dialog::PromptYesNo, key::TerminalKey},
-    widgets::{
-        cmdbar::CommandBarState,
-        screen::{FocusList, Screen, ScreenState, TabLayoutDescription},
-        windows::WindowLayoutDescription,
-        TerminalCursor,
-        TerminalExtOps,
-        Window,
+    key::TerminalKey,
+    keybindings::{
+        dialog::{Pager, PromptYesNo},
+        BindingMachine,
     },
+    prelude::*,
+    ui::FocusList,
+};
+
+use modalkit_ratatui::{
+    cmdbar::CommandBarState,
+    screen::{Screen, ScreenState, TabLayoutDescription},
+    windows::WindowLayoutDescription,
+    TerminalCursor,
+    TerminalExtOps,
+    Window,
 };
 
 fn config_tab_to_desc(
@@ -229,7 +235,7 @@ struct Application {
     worker: Requester,
 
     /// Mapped keybindings.
-    bindings: KeyManager<TerminalKey, ProgramAction, RepeatType, ProgramContext>,
+    bindings: KeyManager<TerminalKey, ProgramAction, RepeatType>,
 
     /// Pending actions to run.
     actstack: VecDeque<(ProgramAction, ProgramContext)>,

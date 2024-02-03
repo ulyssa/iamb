@@ -4,8 +4,8 @@ use std::borrow::Cow;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use modalkit::tui::style::Style;
-use modalkit::tui::text::{Line, Span, Text};
+use ratatui::style::Style;
+use ratatui::text::{Line, Span, Text};
 
 pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) {
     match cow {
