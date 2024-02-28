@@ -1342,7 +1342,9 @@ impl<'a> StatefulWidget for Scrollback<'a> {
             state.cursor.timestamp.is_none()
         {
             // If the cursor is at the last message, then update the read marker.
-            info.read_till = info.messages.last_key_value().map(|(k, _)| k.1.clone());
+            if let Some((k, _)) = info.messages.last_key_value() {
+                info.set_receipt(settings.profile.user_id.clone(), k.1.clone());
+            }
         }
 
         // Check whether we should load older messages for this room.

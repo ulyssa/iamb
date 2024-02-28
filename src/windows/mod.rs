@@ -79,9 +79,11 @@ use crate::base::{
     SortFieldRoom,
     SortFieldUser,
     SortOrder,
+    UnreadInfo,
 };
 
 use self::{room::RoomState, welcome::WelcomeState};
+use crate::message::MessageTimeStamp;
 
 pub mod room;
 pub mod welcome;
@@ -124,11 +126,35 @@ fn selected_text(s: &str, selected: bool) -> Text {
     Text::from(selected_span(s, selected))
 }
 
+fn name_and_labels(
+    name: &str,
+    unread: bool,
+    style: Style,
+) -> (Span<'_>, Vec<Vec<Span<'_>>>) {
+    let name_style = if unread {
+        style.add_modifier(StyleModifier::BOLD)
+    } else {
+        style
+    };
+
+    let name = Span::styled(name, name_style);
+    let labels = if unread {
+        vec![vec![Span::styled("Unread", style)]]
+    } else {
+        vec![]
+    };
+
+    (name, labels)
+}
+
 /// Sort `Some` to be less than `None` so that list items with values come before those without.
 #[inline]
-fn some_cmp<T: Ord>(a: Option<T>, b: Option<T>) -> Ordering {
+fn some_cmp<T, F>(a: Option<T>, b: Option<T>, f: F) -> Ordering
+where
+    F: Fn(&T, &T) -> Ordering,
+{
     match (a, b) {
-        (Some(a), Some(b)) => a.cmp(&b),
+        (Some(a), Some(b)) => f(&a, &b),
         (None, None) => Ordering::Equal,
         (None, Some(_)) => Ordering::Greater,
         (Some(_), None) => Ordering::Less,
@@ -167,8 +193,16 @@ fn room_cmp<T: RoomLikeItem>(a: &T, b: &T, field: &SortFieldRoom) -> Ordering {
             lowa.cmp(&lowb)
         },
         SortFieldRoom::Name => a.name().cmp(b.name()),
-        SortFieldRoom::Alias => some_cmp(a.alias(), b.alias()),
+        SortFieldRoom::Alias => some_cmp(a.alias(), b.alias(), Ord::cmp),
         SortFieldRoom::RoomId => a.room_id().cmp(b.room_id()),
+        SortFieldRoom::Unread => {
+            // Sort true (unread) before false (read)
+            b.is_unread().cmp(&a.is_unread())
+        },
+        SortFieldRoom::Recent => {
+            // sort larger timestamps towards the top.
+            some_cmp(a.recent_ts(), b.recent_ts(), |a, b| b.cmp(a))
+        },
     }
 }
 
@@ -243,6 +277,8 @@ fn append_tags<'a>(tags: Vec<Vec<Span<'a>>>, spans: &mut Vec<Span<'a>>, style: S
 trait RoomLikeItem {
     fn room_id(&self) -> &RoomId;
     fn has_tag(&self, tag: TagName) -> bool;
+    fn is_unread(&self) -> bool;
+    fn recent_ts(&self) -> Option<&MessageTimeStamp>;
     fn alias(&self) -> Option<&RoomAliasId>;
     fn name(&self) -> &str;
 }
@@ -780,6 +816,7 @@ pub struct GenericChatItem {
     room_info: MatrixRoomInfo,
     name: String,
     alias: Option<OwnedRoomAliasId>,
+    unread: UnreadInfo,
     is_dm: bool,
 }
 
@@ -788,17 +825,17 @@ impl GenericChatItem {
         let room = &room_info.deref().0;
         let room_id = room.room_id();
 
-        let info = store.application.get_room_info(room_id.to_owned());
-
+        let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
+        let unread = info.unreads(&store.application.settings);
         info.tags = room_info.deref().1.clone();
 
         if let Some(alias) = &alias {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
         }
 
-        GenericChatItem { room_info, name, alias, is_dm }
+        GenericChatItem { room_info, name, alias, is_dm, unread }
     }
 
     #[inline]
@@ -832,6 +869,14 @@ impl RoomLikeItem for GenericChatItem {
             false
         }
     }
+
+    fn recent_ts(&self) -> Option<&MessageTimeStamp> {
+        self.unread.latest()
+    }
+
+    fn is_unread(&self) -> bool {
+        self.unread.is_unread()
+    }
 }
 
 impl ToString for GenericChatItem {
@@ -842,13 +887,16 @@ impl ToString for GenericChatItem {
 
 impl ListItem<IambInfo> for GenericChatItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let mut spans = vec![Span::styled(self.name.as_str(), style)];
-        let mut labels = if self.is_dm {
-            vec![vec![Span::styled("DM", style)]]
+        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let mut spans = vec![name];
+
+        labels.push(if self.is_dm {
+            vec![Span::styled("DM", style)]
         } else {
-            vec![vec![Span::styled("Room", style)]]
-        };
+            vec![Span::styled("Room", style)]
+        });
 
         if let Some(tags) = &self.tags() {
             labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
@@ -879,6 +927,7 @@ pub struct RoomItem {
     room_info: MatrixRoomInfo,
     name: String,
     alias: Option<OwnedRoomAliasId>,
+    unread: UnreadInfo,
 }
 
 impl RoomItem {
@@ -886,16 +935,17 @@ impl RoomItem {
         let room = &room_info.deref().0;
         let room_id = room.room_id();
 
-        let info = store.application.get_room_info(room_id.to_owned());
+        let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
+        let unread = info.unreads(&store.application.settings);
         info.tags = room_info.deref().1.clone();
 
         if let Some(alias) = &alias {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
         }
 
-        RoomItem { room_info, name, alias }
+        RoomItem { room_info, name, alias, unread }
     }
 
     #[inline]
@@ -929,6 +979,14 @@ impl RoomLikeItem for RoomItem {
             false
         }
     }
+
+    fn recent_ts(&self) -> Option<&MessageTimeStamp> {
+        self.unread.latest()
+    }
+
+    fn is_unread(&self) -> bool {
+        self.unread.is_unread()
+    }
 }
 
 impl ToString for RoomItem {
@@ -939,17 +997,18 @@ impl ToString for RoomItem {
 
 impl ListItem<IambInfo> for RoomItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+        let unread = self.unread.is_unread();
+        let style = selected_style(selected);
+        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let mut spans = vec![name];
+
         if let Some(tags) = &self.tags() {
-            let style = selected_style(selected);
-            let mut spans = vec![Span::styled(self.name.as_str(), style)];
-            let tags = tags.keys().map(|t| tag_to_span(t, style)).collect();
-
-            append_tags(tags, &mut spans, style);
-
-            Text::from(Line::from(spans))
-        } else {
-            selected_text(self.name.as_str(), selected)
+            labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
         }
+
+        append_tags(labels, &mut spans, style);
+
+        Text::from(Line::from(spans))
     }
 
     fn get_word(&self) -> Option<String> {
@@ -973,15 +1032,20 @@ pub struct DirectItem {
     room_info: MatrixRoomInfo,
     name: String,
     alias: Option<OwnedRoomAliasId>,
+    unread: UnreadInfo,
 }
 
 impl DirectItem {
     fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
         let room_id = room_info.0.room_id().to_owned();
-        let name = store.application.get_room_info(room_id).name.clone().unwrap_or_default();
         let alias = room_info.0.canonical_alias();
 
-        DirectItem { room_info, name, alias }
+        let info = store.application.rooms.get_or_default(room_id);
+        let name = info.name.clone().unwrap_or_default();
+        let unread = info.unreads(&store.application.settings);
+        info.tags = room_info.deref().1.clone();
+
+        DirectItem { room_info, name, alias, unread }
     }
 
     #[inline]
@@ -1015,6 +1079,14 @@ impl RoomLikeItem for DirectItem {
     fn room_id(&self) -> &RoomId {
         self.room().room_id()
     }
+
+    fn recent_ts(&self) -> Option<&MessageTimeStamp> {
+        self.unread.latest()
+    }
+
+    fn is_unread(&self) -> bool {
+        self.unread.is_unread()
+    }
 }
 
 impl ToString for DirectItem {
@@ -1025,17 +1097,18 @@ impl ToString for DirectItem {
 
 impl ListItem<IambInfo> for DirectItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+        let unread = self.unread.is_unread();
+        let style = selected_style(selected);
+        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let mut spans = vec![name];
+
         if let Some(tags) = &self.tags() {
-            let style = selected_style(selected);
-            let mut spans = vec![Span::styled(self.name.as_str(), style)];
-            let tags = tags.keys().map(|t| tag_to_span(t, style)).collect();
-
-            append_tags(tags, &mut spans, style);
-
-            Text::from(Line::from(spans))
-        } else {
-            selected_text(self.name.as_str(), selected)
+            labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
         }
+
+        append_tags(labels, &mut spans, style);
+
+        Text::from(Line::from(spans))
     }
 
     fn get_word(&self) -> Option<String> {
@@ -1101,6 +1174,16 @@ impl RoomLikeItem for SpaceItem {
     fn has_tag(&self, _: TagName) -> bool {
         // I think that spaces can technically have tags, but afaik no client
         // exposes them, so we'll just always return false here for now.
+        false
+    }
+
+    fn recent_ts(&self) -> Option<&MessageTimeStamp> {
+        // XXX: this needs to determine the room with most recent message and return its timestamp.
+        None
+    }
+
+    fn is_unread(&self) -> bool {
+        // XXX: this needs to check whether the space contains rooms with unread messages
         false
     }
 }
@@ -1433,6 +1516,7 @@ mod tests {
         tags: Vec<TagName>,
         alias: Option<OwnedRoomAliasId>,
         name: &'static str,
+        unread: UnreadInfo,
     }
 
     impl RoomLikeItem for &TestRoomItem {
@@ -1451,6 +1535,14 @@ mod tests {
         fn name(&self) -> &str {
             self.name
         }
+
+        fn recent_ts(&self) -> Option<&MessageTimeStamp> {
+            self.unread.latest()
+        }
+
+        fn is_unread(&self) -> bool {
+            self.unread.is_unread()
+        }
     }
 
     #[test]
@@ -1462,6 +1554,7 @@ mod tests {
             tags: vec![TagName::Favorite],
             alias: Some(room_alias_id!("#room1:example.com").to_owned()),
             name: "Z",
+            unread: UnreadInfo::default(),
         };
 
         let room2 = TestRoomItem {
@@ -1469,6 +1562,7 @@ mod tests {
             tags: vec![],
             alias: Some(room_alias_id!("#a:example.com").to_owned()),
             name: "Unnamed Room",
+            unread: UnreadInfo::default(),
         };
 
         let room3 = TestRoomItem {
@@ -1476,6 +1570,7 @@ mod tests {
             tags: vec![],
             alias: None,
             name: "Cool Room",
+            unread: UnreadInfo::default(),
         };
 
         // Sort by Name ascending.
@@ -1509,5 +1604,52 @@ mod tests {
         ];
         rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
         assert_eq!(rooms, vec![&room2, &room3, &room1]);
+    }
+
+    #[test]
+    fn test_sort_room_recents() {
+        let server = server_name!("example.com");
+
+        let room1 = TestRoomItem {
+            room_id: RoomId::new(server).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Room 1",
+            unread: UnreadInfo { unread: false, latest: None },
+        };
+
+        let room2 = TestRoomItem {
+            room_id: RoomId::new(server).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Room 2",
+            unread: UnreadInfo {
+                unread: false,
+                latest: Some(MessageTimeStamp::OriginServer(40u32.into())),
+            },
+        };
+
+        let room3 = TestRoomItem {
+            room_id: RoomId::new(server).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Room 3",
+            unread: UnreadInfo {
+                unread: false,
+                latest: Some(MessageTimeStamp::OriginServer(20u32.into())),
+            },
+        };
+
+        // Sort by Recent ascending.
+        let mut rooms = vec![&room1, &room2, &room3];
+        let fields = &[SortColumn(SortFieldRoom::Recent, SortOrder::Ascending)];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        assert_eq!(rooms, vec![&room2, &room3, &room1]);
+
+        // Sort by Recent descending.
+        let mut rooms = vec![&room1, &room2, &room3];
+        let fields = &[SortColumn(SortFieldRoom::Recent, SortOrder::Descending)];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        assert_eq!(rooms, vec![&room1, &room3, &room2]);
     }
 }

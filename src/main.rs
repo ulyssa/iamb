@@ -27,16 +27,9 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use clap::Parser;
+use matrix_sdk::ruma::OwnedUserId;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing_subscriber::FmtSubscriber;
-
-use matrix_sdk::{
-    config::SyncSettings,
-    ruma::{
-        api::client::filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
-        OwnedUserId,
-    },
-};
 
 use modalkit::crossterm::{
     self,
@@ -719,20 +712,6 @@ async fn login(worker: Requester, settings: &ApplicationSettings) -> IambResult<
         }
     }
 
-    // Perform an initial, lazily-loaded sync.
-    let mut room = RoomEventFilter::default();
-    room.lazy_load_options = LazyLoadOptions::Enabled { include_redundant_members: false };
-
-    let mut room_ev = RoomFilter::default();
-    room_ev.state = room;
-
-    let mut filter = FilterDefinition::default();
-    filter.room = room_ev;
-
-    let settings = SyncSettings::new().filter(filter.into());
-
-    worker.client.sync_once(settings).await.map_err(IambError::from)?;
-
     Ok(())
 }
 
@@ -744,12 +723,14 @@ fn print_exit<T: Display, N>(v: T) -> N {
 async fn run(settings: ApplicationSettings) -> IambResult<()> {
     // Set up the async worker thread and global store.
     let worker = ClientWorker::spawn(settings.clone()).await;
+    let client = worker.client.clone();
     let store = ChatStore::new(worker.clone(), settings.clone());
     let store = Store::new(store);
     let store = Arc::new(AsyncMutex::new(store));
     worker.init(store.clone());
 
     login(worker, &settings).await.unwrap_or_else(print_exit);
+    worker::do_first_sync(client, &store).await;
 
     fn restore_tty() {
         let _ = crossterm::terminal::disable_raw_mode();

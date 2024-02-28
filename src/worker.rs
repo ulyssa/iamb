@@ -26,6 +26,7 @@ use matrix_sdk::{
     room::{Invited, Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
+            filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
             room::create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
             room::Visibility,
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
@@ -424,9 +425,8 @@ async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
 
     loop {
-        interval.tick().await;
-
         refresh_rooms(client, store).await;
+        interval.tick().await;
     }
 }
 
@@ -438,13 +438,14 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
         interval.tick().await;
 
         let locked = store.lock().await;
+        let user_id = &locked.application.settings.profile.user_id;
         let updates = client
             .joined_rooms()
             .into_iter()
             .filter_map(|room| {
                 let room_id = room.room_id().to_owned();
                 let info = locked.application.rooms.get(&room_id)?;
-                let new_receipt = info.read_till.as_ref()?;
+                let new_receipt = info.get_receipt(user_id)?;
                 let old_receipt = sent.get(&room_id);
                 if Some(new_receipt) != old_receipt {
                     Some((room_id, new_receipt.clone()))
@@ -466,6 +467,42 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
                 Err(e) => tracing::warn!(?room_id, "Failed to set read receipt: {e}"),
             }
         }
+    }
+}
+
+pub async fn do_first_sync(client: Client, store: &AsyncProgramStore) {
+    // Perform an initial, lazily-loaded sync.
+    let mut room = RoomEventFilter::default();
+    room.lazy_load_options = LazyLoadOptions::Enabled { include_redundant_members: false };
+
+    let mut room_ev = RoomFilter::default();
+    room_ev.state = room;
+
+    let mut filter = FilterDefinition::default();
+    filter.room = room_ev;
+
+    let settings = SyncSettings::new().filter(filter.into());
+
+    if let Err(e) = client.sync_once(settings).await {
+        tracing::error!(err = e.to_string(), "Failed to perform initial sync; will retry later");
+        return;
+    }
+
+    // Populate sync_info with our initial set of rooms/dms/spaces.
+    refresh_rooms(&client, store).await;
+
+    // Insert Need::Messages to fetch accurate recent timestamps in the background.
+    let mut locked = store.lock().await;
+    let ChatStore { sync_info, need_load, .. } = &mut locked.application;
+
+    for room in sync_info.rooms.iter() {
+        let room_id = room.as_ref().0.room_id().to_owned();
+        need_load.insert(room_id, Need::MESSAGES);
+    }
+
+    for room in sync_info.dms.iter() {
+        let room_id = room.as_ref().0.room_id().to_owned();
+        need_load.insert(room_id, Need::MESSAGES);
     }
 }
 
