@@ -53,6 +53,7 @@ use matrix_sdk::{
         OwnedRoomId,
         OwnedUserId,
         RoomId,
+        UserId,
     },
 };
 
@@ -209,11 +210,26 @@ bitflags::bitflags! {
 /// Fields that rooms and spaces can be sorted by.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SortFieldRoom {
+    /// Sort rooms by whether they have the Favorite tag.
     Favorite,
+
+    /// Sort rooms by whether they have the Low Priority tag.
     LowPriority,
+
+    /// Sort rooms by their room name.
     Name,
+
+    /// Sort rooms by their canonical room alias.
     Alias,
+
+    /// Sort rooms by their Matrix room identifier.
     RoomId,
+
+    /// Sort rooms by whether they have unread messages.
+    Unread,
+
+    /// Sort rooms by the timestamps of their most recent messages.
+    Recent,
 }
 
 /// Fields that users can be sorted by.
@@ -273,6 +289,8 @@ impl<'de> Visitor<'de> for SortRoomVisitor {
         let field = match value {
             "favorite" => SortFieldRoom::Favorite,
             "lowpriority" => SortFieldRoom::LowPriority,
+            "recent" => SortFieldRoom::Recent,
+            "unread" => SortFieldRoom::Unread,
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
             "id" => SortFieldRoom::RoomId,
@@ -672,6 +690,22 @@ impl EventLocation {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct UnreadInfo {
+    pub(crate) unread: bool,
+    pub(crate) latest: Option<MessageTimeStamp>,
+}
+
+impl UnreadInfo {
+    pub fn is_unread(&self) -> bool {
+        self.unread
+    }
+
+    pub fn latest(&self) -> Option<&MessageTimeStamp> {
+        self.latest.as_ref()
+    }
+}
+
 /// Information about room's the user's joined.
 #[derive(Default)]
 pub struct RoomInfo {
@@ -696,9 +730,6 @@ pub struct RoomInfo {
     /// however not every user has an entry. If a user's most recent receipt is
     /// older than the oldest loaded event, that user will not be included.
     pub user_receipts: HashMap<OwnedUserId, OwnedEventId>,
-
-    /// An event ID for where we should indicate we've read up to.
-    pub read_till: Option<OwnedEventId>,
 
     /// A map of message identifiers to a map of reaction events.
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
@@ -810,6 +841,20 @@ impl RoomInfo {
         msg.html = msg.event.html();
     }
 
+    /// Indicates whether this room has unread messages.
+    pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
+        let last_message = self.messages.last_key_value();
+        let last_receipt = self.get_receipt(&settings.profile.user_id);
+
+        match (last_message, last_receipt) {
+            (Some(((ts, recent), _)), Some(last_read)) => {
+                UnreadInfo { unread: last_read != recent, latest: Some(*ts) }
+            },
+            (Some(((ts, _), _)), None) => UnreadInfo { unread: false, latest: Some(*ts) },
+            (None, _) => UnreadInfo::default(),
+        }
+    }
+
     /// Inserts events that couldn't be decrypted into the scrollback.
     pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
         let event_id = msg.event_id().to_owned();
@@ -899,6 +944,10 @@ impl RoomInfo {
             .or_default()
             .insert(user_id.clone());
         self.user_receipts.insert(user_id, event_id);
+    }
+
+    pub fn get_receipt(&self, user_id: &UserId) -> Option<&OwnedEventId> {
+        self.user_receipts.get(user_id)
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {
