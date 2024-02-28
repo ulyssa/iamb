@@ -43,6 +43,13 @@ Arch User Repositories (AUR). To install it simply run with your favorite AUR he
 ```
 paru iamb-git
 ```
+### openSUSE Tumbleweed
+
+On openSUSE Tumbleweed a [package](https://build.opensuse.org/package/show/home%3Asmolsheep/iamb) is available from openSUSE Build Service (OBS). To install just use OBS Package Installer:
+
+```
+opi iamb
+```
 
 ### Nix / NixOS (flake)
 
