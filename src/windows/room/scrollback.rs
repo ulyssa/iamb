@@ -5,14 +5,14 @@ use regex::Regex;
 
 use matrix_sdk::ruma::OwnedRoomId;
 
-use modalkit::tui::{
+use modalkit_ratatui::{ScrollActions, TerminalCursor, WindowOps};
+use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
     text::{Line, Span},
     widgets::{Paragraph, StatefulWidget, Widget},
 };
-use modalkit::widgets::{ScrollActions, TerminalCursor, WindowOps};
 
 use modalkit::editing::{
     action::{
@@ -36,40 +36,14 @@ use modalkit::editing::{
         UIError,
         UIResult,
     },
-    base::{
-        Axis,
-        CloseFlags,
-        CompletionDisplay,
-        CompletionSelection,
-        CompletionType,
-        Count,
-        EditRange,
-        EditTarget,
-        Mark,
-        MoveDir1D,
-        MoveDir2D,
-        MoveDirMod,
-        MovePosition,
-        MoveTerminus,
-        MoveType,
-        PositionList,
-        RangeType,
-        Register,
-        ScrollSize,
-        ScrollStyle,
-        SearchType,
-        TargetShape,
-        ViewportContext,
-        WordStyle,
-        WriteFlags,
-    },
     completion::CompletionList,
-    context::{EditContext, Resolve},
+    context::Resolve,
     cursor::{CursorGroup, CursorState},
     history::HistoryList,
     rope::EditRope,
     store::{RegisterCell, RegisterPutFlags},
 };
+use modalkit::prelude::*;
 
 use crate::{
     base::{
@@ -620,15 +594,9 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let dir = ctx.get_search_regex_dir();
                         let dir = flip.resolve(&dir);
 
-                        let needle = match ctx.get_search_regex() {
-                            Some(re) => re,
-                            None => {
-                                let lsearch = store.registers.get(&Register::LastSearch)?;
-                                let lsearch = lsearch.value.to_string();
-
-                                Regex::new(lsearch.as_ref())?
-                            },
-                        };
+                        let lsearch = store.registers.get(&Register::LastSearch)?;
+                        let lsearch = lsearch.value.to_string();
+                        let needle = Regex::new(lsearch.as_ref())?;
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
@@ -706,15 +674,9 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let dir = ctx.get_search_regex_dir();
                         let dir = flip.resolve(&dir);
 
-                        let needle = match ctx.get_search_regex() {
-                            Some(re) => re,
-                            None => {
-                                let lsearch = store.registers.get(&Register::LastSearch)?;
-                                let lsearch = lsearch.value.to_string();
-
-                                Regex::new(lsearch.as_ref())?
-                            },
-                        };
+                        let lsearch = store.registers.get(&Register::LastSearch)?;
+                        let lsearch = lsearch.value.to_string();
+                        let needle = Regex::new(lsearch.as_ref())?;
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
@@ -833,7 +795,6 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             HistoryAction::Checkpoint => Ok(None),
             HistoryAction::Undo(_) => Err(EditError::Failure("Nothing to undo".into())),
             HistoryAction::Redo(_) => Err(EditError::Failure("Nothing to redo".into())),
-            _ => Err(EditError::Unimplemented(format!("Unknown action: {act:?}"))),
         }
     }
 
@@ -1012,12 +973,6 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             PromptAction::Recall(..) => {
                 let msg = "Cannot recall previous messages.";
                 let err = EditError::Failure(msg.into());
-
-                return Err(err);
-            },
-            _ => {
-                let msg = format!("Messages scrollback doesn't support {act:?}");
-                let err = EditError::Unimplemented(msg);
 
                 return Err(err);
             },

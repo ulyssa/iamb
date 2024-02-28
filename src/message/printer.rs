@@ -5,9 +5,9 @@
 //! contents).
 use std::borrow::Cow;
 
-use modalkit::tui::layout::Alignment;
-use modalkit::tui::style::Style;
-use modalkit::tui::text::{Line, Span, Text};
+use ratatui::layout::Alignment;
+use ratatui::style::Style;
+use ratatui::text::{Line, Span, Text};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 

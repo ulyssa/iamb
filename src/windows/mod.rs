@@ -24,7 +24,7 @@ use matrix_sdk::{
     },
 };
 
-use modalkit::tui::{
+use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
@@ -48,25 +48,17 @@ use modalkit::{
             UIError,
             WindowAction,
         },
-        base::{
-            CloseFlags,
-            MoveDir1D,
-            OpenTarget,
-            PositionList,
-            ScrollStyle,
-            ViewportContext,
-            WordStyle,
-            WriteFlags,
-        },
         completion::CompletionList,
     },
-    widgets::{
-        list::{List, ListCursor, ListItem, ListState},
-        TermOffset,
-        TerminalCursor,
-        Window,
-        WindowOps,
-    },
+    prelude::*,
+};
+
+use modalkit_ratatui::{
+    list::{List, ListCursor, ListItem, ListState},
+    TermOffset,
+    TerminalCursor,
+    Window,
+    WindowOps,
 };
 
 use crate::base::{
@@ -215,28 +207,34 @@ fn user_fields_cmp(
     user_cmp(a, b, &SortFieldUser::UserId)
 }
 
-fn append_tags<'a>(tags: &'a Tags, spans: &mut Vec<Span<'a>>, style: Style) {
+fn tag_to_span(tag: &TagName, style: Style) -> Vec<Span<'_>> {
+    match tag {
+        TagName::Favorite => vec![Span::styled("Favorite", style)],
+        TagName::LowPriority => vec![Span::styled("Low Priority", style)],
+        TagName::ServerNotice => vec![Span::styled("Server Notice", style)],
+        TagName::User(tag) => {
+            vec![
+                Span::styled("User Tag: ", style),
+                Span::styled(tag.as_ref(), style),
+            ]
+        },
+        tag => vec![Span::styled(format!("{tag:?}"), style)],
+    }
+}
+
+fn append_tags<'a>(tags: Vec<Vec<Span<'a>>>, spans: &mut Vec<Span<'a>>, style: Style) {
     if tags.is_empty() {
         return;
     }
 
     spans.push(Span::styled(" (", style));
 
-    for (i, tag) in tags.keys().enumerate() {
+    for (i, tag) in tags.into_iter().enumerate() {
         if i > 0 {
             spans.push(Span::styled(", ", style));
         }
 
-        match tag {
-            TagName::Favorite => spans.push(Span::styled("Favorite", style)),
-            TagName::LowPriority => spans.push(Span::styled("Low Priority", style)),
-            TagName::ServerNotice => spans.push(Span::styled("Server Notice", style)),
-            TagName::User(tag) => {
-                spans.push(Span::styled("User Tag: ", style));
-                spans.push(Span::styled(tag.as_ref(), style));
-            },
-            tag => spans.push(Span::styled(format!("{tag:?}"), style)),
-        }
+        spans.extend(tag);
     }
 
     spans.push(Span::styled(")", style));
@@ -275,7 +273,6 @@ fn room_prompt(
 
             Err(err)
         },
-        _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
     }
 }
 
@@ -289,6 +286,7 @@ macro_rules! delegate {
             IambWindow::SpaceList($id) => $e,
             IambWindow::VerifyList($id) => $e,
             IambWindow::Welcome($id) => $e,
+            IambWindow::ChatList($id) => $e,
         }
     };
 }
@@ -301,6 +299,7 @@ pub enum IambWindow {
     RoomList(RoomListState),
     SpaceList(SpaceListState),
     Welcome(WelcomeState),
+    ChatList(ChatListState),
 }
 
 impl IambWindow {
@@ -355,8 +354,15 @@ impl IambWindow {
 pub type DirectListState = ListState<DirectItem, IambInfo>;
 pub type MemberListState = ListState<MemberItem, IambInfo>;
 pub type RoomListState = ListState<RoomItem, IambInfo>;
+pub type ChatListState = ListState<GenericChatItem, IambInfo>;
 pub type SpaceListState = ListState<SpaceItem, IambInfo>;
 pub type VerifyListState = ListState<VerifyItem, IambInfo>;
+
+impl From<ChatListState> for IambWindow {
+    fn from(list: ChatListState) -> Self {
+        IambWindow::ChatList(list)
+    }
+}
 
 impl From<RoomState> for IambWindow {
     fn from(room: RoomState) -> Self {
@@ -514,6 +520,37 @@ impl WindowOps<IambInfo> for IambWindow {
                     .focus(focused)
                     .render(area, buf, state);
             },
+            IambWindow::ChatList(state) => {
+                let mut items = store
+                    .application
+                    .sync_info
+                    .rooms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, false))
+                    .collect::<Vec<_>>();
+
+                let dms = store
+                    .application
+                    .sync_info
+                    .dms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, true));
+
+                items.extend(dms);
+
+                let fields = &store.application.settings.tunables.sort.chats;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+
+                state.set(items);
+
+                List::new(store)
+                    .empty_message("You do not have rooms or dms yet")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(area, buf, state);
+            },
             IambWindow::SpaceList(state) => {
                 let mut items = store
                     .application
@@ -564,6 +601,7 @@ impl WindowOps<IambInfo> for IambWindow {
             IambWindow::SpaceList(w) => w.dup(store).into(),
             IambWindow::VerifyList(w) => w.dup(store).into(),
             IambWindow::Welcome(w) => w.dup(store).into(),
+            IambWindow::ChatList(w) => w.dup(store).into(),
         }
     }
 
@@ -603,6 +641,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::SpaceList(_) => IambId::SpaceList,
             IambWindow::VerifyList(_) => IambId::VerifyList,
             IambWindow::Welcome(_) => IambId::Welcome,
+            IambWindow::ChatList(_) => IambId::ChatList,
         }
     }
 
@@ -613,6 +652,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::SpaceList(_) => bold_spans("Spaces"),
             IambWindow::VerifyList(_) => bold_spans("Verifications"),
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
+            IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
 
             IambWindow::Room(w) => {
                 let title = store.application.get_room_title(w.id());
@@ -639,6 +679,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::SpaceList(_) => bold_spans("Spaces"),
             IambWindow::VerifyList(_) => bold_spans("Verifications"),
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
+            IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
 
             IambWindow::Room(w) => w.get_title(store),
             IambWindow::MemberList(state, room_id, _) => {
@@ -695,6 +736,11 @@ impl Window<IambInfo> for IambWindow {
 
                 return Ok(win.into());
             },
+            IambId::ChatList => {
+                let list = ChatListState::new(IambBufferId::ChatList, vec![]);
+
+                Ok(list.into())
+            },
         }
     }
 
@@ -726,6 +772,105 @@ impl Window<IambInfo> for IambWindow {
 
     fn unnamed(store: &mut ProgramStore) -> IambResult<Self> {
         Self::open(IambId::RoomList, store)
+    }
+}
+
+#[derive(Clone)]
+pub struct GenericChatItem {
+    room_info: MatrixRoomInfo,
+    name: String,
+    alias: Option<OwnedRoomAliasId>,
+    is_dm: bool,
+}
+
+impl GenericChatItem {
+    fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore, is_dm: bool) -> Self {
+        let room = &room_info.deref().0;
+        let room_id = room.room_id();
+
+        let info = store.application.get_room_info(room_id.to_owned());
+
+        let name = info.name.clone().unwrap_or_default();
+        let alias = room.canonical_alias();
+        info.tags = room_info.deref().1.clone();
+
+        if let Some(alias) = &alias {
+            store.application.names.insert(alias.to_string(), room_id.to_owned());
+        }
+
+        GenericChatItem { room_info, name, alias, is_dm }
+    }
+
+    #[inline]
+    fn room(&self) -> &MatrixRoom {
+        &self.room_info.deref().0
+    }
+
+    #[inline]
+    fn tags(&self) -> &Option<Tags> {
+        &self.room_info.deref().1
+    }
+}
+
+impl RoomLikeItem for GenericChatItem {
+    fn name(&self) -> &str {
+        self.name.as_str()
+    }
+
+    fn alias(&self) -> Option<&RoomAliasId> {
+        self.alias.as_deref()
+    }
+
+    fn room_id(&self) -> &RoomId {
+        self.room().room_id()
+    }
+
+    fn has_tag(&self, tag: TagName) -> bool {
+        if let Some(tags) = &self.room_info.deref().1 {
+            tags.contains_key(&tag)
+        } else {
+            false
+        }
+    }
+}
+
+impl ToString for GenericChatItem {
+    fn to_string(&self) -> String {
+        return self.name.clone();
+    }
+}
+
+impl ListItem<IambInfo> for GenericChatItem {
+    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+        let style = selected_style(selected);
+        let mut spans = vec![Span::styled(self.name.as_str(), style)];
+        let mut labels = if self.is_dm {
+            vec![vec![Span::styled("DM", style)]]
+        } else {
+            vec![vec![Span::styled("Room", style)]]
+        };
+
+        if let Some(tags) = &self.tags() {
+            labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
+        }
+
+        append_tags(labels, &mut spans, style);
+        Text::from(Line::from(spans))
+    }
+
+    fn get_word(&self) -> Option<String> {
+        self.room_id().to_string().into()
+    }
+}
+
+impl Promptable<ProgramContext, ProgramStore, IambInfo> for GenericChatItem {
+    fn prompt(
+        &mut self,
+        act: &PromptAction,
+        ctx: &ProgramContext,
+        _: &mut ProgramStore,
+    ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
+        room_prompt(self.room_id(), act, ctx)
     }
 }
 
@@ -797,6 +942,7 @@ impl ListItem<IambInfo> for RoomItem {
         if let Some(tags) = &self.tags() {
             let style = selected_style(selected);
             let mut spans = vec![Span::styled(self.name.as_str(), style)];
+            let tags = tags.keys().map(|t| tag_to_span(t, style)).collect();
 
             append_tags(tags, &mut spans, style);
 
@@ -882,6 +1028,7 @@ impl ListItem<IambInfo> for DirectItem {
         if let Some(tags) = &self.tags() {
             let style = selected_style(selected);
             let mut spans = vec![Span::styled(self.name.as_str(), style)];
+            let tags = tags.keys().map(|t| tag_to_span(t, style)).collect();
 
             append_tags(tags, &mut spans, style);
 
@@ -1069,7 +1216,7 @@ impl Ord for VerifyItem {
 
 impl PartialOrd for VerifyItem {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.cmp(other).into()
+        Some(self.cmp(other))
     }
 }
 
@@ -1176,7 +1323,6 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for VerifyItem {
 
                 Err(err)
             },
-            _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
         }
     }
 }
@@ -1272,7 +1418,6 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 
                 Err(err)
             },
-            _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
         }
     }
 }

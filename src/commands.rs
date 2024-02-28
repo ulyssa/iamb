@@ -7,10 +7,9 @@ use std::convert::TryFrom;
 use matrix_sdk::ruma::{events::tag::TagName, OwnedUserId};
 
 use modalkit::{
-    editing::base::OpenTarget,
+    commands::{CommandError, CommandResult, CommandStep},
     env::vim::command::{CommandContext, CommandDescription, OptionType},
-    input::commands::{CommandError, CommandResult, CommandStep},
-    input::InputContext,
+    prelude::OpenTarget,
 };
 
 use crate::base::{
@@ -23,14 +22,13 @@ use crate::base::{
     MessageAction,
     ProgramCommand,
     ProgramCommands,
-    ProgramContext,
     RoomAction,
     RoomField,
     SendAction,
     VerifyAction,
 };
 
-type ProgContext = CommandContext<ProgramContext>;
+type ProgContext = CommandContext;
 type ProgResult = CommandResult<ProgramCommand>;
 
 /// Convert strings the user types into a tag name.
@@ -99,7 +97,7 @@ fn iamb_invite(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     };
 
     let iact = IambAction::from(ract);
-    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -110,7 +108,7 @@ fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     match args.len() {
         0 => {
             let open = ctx.switch(OpenTarget::Application(IambId::VerifyList));
-            let step = CommandStep::Continue(open, ctx.context.take());
+            let step = CommandStep::Continue(open, ctx.context.clone());
 
             return Ok(step);
         },
@@ -125,7 +123,7 @@ fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
                 "mismatch" => VerifyAction::Mismatch,
                 "request" => {
                     let iact = IambAction::VerifyRequest(args.remove(1));
-                    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+                    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
                     return Ok(step);
                 },
@@ -133,7 +131,7 @@ fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             };
 
             let vact = IambAction::Verify(act, args.remove(1));
-            let step = CommandStep::Continue(vact.into(), ctx.context.take());
+            let step = CommandStep::Continue(vact.into(), ctx.context.clone());
 
             return Ok(step);
         },
@@ -149,7 +147,7 @@ fn iamb_dms(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let open = ctx.switch(OpenTarget::Application(IambId::DirectList));
-    let step = CommandStep::Continue(open, ctx.context.take());
+    let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
 }
@@ -160,7 +158,7 @@ fn iamb_members(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let open = IambAction::Room(RoomAction::Members(ctx.clone().into()));
-    let step = CommandStep::Continue(open.into(), ctx.context.take());
+    let step = CommandStep::Continue(open.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -171,7 +169,7 @@ fn iamb_leave(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let leave = IambAction::Room(RoomAction::Leave(desc.bang));
-    let step = CommandStep::Continue(leave.into(), ctx.context.take());
+    let step = CommandStep::Continue(leave.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -182,7 +180,7 @@ fn iamb_cancel(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let mact = IambAction::from(MessageAction::Cancel(desc.bang));
-    let step = CommandStep::Continue(mact.into(), ctx.context.take());
+    let step = CommandStep::Continue(mact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -193,7 +191,7 @@ fn iamb_edit(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let mact = IambAction::from(MessageAction::Edit);
-    let step = CommandStep::Continue(mact.into(), ctx.context.take());
+    let step = CommandStep::Continue(mact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -209,7 +207,7 @@ fn iamb_react(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     if let Some(emoji) = emojis::get(k).or_else(|| emojis::get_by_shortcode(k)) {
         let mact = IambAction::from(MessageAction::React(emoji.to_string()));
-        let step = CommandStep::Continue(mact.into(), ctx.context.take());
+        let step = CommandStep::Continue(mact.into(), ctx.context.clone());
 
         return Ok(step);
     } else {
@@ -240,7 +238,7 @@ fn iamb_unreact(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         IambAction::from(MessageAction::Unreact(None))
     };
 
-    let step = CommandStep::Continue(mact.into(), ctx.context.take());
+    let step = CommandStep::Continue(mact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -254,7 +252,7 @@ fn iamb_redact(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     let reason = args.into_iter().next();
     let ract = IambAction::from(MessageAction::Redact(reason, desc.bang));
-    let step = CommandStep::Continue(ract.into(), ctx.context.take());
+    let step = CommandStep::Continue(ract.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -265,7 +263,7 @@ fn iamb_reply(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let ract = IambAction::from(MessageAction::Reply);
-    let step = CommandStep::Continue(ract.into(), ctx.context.take());
+    let step = CommandStep::Continue(ract.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -276,7 +274,7 @@ fn iamb_editor(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let sact = IambAction::from(SendAction::SubmitFromEditor);
-    let step = CommandStep::Continue(sact.into(), ctx.context.take());
+    let step = CommandStep::Continue(sact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -287,7 +285,18 @@ fn iamb_rooms(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let open = ctx.switch(OpenTarget::Application(IambId::RoomList));
-    let step = CommandStep::Continue(open, ctx.context.take());
+    let step = CommandStep::Continue(open, ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_chats(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = ctx.switch(OpenTarget::Application(IambId::ChatList));
+    let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
 }
@@ -298,7 +307,7 @@ fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let open = ctx.switch(OpenTarget::Application(IambId::SpaceList));
-    let step = CommandStep::Continue(open, ctx.context.take());
+    let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
 }
@@ -309,7 +318,7 @@ fn iamb_welcome(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let open = ctx.switch(OpenTarget::Application(IambId::Welcome));
-    let step = CommandStep::Continue(open, ctx.context.take());
+    let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
 }
@@ -322,7 +331,7 @@ fn iamb_join(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let open = ctx.switch(args.remove(0));
-    let step = CommandStep::Continue(open, ctx.context.take());
+    let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
 }
@@ -369,7 +378,7 @@ fn iamb_create(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     let hact = HomeserverAction::CreateRoom(alias, ct, flags);
     let iact = IambAction::from(hact);
-    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -416,7 +425,7 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         _ => return Result::Err(CommandError::InvalidArgument),
     };
 
-    let step = CommandStep::Continue(act.into(), ctx.context.take());
+    let step = CommandStep::Continue(act.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -430,7 +439,7 @@ fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     let sact = SendAction::Upload(args.remove(0));
     let iact = IambAction::from(sact);
-    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -448,7 +457,7 @@ fn iamb_download(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult 
     };
     let mact = MessageAction::Download(args.pop(), flags);
     let iact = IambAction::from(mact);
-    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -466,7 +475,7 @@ fn iamb_open(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     };
     let mact = MessageAction::Download(args.pop(), flags);
     let iact = IambAction::from(mact);
-    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -479,7 +488,7 @@ fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let iact = IambAction::from(HomeserverAction::Logout(args[0].clone(), desc.bang));
-    let step = CommandStep::Continue(iact.into(), ctx.context.take());
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -494,6 +503,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "create".into(),
         aliases: vec![],
         f: iamb_create,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "chats".into(),
+        aliases: vec![],
+        f: iamb_chats,
     });
     cmds.add_command(ProgramCommand { name: "dms".into(), aliases: vec![], f: iamb_dms });
     cmds.add_command(ProgramCommand {
@@ -591,11 +605,12 @@ mod tests {
     use super::*;
     use matrix_sdk::ruma::user_id;
     use modalkit::editing::action::WindowAction;
+    use modalkit::editing::context::EditContext;
 
     #[test]
     fn test_cmd_verify() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd(":verify", ctx.clone()).unwrap();
         let act = WindowAction::Switch(OpenTarget::Application(IambId::VerifyList));
@@ -642,7 +657,7 @@ mod tests {
     #[test]
     fn test_cmd_join() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd("join #foobar:example.com", ctx.clone()).unwrap();
         let act = WindowAction::Switch(OpenTarget::Name("#foobar:example.com".into()));
@@ -662,7 +677,7 @@ mod tests {
     #[test]
     fn test_cmd_room_invalid() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
@@ -677,7 +692,7 @@ mod tests {
     #[test]
     fn test_cmd_room_topic_set() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds
             .input_cmd("room topic set \"Lots of fun discussion!\"", ctx.clone())
@@ -708,7 +723,7 @@ mod tests {
     #[test]
     fn test_cmd_room_name_invalid() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room name", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
@@ -720,7 +735,7 @@ mod tests {
     #[test]
     fn test_cmd_room_name_set() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room name set Development", ctx.clone()).unwrap();
         let act = RoomAction::Set(RoomField::Name, "Development".into());
@@ -739,7 +754,7 @@ mod tests {
     #[test]
     fn test_cmd_room_name_unset() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room name unset", ctx.clone()).unwrap();
         let act = RoomAction::Unset(RoomField::Name);
@@ -752,7 +767,7 @@ mod tests {
     #[test]
     fn test_cmd_room_tag_set() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room tag set favourite", ctx.clone()).unwrap();
         let act = RoomAction::Set(RoomField::Tag(TagName::Favorite), "".into());
@@ -821,7 +836,7 @@ mod tests {
     #[test]
     fn test_cmd_room_tag_unset() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room tag unset favourite", ctx.clone()).unwrap();
         let act = RoomAction::Unset(RoomField::Tag(TagName::Favorite));
@@ -886,7 +901,7 @@ mod tests {
     #[test]
     fn test_cmd_invite() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd("invite accept", ctx.clone()).unwrap();
         let act = IambAction::Room(RoomAction::InviteAccept);
@@ -923,7 +938,7 @@ mod tests {
     #[test]
     fn test_cmd_redact() {
         let mut cmds = setup_commands();
-        let ctx = ProgramContext::default();
+        let ctx = EditContext::default();
 
         let res = cmds.input_cmd("redact", ctx.clone()).unwrap();
         let act = IambAction::Message(MessageAction::Redact(None, false));

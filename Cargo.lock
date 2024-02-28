@@ -136,9 +136,9 @@ checksum = "d301b3b94cb4b2f23d7917810addbbaff90738e0ca2be692bd027e70d7e0330c"
 
 [[package]]
 name = "arboard"
-version = "3.2.1"
+version = "3.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac57f2b058a76363e357c056e4f74f1945bf734d37b8b3ef49066c4787dde0fc"
+checksum = "aafb29b107435aa276664c1db8954ac27a6e105cdad3c88287a199eb0e313c08"
 dependencies = [
  "clipboard-win",
  "core-graphics",
@@ -319,9 +319,9 @@ checksum = "bef38d45163c2f1dde094a7dfd33ccf595c92905c8f8f4fdc18d06fb1037718a"
 
 [[package]]
 name = "bitflags"
-version = "2.4.0"
+version = "2.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4682ae6287fcf752ecaabbfcc7b6f9b72aa33933dc23a554d853aea8eea8635"
+checksum = "ed570934406eb16438a4e976b1b4500774099c13b8cb96eec99f620f05090ddf"
 
 [[package]]
 name = "blake3"
@@ -707,7 +707,7 @@ version = "0.27.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f476fe445d41c9e991fd07515a6f463074b782242ccf4a5b7b1d1012e70824df"
 dependencies = [
- "bitflags 2.4.0",
+ "bitflags 2.4.2",
  "crossterm_winapi",
  "libc",
  "mio",
@@ -1328,9 +1328,9 @@ dependencies = [
 
 [[package]]
 name = "gethostname"
-version = "0.2.3"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c1ebd34e35c46e00bb73e81363248d627782724609fe1b6396f553f68fe3862e"
+checksum = "bb65d4ba3173c56a500b555b532f72c42e8d1fe64962b518897f8959fae2c177"
 dependencies = [
  "libc",
  "winapi",
@@ -1595,7 +1595,7 @@ name = "iamb"
 version = "0.0.9-alpha.1"
 dependencies = [
  "arboard",
- "bitflags 2.4.0",
+ "bitflags 2.4.2",
  "chrono",
  "clap",
  "comrak",
@@ -1615,8 +1615,10 @@ dependencies = [
  "mime",
  "mime_guess",
  "modalkit",
+ "modalkit-ratatui",
  "open",
  "pretty_assertions",
+ "ratatui",
  "ratatui-image",
  "regex",
  "rpassword",
@@ -1855,6 +1857,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "68421373957a1593a767013698dbf206e2b221eefe97a44d98d18672ff38423c"
 dependencies = [
  "serde",
+]
+
+[[package]]
+name = "keybindings"
+version = "0.0.1"
+source = "git+https://github.com/ulyssa/modalkit?rev=5ebcaf1#5ebcaf18289526216a4e852a6c2c9ee03709e717"
+dependencies = [
+ "textwrap",
+ "unicode-segmentation",
+ "unicode-width",
 ]
 
 [[package]]
@@ -2180,9 +2192,9 @@ checksum = "f665ee40bc4a3c5590afb1e9677db74a508659dfd71e126420da8274909a0167"
 
 [[package]]
 name = "memoffset"
-version = "0.6.5"
+version = "0.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5aa361d4faea93603064a027415f07bd8e1d5c88c9fbf68bf56a285428fd79ce"
+checksum = "5de893c32cde5f383baa4c04c5d6dbdd735cfd4a794b0debdb2bb1b421da5ff4"
 dependencies = [
  "autocfg",
 ]
@@ -2242,26 +2254,37 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.16"
-source = "git+https://github.com/ulyssa/modalkit?rev=f9f0517ed6a6152c1eab36d2e71b11f38831d5e6#f9f0517ed6a6152c1eab36d2e71b11f38831d5e6"
+version = "0.0.17"
+source = "git+https://github.com/ulyssa/modalkit?rev=5ebcaf1#5ebcaf18289526216a4e852a6c2c9ee03709e717"
 dependencies = [
  "anymap2",
  "arboard",
- "bitflags 1.3.2",
+ "bitflags 2.4.2",
  "crossterm 0.27.0",
  "derive_more",
  "intervaltree",
- "libc",
+ "keybindings",
  "nom",
  "radix_trie",
- "ratatui",
  "regex",
  "ropey",
- "serde",
- "textwrap",
  "thiserror",
  "unicode-segmentation",
  "unicode-width",
+]
+
+[[package]]
+name = "modalkit-ratatui"
+version = "0.0.17"
+source = "git+https://github.com/ulyssa/modalkit?rev=5ebcaf1#5ebcaf18289526216a4e852a6c2c9ee03709e717"
+dependencies = [
+ "crossterm 0.27.0",
+ "intervaltree",
+ "libc",
+ "modalkit",
+ "ratatui",
+ "regex",
+ "serde",
 ]
 
 [[package]]
@@ -2281,14 +2304,14 @@ dependencies = [
 
 [[package]]
 name = "nix"
-version = "0.24.3"
+version = "0.26.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fa52e972a9a719cecb6864fb88568781eb706bac2cd1d4f04a648542dbf78069"
+checksum = "598beaf3cc6fdd9a5dfb1630c2800c7acd31df7aaf0f565796fba2b53ca1af1b"
 dependencies = [
  "bitflags 1.3.2",
  "cfg-if",
  "libc",
- "memoffset 0.6.5",
+ "memoffset 0.7.1",
 ]
 
 [[package]]
@@ -2869,7 +2892,7 @@ version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e2e4cd95294a85c3b4446e63ef054eea43e0205b1fd60120c16b74ff7ff96ad"
 dependencies = [
- "bitflags 2.4.0",
+ "bitflags 2.4.2",
  "cassowary",
  "crossterm 0.27.0",
  "indoc",
@@ -3195,7 +3218,7 @@ version = "0.38.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f25469e9ae0f3d0047ca8b93fc56843f38e6774f0914a107ff8b41be8be8e0b7"
 dependencies = [
- "bitflags 2.4.0",
+ "bitflags 2.4.2",
  "errno",
  "libc",
  "linux-raw-sys 0.4.8",
@@ -4516,11 +4539,11 @@ dependencies = [
 
 [[package]]
 name = "x11rb"
-version = "0.10.1"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "592b4883219f345e712b3209c62654ebda0bb50887f330cbd018d0f654bfd507"
+checksum = "b1641b26d4dec61337c35a1b1aaf9e3cba8f46f0b43636c609ab0291a648040a"
 dependencies = [
- "gethostname 0.2.3",
+ "gethostname 0.3.0",
  "nix",
  "winapi",
  "winapi-wsapoll",
@@ -4529,9 +4552,9 @@ dependencies = [
 
 [[package]]
 name = "x11rb-protocol"
-version = "0.10.0"
+version = "0.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "56b245751c0ac9db0e006dc812031482784e434630205a93c73cfefcaabeac67"
+checksum = "82d6c3f9a0fb6701fab8f6cea9b0c0bd5d6876f1f89f7fada07e558077c344bc"
 dependencies = [
  "nix",
 ]

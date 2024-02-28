@@ -12,6 +12,7 @@
 
 - `:dms` will open a list of direct messages
 - `:rooms` will open a list of joined rooms
+- `:chats` will open a list containing both direct messages and rooms
 - `:members` will open a list of members for the currently focused room or space
 - `:spaces` will open a list of joined spaces
 - `:join` can be used to switch to join a new room or start a direct message

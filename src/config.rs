@@ -11,15 +11,12 @@ use std::process;
 
 use clap::Parser;
 use matrix_sdk::ruma::{OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use ratatui::style::{Color, Modifier as StyleModifier, Style};
+use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
 use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer};
 use tracing::Level;
 use url::Url;
-
-use modalkit::tui::{
-    style::{Color, Modifier as StyleModifier, Style},
-    text::Span,
-};
 
 use super::base::{IambId, RoomInfo, SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 
@@ -227,6 +224,7 @@ pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
 fn merge_sorts(a: SortOverrides, b: SortOverrides) -> SortOverrides {
     SortOverrides {
+        chats: b.chats.or(a.chats),
         dms: b.dms.or(a.dms),
         rooms: b.rooms.or(a.rooms),
         spaces: b.spaces.or(a.spaces),
@@ -308,6 +306,7 @@ pub struct ImagePreviewProtocolValues {
 
 #[derive(Clone)]
 pub struct SortValues {
+    pub chats: Vec<SortColumn<SortFieldRoom>>,
     pub dms: Vec<SortColumn<SortFieldRoom>>,
     pub rooms: Vec<SortColumn<SortFieldRoom>>,
     pub spaces: Vec<SortColumn<SortFieldRoom>>,
@@ -316,6 +315,7 @@ pub struct SortValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct SortOverrides {
+    pub chats: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub dms: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub rooms: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub spaces: Option<Vec<SortColumn<SortFieldRoom>>>,
@@ -325,11 +325,12 @@ pub struct SortOverrides {
 impl SortOverrides {
     pub fn values(self) -> SortValues {
         let rooms = self.rooms.unwrap_or_else(|| Vec::from(DEFAULT_ROOM_SORT));
+        let chats = self.chats.unwrap_or_else(|| rooms.clone());
         let dms = self.dms.unwrap_or_else(|| rooms.clone());
         let spaces = self.spaces.unwrap_or_else(|| rooms.clone());
         let members = self.members.unwrap_or_else(|| Vec::from(DEFAULT_MEMBERS_SORT));
 
-        SortValues { rooms, members, dms, spaces }
+        SortValues { rooms, members, chats, dms, spaces }
     }
 }
 

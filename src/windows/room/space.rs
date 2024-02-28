@@ -7,7 +7,7 @@ use matrix_sdk::{
     ruma::{OwnedRoomId, RoomId},
 };
 
-use modalkit::tui::{
+use ratatui::{
     buffer::Buffer,
     layout::Rect,
     style::{Color, Style},
@@ -15,9 +15,11 @@ use modalkit::tui::{
     widgets::StatefulWidget,
 };
 
-use modalkit::{
-    widgets::list::{List, ListState},
-    widgets::{TermOffset, TerminalCursor, WindowOps},
+use modalkit_ratatui::{
+    list::{List, ListState},
+    TermOffset,
+    TerminalCursor,
+    WindowOps,
 };
 
 use crate::base::{IambBufferId, IambInfo, ProgramStore, RoomFocus};

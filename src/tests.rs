@@ -15,7 +15,7 @@ use matrix_sdk::ruma::{
 };
 
 use lazy_static::lazy_static;
-use modalkit::tui::style::{Color, Style};
+use ratatui::style::{Color, Style};
 use tokio::sync::mpsc::unbounded_channel;
 use tracing::Level;
 use url::Url;

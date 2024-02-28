@@ -44,13 +44,14 @@ use matrix_sdk::ruma::{
     UInt,
 };
 
-use modalkit::tui::{
+use ratatui::{
     style::{Modifier as StyleModifier, Style},
     symbols::line::THICK_VERTICAL,
     text::{Line, Span, Text},
 };
 
-use modalkit::editing::{base::ViewportContext, cursor::Cursor};
+use modalkit::editing::cursor::Cursor;
+use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
 use crate::config::ImagePreviewSize;
@@ -58,7 +59,7 @@ use crate::{
     base::{IambResult, RoomInfo},
     config::ApplicationSettings,
     message::html::{parse_matrix_html, StyleTree},
-    util::{space_span, wrapped_text},
+    util::{space, space_span, take_width, wrapped_text},
 };
 
 mod html;
@@ -196,7 +197,7 @@ impl Ord for MessageTimeStamp {
 
 impl PartialOrd for MessageTimeStamp {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.cmp(other).into()
+        Some(self.cmp(other))
     }
 }
 
@@ -340,7 +341,7 @@ impl Ord for MessageCursor {
 
 impl PartialOrd for MessageCursor {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.cmp(other).into()
+        Some(self.cmp(other))
     }
 }
 
@@ -846,10 +847,10 @@ impl Message {
             if let Some(placeholder) = match &self.image_preview {
                 ImageStatus::None => None,
                 ImageStatus::Downloading(image_preview_size) => {
-                    Some(Message::placeholder_frame(Some("Downloading..."), image_preview_size))
+                    Message::placeholder_frame(Some("Downloading..."), width, image_preview_size)
                 },
                 ImageStatus::Loaded(backend) => {
-                    Some(Message::placeholder_frame(None, &backend.rect().into()))
+                    Message::placeholder_frame(None, width, &backend.rect().into())
                 },
                 ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
             } {
@@ -869,21 +870,32 @@ impl Message {
     }
 
     /// Before the image is loaded, already display a placeholder frame of the image size.
-    fn placeholder_frame(text: Option<&str>, image_preview_size: &ImagePreviewSize) -> String {
+    fn placeholder_frame(
+        text: Option<&str>,
+        outer_width: usize,
+        image_preview_size: &ImagePreviewSize,
+    ) -> Option<String> {
         let ImagePreviewSize { width, height } = image_preview_size;
+        if outer_width < *width || (*width < 2 || *height < 2) {
+            return None;
+        }
         let mut placeholder = "\u{230c}".to_string();
         placeholder.push_str(&" ".repeat(width - 2));
         placeholder.push_str("\u{230d}\n");
-        placeholder.push(' ');
-        if let Some(text) = text {
-            placeholder.push_str(text);
+        if *height > 2 {
+            if let Some(text) = text {
+                if text.width() <= width - 2 {
+                    placeholder.push(' ');
+                    placeholder.push_str(text);
+                }
+            }
         }
 
         placeholder.push_str(&"\n".repeat(height - 2));
         placeholder.push('\u{230e}');
         placeholder.push_str(&" ".repeat(width - 2));
         placeholder.push_str("\u{230f}\n");
-        placeholder
+        Some(placeholder)
     }
 
     fn show_sender<'a>(
@@ -903,13 +915,13 @@ impl Message {
         }
 
         let Span { content, style } = self.sender_span(info, settings);
-        let stop = content.len().min(28);
-        let s = &content[..stop];
+        let ((truncated, width), _) = take_width(content, 28);
+        let padding = 28 - width;
 
         let sender = if align_right {
-            format!("{: >width$}  ", s, width = 28)
+            space(padding) + &truncated + "  "
         } else {
-            format!("{: <width$}  ", s, width = 28)
+            truncated.into_owned() + &space(padding) + "  "
         };
 
         Span::styled(sender, style).into()
@@ -1125,6 +1137,84 @@ pub mod tests {
         assert_eq!(
             content.formatted.unwrap().body,
             "<h1>Heading</h1>\n<h2>Subheading</h2>\n<p>text</p>\n"
+        );
+    }
+
+    #[test]
+    fn test_placeholder_frame() {
+        fn pretty_frame_test(str: &str) -> Option<String> {
+            Some(str[1..].to_string())
+        }
+
+        assert_eq!(
+            Message::placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 4 }),
+            pretty_frame_test(
+                r#"
+⌌  ⌍
+
+
+⌎  ⌏
+"#
+            )
+        );
+
+        assert_eq!(
+            Message::placeholder_frame(None, 2, &ImagePreviewSize { width: 4, height: 4 }),
+            None
+        );
+        assert_eq!(
+            Message::placeholder_frame(None, 4, &ImagePreviewSize { width: 1, height: 4 }),
+            None
+        );
+
+        assert_eq!(
+            Message::placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 1 }),
+            None
+        );
+
+        assert_eq!(
+            Message::placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 4 }),
+            pretty_frame_test(
+                r#"
+⌌  ⌍
+ OK
+
+⌎  ⌏
+"#
+            )
+        );
+        assert_eq!(
+            Message::placeholder_frame(Some("idontfit"), 4, &ImagePreviewSize {
+                width: 4,
+                height: 4,
+            }),
+            pretty_frame_test(
+                r#"
+⌌  ⌍
+
+
+⌎  ⌏
+"#
+            )
+        );
+        assert_eq!(
+            Message::placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 2 }),
+            pretty_frame_test(
+                r#"
+⌌  ⌍
+⌎  ⌏
+"#
+            )
+        );
+        assert_eq!(
+            Message::placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 2, height: 3 }),
+            pretty_frame_test(
+                r#"
+⌌⌍
+
+⌎⌏
+"#
+            )
         );
     }
 }
