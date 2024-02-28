@@ -26,19 +26,19 @@ pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) 
 
 pub fn take_width(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usize), Cow<'_, str>) {
     // Find where to split the line.
-    let mut idx = 0;
     let mut w = 0;
 
-    for (i, g) in UnicodeSegmentation::grapheme_indices(s.as_ref(), true) {
-        let gw = UnicodeWidthStr::width(g);
-        idx = i;
-
-        if w + gw > width {
-            break;
-        }
-
-        w += gw;
-    }
+    let idx = UnicodeSegmentation::grapheme_indices(s.as_ref(), true)
+        .find_map(|(i, g)| {
+            let gw = UnicodeWidthStr::width(g);
+            if w + gw > width {
+                Some(i)
+            } else {
+                w += gw;
+                None
+            }
+        })
+        .unwrap_or(s.len());
 
     let (s0, s1) = split_cow(s, idx);
 

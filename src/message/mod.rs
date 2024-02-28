@@ -58,7 +58,7 @@ use crate::{
     base::{IambResult, RoomInfo},
     config::ApplicationSettings,
     message::html::{parse_matrix_html, StyleTree},
-    util::{space_span, wrapped_text},
+    util::{space, space_span, take_width, wrapped_text},
 };
 
 mod html;
@@ -909,13 +909,13 @@ impl Message {
         }
 
         let Span { content, style } = self.sender_span(info, settings);
-        let stop = content.len().min(28);
-        let s = &content[..stop];
+        let ((truncated, width), _) = take_width(content, 28);
+        let padding = 28 - width;
 
         let sender = if align_right {
-            format!("{: >width$}  ", s, width = 28)
+            space(padding) + &truncated + "  "
         } else {
-            format!("{: <width$}  ", s, width = 28)
+            truncated.into_owned() + &space(padding) + "  "
         };
 
         Span::styled(sender, style).into()
