@@ -29,7 +29,7 @@
               "modalkit-0.0.16" = "sha256-mjAD1v0r2+SzPdoB2wZ/5iJ1NZK+3OSvCYcUZ5Ef38Y=";
             };
           };
-          nativeBuildInputs = [ pkgs.pkgconfig ];
+          nativeBuildInputs = [ pkgs.pkg-config ];
           buildInputs = [ pkgs.openssl ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin
             (with pkgs.darwin.apple_sdk.frameworks; [ AppKit Security ]);
         };
