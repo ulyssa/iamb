@@ -126,11 +126,7 @@ fn selected_text(s: &str, selected: bool) -> Text {
     Text::from(selected_span(s, selected))
 }
 
-fn name_and_labels(
-    name: &str,
-    unread: bool,
-    style: Style,
-) -> (Span<'_>, Vec<Vec<Span<'_>>>) {
+fn name_and_labels(name: &str, unread: bool, style: Style) -> (Span<'_>, Vec<Vec<Span<'_>>>) {
     let name_style = if unread {
         style.add_modifier(StyleModifier::BOLD)
     } else {
