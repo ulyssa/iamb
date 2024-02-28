@@ -1,17 +1,13 @@
 //! Welcome Window
 use std::ops::{Deref, DerefMut};
 
-use modalkit::tui::{buffer::Buffer, layout::Rect};
+use ratatui::{buffer::Buffer, layout::Rect};
 
-use modalkit::{
-    widgets::textbox::TextBoxState,
-    widgets::WindowOps,
-    widgets::{TermOffset, TerminalCursor},
-};
+use modalkit_ratatui::{textbox::TextBoxState, TermOffset, TerminalCursor, WindowOps};
 
 use modalkit::editing::action::EditInfo;
-use modalkit::editing::base::{CloseFlags, WordStyle, WriteFlags};
 use modalkit::editing::completion::CompletionList;
+use modalkit::prelude::*;
 
 use crate::base::{IambBufferId, IambInfo, IambResult, ProgramStore};
 

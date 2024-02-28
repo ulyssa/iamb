@@ -6,8 +6,8 @@ use modalkit::{
     editing::action::WindowAction,
     env::vim::keybindings::{InputStep, VimBindings},
     env::vim::VimMode,
-    input::bindings::{EdgeEvent, EdgeRepeat, InputBindings},
-    input::key::TerminalKey,
+    key::TerminalKey,
+    keybindings::{EdgeEvent, EdgeRepeat, InputBindings},
 };
 
 use crate::base::{IambAction, IambInfo, Keybindings, MATRIX_ID_WORD};

@@ -24,7 +24,7 @@ use matrix_sdk::{
     },
 };
 
-use modalkit::tui::{
+use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
     style::{Modifier as StyleModifier, Style},
@@ -48,25 +48,17 @@ use modalkit::{
             UIError,
             WindowAction,
         },
-        base::{
-            CloseFlags,
-            MoveDir1D,
-            OpenTarget,
-            PositionList,
-            ScrollStyle,
-            ViewportContext,
-            WordStyle,
-            WriteFlags,
-        },
         completion::CompletionList,
     },
-    widgets::{
-        list::{List, ListCursor, ListItem, ListState},
-        TermOffset,
-        TerminalCursor,
-        Window,
-        WindowOps,
-    },
+    prelude::*,
+};
+
+use modalkit_ratatui::{
+    list::{List, ListCursor, ListItem, ListState},
+    TermOffset,
+    TerminalCursor,
+    Window,
+    WindowOps,
 };
 
 use crate::base::{
@@ -281,7 +273,6 @@ fn room_prompt(
 
             Err(err)
         },
-        _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
     }
 }
 
@@ -1332,7 +1323,6 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for VerifyItem {
 
                 Err(err)
             },
-            _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
         }
     }
 }
@@ -1428,7 +1418,6 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 
                 Err(err)
             },
-            _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
         }
     }
 }

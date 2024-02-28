@@ -31,17 +31,20 @@ use matrix_sdk::{
     },
 };
 
-use modalkit::{
-    input::dialog::{MultiChoice, MultiChoiceItem, PromptYesNo},
-    tui::{
-        buffer::Buffer,
-        layout::Rect,
-        text::{Line, Span},
-        widgets::{Paragraph, StatefulWidget, Widget},
-    },
-    widgets::textbox::{TextBox, TextBoxState},
-    widgets::TerminalCursor,
-    widgets::{PromptActions, WindowOps},
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    text::{Line, Span},
+    widgets::{Paragraph, StatefulWidget, Widget},
+};
+
+use modalkit::keybindings::dialog::{MultiChoice, MultiChoiceItem, PromptYesNo};
+
+use modalkit_ratatui::{
+    textbox::{TextBox, TextBoxState},
+    PromptActions,
+    TerminalCursor,
+    WindowOps,
 };
 
 use modalkit::editing::{
@@ -59,12 +62,12 @@ use modalkit::editing::{
         Scrollable,
         UIError,
     },
-    base::{CloseFlags, Count, MoveDir1D, PositionList, ScrollStyle, WordStyle, WriteFlags},
     completion::CompletionList,
     context::Resolve,
     history::{self, HistoryList},
     rope::EditRope,
 };
+use modalkit::prelude::*;
 
 use crate::base::{
     DownloadFlags,
@@ -811,7 +814,6 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ChatState {
             PromptAction::Recall(dir, count, prefixed) => {
                 self.recall(dir, count, *prefixed, ctx, store)
             },
-            _ => Err(EditError::Unimplemented("unknown prompt action".to_string())),
         }
     }
 }
