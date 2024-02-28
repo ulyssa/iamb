@@ -832,7 +832,7 @@ impl ClientWorker {
                             let room_id = room.room_id().to_owned();
                             let room_name = Some(room_name.to_string());
                             let mut locked = store.lock().await;
-                            let mut info = locked.application.rooms.get_or_default(room_id.clone());
+                            let info = locked.application.rooms.get_or_default(room_id.clone());
                             info.name = room_name;
                         }
                     }

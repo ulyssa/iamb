@@ -292,6 +292,17 @@ fn iamb_rooms(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_chats(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = ctx.switch(OpenTarget::Application(IambId::ChatList));
+    let step = CommandStep::Continue(open, ctx.context.take());
+
+    return Ok(step);
+}
+
 fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -494,6 +505,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "create".into(),
         aliases: vec![],
         f: iamb_create,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "chats".into(),
+        aliases: vec![],
+        f: iamb_chats,
     });
     cmds.add_command(ProgramCommand { name: "dms".into(), aliases: vec![], f: iamb_dms });
     cmds.add_command(ProgramCommand {

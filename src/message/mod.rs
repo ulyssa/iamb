@@ -196,7 +196,7 @@ impl Ord for MessageTimeStamp {
 
 impl PartialOrd for MessageTimeStamp {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.cmp(other).into()
+        Some(self.cmp(other))
     }
 }
 
@@ -340,7 +340,7 @@ impl Ord for MessageCursor {
 
 impl PartialOrd for MessageCursor {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.cmp(other).into()
+        Some(self.cmp(other))
     }
 }
 

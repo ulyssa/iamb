@@ -1172,7 +1172,7 @@ pub enum IambId {
     /// A Matrix room.
     Room(OwnedRoomId),
 
-    /// The `:rooms` window.
+    /// The `:dms` window.
     DirectList,
 
     /// The `:members` window for a given Matrix room.
@@ -1189,6 +1189,9 @@ pub enum IambId {
 
     /// The `:welcome` window.
     Welcome,
+
+    /// The `:chats` window.
+    ChatList,
 }
 
 impl Display for IambId {
@@ -1205,6 +1208,7 @@ impl Display for IambId {
             IambId::SpaceList => f.write_str("iamb://spaces"),
             IambId::VerifyList => f.write_str("iamb://verify"),
             IambId::Welcome => f.write_str("iamb://welcome"),
+            IambId::ChatList => f.write_str("iamb://chats"),
         }
     }
 }
@@ -1317,6 +1321,13 @@ impl<'de> Visitor<'de> for IambIdVisitor {
 
                 Ok(IambId::Welcome)
             },
+            Some("chats") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://chats takes no path"));
+                }
+
+                Ok(IambId::ChatList)
+            },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
         }
@@ -1374,6 +1385,9 @@ pub enum IambBufferId {
 
     /// The buffer for the `:rooms` window.
     Welcome,
+
+    /// The `:chats` window.
+    ChatList,
 }
 
 impl IambBufferId {
@@ -1388,6 +1402,7 @@ impl IambBufferId {
             IambBufferId::SpaceList => Some(IambId::SpaceList),
             IambBufferId::VerifyList => Some(IambId::VerifyList),
             IambBufferId::Welcome => Some(IambId::Welcome),
+            IambBufferId::ChatList => Some(IambId::ChatList),
         }
     }
 }
@@ -1410,7 +1425,6 @@ impl ApplicationInfo for IambInfo {
         match content {
             IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
             IambBufferId::Command(CommandType::Search) => vec![],
-
             IambBufferId::Room(_, RoomFocus::MessageBar) => complete_msgbar(text, cursor, store),
             IambBufferId::Room(_, RoomFocus::Scrollback) => vec![],
 
@@ -1420,6 +1434,7 @@ impl ApplicationInfo for IambInfo {
             IambBufferId::SpaceList => vec![],
             IambBufferId::VerifyList => vec![],
             IambBufferId::Welcome => vec![],
+            IambBufferId::ChatList => vec![],
         }
     }
 
