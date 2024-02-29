@@ -78,9 +78,10 @@ features = ["macros", "net", "rt-multi-thread", "sync", "time"]
 lazy_static = "1.4.0"
 pretty_assertions = "1.4.0"
 
-[profile.release]
-lto = true
+[profile.release-lto]
+inherits = "release"
 incremental = false
+lto = true
 
 [features]
 default = ["sixel"]
