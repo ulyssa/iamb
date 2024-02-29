@@ -77,7 +77,8 @@ use matrix_sdk::{
     Session,
 };
 
-use modalkit::editing::action::{EditInfo, InfoMessage, UIError};
+use modalkit::errors::UIError;
+use modalkit::prelude::{EditInfo, InfoMessage};
 
 use crate::base::Need;
 use crate::{

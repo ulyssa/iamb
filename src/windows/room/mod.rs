@@ -19,23 +19,18 @@ use ratatui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
-use modalkit::prelude::*;
-use modalkit::{
-    editing::action::{
-        Action,
-        EditInfo,
-        EditResult,
-        Editable,
-        EditorAction,
-        Jumpable,
-        PromptAction,
-        Promptable,
-        Scrollable,
-        UIError,
-    },
-    editing::completion::CompletionList,
-    keybindings::dialog::PromptYesNo,
+use modalkit::actions::{
+    Action,
+    Editable,
+    EditorAction,
+    Jumpable,
+    PromptAction,
+    Promptable,
+    Scrollable,
 };
+use modalkit::errors::{EditResult, UIError};
+use modalkit::prelude::*;
+use modalkit::{editing::completion::CompletionList, keybindings::dialog::PromptYesNo};
 use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
 
 use crate::base::{

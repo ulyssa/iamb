@@ -14,28 +14,23 @@ use ratatui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
+use modalkit::actions::{
+    Action,
+    CursorAction,
+    EditAction,
+    Editable,
+    EditorAction,
+    EditorActions,
+    HistoryAction,
+    InsertTextAction,
+    Jumpable,
+    PromptAction,
+    Promptable,
+    Scrollable,
+    Searchable,
+    SelectionAction,
+};
 use modalkit::editing::{
-    action::{
-        Action,
-        CursorAction,
-        EditAction,
-        EditError,
-        EditInfo,
-        EditResult,
-        Editable,
-        EditorAction,
-        EditorActions,
-        HistoryAction,
-        InsertTextAction,
-        Jumpable,
-        PromptAction,
-        Promptable,
-        Scrollable,
-        Searchable,
-        SelectionAction,
-        UIError,
-        UIResult,
-    },
     completion::CompletionList,
     context::Resolve,
     cursor::{CursorGroup, CursorState},
@@ -43,6 +38,7 @@ use modalkit::editing::{
     rope::EditRope,
     store::{RegisterCell, RegisterPutFlags},
 };
+use modalkit::errors::{EditError, EditResult, UIError, UIResult};
 use modalkit::prelude::*;
 
 use crate::{

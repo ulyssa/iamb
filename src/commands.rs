@@ -604,7 +604,7 @@ pub fn setup_commands() -> ProgramCommands {
 mod tests {
     use super::*;
     use matrix_sdk::ruma::user_id;
-    use modalkit::editing::action::WindowAction;
+    use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
 
     #[test]

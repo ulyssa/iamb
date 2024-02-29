@@ -58,12 +58,12 @@ edit = "0.1.4"
 [dependencies.modalkit]
 version = "0.0.17"
 git = "https://github.com/ulyssa/modalkit"
-rev = "5ebcaf1"
+rev = "cb8c8aeb9a499b9b16615ce144f9014d78036e01"
 
 [dependencies.modalkit-ratatui]
 version = "0.0.17"
 git = "https://github.com/ulyssa/modalkit"
-rev = "5ebcaf1"
+rev = "cb8c8aeb9a499b9b16615ce144f9014d78036e01"
 
 [dependencies.matrix-sdk]
 version = "^0.6.2"
