@@ -738,15 +738,21 @@ impl ClientWorker {
         let req_config = RequestConfig::new().timeout(req_timeout).retry_timeout(req_timeout);
 
         // Set up the Matrix client for the selected profile.
-        let client = Client::builder()
+        let builder = Client::builder()
             .http_client(Arc::new(http))
-            .homeserver_url(account.url.clone())
             .sled_store(settings.matrix_dir.as_path(), None)
             .expect("Failed to setup up sled store for Matrix SDK")
-            .request_config(req_config)
-            .build()
-            .await
-            .expect("Failed to instantiate Matrix client");
+            .request_config(req_config);
+
+        let builder = if let Some(url) = account.url.as_ref() {
+            // Use the explicitly specified homeserver.
+            builder.homeserver_url(url.as_str())
+        } else {
+            // Try to discover the homeserver from the user ID.
+            builder.server_name(account.user_id.server_name())
+        };
+
+        let client = builder.build().await.expect("Failed to instantiate Matrix client");
 
         let mut worker = ClientWorker {
             initialized: false,
