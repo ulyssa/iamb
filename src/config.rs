@@ -505,7 +505,7 @@ pub enum Layout {
 #[derive(Clone, Deserialize)]
 pub struct ProfileConfig {
     pub user_id: OwnedUserId,
-    pub url: Url,
+    pub url: Option<Url>,
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,

@@ -65,6 +65,20 @@ You can create a basic configuration in `$CONFIG_DIR/iamb/config.json` that look
 {
     "profiles": {
         "example.com": {
+            "user_id": "@user:example.com"
+        }
+    }
+}
+```
+
+If you homeserver is located on a different domain than the server part of the
+`user_id` and you don't have a [`/.well-known`][well_known_entry] entry, then
+you can explicitly specify the homeserver URL to use:
+
+```json
+{
+    "profiles": {
+        "example.com": {
             "url": "https://example.com",
             "user_id": "@user:example.com"
         }
@@ -122,6 +136,7 @@ iamb is released under the [Apache License, Version 2.0].
 [iamb.chat]: https://iamb.chat
 [gomuks]: https://github.com/tulir/gomuks
 [weechat-matrix]: https://github.com/poljar/weechat-matrix
+[well_known_entry]: https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixclient
 [#8]: https://github.com/ulyssa/iamb/issues/8
 [#14]: https://github.com/ulyssa/iamb/issues/14
 [#16]: https://github.com/ulyssa/iamb/issues/16
