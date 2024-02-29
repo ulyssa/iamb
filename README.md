@@ -4,6 +4,7 @@
 [![License: Apache 2.0](https://img.shields.io/crates/l/iamb.svg?logo=apache)](https://crates.io/crates/iamb)
 [![#iamb:0x.badd.cafe](https://img.shields.io/badge/matrix-%23iamb:0x.badd.cafe-blue)](https://matrix.to/#/#iamb:0x.badd.cafe)
 [![Latest Version](https://img.shields.io/crates/v/iamb.svg?logo=rust)](https://crates.io/crates/iamb)
+[![iamb](https://snapcraft.io/iamb/badge.svg)](https://snapcraft.io/iamb)
 
 ## About
 
@@ -55,6 +56,14 @@ opi iamb
 
 ```
 nix profile install "github:ulyssa/iamb"
+```
+
+### Snap
+
+A snap for Linux distributions which [support](https://snapcraft.io/docs/installing-snapd) the packaging system. 
+
+```
+snap install iamb
 ```
 
 ## Configuration
