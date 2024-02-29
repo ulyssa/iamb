@@ -20,20 +20,17 @@ use ratatui::{
 };
 
 use modalkit::actions::{
-        Action,
-        Editable,
-        EditorAction,
-        Jumpable,
-        PromptAction,
-        Promptable,
-        Scrollable,
+    Action,
+    Editable,
+    EditorAction,
+    Jumpable,
+    PromptAction,
+    Promptable,
+    Scrollable,
 };
 use modalkit::errors::{EditResult, UIError};
 use modalkit::prelude::*;
-use modalkit::{
-    editing::completion::CompletionList,
-    keybindings::dialog::PromptYesNo,
-};
+use modalkit::{editing::completion::CompletionList, keybindings::dialog::PromptYesNo};
 use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
 
 use crate::base::{

@@ -30,7 +30,6 @@ use modalkit::actions::{
     Searchable,
     SelectionAction,
 };
-use modalkit::errors::{EditError, EditResult, UIError, UIResult};
 use modalkit::editing::{
     completion::CompletionList,
     context::Resolve,
@@ -39,6 +38,7 @@ use modalkit::editing::{
     rope::EditRope,
     store::{RegisterCell, RegisterPutFlags},
 };
+use modalkit::errors::{EditError, EditResult, UIError, UIResult};
 use modalkit::prelude::*;
 
 use crate::{

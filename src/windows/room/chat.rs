@@ -56,13 +56,13 @@ use modalkit::actions::{
     Promptable,
     Scrollable,
 };
-use modalkit::errors::{EditError, EditResult, UIError};
 use modalkit::editing::{
     completion::CompletionList,
     context::Resolve,
     history::{self, HistoryList},
     rope::EditRope,
 };
+use modalkit::errors::{EditError, EditResult, UIError};
 use modalkit::prelude::*;
 
 use crate::base::{

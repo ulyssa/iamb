@@ -104,12 +104,8 @@ use modalkit::{
         WindowAction,
         WindowContainer,
     },
+    editing::{context::Resolve, key::KeyManager, store::Store},
     errors::{EditError, UIError},
-    editing::{
-        context::Resolve,
-        key::KeyManager,
-        store::Store,
-    },
     key::TerminalKey,
     keybindings::{
         dialog::{Pager, PromptYesNo},

@@ -59,7 +59,6 @@ use matrix_sdk::{
 
 use modalkit::{
     actions::Action,
-    errors::{UIError, UIResult},
     editing::{
         application::{
             ApplicationAction,
@@ -79,6 +78,7 @@ use modalkit::{
         command::{CommandContext, CommandDescription, VimCommand, VimCommandMachine},
         keybindings::VimMachine,
     },
+    errors::{UIError, UIResult},
     key::TerminalKey,
     keybindings::SequenceStatus,
     prelude::{CommandType, WordStyle},
