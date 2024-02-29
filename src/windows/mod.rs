@@ -33,23 +33,18 @@ use ratatui::{
 };
 
 use modalkit::{
-    editing::{
-        action::{
-            Action,
-            EditError,
-            EditInfo,
-            EditResult,
-            Editable,
-            EditorAction,
-            Jumpable,
-            PromptAction,
-            Promptable,
-            Scrollable,
-            UIError,
-            WindowAction,
-        },
-        completion::CompletionList,
+    actions::{
+        Action,
+        Editable,
+        EditorAction,
+        Jumpable,
+        PromptAction,
+        Promptable,
+        Scrollable,
+        WindowAction,
     },
+    editing::completion::CompletionList,
+    errors::{EditError, EditResult, UIError},
     prelude::*,
 };
 

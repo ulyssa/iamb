@@ -47,21 +47,17 @@ use modalkit_ratatui::{
     WindowOps,
 };
 
+use modalkit::actions::{
+    Action,
+    Editable,
+    EditorAction,
+    Jumpable,
+    PromptAction,
+    Promptable,
+    Scrollable,
+};
+use modalkit::errors::{EditError, EditResult, UIError};
 use modalkit::editing::{
-    action::{
-        Action,
-        EditError,
-        EditInfo,
-        EditResult,
-        Editable,
-        EditorAction,
-        InfoMessage,
-        Jumpable,
-        PromptAction,
-        Promptable,
-        Scrollable,
-        UIError,
-    },
     completion::CompletionList,
     context::Resolve,
     history::{self, HistoryList},

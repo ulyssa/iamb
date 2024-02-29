@@ -5,7 +5,6 @@ use ratatui::{buffer::Buffer, layout::Rect};
 
 use modalkit_ratatui::{textbox::TextBoxState, TermOffset, TerminalCursor, WindowOps};
 
-use modalkit::editing::action::EditInfo;
 use modalkit::editing::completion::CompletionList;
 use modalkit::prelude::*;
 

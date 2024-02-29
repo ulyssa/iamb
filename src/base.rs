@@ -58,8 +58,9 @@ use matrix_sdk::{
 };
 
 use modalkit::{
+    actions::Action,
+    errors::{UIError, UIResult},
     editing::{
-        action::{Action, UIError, UIResult},
         application::{
             ApplicationAction,
             ApplicationContentId,

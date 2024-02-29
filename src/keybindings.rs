@@ -3,7 +3,7 @@
 //! The keybindings are set up here. We define some iamb-specific keybindings, but the default Vim
 //! keys come from [modalkit::env::vim::keybindings].
 use modalkit::{
-    editing::action::WindowAction,
+    actions::WindowAction,
     env::vim::keybindings::{InputStep, VimBindings},
     env::vim::VimMode,
     key::TerminalKey,

@@ -1862,7 +1862,7 @@ dependencies = [
 [[package]]
 name = "keybindings"
 version = "0.0.1"
-source = "git+https://github.com/ulyssa/modalkit?rev=5ebcaf1#5ebcaf18289526216a4e852a6c2c9ee03709e717"
+source = "git+https://github.com/ulyssa/modalkit?rev=cb8c8aeb9a499b9b16615ce144f9014d78036e01#cb8c8aeb9a499b9b16615ce144f9014d78036e01"
 dependencies = [
  "textwrap",
  "unicode-segmentation",
@@ -2255,7 +2255,7 @@ dependencies = [
 [[package]]
 name = "modalkit"
 version = "0.0.17"
-source = "git+https://github.com/ulyssa/modalkit?rev=5ebcaf1#5ebcaf18289526216a4e852a6c2c9ee03709e717"
+source = "git+https://github.com/ulyssa/modalkit?rev=cb8c8aeb9a499b9b16615ce144f9014d78036e01#cb8c8aeb9a499b9b16615ce144f9014d78036e01"
 dependencies = [
  "anymap2",
  "arboard",
@@ -2276,7 +2276,7 @@ dependencies = [
 [[package]]
 name = "modalkit-ratatui"
 version = "0.0.17"
-source = "git+https://github.com/ulyssa/modalkit?rev=5ebcaf1#5ebcaf18289526216a4e852a6c2c9ee03709e717"
+source = "git+https://github.com/ulyssa/modalkit?rev=cb8c8aeb9a499b9b16615ce144f9014d78036e01#cb8c8aeb9a499b9b16615ce144f9014d78036e01"
 dependencies = [
  "crossterm 0.27.0",
  "intervaltree",
