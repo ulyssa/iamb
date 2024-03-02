@@ -5,8 +5,7 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
-use std::fs::File;
-use std::io::BufWriter;
+use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
@@ -17,13 +16,15 @@ use gethostname::gethostname;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use tracing::{error, warn};
+use url::Url;
 
 use matrix_sdk::{
     config::{RequestConfig, SyncSettings},
     encryption::verification::{SasVerification, Verification},
     event_handler::Ctx,
+    matrix_auth::MatrixSession,
     reqwest,
-    room::{Invited, Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
+    room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
             filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
@@ -42,7 +43,8 @@ use matrix_sdk::{
             },
             presence::PresenceEvent,
             reaction::ReactionEventContent,
-            receipt::{ReceiptEventContent, ReceiptType},
+            receipt::ReceiptType,
+            receipt::{ReceiptEventContent, ReceiptThread},
             room::{
                 encryption::RoomEncryptionEventContent,
                 member::OriginalSyncRoomMemberEvent,
@@ -73,8 +75,9 @@ use matrix_sdk::{
         RoomVersionId,
     },
     Client,
+    ClientBuildError,
     DisplayName,
-    Session,
+    RoomMemberships,
 };
 
 use modalkit::errors::UIError;
@@ -106,9 +109,13 @@ fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
 }
 
+async fn is_direct(room: &MatrixRoom) -> bool {
+    room.deref().is_direct().await.unwrap_or_default()
+}
+
 pub async fn create_room(
     client: &Client,
-    room_alias_name: Option<&str>,
+    room_alias_name: Option<String>,
     rt: CreateRoomType,
     flags: CreateRoomFlags,
 ) -> IambResult<OwnedRoomId> {
@@ -154,8 +161,8 @@ pub async fn create_room(
     let request = assign!(CreateRoomRequest::new(), {
         room_alias_name,
         creation_content,
-        initial_state: initial_state.as_slice(),
-        invite: invite.as_slice(),
+        initial_state,
+        invite,
         is_direct,
         visibility,
         preset,
@@ -164,27 +171,31 @@ pub async fn create_room(
     let resp = client.create_room(request).await.map_err(IambError::from)?;
 
     if is_direct {
-        if let Some(room) = client.get_room(&resp.room_id) {
+        if let Some(room) = client.get_room(resp.room_id()) {
             room.set_is_direct(true).await.map_err(IambError::from)?;
         } else {
             error!(
-                room_id = resp.room_id.as_str(),
+                room_id = resp.room_id().as_str(),
                 "Couldn't set is_direct for new direct message room"
             );
         }
     }
 
-    return Ok(resp.room_id);
+    return Ok(resp.room_id().to_owned());
 }
 
 async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id: &EventId) {
-    let receipts = match room.event_read_receipts(event_id).await {
+    let receipts = match room
+        .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
+        .await
+    {
         Ok(receipts) => receipts,
         Err(e) => {
             tracing::warn!(?event_id, "failed to get event receipts: {e}");
             return;
         },
     };
+
     for (user_id, _) in receipts {
         info.set_receipt(user_id, event_id.to_owned());
     }
@@ -339,7 +350,10 @@ async fn load_older(client: &Client, store: &AsyncProgramStore) -> usize {
 
 async fn members_load(client: &Client, room_id: &RoomId) -> IambResult<Vec<RoomMember>> {
     if let Some(room) = client.get_room(room_id) {
-        Ok(room.members_no_sync().await.map_err(IambError::from)?)
+        Ok(room
+            .members_no_sync(RoomMemberships::all())
+            .await
+            .map_err(IambError::from)?)
     } else {
         Err(IambError::UnknownRoom(room_id.to_owned()).into())
     }
@@ -388,12 +402,12 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
 
         names.push((room.room_id().to_owned(), name));
 
-        if room.is_direct() {
-            dms.push(Arc::new((room.into(), tags)));
+        if is_direct(&room).await {
+            dms.push(Arc::new((room, tags)));
         } else if room.is_space() {
-            spaces.push(Arc::new((room.into(), tags)));
+            spaces.push(Arc::new((room, tags)));
         } else {
-            rooms.push(Arc::new((room.into(), tags)));
+            rooms.push(Arc::new((room, tags)));
         }
     }
 
@@ -403,12 +417,12 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
 
         names.push((room.room_id().to_owned(), name));
 
-        if room.is_direct() {
-            dms.push(Arc::new((room.into(), tags)));
+        if is_direct(&room).await {
+            dms.push(Arc::new((room, tags)));
         } else if room.is_space() {
-            spaces.push(Arc::new((room.into(), tags)));
+            spaces.push(Arc::new((room, tags)));
         } else {
-            rooms.push(Arc::new((room.into(), tags)));
+            rooms.push(Arc::new((room, tags)));
         }
     }
 
@@ -458,10 +472,20 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
         drop(locked);
 
         for (room_id, new_receipt) in updates {
-            let Some(room) = client.get_joined_room(&room_id) else {
+            use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
+
+            let Some(room) = client.get_room(&room_id) else {
                 continue;
             };
-            match room.read_receipt(&new_receipt).await {
+
+            match room
+                .send_single_receipt(
+                    ReceiptType::Read,
+                    ReceiptThread::Unthreaded,
+                    new_receipt.clone(),
+                )
+                .await
+            {
                 Ok(()) => {
                     sent.insert(room_id, new_receipt);
                 },
@@ -471,7 +495,7 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
-pub async fn do_first_sync(client: Client, store: &AsyncProgramStore) {
+pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) {
     // Perform an initial, lazily-loaded sync.
     let mut room = RoomEventFilter::default();
     room.lazy_load_options = LazyLoadOptions::Enabled { include_redundant_members: false };
@@ -490,7 +514,7 @@ pub async fn do_first_sync(client: Client, store: &AsyncProgramStore) {
     }
 
     // Populate sync_info with our initial set of rooms/dms/spaces.
-    refresh_rooms(&client, store).await;
+    refresh_rooms(client, store).await;
 
     // Insert Need::Messages to fetch accurate recent timestamps in the background.
     let mut locked = store.lock().await;
@@ -509,7 +533,7 @@ pub async fn do_first_sync(client: Client, store: &AsyncProgramStore) {
 
 #[derive(Debug)]
 pub enum LoginStyle {
-    SessionRestore(Session),
+    SessionRestore(MatrixSession),
     Password(String),
     SingleSignOn,
 }
@@ -543,7 +567,7 @@ pub enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     Logout(String, ClientReply<IambResult<EditInfo>>),
-    GetInviter(Invited, ClientReply<IambResult<Option<RoomMember>>>),
+    GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
     GetRoom(OwnedRoomId, ClientReply<IambResult<FetchedRoom>>),
     JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
@@ -618,6 +642,56 @@ impl Debug for WorkerTask {
     }
 }
 
+async fn create_client_inner(
+    homeserver: &Option<Url>,
+    settings: &ApplicationSettings,
+) -> Result<Client, ClientBuildError> {
+    let req_timeout = Duration::from_secs(settings.tunables.request_timeout);
+
+    // Set up the HTTP client.
+    let http = reqwest::Client::builder()
+        .user_agent(IAMB_USER_AGENT)
+        .timeout(req_timeout)
+        .pool_idle_timeout(Duration::from_secs(60))
+        .pool_max_idle_per_host(10)
+        .tcp_keepalive(Duration::from_secs(10))
+        .build()
+        .unwrap();
+
+    let req_config = RequestConfig::new().timeout(req_timeout).retry_timeout(req_timeout);
+
+    // Set up the Matrix client for the selected profile.
+    let builder = Client::builder()
+        .http_client(http)
+        .sqlite_store(settings.sqlite_dir.as_path(), None)
+        .request_config(req_config);
+
+    let builder = if let Some(url) = homeserver {
+        // Use the explicitly specified homeserver.
+        builder.homeserver_url(url.as_str())
+    } else {
+        // Try to discover the homeserver from the user ID.
+        let account = &settings.profile;
+        builder.server_name(account.user_id.server_name())
+    };
+
+    builder.build().await
+}
+
+pub async fn create_client(settings: &ApplicationSettings) -> Client {
+    let account = &settings.profile;
+    let res = match create_client_inner(&account.url, settings).await {
+        Err(ClientBuildError::AutoDiscovery(_)) => {
+            let url = format!("https://{}/", account.user_id.server_name().as_str());
+            let url = Url::parse(&url).unwrap();
+            create_client_inner(&Some(url), settings).await
+        },
+        res => res,
+    };
+
+    res.expect("Failed to instantiate client")
+}
+
 #[derive(Clone)]
 pub struct Requester {
     pub client: Client,
@@ -649,7 +723,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn get_inviter(&self, invite: Invited) -> IambResult<Option<RoomMember>> {
+    pub fn get_inviter(&self, invite: MatrixRoom) -> IambResult<Option<RoomMember>> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::GetInviter(invite, reply)).unwrap();
@@ -719,40 +793,8 @@ pub struct ClientWorker {
 }
 
 impl ClientWorker {
-    pub async fn spawn(settings: ApplicationSettings) -> Requester {
+    pub async fn spawn(client: Client, settings: ApplicationSettings) -> Requester {
         let (tx, rx) = unbounded_channel();
-        let account = &settings.profile;
-
-        let req_timeout = Duration::from_secs(settings.tunables.request_timeout);
-
-        // Set up the HTTP client.
-        let http = reqwest::Client::builder()
-            .user_agent(IAMB_USER_AGENT)
-            .timeout(req_timeout)
-            .pool_idle_timeout(Duration::from_secs(60))
-            .pool_max_idle_per_host(10)
-            .tcp_keepalive(Duration::from_secs(10))
-            .build()
-            .unwrap();
-
-        let req_config = RequestConfig::new().timeout(req_timeout).retry_timeout(req_timeout);
-
-        // Set up the Matrix client for the selected profile.
-        let builder = Client::builder()
-            .http_client(Arc::new(http))
-            .sled_store(settings.matrix_dir.as_path(), None)
-            .expect("Failed to setup up sled store for Matrix SDK")
-            .request_config(req_config);
-
-        let builder = if let Some(url) = account.url.as_ref() {
-            // Use the explicitly specified homeserver.
-            builder.homeserver_url(url.as_str())
-        } else {
-            // Try to discover the homeserver from the user ID.
-            builder.server_name(account.user_id.server_name())
-        };
-
-        let client = builder.build().await.expect("Failed to instantiate Matrix client");
 
         let mut worker = ClientWorker {
             initialized: false,
@@ -872,13 +914,11 @@ impl ClientWorker {
              store: Ctx<AsyncProgramStore>| {
                 async move {
                     if let SyncStateEvent::Original(ev) = ev {
-                        if let Some(room_name) = ev.content.name {
-                            let room_id = room.room_id().to_owned();
-                            let room_name = Some(room_name.to_string());
-                            let mut locked = store.lock().await;
-                            let info = locked.application.rooms.get_or_default(room_id.clone());
-                            info.name = room_name;
-                        }
+                        let room_id = room.room_id().to_owned();
+                        let room_name = Some(ev.content.name);
+                        let mut locked = store.lock().await;
+                        let info = locked.application.rooms.get_or_default(room_id.clone());
+                        info.name = room_name;
                     }
                 }
             },
@@ -980,7 +1020,11 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
 
-                    match info.keys.get(&ev.redacts) {
+                    let Some(redacts) = &ev.redacts else {
+                        return;
+                    };
+
+                    match info.keys.get(redacts) {
                         None => return,
                         Some(EventLocation::Message(key)) => {
                             if let Some(msg) = info.messages.get_mut(key) {
@@ -990,10 +1034,10 @@ impl ClientWorker {
                         },
                         Some(EventLocation::Reaction(event_id)) => {
                             if let Some(reactions) = info.reactions.get_mut(event_id) {
-                                reactions.remove(&ev.redacts);
+                                reactions.remove(redacts);
                             }
 
-                            info.keys.remove(&ev.redacts);
+                            info.keys.remove(redacts);
                         },
                     }
                 }
@@ -1165,22 +1209,22 @@ impl ClientWorker {
 
         match style {
             LoginStyle::SessionRestore(session) => {
-                client.restore_login(session).await.map_err(IambError::from)?;
+                client.restore_session(session).await.map_err(IambError::from)?;
             },
             LoginStyle::Password(password) => {
                 let resp = client
+                    .matrix_auth()
                     .login_username(&self.settings.profile.user_id, &password)
                     .initial_device_display_name(initial_devname().as_str())
                     .send()
                     .await
                     .map_err(IambError::from)?;
-                let file = File::create(self.settings.session_json.as_path())?;
-                let writer = BufWriter::new(file);
-                let session = Session::from(resp);
-                serde_json::to_writer(writer, &session).map_err(IambError::from)?;
+                let session = MatrixSession::from(&resp);
+                self.settings.write_session(session)?;
             },
             LoginStyle::SingleSignOn => {
                 let resp = client
+                    .matrix_auth()
                     .login_sso(|url| {
                         let opened = format!(
                             "The following URL should have been opened in your browser:\n    {url}"
@@ -1197,10 +1241,8 @@ impl ClientWorker {
                     .await
                     .map_err(IambError::from)?;
 
-                let file = File::create(self.settings.session_json.as_path())?;
-                let writer = BufWriter::new(file);
-                let session = Session::from(resp);
-                serde_json::to_writer(writer, &session).map_err(IambError::from)?;
+                let session = MatrixSession::from(&resp);
+                self.settings.write_session(session)?;
             },
         }
 
@@ -1213,7 +1255,7 @@ impl ClientWorker {
         })
         .into();
 
-        Ok(Some(InfoMessage::from("Successfully logged in!")))
+        Ok(Some(InfoMessage::from("* Successfully logged in!")))
     }
 
     async fn logout(&mut self, user_id: String) -> IambResult<EditInfo> {
@@ -1228,7 +1270,7 @@ impl ClientWorker {
         }
 
         // Send the logout request.
-        if let Err(e) = self.client.logout().await {
+        if let Err(e) = self.client.matrix_auth().logout().await {
             let msg = format!("Failed to logout: {e}");
             let err = UIError::Failure(msg);
 
@@ -1243,7 +1285,7 @@ impl ClientWorker {
 
     async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<OwnedRoomId> {
         for room in self.client.rooms() {
-            if !room.is_direct() {
+            if !is_direct(&room).await {
                 continue;
             }
 
@@ -1267,7 +1309,7 @@ impl ClientWorker {
         })
     }
 
-    async fn get_inviter(&mut self, invited: Invited) -> IambResult<Option<RoomMember>> {
+    async fn get_inviter(&mut self, invited: MatrixRoom) -> IambResult<Option<RoomMember>> {
         let details = invited.invite_details().await.map_err(IambError::from)?;
 
         Ok(details.inviter)
@@ -1287,7 +1329,7 @@ impl ClientWorker {
     async fn join_room(&mut self, name: String) -> IambResult<OwnedRoomId> {
         if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
             match self.client.join_room_by_id_or_alias(&alias_id, &[]).await {
-                Ok(resp) => Ok(resp.room_id),
+                Ok(resp) => Ok(resp.room_id().to_owned()),
                 Err(e) => {
                     let msg = e.to_string();
                     let err = UIError::Failure(msg);
@@ -1307,14 +1349,14 @@ impl ClientWorker {
 
     async fn members(&mut self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
         if let Some(room) = self.client.get_room(room_id.as_ref()) {
-            Ok(room.active_members().await.map_err(IambError::from)?)
+            Ok(room.members(RoomMemberships::ACTIVE).await.map_err(IambError::from)?)
         } else {
             Err(IambError::UnknownRoom(room_id).into())
         }
     }
 
     async fn space_members(&mut self, space: OwnedRoomId) -> IambResult<Vec<OwnedRoomId>> {
-        let mut req = SpaceHierarchyRequest::new(&space);
+        let mut req = SpaceHierarchyRequest::new(space);
         req.limit = Some(1000u32.into());
         req.max_depth = Some(1u32.into());
 
@@ -1326,7 +1368,7 @@ impl ClientWorker {
     }
 
     async fn typing_notice(&mut self, room_id: OwnedRoomId) {
-        if let Some(room) = self.client.get_joined_room(room_id.as_ref()) {
+        if let Some(room) = self.client.get_room(room_id.as_ref()) {
             let _ = room.typing_notice(true).await;
         }
     }

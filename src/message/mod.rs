@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 
 use chrono::{DateTime, Local as LocalTz, NaiveDateTime, TimeZone};
 use comrak::{markdown_to_html, ComrakOptions};
+use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
@@ -33,7 +34,7 @@ use matrix_sdk::ruma::{
             redaction::SyncRoomRedactionEvent,
         },
         AnyMessageLikeEvent,
-        Redact,
+        RedactContent,
         RedactedUnsigned,
     },
     EventId,
@@ -345,6 +346,28 @@ impl PartialOrd for MessageCursor {
     }
 }
 
+fn redaction_reason(ev: &SyncRoomRedactionEvent) -> Option<&str> {
+    let SyncRoomRedactionEvent::Original(ev) = ev else {
+        return None;
+    };
+
+    return ev.content.reason.as_deref();
+}
+
+fn redaction_unsigned(ev: SyncRoomRedactionEvent) -> RedactedUnsigned {
+    let reason = redaction_reason(&ev);
+    let redacted_because = json!({
+        "content": {
+            "reason": reason
+        },
+        "event_id": ev.event_id(),
+        "sender": ev.sender(),
+        "origin_server_ts": ev.origin_server_ts(),
+        "unsigned": {},
+    });
+    RedactedUnsigned::new(serde_json::from_value(redacted_because).unwrap())
+}
+
 #[derive(Clone)]
 pub enum MessageEvent {
     EncryptedOriginal(Box<OriginalRoomEncryptedEvent>),
@@ -419,7 +442,14 @@ impl MessageEvent {
             MessageEvent::Redacted(_) => return,
             MessageEvent::Local(_, _) => return,
             MessageEvent::Original(ev) => {
-                let redacted = ev.clone().redact(redaction, version);
+                let redacted = RedactedRoomMessageEvent {
+                    content: ev.content.clone().redact(version),
+                    event_id: ev.event_id.clone(),
+                    sender: ev.sender.clone(),
+                    origin_server_ts: ev.origin_server_ts,
+                    room_id: ev.room_id.clone(),
+                    unsigned: redaction_unsigned(redaction),
+                };
                 *self = MessageEvent::Redacted(Box::new(redacted));
             },
         }
@@ -455,11 +485,7 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
 }
 
 fn body_cow_reason(unsigned: &RedactedUnsigned) -> Cow<'_, str> {
-    let reason = unsigned
-        .redacted_because
-        .as_ref()
-        .and_then(|e| e.as_original())
-        .and_then(|r| r.content.reason.as_ref());
+    let reason = unsigned.redacted_because.content.reason.as_ref();
 
     if let Some(r) = reason {
         Cow::Owned(format!("[Redacted: {r:?}]"))

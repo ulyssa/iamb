@@ -14,14 +14,16 @@ use url::Url;
 use matrix_sdk::{
     attachment::AttachmentConfig,
     media::{MediaFormat, MediaRequest},
-    room::{Joined, Room as MatrixRoom},
+    room::Room as MatrixRoom,
     ruma::{
-        events::reaction::{ReactionEventContent, Relation as Reaction},
+        events::reaction::ReactionEventContent,
+        events::relation::{Annotation, Replacement},
         events::room::message::{
+            AddMentions,
+            ForwardThread,
             MessageType,
             OriginalRoomMessageEvent,
             Relation,
-            Replacement,
             RoomMessageEventContent,
             TextMessageEventContent,
         },
@@ -29,6 +31,7 @@ use matrix_sdk::{
         OwnedRoomId,
         RoomId,
     },
+    RoomState,
 };
 
 use ratatui::{
@@ -126,8 +129,16 @@ impl ChatState {
         }
     }
 
-    fn get_joined(&self, worker: &Requester) -> Result<Joined, IambError> {
-        worker.client.get_joined_room(self.id()).ok_or(IambError::NotJoined)
+    fn get_joined(&self, worker: &Requester) -> Result<MatrixRoom, IambError> {
+        let Some(room) = worker.client.get_room(self.id()) else {
+            return Err(IambError::NotJoined);
+        };
+
+        if room.state() == RoomState::Joined {
+            Ok(room)
+        } else {
+            Err(IambError::NotJoined)
+        }
     }
 
     fn get_reply_to<'a>(&self, info: &'a RoomInfo) -> Option<&'a OriginalRoomMessageEvent> {
@@ -356,9 +367,9 @@ impl ChatState {
                     },
                 };
 
-                let reaction = Reaction::new(event_id, emoji);
+                let reaction = Annotation::new(event_id, emoji);
                 let msg = ReactionEventContent::new(reaction);
-                let _ = room.send(msg, None).await.map_err(IambError::from)?;
+                let _ = room.send(msg).await.map_err(IambError::from)?;
 
                 Ok(None)
             },
@@ -449,12 +460,7 @@ impl ChatState {
         _: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
-        let room = store
-            .application
-            .worker
-            .client
-            .get_joined_room(self.id())
-            .ok_or(IambError::NotJoined)?;
+        let room = self.get_joined(&store.application.worker)?;
         let info = store.application.rooms.get_or_default(self.id().to_owned());
         let mut show_echo = true;
 
@@ -475,18 +481,18 @@ impl ChatState {
                 if let Some((_, event_id)) = &self.editing {
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(
                         event_id.clone(),
-                        Box::new(msg.clone()),
+                        msg.msgtype.clone().into(),
                     )));
 
                     show_echo = false;
                 } else if let Some(m) = self.get_reply_to(info) {
                     // XXX: Switch to RoomMessageEventContent::reply() once it's stable?
-                    msg = msg.make_reply_to(m);
+                    msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
                 }
 
                 // XXX: second parameter can be a locally unique transaction id.
                 // Useful for doing retries.
-                let resp = room.send(msg.clone(), None).await.map_err(IambError::from)?;
+                let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
                 let event_id = resp.event_id;
 
                 // Reset message bar state now that it's been sent.
@@ -506,7 +512,7 @@ impl ChatState {
                 let config = AttachmentConfig::new();
 
                 let resp = room
-                    .send_attachment(name.as_ref(), &mime, bytes.as_ref(), config)
+                    .send_attachment(name.as_ref(), &mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
 
@@ -536,7 +542,7 @@ impl ChatState {
                 let config = AttachmentConfig::new();
 
                 let resp = room
-                    .send_attachment(name.as_ref(), &mime, bytes.as_ref(), config)
+                    .send_attachment(name.as_ref(), &mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
 
