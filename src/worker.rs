@@ -21,6 +21,7 @@ use url::Url;
 use matrix_sdk::{
     config::{RequestConfig, SyncSettings},
     encryption::verification::{SasVerification, Verification},
+    encryption::{BackupDownloadStrategy, EncryptionSettings},
     event_handler::Ctx,
     matrix_auth::MatrixSession,
     reqwest,
@@ -99,6 +100,12 @@ use crate::{
     },
     message::MessageFetchResult,
     ApplicationSettings,
+};
+
+const DEFAULT_ENCRYPTION_SETTINGS: EncryptionSettings = EncryptionSettings {
+    auto_enable_cross_signing: true,
+    auto_enable_backups: true,
+    backup_download_strategy: BackupDownloadStrategy::AfterDecryptionFailure,
 };
 
 const IAMB_DEVICE_NAME: &str = "iamb";
@@ -664,7 +671,8 @@ async fn create_client_inner(
     let builder = Client::builder()
         .http_client(http)
         .sqlite_store(settings.sqlite_dir.as_path(), None)
-        .request_config(req_config);
+        .request_config(req_config)
+        .with_encryption_settings(DEFAULT_ENCRYPTION_SETTINGS.clone());
 
     let builder = if let Some(url) = homeserver {
         // Use the explicitly specified homeserver.
