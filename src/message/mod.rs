@@ -33,7 +33,6 @@ use matrix_sdk::ruma::{
             },
             redaction::SyncRoomRedactionEvent,
         },
-        AnyMessageLikeEvent,
         RedactContent,
         RedactedUnsigned,
     },
@@ -57,7 +56,7 @@ use ratatui_image::protocol::Protocol;
 
 use crate::config::ImagePreviewSize;
 use crate::{
-    base::{IambResult, RoomInfo},
+    base::RoomInfo,
     config::ApplicationSettings,
     message::html::{parse_matrix_html, StyleTree},
     util::{space, space_span, take_width, wrapped_text},
@@ -66,7 +65,6 @@ use crate::{
 mod html;
 mod printer;
 
-pub type MessageFetchResult = IambResult<(Option<String>, Vec<AnyMessageLikeEvent>)>;
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 pub type Messages = BTreeMap<MessageKey, Message>;
 

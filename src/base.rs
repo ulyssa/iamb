@@ -1119,6 +1119,10 @@ impl RoomNeeds {
     pub fn insert(&mut self, room_id: OwnedRoomId, need: Need) {
         self.needs.entry(room_id).or_default().insert(need);
     }
+
+    pub fn rooms(&self) -> usize {
+        self.needs.len()
+    }
 }
 
 impl IntoIterator for RoomNeeds {
