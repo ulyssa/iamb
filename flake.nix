@@ -24,9 +24,8 @@
           src = ./.;
           cargoLock = {
             lockFile = ./Cargo.lock;
-            # Remove this once modalkit gets pinned by version again.
             outputHashes = {
-              "modalkit-0.0.16" = "sha256-mjAD1v0r2+SzPdoB2wZ/5iJ1NZK+3OSvCYcUZ5Ef38Y=";
+              "keybindings-0.0.1" = "sha256-0ZWJNmKdxbJq1W/fuxzyD5Yagu6KsO5WMHlcM51nDvo=";
             };
           };
           nativeBuildInputs = [ pkgs.pkg-config ];
