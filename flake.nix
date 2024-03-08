@@ -14,28 +14,29 @@
         # We only need the nightly overlay in the devShell because .rs files are formatted with nightly.
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        rustNightly = pkgs.rust-bin.nightly."2023-03-17".default;
-      in 
+        rustNightly = pkgs.rust-bin.nightly."2024-03-08".default;
+      in
       with pkgs;
       {
-        packages.default = pkgs.rustPlatform.buildRustPackage {
+        packages.default = rustPlatform.buildRustPackage {
           pname = "iamb";
-          version = "0.0.7";
+          version = self.shortRev or self.dirtyShortRev;
           src = ./.;
           cargoLock = {
             lockFile = ./Cargo.lock;
             outputHashes = {
-              "keybindings-0.0.1" = "sha256-0ZWJNmKdxbJq1W/fuxzyD5Yagu6KsO5WMHlcM51nDvo=";
+              "keybindings-0.0.1" = "sha256-6gGviJF4/gzoPxgh0XJXXrhQoWxOTqyI9fwiOE+TY7s=";
             };
           };
-          nativeBuildInputs = [ pkgs.pkg-config ];
-          buildInputs = [ pkgs.openssl ] ++ pkgs.lib.optionals pkgs.stdenv.isDarwin
-            (with pkgs.darwin.apple_sdk.frameworks; [ AppKit Security ]);
+          nativeBuildInputs = [ pkg-config ];
+          buildInputs = [ openssl ] ++ lib.optionals stdenv.isDarwin
+            (with darwin.apple_sdk.frameworks; [ AppKit Security ]);
         };
+
         devShell = mkShell {
           buildInputs = [
             (rustNightly.override {
-              extensions = [ "rust-src" "rust-analyzer-preview" "rustfmt" "clippy" ]; 
+              extensions = [ "rust-src" "rust-analyzer-preview" "rustfmt" "clippy" ];
             })
             pkg-config
             cargo-tarpaulin
