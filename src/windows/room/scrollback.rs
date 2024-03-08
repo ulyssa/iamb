@@ -1,6 +1,6 @@
 //! Message scrollback
 
-use ratatui_image::FixedImage;
+use ratatui_image::Image;
 use regex::Regex;
 
 use matrix_sdk::ruma::OwnedRoomId;
@@ -1323,7 +1323,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
         // Render image previews after all text lines have been drawn, as the render might draw below the current
         // line.
         for (x, y, backend) in image_previews {
-            let image_widget = FixedImage::new(backend);
+            let image_widget = Image::new(backend);
             let mut rect = backend.rect();
             rect.x = x;
             rect.y = y;
