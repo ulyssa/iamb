@@ -885,7 +885,7 @@ impl RoomInfo {
         let key = (msg.origin_server_ts().into(), event_id.clone());
 
         let loc = EventLocation::Message(None, key.clone());
-        self.keys.insert(event_id.clone(), loc);
+        self.keys.insert(event_id, loc);
         self.messages.insert_message(key, msg);
     }
 
@@ -895,7 +895,7 @@ impl RoomInfo {
 
         let replies = self.threads.entry(thread_root.clone()).or_default();
         let loc = EventLocation::Message(Some(thread_root), key.clone());
-        self.keys.insert(event_id.clone(), loc);
+        self.keys.insert(event_id, loc);
         replies.insert_message(key, msg);
     }
 
