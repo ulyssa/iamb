@@ -24,10 +24,12 @@ use matrix_sdk::{
             MessageType,
             OriginalRoomMessageEvent,
             Relation,
+            ReplyWithinThread,
             RoomMessageEventContent,
             TextMessageEventContent,
         },
         EventId,
+        OwnedEventId,
         OwnedRoomId,
         RoomId,
     },
@@ -70,6 +72,7 @@ use modalkit::prelude::*;
 
 use crate::base::{
     DownloadFlags,
+    EventLocation,
     IambAction,
     IambBufferId,
     IambError,
@@ -106,10 +109,10 @@ pub struct ChatState {
 }
 
 impl ChatState {
-    pub fn new(room: MatrixRoom, store: &mut ProgramStore) -> Self {
+    pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
         let room_id = room.room_id().to_owned();
-        let scrollback = ScrollbackState::new(room_id.clone());
-        let id = IambBufferId::Room(room_id.clone(), RoomFocus::MessageBar);
+        let scrollback = ScrollbackState::new(room_id.clone(), thread.clone());
+        let id = IambBufferId::Room(room_id.clone(), thread, RoomFocus::MessageBar);
         let ebuf = store.load_buffer(id);
         let tbox = TextBoxState::new(ebuf);
 
@@ -129,6 +132,10 @@ impl ChatState {
         }
     }
 
+    pub fn thread(&self) -> Option<&OwnedEventId> {
+        self.scrollback.thread()
+    }
+
     fn get_joined(&self, worker: &Requester) -> Result<MatrixRoom, IambError> {
         let Some(room) = worker.client.get_room(self.id()) else {
             return Err(IambError::NotJoined);
@@ -138,6 +145,29 @@ impl ChatState {
             Ok(room)
         } else {
             Err(IambError::NotJoined)
+        }
+    }
+
+    fn get_thread_last<'a>(
+        &self,
+        thread_root: &OwnedEventId,
+        info: &'a RoomInfo,
+    ) -> Option<&'a OriginalRoomMessageEvent> {
+        let last = info.threads.get(thread_root).and_then(|t| Some(t.last_key_value()?.1));
+
+        let msg = if let Some(last) = last {
+            &last.event
+        } else if let EventLocation::Message(_, key) = info.keys.get(thread_root)? {
+            let msg = info.messages.get(key)?;
+            &msg.event
+        } else {
+            return None;
+        };
+
+        if let MessageEvent::Original(ev) = &msg {
+            Some(ev)
+        } else {
+            None
         }
     }
 
@@ -485,8 +515,15 @@ impl ChatState {
                     )));
 
                     show_echo = false;
+                } else if let Some(thread_root) = self.scrollback.thread() {
+                    if let Some(m) = self.get_reply_to(info) {
+                        msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::No);
+                    } else if let Some(m) = self.get_thread_last(thread_root, info) {
+                        msg = msg.make_for_thread(m, ReplyWithinThread::No, AddMentions::No);
+                    } else {
+                        // Internal state is wonky?
+                    }
                 } else if let Some(m) = self.get_reply_to(info) {
-                    // XXX: Switch to RoomMessageEventContent::reply() once it's stable?
                     msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
                 }
 
@@ -560,7 +597,8 @@ impl ChatState {
             let key = (MessageTimeStamp::LocalEcho, event_id.clone());
             let msg = MessageEvent::Local(event_id, msg.into());
             let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
-            info.messages.insert(key, msg);
+            let thread = self.scrollback.get_thread_mut(info);
+            thread.insert(key, msg);
         }
 
         // Jump to the end of the scrollback to show the message.
@@ -627,12 +665,14 @@ impl WindowOps<IambInfo> for ChatState {
     fn dup(&self, store: &mut ProgramStore) -> Self {
         // XXX: I want each WindowSlot to have its own shared buffer, instead of each Room; need to
         // find a good way to pass that info here so that it can be part of the content id.
-        let id = IambBufferId::Room(self.room_id.clone(), RoomFocus::MessageBar);
+        let room_id = self.room_id.clone();
+        let thread = self.thread().cloned();
+        let id = IambBufferId::Room(room_id.clone(), thread, RoomFocus::MessageBar);
         let ebuf = store.load_buffer(id);
         let tbox = TextBoxState::new(ebuf);
 
         ChatState {
-            room_id: self.room_id.clone(),
+            room_id,
             room: self.room.clone(),
 
             tbox,
@@ -688,8 +728,10 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
 
         match delegate!(self, w => w.editor_command(act, ctx, store)) {
             res @ Ok(_) => res,
-            Err(EditError::WrongBuffer(IambBufferId::Room(room_id, focus)))
-                if room_id == self.room_id && act.is_switchable(ctx) =>
+            Err(EditError::WrongBuffer(IambBufferId::Room(room_id, thread, focus)))
+                if room_id == self.room_id &&
+                    thread.as_ref() == self.thread() &&
+                    act.is_switchable(ctx) =>
             {
                 // Switch focus.
                 self.focus = focus;
@@ -807,7 +849,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ChatState {
         store: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
         if let RoomFocus::Scrollback = self.focus {
-            return Ok(vec![]);
+            return self.scrollback.prompt(act, ctx, store);
         }
 
         match act {

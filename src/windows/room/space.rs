@@ -39,7 +39,7 @@ pub struct SpaceState {
 impl SpaceState {
     pub fn new(room: MatrixRoom) -> Self {
         let room_id = room.room_id().to_owned();
-        let content = IambBufferId::Room(room_id.clone(), RoomFocus::Scrollback);
+        let content = IambBufferId::Room(room_id.clone(), None, RoomFocus::Scrollback);
         let list = ListState::new(content, vec![]);
         let last_fetch = None;
 

@@ -6,6 +6,7 @@ use std::collections::hash_set;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
 use std::hash::{Hash, Hasher};
+use std::ops::{Deref, DerefMut};
 
 use chrono::{DateTime, Local as LocalTz, NaiveDateTime, TimeZone};
 use comrak::{markdown_to_html, ComrakOptions};
@@ -14,6 +15,7 @@ use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
     events::{
+        relation::Thread,
         room::{
             encrypted::{
                 OriginalRoomEncryptedEvent,
@@ -66,7 +68,36 @@ mod html;
 mod printer;
 
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
-pub type Messages = BTreeMap<MessageKey, Message>;
+
+#[derive(Default)]
+pub struct Messages(BTreeMap<MessageKey, Message>);
+
+impl Deref for Messages {
+    type Target = BTreeMap<MessageKey, Message>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl DerefMut for Messages {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.0
+    }
+}
+
+impl Messages {
+    pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
+        let event_id = key.1.clone();
+        let msg = msg.into();
+
+        self.0.insert(key, msg);
+
+        // Remove any echo.
+        let key = (MessageTimeStamp::LocalEcho, event_id);
+        let _ = self.0.remove(&key);
+    }
+}
 
 const fn span_static(s: &'static str) -> Span<'static> {
     Span {
@@ -260,33 +291,27 @@ impl MessageCursor {
         MessageCursor::default()
     }
 
-    pub fn to_key<'a>(&'a self, info: &'a RoomInfo) -> Option<&'a MessageKey> {
+    pub fn to_key<'a>(&'a self, thread: &'a Messages) -> Option<&'a MessageKey> {
         if let Some(ref key) = self.timestamp {
             Some(key)
         } else {
-            Some(info.messages.last_key_value()?.0)
+            Some(thread.last_key_value()?.0)
         }
     }
 
-    pub fn from_cursor(cursor: &Cursor, info: &RoomInfo) -> Option<Self> {
+    pub fn from_cursor(cursor: &Cursor, thread: &Messages) -> Option<Self> {
         let ev_hash = u64::try_from(cursor.get_x()).ok()?;
         let ev_term = OwnedEventId::try_from("$").ok()?;
 
         let ts_start = MessageTimeStamp::try_from(cursor.get_y()).ok()?;
         let start = (ts_start, ev_term);
-        let mut mc = None;
 
-        for ((ts, event_id), _) in info.messages.range(start..) {
+        for ((ts, event_id), _) in thread.range(&start..) {
             let mut hasher = DefaultHasher::new();
             event_id.hash(&mut hasher);
 
             if hasher.finish() == ev_hash {
-                mc = Self::from((*ts, event_id.clone())).into();
-                break;
-            }
-
-            if mc.is_none() {
-                mc = Self::from((*ts, event_id.clone())).into();
+                return Self::from((*ts, event_id.clone())).into();
             }
 
             if ts > &ts_start {
@@ -294,11 +319,15 @@ impl MessageCursor {
             }
         }
 
-        return mc;
+        // If we can't find the cursor, then go to the nearest timestamp.
+        thread
+            .range(start..)
+            .next()
+            .map(|((ts, ev), _)| Self::from((*ts, ev.clone())))
     }
 
-    pub fn to_cursor(&self, info: &RoomInfo) -> Option<Cursor> {
-        let (ts, event_id) = self.to_key(info)?;
+    pub fn to_cursor(&self, thread: &Messages) -> Option<Cursor> {
+        let (ts, event_id) = self.to_key(thread)?;
 
         let y: usize = usize::try_from(ts).ok()?;
 
@@ -652,10 +681,34 @@ impl Message {
             MessageEvent::Redacted(_) => return None,
         };
 
-        if let Some(Relation::Reply { in_reply_to }) = &content.relates_to {
-            Some(in_reply_to.event_id.clone())
-        } else {
-            None
+        match &content.relates_to {
+            Some(Relation::Reply { in_reply_to }) => Some(in_reply_to.event_id.clone()),
+            Some(Relation::Thread(Thread {
+                in_reply_to: Some(in_reply_to),
+                is_falling_back: false,
+                ..
+            })) => Some(in_reply_to.event_id.clone()),
+            Some(_) | None => None,
+        }
+    }
+
+    fn thread_root(&self) -> Option<OwnedEventId> {
+        let content = match &self.event {
+            MessageEvent::EncryptedOriginal(_) => return None,
+            MessageEvent::EncryptedRedacted(_) => return None,
+            MessageEvent::Local(_, content) => content,
+            MessageEvent::Original(ev) => &ev.content,
+            MessageEvent::Redacted(_) => return None,
+        };
+
+        match &content.relates_to {
+            Some(Relation::Thread(Thread {
+                event_id,
+                in_reply_to: Some(in_reply_to),
+                is_falling_back: true,
+                ..
+            })) if event_id == &in_reply_to.event_id => Some(event_id.clone()),
+            Some(_) | None => None,
         }
     }
 
@@ -774,7 +827,10 @@ impl Message {
         let width = fmt.width();
 
         // Show the message that this one replied to, if any.
-        let reply = self.reply_to().and_then(|e| info.get_event(&e));
+        let reply = self
+            .reply_to()
+            .or_else(|| self.thread_root())
+            .and_then(|e| info.get_event(&e));
 
         if let Some(r) = &reply {
             let w = width.saturating_sub(2);
@@ -855,7 +911,22 @@ impl Message {
             }
         }
 
-        return text;
+        if let Some(thread) = info.threads.get(self.event.event_id()) {
+            // If we have threaded replies to this message, show how many.
+            let len = thread.len();
+
+            if len > 0 {
+                let style = Style::default();
+                let mut threaded = printer::TextPrinter::new(width, style, false).literal(true);
+                let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
+                threaded.push_str(" \u{2937} ", style);
+                threaded.push_span_nobreak(len);
+                threaded.push_str(" replies in thread", style);
+                fmt.push_text(threaded.finish(), style, &mut text);
+            }
+        }
+
+        text
     }
 
     pub fn show_msg(&self, width: usize, style: Style, hide_reply: bool) -> Text {
@@ -1058,7 +1129,7 @@ pub mod tests {
 
     #[test]
     fn test_mc_to_key() {
-        let info = mock_room();
+        let messages = mock_messages();
         let mc1 = MessageCursor::from(MSG1_KEY.clone());
         let mc2 = MessageCursor::from(MSG2_KEY.clone());
         let mc3 = MessageCursor::from(MSG3_KEY.clone());
@@ -1066,12 +1137,12 @@ pub mod tests {
         let mc5 = MessageCursor::from(MSG5_KEY.clone());
         let mc6 = MessageCursor::latest();
 
-        let k1 = mc1.to_key(&info).unwrap();
-        let k2 = mc2.to_key(&info).unwrap();
-        let k3 = mc3.to_key(&info).unwrap();
-        let k4 = mc4.to_key(&info).unwrap();
-        let k5 = mc5.to_key(&info).unwrap();
-        let k6 = mc6.to_key(&info).unwrap();
+        let k1 = mc1.to_key(&messages).unwrap();
+        let k2 = mc2.to_key(&messages).unwrap();
+        let k3 = mc3.to_key(&messages).unwrap();
+        let k4 = mc4.to_key(&messages).unwrap();
+        let k5 = mc5.to_key(&messages).unwrap();
+        let k6 = mc6.to_key(&messages).unwrap();
 
         // These should all be equal to their MSGN_KEYs.
         assert_eq!(k1, &MSG1_KEY.clone());
@@ -1084,13 +1155,13 @@ pub mod tests {
         assert_eq!(k6, &MSG1_KEY.clone());
 
         // MessageCursor::latest() fails to convert for a room w/o messages.
-        let info_empty = RoomInfo::default();
-        assert_eq!(mc6.to_key(&info_empty), None);
+        let messages_empty = Messages::default();
+        assert_eq!(mc6.to_key(&messages_empty), None);
     }
 
     #[test]
     fn test_mc_to_from_cursor() {
-        let info = mock_room();
+        let messages = mock_messages();
         let mc1 = MessageCursor::from(MSG1_KEY.clone());
         let mc2 = MessageCursor::from(MSG2_KEY.clone());
         let mc3 = MessageCursor::from(MSG3_KEY.clone());
@@ -1099,9 +1170,9 @@ pub mod tests {
         let mc6 = MessageCursor::latest();
 
         let identity = |mc: &MessageCursor| {
-            let c = mc.to_cursor(&info).unwrap();
+            let c = mc.to_cursor(&messages).unwrap();
 
-            MessageCursor::from_cursor(&c, &info).unwrap()
+            MessageCursor::from_cursor(&c, &messages).unwrap()
         };
 
         // These should all convert to a Cursor and back to the original value.

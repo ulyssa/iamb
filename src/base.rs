@@ -36,7 +36,7 @@ use matrix_sdk::{
     ruma::{
         events::{
             reaction::ReactionEvent,
-            relation::Replacement,
+            relation::{Replacement, Thread},
             room::encrypted::RoomEncryptedEvent,
             room::message::{
                 OriginalRoomMessageEvent,
@@ -681,7 +681,10 @@ pub enum RoomFetchStatus {
 /// Indicates where an [EventId] lives in the [ChatStore].
 pub enum EventLocation {
     /// The [EventId] belongs to a message.
-    Message(MessageKey),
+    ///
+    /// If the first argument is [None], then it's part of the main scrollback. When [Some],
+    /// it specifies which thread it's in reply to.
+    Message(Option<OwnedEventId>, MessageKey),
 
     /// The [EventId] belongs to a reaction to the given event.
     Reaction(OwnedEventId),
@@ -689,7 +692,7 @@ pub enum EventLocation {
 
 impl EventLocation {
     fn to_message_key(&self) -> Option<&MessageKey> {
-        if let EventLocation::Message(key) = self {
+        if let EventLocation::Message(_, key) = self {
             Some(key)
         } else {
             None
@@ -740,6 +743,9 @@ pub struct RoomInfo {
 
     /// A map of message identifiers to a map of reaction events.
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
+
+    /// A map of message identifiers to thread replies.
+    pub threads: HashMap<OwnedEventId, Messages>,
 
     /// Whether the scrollback for this room is currently being fetched.
     pub fetching: bool,
@@ -819,15 +825,17 @@ impl RoomInfo {
         let event_id = msg.event_id;
         let new_msgtype = msg.new_content;
 
-        let key = if let Some(EventLocation::Message(k)) = self.keys.get(&event_id) {
-            k
-        } else {
+        let Some(EventLocation::Message(thread, key)) = self.keys.get(&event_id) else {
             return;
         };
 
-        let msg = if let Some(msg) = self.messages.get_mut(key) {
-            msg
+        let source = if let Some(thread) = thread {
+            self.threads.entry(thread.clone()).or_default()
         } else {
+            &mut self.messages
+        };
+
+        let Some(msg) = source.get_mut(key) else {
             return;
         };
 
@@ -867,7 +875,7 @@ impl RoomInfo {
         let event_id = msg.event_id().to_owned();
         let key = (msg.origin_server_ts().into(), event_id.clone());
 
-        self.keys.insert(event_id, EventLocation::Message(key.clone()));
+        self.keys.insert(event_id, EventLocation::Message(None, key.clone()));
         self.messages.insert(key, msg.into());
     }
 
@@ -876,22 +884,38 @@ impl RoomInfo {
         let event_id = msg.event_id().to_owned();
         let key = (msg.origin_server_ts().into(), event_id.clone());
 
-        self.keys.insert(event_id.clone(), EventLocation::Message(key.clone()));
-        self.messages.insert(key, msg.into());
+        let loc = EventLocation::Message(None, key.clone());
+        self.keys.insert(event_id.clone(), loc);
+        self.messages.insert_message(key, msg);
+    }
 
-        // Remove any echo.
-        let key = (MessageTimeStamp::LocalEcho, event_id);
-        let _ = self.messages.remove(&key);
+    fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
+        let event_id = msg.event_id().to_owned();
+        let key = (msg.origin_server_ts().into(), event_id.clone());
+
+        let replies = self.threads.entry(thread_root.clone()).or_default();
+        let loc = EventLocation::Message(Some(thread_root), key.clone());
+        self.keys.insert(event_id.clone(), loc);
+        replies.insert_message(key, msg);
     }
 
     /// Insert a new message event.
     pub fn insert(&mut self, msg: RoomMessageEvent) {
         match msg {
             RoomMessageEvent::Original(OriginalRoomMessageEvent {
-                content:
-                    RoomMessageEventContent { relates_to: Some(Relation::Replacement(repl)), .. },
+                content: RoomMessageEventContent { relates_to: Some(ref relates_to), .. },
                 ..
-            }) => self.insert_edit(repl),
+            }) => {
+                match relates_to {
+                    Relation::Replacement(repl) => self.insert_edit(repl.clone()),
+                    Relation::Thread(Thread { event_id, .. }) => {
+                        let event_id = event_id.clone();
+                        self.insert_thread(msg, event_id);
+                    },
+                    Relation::Reply { .. } => self.insert_message(msg),
+                    _ => self.insert_message(msg),
+                }
+            },
             _ => self.insert_message(msg),
         }
     }
@@ -1236,8 +1260,8 @@ impl ApplicationStore for ChatStore {}
 /// Identified used to track window content.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IambId {
-    /// A Matrix room.
-    Room(OwnedRoomId),
+    /// A Matrix room, with an optional thread to show.
+    Room(OwnedRoomId, Option<OwnedEventId>),
 
     /// The `:dms` window.
     DirectList,
@@ -1264,8 +1288,11 @@ pub enum IambId {
 impl Display for IambId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IambId::Room(room_id) => {
+            IambId::Room(room_id, None) => {
                 write!(f, "iamb://room/{room_id}")
+            },
+            IambId::Room(room_id, Some(thread)) => {
+                write!(f, "iamb://room/{room_id}/threads/{thread}")
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -1328,15 +1355,27 @@ impl<'de> Visitor<'de> for IambIdVisitor {
                     return Err(E::custom("Invalid members window URL"));
                 };
 
-                let &[room_id] = path.collect::<Vec<_>>().as_slice() else {
-                    return Err(E::custom("Invalid members window URL"));
-                };
+                match *path.collect::<Vec<_>>().as_slice() {
+                    [room_id] => {
+                        let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
+                            return Err(E::custom("Invalid room identifier"));
+                        };
 
-                let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
-                    return Err(E::custom("Invalid room identifier"));
-                };
+                        Ok(IambId::Room(room_id, None))
+                    },
+                    [room_id, "threads", thread_root] => {
+                        let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
+                            return Err(E::custom("Invalid room identifier"));
+                        };
 
-                Ok(IambId::Room(room_id))
+                        let Ok(thread_root) = OwnedEventId::try_from(thread_root) else {
+                            return Err(E::custom("Invalid thread root identifier"));
+                        };
+
+                        Ok(IambId::Room(room_id, Some(thread_root)))
+                    },
+                    _ => return Err(E::custom("Invalid members window URL")),
+                }
             },
             Some("members") => {
                 let Some(path) = url.path_segments() else {
@@ -1433,7 +1472,7 @@ pub enum IambBufferId {
     Command(CommandType),
 
     /// The message buffer or a specific message in a room.
-    Room(OwnedRoomId, RoomFocus),
+    Room(OwnedRoomId, Option<OwnedEventId>, RoomFocus),
 
     /// The `:dms` window.
     DirectList,
@@ -1460,17 +1499,19 @@ pub enum IambBufferId {
 impl IambBufferId {
     /// Get the identifier for the window that contains this buffer.
     pub fn to_window(&self) -> Option<IambId> {
-        match self {
-            IambBufferId::Command(_) => None,
-            IambBufferId::Room(room, _) => Some(IambId::Room(room.clone())),
-            IambBufferId::DirectList => Some(IambId::DirectList),
-            IambBufferId::MemberList(room) => Some(IambId::MemberList(room.clone())),
-            IambBufferId::RoomList => Some(IambId::RoomList),
-            IambBufferId::SpaceList => Some(IambId::SpaceList),
-            IambBufferId::VerifyList => Some(IambId::VerifyList),
-            IambBufferId::Welcome => Some(IambId::Welcome),
-            IambBufferId::ChatList => Some(IambId::ChatList),
-        }
+        let id = match self {
+            IambBufferId::Command(_) => return None,
+            IambBufferId::Room(room, thread, _) => IambId::Room(room.clone(), thread.clone()),
+            IambBufferId::DirectList => IambId::DirectList,
+            IambBufferId::MemberList(room) => IambId::MemberList(room.clone()),
+            IambBufferId::RoomList => IambId::RoomList,
+            IambBufferId::SpaceList => IambId::SpaceList,
+            IambBufferId::VerifyList => IambId::VerifyList,
+            IambBufferId::Welcome => IambId::Welcome,
+            IambBufferId::ChatList => IambId::ChatList,
+        };
+
+        Some(id)
     }
 }
 
@@ -1492,8 +1533,8 @@ impl ApplicationInfo for IambInfo {
         match content {
             IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
             IambBufferId::Command(CommandType::Search) => vec![],
-            IambBufferId::Room(_, RoomFocus::MessageBar) => complete_msgbar(text, cursor, store),
-            IambBufferId::Room(_, RoomFocus::Scrollback) => vec![],
+            IambBufferId::Room(_, _, RoomFocus::MessageBar) => complete_msgbar(text, cursor, store),
+            IambBufferId::Room(_, _, RoomFocus::Scrollback) => vec![],
 
             IambBufferId::DirectList => vec![],
             IambBufferId::MemberList(_) => vec![],
