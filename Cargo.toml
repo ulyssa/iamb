@@ -42,7 +42,7 @@ mime_guess = "^2.0.4"
 open = "3.2.0"
 rand = "0.8.5"
 ratatui = "0.23"
-ratatui-image = { version = "0.4.3", features = ["serde"] }
+ratatui-image = { version = "0.8.1", features = ["serde"] }
 regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"
@@ -85,7 +85,3 @@ pretty_assertions = "1.4.0"
 inherits = "release"
 incremental = false
 lto = true
-
-[features]
-default = ["sixel"]
-sixel = ["ratatui-image/sixel"]
