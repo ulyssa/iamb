@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::PathBuf;
 
 use matrix_sdk::ruma::{
@@ -125,17 +125,17 @@ pub fn mock_message5() -> Message {
 pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
     let mut keys = HashMap::new();
 
-    keys.insert(MSG1_EVID.clone(), EventLocation::Message(MSG1_KEY.clone()));
-    keys.insert(MSG2_EVID.clone(), EventLocation::Message(MSG2_KEY.clone()));
-    keys.insert(MSG3_EVID.clone(), EventLocation::Message(MSG3_KEY.clone()));
-    keys.insert(MSG4_EVID.clone(), EventLocation::Message(MSG4_KEY.clone()));
-    keys.insert(MSG5_EVID.clone(), EventLocation::Message(MSG5_KEY.clone()));
+    keys.insert(MSG1_EVID.clone(), EventLocation::Message(None, MSG1_KEY.clone()));
+    keys.insert(MSG2_EVID.clone(), EventLocation::Message(None, MSG2_KEY.clone()));
+    keys.insert(MSG3_EVID.clone(), EventLocation::Message(None, MSG3_KEY.clone()));
+    keys.insert(MSG4_EVID.clone(), EventLocation::Message(None, MSG4_KEY.clone()));
+    keys.insert(MSG5_EVID.clone(), EventLocation::Message(None, MSG5_KEY.clone()));
 
     keys
 }
 
 pub fn mock_messages() -> Messages {
-    let mut messages = BTreeMap::new();
+    let mut messages = Messages::default();
 
     messages.insert(MSG1_KEY.clone(), mock_message1());
     messages.insert(MSG2_KEY.clone(), mock_message2());
@@ -153,6 +153,7 @@ pub fn mock_room() -> RoomInfo {
 
         keys: mock_keys(),
         messages: mock_messages(),
+        threads: HashMap::default(),
 
         event_receipts: HashMap::new(),
         user_receipts: HashMap::new(),

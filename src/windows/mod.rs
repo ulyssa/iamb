@@ -282,7 +282,7 @@ fn room_prompt(
 ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
     match act {
         PromptAction::Submit => {
-            let room = IambId::Room(room_id.to_owned());
+            let room = IambId::Room(room_id.to_owned(), None);
             let open = WindowAction::Switch(OpenTarget::Application(room));
             let acts = vec![(open.into(), ctx.clone())];
 
@@ -661,7 +661,7 @@ impl WindowOps<IambInfo> for IambWindow {
 impl Window<IambInfo> for IambWindow {
     fn id(&self) -> IambId {
         match self {
-            IambWindow::Room(room) => IambId::Room(room.id().to_owned()),
+            IambWindow::Room(room) => IambId::Room(room.id().to_owned(), room.thread().cloned()),
             IambWindow::DirectList(_) => IambId::DirectList,
             IambWindow::MemberList(_, room_id, _) => IambId::MemberList(room_id.clone()),
             IambWindow::RoomList(_) => IambId::RoomList,
@@ -724,9 +724,9 @@ impl Window<IambInfo> for IambWindow {
 
     fn open(id: IambId, store: &mut ProgramStore) -> IambResult<Self> {
         match id {
-            IambId::Room(room_id) => {
+            IambId::Room(room_id, thread) => {
                 let (room, name, tags) = store.application.worker.get_room(room_id)?;
-                let room = RoomState::new(room, name, tags, store);
+                let room = RoomState::new(room, thread, name, tags, store);
 
                 store.application.need_load.insert(room.id().to_owned(), Need::MEMBERS);
                 return Ok(room.into());
@@ -775,7 +775,7 @@ impl Window<IambInfo> for IambWindow {
         let ChatStore { names, worker, .. } = &mut store.application;
 
         if let Some(room) = names.get_mut(&name) {
-            let id = IambId::Room(room.clone());
+            let id = IambId::Room(room.clone(), None);
 
             IambWindow::open(id, store)
         } else {
@@ -783,7 +783,7 @@ impl Window<IambInfo> for IambWindow {
             names.insert(name, room_id.clone());
 
             let (room, name, tags) = store.application.worker.get_room(room_id)?;
-            let room = RoomState::new(room, name, tags, store);
+            let room = RoomState::new(room, None, name, tags, store);
 
             store.application.need_load.insert(room.id().to_owned(), Need::MEMBERS);
             Ok(room.into())

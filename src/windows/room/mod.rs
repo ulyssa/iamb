@@ -6,6 +6,7 @@ use matrix_sdk::{
             room::{name::RoomNameEventContent, topic::RoomTopicEventContent},
             tag::{TagInfo, Tags},
         },
+        OwnedEventId,
         RoomId,
     },
     DisplayName,
@@ -90,6 +91,7 @@ impl From<SpaceState> for RoomState {
 impl RoomState {
     pub fn new(
         room: MatrixRoom,
+        thread: Option<OwnedEventId>,
         name: DisplayName,
         tags: Option<Tags>,
         store: &mut ProgramStore,
@@ -102,7 +104,14 @@ impl RoomState {
         if room.is_space() {
             SpaceState::new(room).into()
         } else {
-            ChatState::new(room, store).into()
+            ChatState::new(room, thread, store).into()
+        }
+    }
+
+    pub fn thread(&self) -> Option<&OwnedEventId> {
+        match self {
+            RoomState::Chat(chat) => chat.thread(),
+            RoomState::Space(_) => None,
         }
     }
 
@@ -293,7 +302,15 @@ impl RoomState {
     pub fn get_title(&self, store: &mut ProgramStore) -> Line {
         let title = store.application.get_room_title(self.id());
         let style = Style::default().add_modifier(StyleModifier::BOLD);
-        let mut spans = vec![Span::styled(title, style)];
+        let mut spans = vec![];
+
+        if let RoomState::Chat(chat) = self {
+            if chat.thread().is_some() {
+                spans.push("Thread in ".into());
+            }
+        }
+
+        spans.push(Span::styled(title, style));
 
         match self.room().topic() {
             Some(desc) if !desc.is_empty() => {

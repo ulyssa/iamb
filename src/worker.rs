@@ -409,7 +409,7 @@ fn members_insert(
 ) {
     if let Ok(members) = res {
         let ChatStore { rooms, .. } = &mut store.application;
-        let info = rooms.get_or_default(room_id.clone());
+        let info = rooms.get_or_default(room_id);
 
         for member in members {
             let user_id = member.user_id();
@@ -1069,10 +1069,18 @@ impl ClientWorker {
 
                     match info.keys.get(redacts) {
                         None => return,
-                        Some(EventLocation::Message(key)) => {
+                        Some(EventLocation::Message(None, key)) => {
                             if let Some(msg) = info.messages.get_mut(key) {
                                 let ev = SyncRoomRedactionEvent::Original(ev);
                                 msg.redact(ev, room_version);
+                            }
+                        },
+                        Some(EventLocation::Message(Some(root), key)) => {
+                            if let Some(thread) = info.threads.get_mut(root) {
+                                if let Some(msg) = thread.get_mut(key) {
+                                    let ev = SyncRoomRedactionEvent::Original(ev);
+                                    msg.redact(ev, room_version);
+                                }
                             }
                         },
                         Some(EventLocation::Reaction(event_id)) => {
