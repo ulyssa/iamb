@@ -24,9 +24,6 @@
           src = ./.;
           cargoLock = {
             lockFile = ./Cargo.lock;
-            outputHashes = {
-              "keybindings-0.0.1" = "sha256-6gGviJF4/gzoPxgh0XJXXrhQoWxOTqyI9fwiOE+TY7s=";
-            };
           };
           nativeBuildInputs = [ pkg-config ];
           buildInputs = [ openssl ] ++ lib.optionals stdenv.isDarwin

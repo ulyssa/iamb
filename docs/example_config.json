@@ -2,7 +2,7 @@
 	"default_profile": "default",
 	"profiles": {
 		"default": {
-			"user_id":  "",
+			"user_id":  "@user:matrix.org",
 			"url":      "https://matrix.org",
 			"settings": {},
 			"dirs":     {}
@@ -32,6 +32,14 @@
 				"width": 66,
 				"height": 10
 			}
+		}
+	},
+	"layout": {
+		"style": "restore"
+	},
+	"macros": {
+		"i": {
+			"jj": "<Esc>"
 		}
 	},
 	"dirs": {

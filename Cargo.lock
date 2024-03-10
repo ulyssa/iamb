@@ -1993,7 +1993,8 @@ dependencies = [
 [[package]]
 name = "keybindings"
 version = "0.0.1"
-source = "git+https://github.com/ulyssa/modalkit?rev=cb8c8aeb9a499b9b16615ce144f9014d78036e01#cb8c8aeb9a499b9b16615ce144f9014d78036e01"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "680e4699c91c0622dd70da32c274881aadb1ac86252d738c3641266e90e4ca15"
 dependencies = [
  "textwrap",
  "unicode-segmentation",
@@ -2507,8 +2508,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.17"
-source = "git+https://github.com/ulyssa/modalkit?rev=cb8c8aeb9a499b9b16615ce144f9014d78036e01#cb8c8aeb9a499b9b16615ce144f9014d78036e01"
+version = "0.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f7d68711785c96d06bede5bd38fee2e2ac856cfccce7ea0b3e302bc4c5688010"
 dependencies = [
  "anymap2",
  "arboard",
@@ -2528,8 +2530,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit-ratatui"
-version = "0.0.17"
-source = "git+https://github.com/ulyssa/modalkit?rev=cb8c8aeb9a499b9b16615ce144f9014d78036e01#cb8c8aeb9a499b9b16615ce144f9014d78036e01"
+version = "0.0.18"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "747e3dc36bfc4b62a152a37b6631f471797269afa094f6ba0d7aea768be31e2b"
 dependencies = [
  "crossterm",
  "intervaltree",

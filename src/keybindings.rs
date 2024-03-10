@@ -3,16 +3,23 @@
 //! The keybindings are set up here. We define some iamb-specific keybindings, but the default Vim
 //! keys come from [modalkit::env::vim::keybindings].
 use modalkit::{
-    actions::WindowAction,
+    actions::{MacroAction, WindowAction},
     env::vim::keybindings::{InputStep, VimBindings},
     env::vim::VimMode,
+    env::CommonKeyClass,
     key::TerminalKey,
     keybindings::{EdgeEvent, EdgeRepeat, InputBindings},
+    prelude::Count,
 };
 
 use crate::base::{IambAction, IambInfo, Keybindings, MATRIX_ID_WORD};
+use crate::config::{ApplicationSettings, Keys};
 
-type IambStep = InputStep<IambInfo>;
+pub type IambStep = InputStep<IambInfo>;
+
+fn once(key: &TerminalKey) -> (EdgeRepeat, EdgeEvent<TerminalKey, CommonKeyClass>) {
+    (EdgeRepeat::Once, EdgeEvent::Key(*key))
+}
 
 /// Initialize the default keybinding state.
 pub fn setup_keybindings() -> Keybindings {
@@ -24,20 +31,14 @@ pub fn setup_keybindings() -> Keybindings {
 
     vim.setup(&mut ism);
 
-    let ctrl_w = EdgeEvent::Key("<C-W>".parse::<TerminalKey>().unwrap());
-    let ctrl_m = EdgeEvent::Key("<C-M>".parse::<TerminalKey>().unwrap());
-    let ctrl_z = EdgeEvent::Key("<C-Z>".parse::<TerminalKey>().unwrap());
-    let key_m_lc = EdgeEvent::Key("m".parse::<TerminalKey>().unwrap());
-    let key_z_lc = EdgeEvent::Key("z".parse::<TerminalKey>().unwrap());
+    let ctrl_w = "<C-W>".parse::<TerminalKey>().unwrap();
+    let ctrl_m = "<C-M>".parse::<TerminalKey>().unwrap();
+    let ctrl_z = "<C-Z>".parse::<TerminalKey>().unwrap();
+    let key_m_lc = "m".parse::<TerminalKey>().unwrap();
+    let key_z_lc = "z".parse::<TerminalKey>().unwrap();
 
-    let cwz = vec![
-        (EdgeRepeat::Once, ctrl_w.clone()),
-        (EdgeRepeat::Once, key_z_lc),
-    ];
-    let cwcz = vec![
-        (EdgeRepeat::Once, ctrl_w.clone()),
-        (EdgeRepeat::Once, ctrl_z),
-    ];
+    let cwz = vec![once(&ctrl_w), once(&key_z_lc)];
+    let cwcz = vec![once(&ctrl_w), once(&ctrl_z)];
     let zoom = IambStep::new()
         .actions(vec![WindowAction::ZoomToggle.into()])
         .goto(VimMode::Normal);
@@ -47,11 +48,8 @@ pub fn setup_keybindings() -> Keybindings {
     ism.add_mapping(VimMode::Normal, &cwcz, &zoom);
     ism.add_mapping(VimMode::Visual, &cwcz, &zoom);
 
-    let cwm = vec![
-        (EdgeRepeat::Once, ctrl_w.clone()),
-        (EdgeRepeat::Once, key_m_lc),
-    ];
-    let cwcm = vec![(EdgeRepeat::Once, ctrl_w), (EdgeRepeat::Once, ctrl_m)];
+    let cwm = vec![once(&ctrl_w), once(&key_m_lc)];
+    let cwcm = vec![once(&ctrl_w), once(&ctrl_m)];
     let stoggle = IambStep::new()
         .actions(vec![IambAction::ToggleScrollbackFocus.into()])
         .goto(VimMode::Normal);
@@ -59,6 +57,21 @@ pub fn setup_keybindings() -> Keybindings {
     ism.add_mapping(VimMode::Visual, &cwm, &stoggle);
     ism.add_mapping(VimMode::Normal, &cwcm, &stoggle);
     ism.add_mapping(VimMode::Visual, &cwcm, &stoggle);
+    ism
+}
 
-    return ism;
+impl InputBindings<TerminalKey, IambStep> for ApplicationSettings {
+    fn setup(&self, bindings: &mut Keybindings) {
+        for (modes, keys) in &self.macros {
+            for (Keys(input, _), Keys(_, run)) in keys {
+                let act = MacroAction::Run(run.clone(), Count::Contextual);
+                let step = IambStep::new().actions(vec![act.into()]);
+                let input = input.iter().map(once).collect::<Vec<_>>();
+
+                for mode in &modes.0 {
+                    bindings.add_mapping(*mode, &input, &step);
+                }
+            }
+        }
+    }
 }
