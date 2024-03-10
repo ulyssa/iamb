@@ -29,6 +29,7 @@ use std::time::Duration;
 use clap::Parser;
 use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::OwnedUserId;
+use modalkit::keybindings::InputBindings;
 use rand::{distributions::Alphanumeric, Rng};
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
@@ -257,7 +258,8 @@ impl Application {
         let backend = CrosstermBackend::new(stdout);
         let terminal = Terminal::new(backend)?;
 
-        let bindings = crate::keybindings::setup_keybindings();
+        let mut bindings = crate::keybindings::setup_keybindings();
+        settings.setup(&mut bindings);
         let bindings = KeyManager::new(bindings);
 
         let mut locked = store.lock().await;

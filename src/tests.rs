@@ -217,10 +217,12 @@ pub fn mock_settings() -> ApplicationSettings {
             settings: None,
             dirs: None,
             layout: None,
+            macros: None,
         },
         tunables: mock_tunables(),
         dirs: mock_dirs(),
         layout: Default::default(),
+        macros: HashMap::default(),
     }
 }
 

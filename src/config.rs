@@ -19,6 +19,8 @@ use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer, Ser
 use tracing::Level;
 use url::Url;
 
+use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
+
 use super::base::{
     IambError,
     IambId,
@@ -28,6 +30,8 @@ use super::base::{
     SortFieldUser,
     SortOrder,
 };
+
+type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
 
 macro_rules! usage {
     ( $($args: tt)* ) => {
@@ -134,6 +138,81 @@ pub enum ConfigError {
 
     #[error("Error loading configuration file: {0}")]
     Invalid(#[from] serde_json::Error),
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct Keys(pub Vec<TerminalKey>, pub String);
+pub struct KeysVisitor;
+
+impl<'de> Visitor<'de> for KeysVisitor {
+    type Value = Keys;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid Vim mode (e.g. \"normal\" or \"insert\")")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        match TerminalKey::from_macro_str(value) {
+            Ok(keys) => Ok(Keys(keys, value.to_string())),
+            Err(e) => Err(E::custom(format!("Could not parse key sequence: {e}"))),
+        }
+    }
+}
+
+impl<'de> Deserialize<'de> for Keys {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(KeysVisitor)
+    }
+}
+
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub struct VimModes(pub Vec<VimMode>);
+pub struct VimModesVisitor;
+
+impl<'de> Visitor<'de> for VimModesVisitor {
+    type Value = VimModes;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid Vim mode (e.g. \"normal\" or \"insert\")")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        let mut modes = vec![];
+
+        for mode in value.split('|') {
+            let mode = match mode.to_ascii_lowercase().as_str() {
+                "insert" | "i" => VimMode::Insert,
+                "normal" | "n" => VimMode::Normal,
+                "visual" | "v" => VimMode::Visual,
+                "command" | "c" => VimMode::Command,
+                "select" => VimMode::Select,
+                "operator-pending" => VimMode::OperationPending,
+                _ => return Err(E::custom("Could not parse into a Vim mode")),
+            };
+
+            modes.push(mode);
+        }
+
+        Ok(VimModes(modes))
+    }
+}
+
+impl<'de> Deserialize<'de> for VimModes {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(VimModesVisitor)
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -276,7 +355,10 @@ fn merge_sorts(a: SortOverrides, b: SortOverrides) -> SortOverrides {
     }
 }
 
-fn merge_users(a: Option<UserOverrides>, b: Option<UserOverrides>) -> Option<UserOverrides> {
+fn merge_maps<K, V>(a: Option<HashMap<K, V>>, b: Option<HashMap<K, V>>) -> Option<HashMap<K, V>>
+where
+    K: Eq + Hash,
+{
     match (a, b) {
         (Some(a), None) => Some(a),
         (None, Some(b)) => Some(b),
@@ -431,7 +513,7 @@ impl Tunables {
             sort: merge_sorts(self.sort, other.sort),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
-            users: merge_users(self.users, other.users),
+            users: merge_maps(self.users, other.users),
             username_display: self.username_display.or(other.username_display),
             message_user_color: self.message_user_color.or(other.message_user_color),
             default_room: self.default_room.or(other.default_room),
@@ -583,6 +665,7 @@ pub struct ProfileConfig {
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
+    pub macros: Option<Macros>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -592,6 +675,7 @@ pub struct IambConfig {
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
+    pub macros: Option<Macros>,
 }
 
 impl IambConfig {
@@ -624,6 +708,7 @@ pub struct ApplicationSettings {
     pub tunables: TunableValues,
     pub dirs: DirectoryValues,
     pub layout: Layout,
+    pub macros: Macros,
 }
 
 impl ApplicationSettings {
@@ -645,6 +730,7 @@ impl ApplicationSettings {
             dirs,
             settings: global,
             layout,
+            macros,
         } = IambConfig::load(config_json.as_path())?;
 
         validate_profile_names(&profiles);
@@ -668,6 +754,7 @@ impl ApplicationSettings {
             );
         };
 
+        let macros = merge_maps(macros, profile.macros.take()).unwrap_or_default();
         let layout = profile.layout.take().or(layout).unwrap_or_default();
 
         let tunables = global.unwrap_or_default();
@@ -721,6 +808,7 @@ impl ApplicationSettings {
             tunables,
             dirs,
             layout,
+            macros,
         };
 
         Ok(settings)
@@ -851,22 +939,22 @@ mod tests {
         .into_iter()
         .collect::<HashMap<_, _>>();
 
-        let res = merge_users(a.clone(), a.clone());
+        let res = merge_maps(a.clone(), a.clone());
         assert_eq!(res, None);
 
-        let res = merge_users(a.clone(), Some(b.clone()));
+        let res = merge_maps(a.clone(), Some(b.clone()));
         assert_eq!(res, Some(b.clone()));
 
-        let res = merge_users(Some(b.clone()), a.clone());
+        let res = merge_maps(Some(b.clone()), a.clone());
         assert_eq!(res, Some(b.clone()));
 
-        let res = merge_users(Some(b.clone()), Some(b.clone()));
+        let res = merge_maps(Some(b.clone()), Some(b.clone()));
         assert_eq!(res, Some(b.clone()));
 
-        let res = merge_users(Some(b.clone()), Some(c.clone()));
+        let res = merge_maps(Some(b.clone()), Some(c.clone()));
         assert_eq!(res, Some(c.clone()));
 
-        let res = merge_users(Some(c.clone()), Some(b.clone()));
+        let res = merge_maps(Some(c.clone()), Some(b.clone()));
         assert_eq!(res, Some(b.clone()));
     }
 
@@ -1011,5 +1099,46 @@ mod tests {
         };
         let tabs = vec![split1, split3];
         assert_eq!(res, Layout::Config { tabs });
+    }
+
+    #[test]
+    fn test_parse_macros() {
+        let res: Macros = serde_json::from_str("{\"i|c\":{\"jj\":\"<Esc>\"}}").unwrap();
+        assert_eq!(res.len(), 1);
+
+        let modes = VimModes(vec![VimMode::Insert, VimMode::Command]);
+        let mapped = res.get(&modes).unwrap();
+        assert_eq!(mapped.len(), 1);
+
+        let j = "j".parse::<TerminalKey>().unwrap();
+        let esc = "<Esc>".parse::<TerminalKey>().unwrap();
+
+        let jj = Keys(vec![j.clone(), j], "jj".into());
+        let run = mapped.get(&jj).unwrap();
+        let exp = Keys(vec![esc], "<Esc>".into());
+        assert_eq!(run, &exp);
+    }
+
+    #[test]
+    fn test_load_example_config_json() {
+        let path = PathBuf::from("docs/example_config.json");
+        let config = IambConfig::load(&path).expect("can load example_config.json");
+
+        let IambConfig {
+            profiles,
+            default_profile,
+            settings,
+            dirs,
+            layout,
+            macros,
+        } = config;
+
+        // There should be an example object for each top-level field.
+        assert!(!profiles.is_empty());
+        assert!(default_profile.is_some());
+        assert!(settings.is_some());
+        assert!(dirs.is_some());
+        assert!(layout.is_some());
+        assert!(macros.is_some());
     }
 }
