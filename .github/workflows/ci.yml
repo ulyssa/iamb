@@ -44,9 +44,9 @@ jobs:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         reporter: 'github-check'
     - name: Run tests
-      run: cargo test
+      run: cargo test --locked
     - name: Build artifacts
-      run: cargo build --release
+      run: cargo build --release --locked
     - name: Upload artifacts
       uses: actions/upload-artifact@master
       with:
