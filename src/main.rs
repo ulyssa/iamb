@@ -46,6 +46,7 @@ use modalkit::crossterm::{
         EnableBracketedPaste,
         EnableFocusChange,
         Event,
+        KeyEventKind,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
@@ -341,7 +342,13 @@ impl Application {
             }
 
             match read()? {
-                Event::Key(ke) => return Ok(ke.into()),
+                Event::Key(ke) => {
+                    if ke.kind == KeyEventKind::Release {
+                        continue;
+                    }
+
+                    return Ok(ke.into());
+                },
                 Event::Mouse(_) => {
                     // Do nothing for now.
                 },
