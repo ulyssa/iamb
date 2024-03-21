@@ -1311,7 +1311,7 @@ impl ClientWorker {
 
     async fn logout(&mut self, user_id: String) -> IambResult<EditInfo> {
         // Verify that the user is logging out of the correct profile.
-        let curr = self.settings.profile.user_id.as_ref();
+        let curr = self.settings.profile.user_id.as_str();
 
         if user_id != curr {
             let msg = format!("Incorrect user ID (currently logged in as {curr})");
