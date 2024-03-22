@@ -45,6 +45,7 @@ libc = "0.2"
 markup5ever_rcdom = "0.2.0"
 mime = "^0.3.16"
 mime_guess = "^2.0.4"
+notify-rust = { version = "4.10.0", default-features = false, features = ["zbus", "serde"] }
 open = "3.2.0"
 rand = "0.8.5"
 ratatui = "0.23"

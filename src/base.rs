@@ -761,6 +761,9 @@ pub struct RoomInfo {
 
     /// The display names for users in this room.
     pub display_names: HashMap<OwnedUserId, String>,
+
+    /// The last time the room was rendered, used to detect if it is currently open.
+    pub draw_last: Option<Instant>,
 }
 
 impl RoomInfo {
@@ -1192,6 +1195,9 @@ pub struct ChatStore {
 
     /// Image preview "protocol" picker.
     pub picker: Option<Picker>,
+
+    /// Last draw time, used to match with RoomInfo's draw_last.
+    pub draw_curr: Option<Instant>,
 }
 
 impl ChatStore {
@@ -1212,6 +1218,7 @@ impl ChatStore {
             verifications: Default::default(),
             need_load: Default::default(),
             sync_info: Default::default(),
+            draw_curr: None,
         }
     }
 

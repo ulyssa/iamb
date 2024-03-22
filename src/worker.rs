@@ -86,6 +86,7 @@ use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
 use crate::base::Need;
+use crate::notifications::register_notifications;
 use crate::{
     base::{
         AsyncProgramStore,
@@ -1242,12 +1243,14 @@ impl ClientWorker {
 
         self.load_handle = tokio::spawn({
             let client = self.client.clone();
+            let settings = self.settings.clone();
 
             async move {
                 let load = load_older_forever(&client, &store);
                 let rcpt = send_receipts_forever(&client, &store);
                 let room = refresh_rooms_forever(&client, &store);
-                let ((), (), ()) = tokio::join!(load, rcpt, room);
+                let notifications = register_notifications(&client, &settings, &store);
+                let ((), (), (), ()) = tokio::join!(load, rcpt, room, notifications);
             }
         })
         .into();
