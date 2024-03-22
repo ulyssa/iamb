@@ -469,6 +469,7 @@ impl SortOverrides {
 #[derive(Clone)]
 pub struct TunableValues {
     pub log_level: Level,
+    pub message_shortcode_display: bool,
     pub reaction_display: bool,
     pub reaction_shortcode_display: bool,
     pub read_receipt_send: bool,
@@ -489,6 +490,7 @@ pub struct TunableValues {
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
     pub log_level: Option<LogLevel>,
+    pub message_shortcode_display: Option<bool>,
     pub reaction_display: Option<bool>,
     pub reaction_shortcode_display: Option<bool>,
     pub read_receipt_send: Option<bool>,
@@ -511,6 +513,9 @@ impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
             log_level: self.log_level.or(other.log_level),
+            message_shortcode_display: self
+                .message_shortcode_display
+                .or(other.message_shortcode_display),
             reaction_display: self.reaction_display.or(other.reaction_display),
             reaction_shortcode_display: self
                 .reaction_shortcode_display
@@ -534,6 +539,7 @@ impl Tunables {
     fn values(self) -> TunableValues {
         TunableValues {
             log_level: self.log_level.map(Level::from).unwrap_or(Level::INFO),
+            message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             reaction_display: self.reaction_display.unwrap_or(true),
             reaction_shortcode_display: self.reaction_shortcode_display.unwrap_or(false),
             read_receipt_send: self.read_receipt_send.unwrap_or(true),

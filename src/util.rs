@@ -147,6 +147,28 @@ pub fn join_cell_text<'a>(texts: Vec<(Text<'a>, usize)>, join: Span<'a>, style: 
     text
 }
 
+fn replace_emoji_in_grapheme(grapheme: &str) -> String {
+    emojis::get(grapheme)
+        .and_then(|emoji| emoji.shortcode())
+        .map(|shortcode| format!(":{shortcode}:"))
+        .unwrap_or_else(|| grapheme.to_owned())
+}
+
+pub fn replace_emojis_in_str(s: &str) -> String {
+    let graphemes = s.graphemes(true);
+    graphemes.map(|x| replace_emoji_in_grapheme(x)).collect()
+}
+
+pub fn replace_emojis_in_span<'a>(span: &mut Span<'a>) {
+    span.content = Cow::Owned(replace_emojis_in_str(span.content.as_ref()))
+}
+
+pub fn replace_emojis_in_line<'a>(line: &mut Line<'a>) {
+    for span in &mut line.spans {
+        replace_emojis_in_span(span);
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
