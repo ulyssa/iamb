@@ -1,5 +1,4 @@
 //! Message scrollback
-
 use ratatui_image::Image;
 use regex::Regex;
 
@@ -58,6 +57,11 @@ use crate::{
     config::ApplicationSettings,
     message::{Message, MessageCursor, MessageKey, Messages},
 };
+
+fn no_msgs() -> EditError<IambInfo> {
+    let msg = "No messages to select.";
+    EditError::Failure(msg.to_string())
+}
 
 fn nth_key_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageKey {
     let mut end = &pos;
@@ -159,14 +163,16 @@ impl ScrollbackState {
         self.cursor
             .timestamp
             .clone()
-            .or_else(|| self.get_thread(info).last_key_value().map(|kv| kv.0.clone()))
+            .or_else(|| self.get_thread(info)?.last_key_value().map(|kv| kv.0.clone()))
     }
 
-    pub fn get_mut<'a>(&mut self, messages: &'a mut Messages) -> Option<&'a mut Message> {
+    pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
+        let thread = self.get_thread_mut(info);
+
         if let Some(k) = &self.cursor.timestamp {
-            messages.get_mut(k)
+            thread.get_mut(k)
         } else {
-            messages.last_entry().map(|o| o.into_mut())
+            thread.last_entry().map(|o| o.into_mut())
         }
     }
 
@@ -174,20 +180,12 @@ impl ScrollbackState {
         self.thread.as_ref()
     }
 
-    pub fn get_thread<'a>(&self, info: &'a RoomInfo) -> &'a Messages {
-        if let Some(thread_root) = self.thread.as_ref() {
-            info.threads.get(thread_root).unwrap_or(&info.messages)
-        } else {
-            &info.messages
-        }
+    pub fn get_thread<'a>(&self, info: &'a RoomInfo) -> Option<&'a Messages> {
+        info.get_thread(self.thread.as_deref())
     }
 
     pub fn get_thread_mut<'a>(&self, info: &'a mut RoomInfo) -> &'a mut Messages {
-        if let Some(thread_root) = self.thread.as_ref() {
-            info.threads.get_mut(thread_root).unwrap_or(&mut info.messages)
-        } else {
-            &mut info.messages
-        }
+        info.get_thread_mut(self.thread.clone())
     }
 
     pub fn messages<'a>(
@@ -195,7 +193,10 @@ impl ScrollbackState {
         range: EditRange<MessageCursor>,
         info: &'a RoomInfo,
     ) -> impl Iterator<Item = (&'a MessageKey, &'a Message)> {
-        let thread = self.get_thread(info);
+        let Some(thread) = self.get_thread(info) else {
+            return Default::default();
+        };
+
         let start = range.start.to_key(thread);
         let end = range.end.to_key(thread);
 
@@ -223,7 +224,7 @@ impl ScrollbackState {
             _ => {},
         }
 
-        let first_key = self.get_thread(info).first_key_value().map(|(k, _)| k);
+        let first_key = self.get_thread(info).and_then(|t| t.first_key_value()).map(|(k, _)| k);
         let at_top = first_key == self.viewctx.corner.timestamp.as_ref();
 
         match (at_top, self.thread.as_ref()) {
@@ -254,7 +255,10 @@ impl ScrollbackState {
         info: &RoomInfo,
         settings: &ApplicationSettings,
     ) {
-        let thread = self.get_thread(info);
+        let Some(thread) = self.get_thread(info) else {
+            return;
+        };
+
         let selidx = if let Some(key) = self.cursor.to_key(thread) {
             key
         } else {
@@ -319,7 +323,9 @@ impl ScrollbackState {
     }
 
     fn shift_cursor(&mut self, info: &RoomInfo, settings: &ApplicationSettings) {
-        let thread = self.get_thread(info);
+        let Some(thread) = self.get_thread(info) else {
+            return;
+        };
 
         let last_key = if let Some(k) = thread.last_key_value() {
             k.0
@@ -389,7 +395,7 @@ impl ScrollbackState {
             MoveType::BufferLineOffset => None,
             MoveType::BufferLinePercent => None,
             MoveType::BufferPos(MovePosition::Beginning) => {
-                let start = self.get_thread(info).first_key_value()?.0.clone();
+                let start = self.get_thread(info)?.first_key_value()?.0.clone();
 
                 Some(start.into())
             },
@@ -402,7 +408,7 @@ impl ScrollbackState {
             MoveType::ParagraphBegin(dir) |
             MoveType::SectionBegin(dir) |
             MoveType::SectionEnd(dir) => {
-                let thread = self.get_thread(info);
+                let thread = self.get_thread(info)?;
 
                 match dir {
                     MoveDir1D::Previous => nth_before(pos, count, thread).into(),
@@ -455,14 +461,14 @@ impl ScrollbackState {
             RangeType::XmlTag => None,
 
             RangeType::Buffer => {
-                let thread = self.get_thread(info);
+                let thread = self.get_thread(info)?;
                 let start = thread.first_key_value()?.0.clone();
                 let end = thread.last_key_value()?.0.clone();
 
                 Some(EditRange::inclusive(start.into(), end.into(), TargetShape::LineWise))
             },
             RangeType::Line | RangeType::Paragraph | RangeType::Sentence => {
-                let thread = self.get_thread(info);
+                let thread = self.get_thread(info)?;
                 let count = ctx.resolve(count);
 
                 if count == 0 {
@@ -496,7 +502,7 @@ impl ScrollbackState {
         mut count: usize,
         info: &RoomInfo,
     ) -> Option<MessageCursor> {
-        let thread = self.get_thread(info);
+        let thread = self.get_thread(info)?;
         let mut mc = None;
 
         for (key, msg) in thread.range(&start..) {
@@ -524,8 +530,11 @@ impl ScrollbackState {
         mut count: usize,
         info: &RoomInfo,
     ) -> (Option<MessageCursor>, bool) {
-        let thread = self.get_thread(info);
         let mut mc = None;
+
+        let Some(thread) = self.get_thread(info) else {
+            return (None, false);
+        };
 
         for (key, msg) in thread.range(..&end).rev() {
             if count == 0 {
@@ -614,14 +623,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
-        let thread = self.get_thread(info);
-        let key = if let Some(k) = self.cursor.to_key(thread) {
-            k.clone()
-        } else {
-            let msg = "No messages to select.";
-            let err = EditError::Failure(msg.to_string());
-            return Err(err);
-        };
+        let thread = self.get_thread(info).ok_or_else(no_msgs)?;
+        let key = self.cursor.to_key(thread).ok_or_else(no_msgs)?.clone();
 
         match operation {
             EditAction::Motion => {
@@ -644,7 +647,6 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     EditTarget::CharJump(mark) | EditTarget::LineJump(mark) => {
                         let mark = ctx.resolve(mark);
                         let cursor = store.cursors.get_mark(self.id.clone(), mark)?;
-                        let thread = self.get_thread(info);
 
                         if let Some(mc) = MessageCursor::from_cursor(&cursor, thread) {
                             Some(mc)
@@ -723,7 +725,6 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     EditTarget::CharJump(mark) | EditTarget::LineJump(mark) => {
                         let mark = ctx.resolve(mark);
                         let cursor = store.cursors.get_mark(self.id.clone(), mark)?;
-                        let thread = self.get_thread(info);
 
                         if let Some(c) = MessageCursor::from_cursor(&cursor, thread) {
                             self._range_to(c).into()
@@ -821,18 +822,11 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
         let info = store.application.get_room_info(self.room_id.clone());
-        let thread = self.get_thread(info);
+        let thread = self.get_thread(info).ok_or_else(no_msgs)?;
+        let cursor = self.cursor.to_cursor(thread).ok_or_else(no_msgs)?;
+        store.cursors.set_mark(self.id.clone(), name, cursor);
 
-        if let Some(cursor) = self.cursor.to_cursor(thread) {
-            store.cursors.set_mark(self.id.clone(), name, cursor);
-
-            Ok(None)
-        } else {
-            let msg = "Failed to set mark for message";
-            let err = EditError::Failure(msg.into());
-
-            Err(err)
-        }
+        Ok(None)
     }
 
     fn complete(
@@ -884,6 +878,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
         let info = store.application.get_room_info(self.room_id.clone());
+        let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
         match act {
             CursorAction::Close(_) => Ok(None),
@@ -901,8 +896,6 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     self.push_jump();
                 }
 
-                let thread = self.get_thread(info);
-
                 if let Some(mc) = MessageCursor::from_cursor(ngroup.leader.cursor(), thread) {
                     self.cursor = mc;
 
@@ -916,7 +909,6 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             },
             CursorAction::Save(_) => {
                 let reg = ctx.get_register().unwrap_or(Register::UnnamedCursorGroup);
-                let thread = self.get_thread(info);
 
                 // Lists don't have groups; override any previously saved group.
                 let cursor = self.cursor.to_cursor(thread).ok_or_else(|| {
@@ -1019,7 +1011,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         store: &mut ProgramStore,
     ) -> EditResult<Vec<(Action<IambInfo>, ProgramContext)>, IambInfo> {
         let info = store.application.get_room_info(self.room_id.clone());
-        let thread = self.get_thread(info);
+        let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
         let Some(key) = self.cursor.to_key(thread) else {
             let msg = "No message currently selected";
@@ -1068,7 +1060,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let settings = &store.application.settings;
         let mut corner = self.viewctx.corner.clone();
-        let thread = self.get_thread(info);
+        let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
         let last_key = if let Some(k) = thread.last_key_value() {
             k.0
@@ -1182,7 +1174,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             Axis::Vertical => {
                 let info = store.application.rooms.get_or_default(self.room_id.clone());
                 let settings = &store.application.settings;
-                let thread = self.get_thread(info);
+                let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
                 if let Some(key) = self.cursor.to_key(thread).cloned() {
                     self.scrollview(key, pos, info, settings);
@@ -1315,11 +1307,13 @@ impl<'a> StatefulWidget for Scrollback<'a> {
             return;
         }
 
+        let Some(thread) = state.get_thread(info) else {
+            return;
+        };
+
         if state.cursor.timestamp < state.viewctx.corner.timestamp {
             state.viewctx.corner = state.cursor.clone();
         }
-
-        let thread = state.get_thread(info);
 
         let cursor = &state.cursor;
         let cursor_key = if let Some(k) = cursor.to_key(thread) {

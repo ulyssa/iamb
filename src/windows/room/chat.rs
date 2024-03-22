@@ -28,7 +28,6 @@ use matrix_sdk::{
             RoomMessageEventContent,
             TextMessageEventContent,
         },
-        EventId,
         OwnedEventId,
         OwnedRoomId,
         RoomId,
@@ -72,7 +71,6 @@ use modalkit::prelude::*;
 
 use crate::base::{
     DownloadFlags,
-    EventLocation,
     IambAction,
     IambBufferId,
     IambError,
@@ -148,32 +146,10 @@ impl ChatState {
         }
     }
 
-    fn get_thread_last<'a>(
-        &self,
-        thread_root: &OwnedEventId,
-        info: &'a RoomInfo,
-    ) -> Option<&'a OriginalRoomMessageEvent> {
-        let last = info.threads.get(thread_root).and_then(|t| Some(t.last_key_value()?.1));
-
-        let msg = if let Some(last) = last {
-            &last.event
-        } else if let EventLocation::Message(_, key) = info.keys.get(thread_root)? {
-            let msg = info.messages.get(key)?;
-            &msg.event
-        } else {
-            return None;
-        };
-
-        if let MessageEvent::Original(ev) = &msg {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-
     fn get_reply_to<'a>(&self, info: &'a RoomInfo) -> Option<&'a OriginalRoomMessageEvent> {
+        let thread = self.scrollback.get_thread(info)?;
         let key = self.reply_to.as_ref()?;
-        let msg = info.messages.get(key)?;
+        let msg = thread.get(key)?;
 
         if let MessageEvent::Original(ev) = &msg.event {
             Some(ev)
@@ -205,10 +181,7 @@ impl ChatState {
         let settings = &store.application.settings;
         let info = store.application.rooms.get_or_default(self.room_id.clone());
 
-        let msg = self
-            .scrollback
-            .get_mut(&mut info.messages)
-            .ok_or(IambError::NoSelectedMessage)?;
+        let msg = self.scrollback.get_mut(info).ok_or(IambError::NoSelectedMessage)?;
 
         match act {
             MessageAction::Cancel(skip_confirm) => {
@@ -441,11 +414,11 @@ impl ChatState {
             },
             MessageAction::Unreact(emoji) => {
                 let room = self.get_joined(&store.application.worker)?;
-                let event_id: &EventId = match &msg.event {
-                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
-                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
-                    MessageEvent::Original(ev) => ev.event_id.as_ref(),
-                    MessageEvent::Local(event_id, _) => event_id.as_ref(),
+                let event_id = match &msg.event {
+                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
+                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
+                    MessageEvent::Original(ev) => ev.event_id.clone(),
+                    MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::Redacted(_) => {
                         let msg = "Cannot unreact to a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -454,7 +427,7 @@ impl ChatState {
                     },
                 };
 
-                let reactions = match info.reactions.get(event_id) {
+                let reactions = match info.reactions.get(&event_id) {
                     Some(r) => r,
                     None => return Ok(None),
                 };
@@ -518,7 +491,7 @@ impl ChatState {
                 } else if let Some(thread_root) = self.scrollback.thread() {
                     if let Some(m) = self.get_reply_to(info) {
                         msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::No);
-                    } else if let Some(m) = self.get_thread_last(thread_root, info) {
+                    } else if let Some(m) = info.get_thread_last(thread_root) {
                         msg = msg.make_for_thread(m, ReplyWithinThread::No, AddMentions::No);
                     } else {
                         // Internal state is wonky?
@@ -884,19 +857,21 @@ impl<'a> StatefulWidget for Chat<'a> {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         // Determine whether we have a description to show for the message bar.
-        let desc_spans = match (&state.editing, &state.reply_to) {
-            (None, None) => None,
-            (Some(_), None) => Some(Line::from("Editing message")),
-            (editing, Some(_)) => {
-                state.reply_to.as_ref().and_then(|k| {
-                    let room = self.store.application.rooms.get(state.id())?;
-                    let msg = room.messages.get(k)?;
+        let desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
+            (None, None, None) => None,
+            (None, None, Some(_)) => Some(Line::from("Replying in thread")),
+            (Some(_), None, None) => Some(Line::from("Editing message")),
+            (Some(_), None, Some(_)) => Some(Line::from("Editing message in thread")),
+            (editing, Some(_), thread) => {
+                self.store.application.rooms.get(state.id()).and_then(|room| {
+                    let msg = state.get_reply_to(room)?;
                     let user =
                         self.store.application.settings.get_user_span(msg.sender.as_ref(), room);
-                    let prefix = if editing.is_some() {
-                        Span::from("Editing reply to ")
-                    } else {
-                        Span::from("Replying to ")
+                    let prefix = match (editing.is_some(), thread.is_some()) {
+                        (true, false) => Span::from("Editing reply to "),
+                        (true, true) => Span::from("Editing reply in thread to "),
+                        (false, false) => Span::from("Replying to "),
+                        (false, true) => Span::from("Replying in thread to "),
                     };
                     let spans = Line::from(vec![prefix, user]);
 
