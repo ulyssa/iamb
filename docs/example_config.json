@@ -10,6 +10,7 @@
 	},
 	"settings": {
 		"log_level":                  "warn",
+		"message_shortcode_display":  false,
 		"reaction_display":           true,
 		"reaction_shortcode_display": false,
 		"read_receipt_send":          true,
