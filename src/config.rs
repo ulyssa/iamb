@@ -485,6 +485,7 @@ pub struct TunableValues {
     pub open_command: Option<Vec<String>>,
     pub notifications: Notifications,
     pub image_preview: Option<ImagePreviewValues>,
+    pub user_gutter_width: usize,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -507,6 +508,7 @@ pub struct Tunables {
     pub open_command: Option<Vec<String>>,
     pub notifications: Option<Notifications>,
     pub image_preview: Option<ImagePreview>,
+    pub user_gutter_width: Option<usize>,
 }
 
 impl Tunables {
@@ -533,6 +535,7 @@ impl Tunables {
             open_command: self.open_command.or(other.open_command),
             notifications: self.notifications.or(other.notifications),
             image_preview: self.image_preview.or(other.image_preview),
+            user_gutter_width: self.user_gutter_width.or(other.user_gutter_width),
         }
     }
 
@@ -555,6 +558,7 @@ impl Tunables {
             open_command: self.open_command,
             notifications: self.notifications.unwrap_or_default(),
             image_preview: self.image_preview.map(ImagePreview::values),
+            user_gutter_width: self.user_gutter_width.unwrap_or(30 as usize),
         }
     }
 }

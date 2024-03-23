@@ -120,13 +120,9 @@ const BOLD_STYLE: Style = Style {
     underline_color: None,
 };
 
-const USER_GUTTER: usize = 30;
 const TIME_GUTTER: usize = 12;
 const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
-
-const USER_GUTTER_EMPTY: &str = "                              ";
-const USER_GUTTER_EMPTY_SPAN: Span<'static> = span_static(USER_GUTTER_EMPTY);
 
 const TIME_GUTTER_EMPTY: &str = "            ";
 const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
@@ -576,10 +572,15 @@ impl<'a> MessageFormatter<'a> {
             text.lines.push(Line::from(vec![leading, date, trailing]));
         }
 
+        let user_gutter_empty = std::iter::repeat(' ')
+            .take(self.settings.tunables.user_gutter_width)
+            .collect::<String>();
+        let user_gutter_empty_span: Span<'a> = Span::raw(user_gutter_empty);
+
         match self.cols {
             MessageColumns::Four => {
                 let settings = self.settings;
-                let user = self.user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
+                let user = self.user.take().unwrap_or(user_gutter_empty_span);
                 let time = self.time.take().unwrap_or(TIME_GUTTER_EMPTY_SPAN);
 
                 let mut line = vec![user];
@@ -604,7 +605,7 @@ impl<'a> MessageFormatter<'a> {
                 text.lines.push(Line::from(line))
             },
             MessageColumns::Three => {
-                let user = self.user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
+                let user = self.user.take().unwrap_or(user_gutter_empty_span);
                 let time = self.time.take().unwrap_or_else(|| Span::from(""));
 
                 let mut line = vec![user];
@@ -614,7 +615,7 @@ impl<'a> MessageFormatter<'a> {
                 text.lines.push(Line::from(line))
             },
             MessageColumns::Two => {
-                let user = self.user.take().unwrap_or(USER_GUTTER_EMPTY_SPAN);
+                let user = self.user.take().unwrap_or(user_gutter_empty_span);
                 let mut line = vec![user];
                 line.extend(prev_line.spans);
 
@@ -743,28 +744,29 @@ impl Message {
             Some(prev) if prev.timestamp.same_day(&self.timestamp) => None,
             _ => self.timestamp.show_date(),
         };
+        let user_gutter = settings.tunables.user_gutter_width;
 
-        if USER_GUTTER + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
+        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
             settings.tunables.read_receipt_display
         {
             let cols = MessageColumns::Four;
-            let fill = width - USER_GUTTER - TIME_GUTTER - READ_GUTTER;
+            let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
             let time = self.timestamp.show_time();
             let read = info.event_receipts.get(self.event.event_id()).map(|read| read.iter());
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
-        } else if USER_GUTTER + TIME_GUTTER + MIN_MSG_LEN <= width {
+        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
-            let fill = width - USER_GUTTER - TIME_GUTTER;
+            let fill = width - user_gutter - TIME_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
             let time = self.timestamp.show_time();
             let read = None;
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
-        } else if USER_GUTTER + MIN_MSG_LEN <= width {
+        } else if user_gutter + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Two;
-            let fill = width - USER_GUTTER;
+            let fill = width - user_gutter;
             let user = self.show_sender(prev, true, info, settings);
             let time = None;
             let read = None;
@@ -787,11 +789,13 @@ impl Message {
         prev: Option<&Message>,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
     ) -> Option<(&dyn Protocol, u16, u16)> {
         let width = vwctx.get_width();
+        let user_gutter = settings.tunables.user_gutter_width;
         // The x position where get_render_format would render the text.
-        let x = (if USER_GUTTER + MIN_MSG_LEN <= width {
-            USER_GUTTER
+        let x = (if user_gutter + MIN_MSG_LEN <= width {
+            user_gutter
         } else {
             0
         }) as u16;
@@ -1029,8 +1033,9 @@ impl Message {
         }
 
         let Span { content, style } = self.sender_span(info, settings);
-        let ((truncated, width), _) = take_width(content, 28);
-        let padding = 28 - width;
+        let user_gutter = settings.tunables.user_gutter_width;
+        let ((truncated, width), _) = take_width(content, user_gutter - 2);
+        let padding = user_gutter - 2 - width;
 
         let sender = if align_right {
             space(padding) + &truncated + "  "

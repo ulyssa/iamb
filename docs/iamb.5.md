@@ -111,6 +111,10 @@ overridden as described in *PROFILES*.
 > *protocol.font_size* is an optional list of two numbers representing font
 > width and height in pixels.
 
+**user_gutter_width** (type: usize)
+> Specify the width of the column where usernames are displayed in a room.
+> Usernames that are too long are truncated.
+
 ## USER OVERRIDES
 
 Overrides are mapped onto matrix User IDs such as _@user:matrix.org_ and are
