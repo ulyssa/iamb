@@ -53,6 +53,10 @@ overridden as described in *PROFILES*.
 > Specifies the lowest log level that should be shown. Possible values
 > are: _trace_, _debug_, _info_, _warn_, and _error_.
 
+**message_shortcode_display** (type: boolean)
+> Defines whether or not emoji characters in messages should be replaced by
+> their respective shortcodes.
+
 **reaction_display** (type: boolean)
 > Defines whether or not reactions should be shown.
 

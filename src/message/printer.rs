@@ -11,7 +11,13 @@ use ratatui::text::{Line, Span, Text};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::util::{space_span, take_width};
+use crate::util::{
+    replace_emojis_in_line,
+    replace_emojis_in_span,
+    replace_emojis_in_str,
+    space_span,
+    take_width,
+};
 
 /// Wrap styled text for the current terminal width.
 pub struct TextPrinter<'a> {
@@ -19,6 +25,7 @@ pub struct TextPrinter<'a> {
     width: usize,
     base_style: Style,
     hide_reply: bool,
+    emoji_shortcodes: bool,
 
     alignment: Alignment,
     curr_spans: Vec<Span<'a>>,
@@ -28,12 +35,13 @@ pub struct TextPrinter<'a> {
 
 impl<'a> TextPrinter<'a> {
     /// Create a new printer.
-    pub fn new(width: usize, base_style: Style, hide_reply: bool) -> Self {
+    pub fn new(width: usize, base_style: Style, hide_reply: bool, emoji_shortcodes: bool) -> Self {
         TextPrinter {
             text: Text::default(),
             width,
             base_style,
             hide_reply,
+            emoji_shortcodes,
 
             alignment: Alignment::Left,
             curr_spans: vec![],
@@ -59,6 +67,11 @@ impl<'a> TextPrinter<'a> {
         self.hide_reply
     }
 
+    /// Indicates whether emojis should be replaced by shortcodes
+    pub fn emoji_shortcodes(&self) -> bool {
+        self.emoji_shortcodes
+    }
+
     /// Indicates the current printer's width.
     pub fn width(&self) -> usize {
         self.width
@@ -71,6 +84,7 @@ impl<'a> TextPrinter<'a> {
             width: self.width.saturating_sub(indent),
             base_style: self.base_style,
             hide_reply: self.hide_reply,
+            emoji_shortcodes: self.emoji_shortcodes,
 
             alignment: self.alignment,
             curr_spans: vec![],
@@ -164,7 +178,10 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// Push a [Span] that isn't allowed to break across lines.
-    pub fn push_span_nobreak(&mut self, span: Span<'a>) {
+    pub fn push_span_nobreak(&mut self, mut span: Span<'a>) {
+        if self.emoji_shortcodes {
+            replace_emojis_in_span(&mut span);
+        }
         let sw = UnicodeWidthStr::width(span.content.as_ref());
 
         if self.curr_width + sw > self.width {
@@ -200,10 +217,15 @@ impl<'a> TextPrinter<'a> {
                 continue;
             }
 
-            let sw = UnicodeWidthStr::width(word);
+            let cow = if self.emoji_shortcodes {
+                Cow::Owned(replace_emojis_in_str(word))
+            } else {
+                Cow::Borrowed(word)
+            };
+            let sw = UnicodeWidthStr::width(cow.as_ref());
 
             if sw > self.width {
-                self.push_str_wrapped(word, style);
+                self.push_str_wrapped(cow, style);
                 continue;
             }
 
@@ -211,13 +233,13 @@ impl<'a> TextPrinter<'a> {
                 // Word doesn't fit on this line, so start a new one.
                 self.commit();
 
-                if !self.literal && word.chars().all(char::is_whitespace) {
+                if !self.literal && cow.chars().all(char::is_whitespace) {
                     // Drop leading whitespace.
                     continue;
                 }
             }
 
-            let span = Span::styled(word, style);
+            let span = Span::styled(cow, style);
             self.curr_spans.push(span);
             self.curr_width += sw;
         }
@@ -229,14 +251,22 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// Push a [Line] into the printer.
-    pub fn push_line(&mut self, line: Line<'a>) {
+    pub fn push_line(&mut self, mut line: Line<'a>) {
         self.commit();
+        if self.emoji_shortcodes {
+            replace_emojis_in_line(&mut line);
+        }
         self.text.lines.push(line);
     }
 
     /// Push multiline [Text] into the printer.
-    pub fn push_text(&mut self, text: Text<'a>) {
+    pub fn push_text(&mut self, mut text: Text<'a>) {
         self.commit();
+        if self.emoji_shortcodes {
+            for line in &mut text.lines {
+                replace_emojis_in_line(line);
+            }
+        }
         self.text.lines.extend(text.lines);
     }
 

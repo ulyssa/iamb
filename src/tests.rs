@@ -183,6 +183,7 @@ pub fn mock_tunables() -> TunableValues {
     TunableValues {
         default_room: None,
         log_level: Level::INFO,
+        message_shortcode_display: false,
         reaction_display: true,
         reaction_shortcode_display: false,
         read_receipt_send: true,
