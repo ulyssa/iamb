@@ -166,7 +166,8 @@ impl Table {
 
         if let Some(caption) = &self.caption {
             let subw = width.saturating_sub(6);
-            let mut printer = TextPrinter::new(subw, style, true, emoji_shortcodes).align(Alignment::Center);
+            let mut printer =
+                TextPrinter::new(subw, style, true, emoji_shortcodes).align(Alignment::Center);
             caption.print(&mut printer, style);
 
             for mut line in printer.finish().lines {
@@ -464,7 +465,13 @@ impl StyleTree {
         return links;
     }
 
-    pub fn to_text(&self, width: usize, style: Style, hide_reply: bool, emoji_shortcodes: bool) -> Text<'_> {
+    pub fn to_text(
+        &self,
+        width: usize,
+        style: Style,
+        hide_reply: bool,
+        emoji_shortcodes: bool,
+    ) -> Text<'_> {
         let mut printer = TextPrinter::new(width, style, hide_reply, emoji_shortcodes);
 
         for child in self.children.iter() {

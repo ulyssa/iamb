@@ -834,7 +834,8 @@ impl Message {
 
         if let Some(r) = &reply {
             let w = width.saturating_sub(2);
-            let mut replied = r.show_msg(w, style, true, settings.tunables.message_shortcode_display);
+            let mut replied =
+                r.show_msg(w, style, true, settings.tunables.message_shortcode_display);
             let mut sender = r.sender_span(info, settings);
             let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
             let trailing = w.saturating_sub(sender_width + 1);
@@ -862,7 +863,12 @@ impl Message {
         }
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let msg = self.show_msg(width, style, reply.is_some(), settings.tunables.message_shortcode_display);
+        let msg = self.show_msg(
+            width,
+            style,
+            reply.is_some(),
+            settings.tunables.message_shortcode_display,
+        );
         fmt.push_text(msg, style, &mut text);
 
         if text.lines.is_empty() {
@@ -920,7 +926,8 @@ impl Message {
             if len > 0 {
                 let style = Style::default();
                 let emoji_shortcodes = settings.tunables.message_shortcode_display;
-                let mut threaded = printer::TextPrinter::new(width, style, false, emoji_shortcodes).literal(true);
+                let mut threaded =
+                    printer::TextPrinter::new(width, style, false, emoji_shortcodes).literal(true);
                 let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
                 threaded.push_str(" \u{2937} ", style);
                 threaded.push_span_nobreak(len);
@@ -932,7 +939,13 @@ impl Message {
         text
     }
 
-    pub fn show_msg(&self, width: usize, style: Style, hide_reply: bool, emoji_shortcodes: bool) -> Text {
+    pub fn show_msg(
+        &self,
+        width: usize,
+        style: Style,
+        hide_reply: bool,
+        emoji_shortcodes: bool,
+    ) -> Text {
         if let Some(html) = &self.html {
             html.to_text(width, style, hide_reply, emoji_shortcodes)
         } else {

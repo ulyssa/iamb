@@ -12,7 +12,11 @@ use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use crate::util::{
-    replace_emojis_in_line, replace_emojis_in_span, replace_emojis_in_str, space_span, take_width,
+    replace_emojis_in_line,
+    replace_emojis_in_span,
+    replace_emojis_in_str,
+    space_span,
+    take_width,
 };
 
 /// Wrap styled text for the current terminal width.
