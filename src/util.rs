@@ -156,14 +156,14 @@ fn replace_emoji_in_grapheme(grapheme: &str) -> String {
 
 pub fn replace_emojis_in_str(s: &str) -> String {
     let graphemes = s.graphemes(true);
-    graphemes.map(|x| replace_emoji_in_grapheme(x)).collect()
+    graphemes.map(replace_emoji_in_grapheme).collect()
 }
 
-pub fn replace_emojis_in_span<'a>(span: &mut Span<'a>) {
+pub fn replace_emojis_in_span(span: &mut Span) {
     span.content = Cow::Owned(replace_emojis_in_str(span.content.as_ref()))
 }
 
-pub fn replace_emojis_in_line<'a>(line: &mut Line<'a>) {
+pub fn replace_emojis_in_line(line: &mut Line) {
     for span in &mut line.spans {
         replace_emojis_in_span(span);
     }
