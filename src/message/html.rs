@@ -812,6 +812,7 @@ pub mod tests {
     use super::*;
     use crate::util::space_span;
     use pretty_assertions::assert_eq;
+    use unicode_width::UnicodeWidthStr;
 
     #[test]
     fn test_header() {
@@ -1430,18 +1431,25 @@ pub mod tests {
 
     #[test]
     fn test_emoji_shortcodes() {
-        let s = "<p>🤯</p>";
-        let tree = parse_matrix_html(s);
-        let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::raw("🤯"),
-            // Apparently the emoji symbol has width 2
-            space_span(18, Style::default()),
-        ])]);
-        let text = tree.to_text(20, Style::default(), false, true);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::raw(":exploding_head:"),
-            space_span(4, Style::default()),
-        ])]);
+        for shortcode in ["exploding_head", "polar_bear", "canada"] {
+            let emoji = emojis::get_by_shortcode(shortcode).unwrap().as_str();
+            let emoji_width = UnicodeWidthStr::width(emoji);
+            let replacement = format!(":{shortcode}:");
+            let replacement_width = UnicodeWidthStr::width(replacement.as_str());
+            let s = format!("<p>{emoji}</p>");
+            let tree = parse_matrix_html(s.as_str());
+            // Test with emojis_shortcodes set to false
+            let text = tree.to_text(20, Style::default(), false, false);
+            assert_eq!(text.lines, vec![Line::from(vec![
+                Span::raw(emoji),
+                space_span(20 - emoji_width, Style::default()),
+            ]),]);
+            // Test with emojis_shortcodes set to true
+            let text = tree.to_text(20, Style::default(), false, true);
+            assert_eq!(text.lines, vec![Line::from(vec![
+                Span::raw(replacement.as_str()),
+                space_span(20 - replacement_width, Style::default()),
+            ])]);
+        }
     }
 }
