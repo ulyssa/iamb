@@ -21,7 +21,7 @@ use tracing::Level;
 use url::Url;
 
 use crate::{
-    base::{ChatStore, EventLocation, ProgramStore, RoomFetchStatus, RoomInfo},
+    base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
     config::{
         user_color,
         user_style_from_color,
@@ -148,25 +148,11 @@ pub fn mock_messages() -> Messages {
 }
 
 pub fn mock_room() -> RoomInfo {
-    RoomInfo {
-        name: Some("Watercooler Discussion".into()),
-        tags: None,
-
-        keys: mock_keys(),
-        messages: mock_messages(),
-        threads: HashMap::default(),
-
-        event_receipts: HashMap::new(),
-        user_receipts: HashMap::new(),
-        reactions: HashMap::new(),
-
-        fetching: false,
-        fetch_id: RoomFetchStatus::NotStarted,
-        fetch_last: None,
-        users_typing: None,
-        display_names: HashMap::new(),
-        draw_last: None,
-    }
+    let mut room = RoomInfo::default();
+    room.name = Some("Watercooler Discussion".into());
+    room.keys = mock_keys();
+    *room.get_thread_mut(None) = mock_messages();
+    room
 }
 
 pub fn mock_dirs() -> DirectoryValues {

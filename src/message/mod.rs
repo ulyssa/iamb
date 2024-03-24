@@ -638,6 +638,106 @@ impl<'a> MessageFormatter<'a> {
             self.push_spans(line, style, text);
         }
     }
+
+    fn push_in_reply(
+        &mut self,
+        msg: &'a Message,
+        style: Style,
+        text: &mut Text<'a>,
+        info: &'a RoomInfo,
+    ) {
+        let width = self.width();
+        let w = width.saturating_sub(2);
+        let shortcodes = self.settings.tunables.message_shortcode_display;
+        let mut replied = msg.show_msg(w, style, true, shortcodes);
+        let mut sender = msg.sender_span(info, self.settings);
+        let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
+        let trailing = w.saturating_sub(sender_width + 1);
+
+        sender.style = sender.style.patch(style);
+
+        self.push_spans(
+            Line::from(vec![
+                Span::styled(" ", style),
+                Span::styled(THICK_VERTICAL, style),
+                sender,
+                Span::styled(":", style),
+                space_span(trailing, style),
+            ]),
+            style,
+            text,
+        );
+
+        for line in replied.lines.iter_mut() {
+            line.spans.insert(0, Span::styled(THICK_VERTICAL, style));
+            line.spans.insert(0, Span::styled(" ", style));
+        }
+
+        self.push_text(replied, style, text);
+    }
+
+    fn push_reactions(&mut self, counts: Vec<(&'a str, usize)>, style: Style, text: &mut Text<'a>) {
+        let mut emojis = printer::TextPrinter::new(self.width(), style, false, false);
+        let mut reactions = 0;
+
+        for (key, count) in counts {
+            if reactions != 0 {
+                emojis.push_str(" ", style);
+            }
+
+            let name = if self.settings.tunables.reaction_shortcode_display {
+                if let Some(emoji) = emojis::get(key) {
+                    if let Some(short) = emoji.shortcode() {
+                        short
+                    } else {
+                        // No ASCII shortcode name to show.
+                        continue;
+                    }
+                } else if key.chars().all(|c| c.is_ascii_alphanumeric()) {
+                    key
+                } else {
+                    // Not an Emoji or a printable ASCII string.
+                    continue;
+                }
+            } else {
+                key
+            };
+
+            emojis.push_str("[", style);
+            emojis.push_str(name, style);
+            emojis.push_str(" ", style);
+            emojis.push_span_nobreak(Span::styled(count.to_string(), style));
+            emojis.push_str("]", style);
+
+            reactions += 1;
+        }
+
+        if reactions > 0 {
+            self.push_text(emojis.finish(), style, text);
+        }
+    }
+
+    fn push_thread_reply_count(&mut self, len: usize, text: &mut Text<'a>) {
+        if len == 0 {
+            return;
+        }
+
+        // If we have threaded replies to this message, show how many.
+        let plural = len != 1;
+        let style = Style::default();
+        let mut threaded =
+            printer::TextPrinter::new(self.width(), style, false, false).literal(true);
+        let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
+        threaded.push_str(" \u{2937} ", style);
+        threaded.push_span_nobreak(len);
+        if plural {
+            threaded.push_str(" replies in thread", style);
+        } else {
+            threaded.push_str(" reply in thread", style);
+        }
+
+        self.push_text(threaded.finish(), style, text);
+    }
 }
 
 pub enum ImageStatus {
@@ -835,33 +935,7 @@ impl Message {
             .and_then(|e| info.get_event(&e));
 
         if let Some(r) = &reply {
-            let w = width.saturating_sub(2);
-            let mut replied =
-                r.show_msg(w, style, true, settings.tunables.message_shortcode_display);
-            let mut sender = r.sender_span(info, settings);
-            let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
-            let trailing = w.saturating_sub(sender_width + 1);
-
-            sender.style = sender.style.patch(style);
-
-            fmt.push_spans(
-                Line::from(vec![
-                    Span::styled(" ", style),
-                    Span::styled(THICK_VERTICAL, style),
-                    sender,
-                    Span::styled(":", style),
-                    space_span(trailing, style),
-                ]),
-                style,
-                &mut text,
-            );
-
-            for line in replied.lines.iter_mut() {
-                line.spans.insert(0, Span::styled(THICK_VERTICAL, style));
-                line.spans.insert(0, Span::styled(" ", style));
-            }
-
-            fmt.push_text(replied, style, &mut text);
+            fmt.push_in_reply(r, style, &mut text, info);
         }
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
@@ -879,63 +953,12 @@ impl Message {
         }
 
         if settings.tunables.reaction_display {
-            // Pass false for emoji_shortcodes parameter because we handle shortcodes ourselves
-            // before pushing to the printer.
-            let mut emojis = printer::TextPrinter::new(width, style, false, false);
-            let mut reactions = 0;
-
-            for (key, count) in info.get_reactions(self.event.event_id()).into_iter() {
-                if reactions != 0 {
-                    emojis.push_str(" ", style);
-                }
-
-                let name = if settings.tunables.reaction_shortcode_display {
-                    if let Some(emoji) = emojis::get(key) {
-                        if let Some(short) = emoji.shortcode() {
-                            short
-                        } else {
-                            // No ASCII shortcode name to show.
-                            continue;
-                        }
-                    } else if key.chars().all(|c| c.is_ascii_alphanumeric()) {
-                        key
-                    } else {
-                        // Not an Emoji or a printable ASCII string.
-                        continue;
-                    }
-                } else {
-                    key
-                };
-
-                emojis.push_str("[", style);
-                emojis.push_str(name, style);
-                emojis.push_str(" ", style);
-                emojis.push_span_nobreak(Span::styled(count.to_string(), style));
-                emojis.push_str("]", style);
-
-                reactions += 1;
-            }
-
-            if reactions > 0 {
-                fmt.push_text(emojis.finish(), style, &mut text);
-            }
+            let reactions = info.get_reactions(self.event.event_id());
+            fmt.push_reactions(reactions, style, &mut text);
         }
 
-        if let Some(thread) = info.threads.get(self.event.event_id()) {
-            // If we have threaded replies to this message, show how many.
-            let len = thread.len();
-
-            if len > 0 {
-                let style = Style::default();
-                let emoji_shortcodes = settings.tunables.message_shortcode_display;
-                let mut threaded =
-                    printer::TextPrinter::new(width, style, false, emoji_shortcodes).literal(true);
-                let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
-                threaded.push_str(" \u{2937} ", style);
-                threaded.push_span_nobreak(len);
-                threaded.push_str(" replies in thread", style);
-                fmt.push_text(threaded.finish(), style, &mut text);
-            }
+        if let Some(thread) = info.get_thread(Some(self.event.event_id())) {
+            fmt.push_thread_reply_count(thread.len(), &mut text);
         }
 
         text

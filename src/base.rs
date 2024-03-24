@@ -45,6 +45,7 @@ use matrix_sdk::{
                 RoomMessageEventContent,
                 RoomMessageEventContentWithoutRelation,
             },
+            room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
             tag::{TagName, Tags},
             MessageLikeEvent,
         },
@@ -54,6 +55,7 @@ use matrix_sdk::{
         OwnedRoomId,
         OwnedUserId,
         RoomId,
+        RoomVersionId,
         UserId,
     },
     RoomState as MatrixRoomState,
@@ -729,7 +731,7 @@ pub struct RoomInfo {
     pub keys: HashMap<OwnedEventId, EventLocation>,
 
     /// The messages loaded for this room.
-    pub messages: Messages,
+    messages: Messages,
 
     /// A map of read markers to display on different events.
     pub event_receipts: HashMap<OwnedEventId, HashSet<OwnedUserId>>,
@@ -745,7 +747,7 @@ pub struct RoomInfo {
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
 
     /// A map of message identifiers to thread replies.
-    pub threads: HashMap<OwnedEventId, Messages>,
+    threads: HashMap<OwnedEventId, Messages>,
 
     /// Whether the scrollback for this room is currently being fetched.
     pub fetching: bool,
@@ -767,6 +769,48 @@ pub struct RoomInfo {
 }
 
 impl RoomInfo {
+    pub fn get_thread(&self, root: Option<&EventId>) -> Option<&Messages> {
+        if let Some(thread_root) = root {
+            self.threads.get(thread_root)
+        } else {
+            Some(&self.messages)
+        }
+    }
+
+    pub fn get_thread_mut(&mut self, root: Option<OwnedEventId>) -> &mut Messages {
+        if let Some(thread_root) = root {
+            self.threads.entry(thread_root).or_default()
+        } else {
+            &mut self.messages
+        }
+    }
+
+    /// Get the event for the last message in a thread (or the thread root if there are no
+    /// in-thread replies yet).
+    ///
+    /// This returns `None` if the event identifier isn't in the room.
+    pub fn get_thread_last<'a>(
+        &'a self,
+        thread_root: &OwnedEventId,
+    ) -> Option<&'a OriginalRoomMessageEvent> {
+        let last = self.threads.get(thread_root).and_then(|t| Some(t.last_key_value()?.1));
+
+        let msg = if let Some(last) = last {
+            &last.event
+        } else if let EventLocation::Message(_, key) = self.keys.get(thread_root)? {
+            let msg = self.messages.get(key)?;
+            &msg.event
+        } else {
+            return None;
+        };
+
+        if let MessageEvent::Original(ev) = &msg {
+            Some(ev)
+        } else {
+            None
+        }
+    }
+
     /// Get the reactions and their counts for a message.
     pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize)> {
         if let Some(reacts) = self.reactions.get(event_id) {
@@ -799,6 +843,37 @@ impl RoomInfo {
     /// Get an event for an identifier as mutable.
     pub fn get_event_mut(&mut self, event_id: &EventId) -> Option<&mut Message> {
         self.messages.get_mut(self.keys.get(event_id)?.to_message_key()?)
+    }
+
+    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent, room_version: &RoomVersionId) {
+        let Some(redacts) = &ev.redacts else {
+            return;
+        };
+
+        match self.keys.get(redacts) {
+            None => return,
+            Some(EventLocation::Message(None, key)) => {
+                if let Some(msg) = self.messages.get_mut(key) {
+                    let ev = SyncRoomRedactionEvent::Original(ev);
+                    msg.redact(ev, room_version);
+                }
+            },
+            Some(EventLocation::Message(Some(root), key)) => {
+                if let Some(thread) = self.threads.get_mut(root) {
+                    if let Some(msg) = thread.get_mut(key) {
+                        let ev = SyncRoomRedactionEvent::Original(ev);
+                        msg.redact(ev, room_version);
+                    }
+                }
+            },
+            Some(EventLocation::Reaction(event_id)) => {
+                if let Some(reactions) = self.reactions.get_mut(event_id) {
+                    reactions.remove(redacts);
+                }
+
+                self.keys.remove(redacts);
+            },
+        }
     }
 
     /// Insert a reaction to a message.

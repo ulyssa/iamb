@@ -52,7 +52,7 @@ use matrix_sdk::{
                 member::OriginalSyncRoomMemberEvent,
                 message::{MessageType, RoomMessageEventContent},
                 name::RoomNameEventContent,
-                redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
+                redaction::OriginalSyncRoomRedactionEvent,
             },
             tag::Tags,
             typing::SyncTypingEvent,
@@ -94,7 +94,6 @@ use crate::{
         ChatStore,
         CreateRoomFlags,
         CreateRoomType,
-        EventLocation,
         IambError,
         IambResult,
         ProgramStore,
@@ -1063,35 +1062,7 @@ impl ClientWorker {
 
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
-
-                    let Some(redacts) = &ev.redacts else {
-                        return;
-                    };
-
-                    match info.keys.get(redacts) {
-                        None => return,
-                        Some(EventLocation::Message(None, key)) => {
-                            if let Some(msg) = info.messages.get_mut(key) {
-                                let ev = SyncRoomRedactionEvent::Original(ev);
-                                msg.redact(ev, room_version);
-                            }
-                        },
-                        Some(EventLocation::Message(Some(root), key)) => {
-                            if let Some(thread) = info.threads.get_mut(root) {
-                                if let Some(msg) = thread.get_mut(key) {
-                                    let ev = SyncRoomRedactionEvent::Original(ev);
-                                    msg.redact(ev, room_version);
-                                }
-                            }
-                        },
-                        Some(EventLocation::Reaction(event_id)) => {
-                            if let Some(reactions) = info.reactions.get_mut(event_id) {
-                                reactions.remove(redacts);
-                            }
-
-                            info.keys.remove(redacts);
-                        },
-                    }
+                    info.redact(ev, room_version);
                 }
             },
         );
