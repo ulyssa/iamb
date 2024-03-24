@@ -203,6 +203,7 @@ pub fn mock_tunables() -> TunableValues {
         message_user_color: false,
         notifications: Notifications { enabled: false, show_message: None },
         image_preview: None,
+        user_gutter_width: 30,
     }
 }
 

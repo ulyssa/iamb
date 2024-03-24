@@ -1352,7 +1352,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
             let txt = item.show(prev, foc && sel, &state.viewctx, info, settings);
 
             let mut msg_preview = if picker.is_some() {
-                item.line_preview(prev, &state.viewctx, info)
+                item.line_preview(prev, &state.viewctx, info, settings)
             } else {
                 None
             };
