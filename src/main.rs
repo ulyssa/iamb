@@ -28,6 +28,7 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use matrix_sdk::crypto::encrypt_room_key_export;
+use matrix_sdk::ruma::api::client::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
 use modalkit::keybindings::InputBindings;
 use rand::{distributions::Alphanumeric, Rng};
@@ -745,7 +746,7 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
 }
 
 fn print_exit<T: Display, N>(v: T) -> N {
-    println!("{v}");
+    eprintln!("{v}");
     process::exit(2);
 }
 
@@ -847,7 +848,9 @@ async fn login_upgrade(
     }
 
     println!("* Syncing...");
-    worker::do_first_sync(&worker.client, store).await;
+    worker::do_first_sync(&worker.client, store)
+        .await
+        .map_err(IambError::from)?;
 
     Ok(())
 }
@@ -859,7 +862,9 @@ async fn login_normal(
 ) -> IambResult<()> {
     println!("* Logging in for {}...", settings.profile.user_id);
     login(worker, settings).await?;
-    worker::do_first_sync(&worker.client, store).await;
+    worker::do_first_sync(&worker.client, store)
+        .await
+        .map_err(IambError::from)?;
     Ok(())
 }
 
@@ -878,12 +883,22 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     let store = Arc::new(AsyncMutex::new(store));
     worker.init(store.clone());
 
-    if let Some((keydir, pass)) = import_keys {
-        login_upgrade(keydir, pass, &worker, &settings, &store)
-            .await
-            .unwrap_or_else(print_exit);
+    let res = if let Some((keydir, pass)) = import_keys {
+        login_upgrade(keydir, pass, &worker, &settings, &store).await
     } else {
-        login_normal(&worker, &settings, &store).await.unwrap_or_else(print_exit);
+        login_normal(&worker, &settings, &store).await
+    };
+
+    match res {
+        Err(UIError::Application(IambError::Matrix(e))) => {
+            if let Some(ErrorKind::UnknownToken { .. }) = e.client_api_error_kind() {
+                print_exit("Server did not recognize our API token; did you log out from this session elsewhere?")
+            } else {
+                print_exit(e)
+            }
+        },
+        Err(e) => print_exit(e),
+        Ok(()) => (),
     }
 
     fn restore_tty() {

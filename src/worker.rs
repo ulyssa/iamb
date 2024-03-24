@@ -79,6 +79,7 @@ use matrix_sdk::{
     Client,
     ClientBuildError,
     DisplayName,
+    Error as MatrixError,
     RoomMemberships,
 };
 
@@ -538,7 +539,7 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
-pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) {
+pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result<(), MatrixError> {
     // Perform an initial, lazily-loaded sync.
     let mut room = RoomEventFilter::default();
     room.lazy_load_options = LazyLoadOptions::Enabled { include_redundant_members: false };
@@ -551,10 +552,7 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) {
 
     let settings = SyncSettings::new().filter(filter.into());
 
-    if let Err(e) = client.sync_once(settings).await {
-        tracing::error!(err = e.to_string(), "Failed to perform initial sync; will retry later");
-        return;
-    }
+    client.sync_once(settings).await?;
 
     // Populate sync_info with our initial set of rooms/dms/spaces.
     refresh_rooms(client, store).await;
@@ -572,6 +570,8 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) {
         let room_id = room.as_ref().0.room_id().to_owned();
         need_load.insert(room_id, Need::MESSAGES);
     }
+
+    Ok(())
 }
 
 #[derive(Debug)]
