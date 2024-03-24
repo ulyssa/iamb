@@ -572,7 +572,8 @@ impl<'a> MessageFormatter<'a> {
             text.lines.push(Line::from(vec![leading, date, trailing]));
         }
 
-        let user_gutter_empty_span = space_span(self.settings.tunables.user_gutter_width, Style::default());
+        let user_gutter_empty_span =
+            space_span(self.settings.tunables.user_gutter_width, Style::default());
 
         match self.cols {
             MessageColumns::Four => {
