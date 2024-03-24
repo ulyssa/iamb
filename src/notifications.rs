@@ -15,7 +15,7 @@ use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
     base::{AsyncProgramStore, IambError, IambResult},
-    config::ApplicationSettings,
+    config::{ApplicationSettings, NotifyVia},
 };
 
 pub async fn register_notifications(
@@ -26,6 +26,7 @@ pub async fn register_notifications(
     if !settings.tunables.notifications.enabled {
         return;
     }
+    let notify_via = settings.tunables.notifications.via;
     let show_message = settings.tunables.notifications.show_message;
     let server_settings = client.notification_settings().await;
     let Some(startup_ts) = MilliSecondsSinceUnixEpoch::from_system_time(SystemTime::now()) else {
@@ -47,29 +48,19 @@ pub async fn register_notifications(
                     return;
                 }
 
-                match parse_notification(notification, room).await {
+                match parse_notification(notification, room, show_message).await {
                     Ok((summary, body, server_ts)) => {
                         if server_ts < startup_ts {
                             return;
                         }
 
-                        let mut desktop_notification = notify_rust::Notification::new();
-                        desktop_notification
-                            .summary(&summary)
-                            .appname("iamb")
-                            .timeout(notify_rust::Timeout::Milliseconds(3000))
-                            .action("default", "default");
-
                         if is_missing_mention(&body, mode, &client) {
                             return;
                         }
-                        if show_message != Some(false) {
-                            if let Some(body) = body {
-                                desktop_notification.body(&body);
-                            }
-                        }
-                        if let Err(err) = desktop_notification.show() {
-                            tracing::error!("Failed to send notification: {err}")
+
+                        match notify_via {
+                            NotifyVia::Desktop => send_notification_desktop(summary, body),
+                            NotifyVia::Bell => send_notification_bell(&store).await,
                         }
                     },
                     Err(err) => {
@@ -79,6 +70,28 @@ pub async fn register_notifications(
             }
         })
         .await;
+}
+
+async fn send_notification_bell(store: &AsyncProgramStore) {
+    let mut locked = store.lock().await;
+    locked.application.ring_bell = true;
+}
+
+fn send_notification_desktop(summary: String, body: Option<String>) {
+    let mut desktop_notification = notify_rust::Notification::new();
+    desktop_notification
+        .summary(&summary)
+        .appname("iamb")
+        .timeout(notify_rust::Timeout::Milliseconds(3000))
+        .action("default", "default");
+
+    if let Some(body) = body {
+        desktop_notification.body(&body);
+    }
+
+    if let Err(err) = desktop_notification.show() {
+        tracing::error!("Failed to send notification: {err}")
+    }
 }
 
 async fn global_or_room_mode(
@@ -129,6 +142,7 @@ async fn is_open(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
 pub async fn parse_notification(
     notification: Notification,
     room: MatrixRoom,
+    show_body: bool,
 ) -> IambResult<(String, Option<String>, MilliSecondsSinceUnixEpoch)> {
     let event = notification.event.deserialize().map_err(IambError::from)?;
 
@@ -142,12 +156,17 @@ pub async fn parse_notification(
         .and_then(|m| m.display_name())
         .unwrap_or_else(|| sender_id.localpart());
 
-    let body = event_notification_body(
-        &event,
-        sender_name,
-        room.is_direct().await.map_err(IambError::from)?,
-    )
-    .map(truncate);
+    let body = if show_body {
+        event_notification_body(
+            &event,
+            sender_name,
+            room.is_direct().await.map_err(IambError::from)?,
+        )
+        .map(truncate)
+    } else {
+        None
+    };
+
     return Ok((sender_name.to_string(), body, server_ts));
 }
 

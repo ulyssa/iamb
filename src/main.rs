@@ -19,7 +19,7 @@ use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::Display;
 use std::fs::{create_dir_all, File};
-use std::io::{stdout, BufWriter, Stdout};
+use std::io::{stdout, BufWriter, Stdout, Write};
 use std::ops::DerefMut;
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -292,6 +292,10 @@ impl Application {
         let focused = self.focused;
         let sstate = &mut self.screen;
         let term = &mut self.terminal;
+
+        if store.application.ring_bell {
+            store.application.ring_bell = term.backend_mut().write_all(&[7]).is_err();
+        }
 
         if full {
             term.clear()?;
