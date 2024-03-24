@@ -575,7 +575,7 @@ impl<'a> MessageFormatter<'a> {
         let user_gutter_empty = std::iter::repeat(' ')
             .take(self.settings.tunables.user_gutter_width)
             .collect::<String>();
-        let user_gutter_empty_span: Span<'a> = Span::raw(user_gutter_empty);
+        let user_gutter_empty_span = space_span(self.settings.tunables.user_gutter_width, Style::default());
 
         match self.cols {
             MessageColumns::Four => {
