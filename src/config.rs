@@ -558,7 +558,7 @@ impl Tunables {
             open_command: self.open_command,
             notifications: self.notifications.unwrap_or_default(),
             image_preview: self.image_preview.map(ImagePreview::values),
-            user_gutter_width: self.user_gutter_width.unwrap_or(30 as usize),
+            user_gutter_width: self.user_gutter_width.unwrap_or(30),
         }
     }
 }

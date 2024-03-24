@@ -572,9 +572,6 @@ impl<'a> MessageFormatter<'a> {
             text.lines.push(Line::from(vec![leading, date, trailing]));
         }
 
-        let user_gutter_empty = std::iter::repeat(' ')
-            .take(self.settings.tunables.user_gutter_width)
-            .collect::<String>();
         let user_gutter_empty_span = space_span(self.settings.tunables.user_gutter_width, Style::default());
 
         match self.cols {
