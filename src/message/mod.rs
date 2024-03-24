@@ -142,6 +142,35 @@ pub fn text_to_message(input: String) -> RoomMessageEventContent {
     RoomMessageEventContent::new(msg)
 }
 
+/// Before the image is loaded, already display a placeholder frame of the image size.
+fn placeholder_frame(
+    text: Option<&str>,
+    outer_width: usize,
+    image_preview_size: &ImagePreviewSize,
+) -> Option<String> {
+    let ImagePreviewSize { width, height } = image_preview_size;
+    if outer_width < *width || (*width < 2 || *height < 2) {
+        return None;
+    }
+    let mut placeholder = "\u{230c}".to_string();
+    placeholder.push_str(&" ".repeat(width - 2));
+    placeholder.push_str("\u{230d}\n");
+    if *height > 2 {
+        if let Some(text) = text {
+            if text.width() <= width - 2 {
+                placeholder.push(' ');
+                placeholder.push_str(text);
+            }
+        }
+    }
+
+    placeholder.push_str(&"\n".repeat(height - 2));
+    placeholder.push('\u{230e}');
+    placeholder.push_str(&" ".repeat(width - 2));
+    placeholder.push_str("\u{230f}\n");
+    Some(placeholder)
+}
+
 #[inline]
 fn millis_to_datetime(ms: UInt) -> DateTime<LocalTz> {
     let time = i64::from(ms) / 1000;
@@ -531,6 +560,16 @@ enum MessageColumns {
     One,
 }
 
+impl MessageColumns {
+    fn user_gutter_width(&self, settings: &ApplicationSettings) -> u16 {
+        if let MessageColumns::One = self {
+            0
+        } else {
+            settings.tunables.user_gutter_width as u16
+        }
+    }
+}
+
 struct MessageFormatter<'a> {
     settings: &'a ApplicationSettings,
 
@@ -649,7 +688,7 @@ impl<'a> MessageFormatter<'a> {
         let width = self.width();
         let w = width.saturating_sub(2);
         let shortcodes = self.settings.tunables.message_shortcode_display;
-        let mut replied = msg.show_msg(w, style, true, shortcodes);
+        let (mut replied, _) = msg.show_msg(w, style, true, shortcodes);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -881,46 +920,17 @@ impl Message {
         }
     }
 
-    /// Get the image preview Protocol and x,y offset, based on get_render_format.
-    pub fn line_preview<'a>(
-        &'a self,
-        prev: Option<&Message>,
-        vwctx: &ViewportContext<MessageCursor>,
-        info: &'a RoomInfo,
-        settings: &'a ApplicationSettings,
-    ) -> Option<(&dyn Protocol, u16, u16)> {
-        let width = vwctx.get_width();
-        let user_gutter = settings.tunables.user_gutter_width;
-        // The x position where get_render_format would render the text.
-        let x = (if user_gutter + MIN_MSG_LEN <= width {
-            user_gutter
-        } else {
-            0
-        }) as u16;
-        // See get_render_format; account for possible "date" line.
-        let date_y = match &prev {
-            Some(prev) if !prev.timestamp.same_day(&self.timestamp) => 1,
-            _ => 0,
-        };
-        if let ImageStatus::Loaded(backend) = &self.image_preview {
-            return Some((backend.as_ref(), x, date_y));
-        } else if let Some(reply) = self.reply_to().and_then(|e| info.get_event(&e)) {
-            if let ImageStatus::Loaded(backend) = &reply.image_preview {
-                // The reply should be offset a bit:
-                return Some((backend.as_ref(), x + 2, date_y + 1));
-            }
-        }
-        None
-    }
-
-    pub fn show<'a>(
+    /// Render the message as a [Text] object for the terminal.
+    ///
+    /// This will also get the image preview Protocol with an x/y offset.
+    pub fn show_with_preview<'a>(
         &'a self,
         prev: Option<&Message>,
         selected: bool,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
-    ) -> Text<'a> {
+    ) -> (Text<'a>, Option<(&dyn Protocol, u16, u16)>) {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected, settings);
@@ -939,12 +949,20 @@ impl Message {
         }
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let msg = self.show_msg(
+        let (msg, proto) = self.show_msg(
             width,
             style,
             reply.is_some(),
             settings.tunables.message_shortcode_display,
         );
+
+        // Given our text so far, determine the image offset.
+        let proto = proto.map(|p| {
+            let y_off = text.lines.len() as u16;
+            let x_off = fmt.cols.user_gutter_width(settings);
+            (p, x_off, y_off)
+        });
+
         fmt.push_text(msg, style, &mut text);
 
         if text.lines.is_empty() {
@@ -961,18 +979,29 @@ impl Message {
             fmt.push_thread_reply_count(thread.len(), &mut text);
         }
 
-        text
+        (text, proto)
     }
 
-    pub fn show_msg(
+    pub fn show<'a>(
+        &'a self,
+        prev: Option<&Message>,
+        selected: bool,
+        vwctx: &ViewportContext<MessageCursor>,
+        info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
+    ) -> Text<'a> {
+        self.show_with_preview(prev, selected, vwctx, info, settings).0
+    }
+
+    fn show_msg(
         &self,
         width: usize,
         style: Style,
         hide_reply: bool,
         emoji_shortcodes: bool,
-    ) -> Text {
+    ) -> (Text, Option<&dyn Protocol>) {
         if let Some(html) = &self.html {
-            html.to_text(width, style, hide_reply, emoji_shortcodes)
+            (html.to_text(width, style, hide_reply, emoji_shortcodes), None)
         } else {
             let mut msg = self.event.body();
             if emoji_shortcodes {
@@ -983,20 +1012,24 @@ impl Message {
                 msg.to_mut().push_str(" \u{2705}");
             }
 
-            if let Some(placeholder) = match &self.image_preview {
+            let mut proto = None;
+            let placeholder = match &self.image_preview {
                 ImageStatus::None => None,
                 ImageStatus::Downloading(image_preview_size) => {
-                    Message::placeholder_frame(Some("Downloading..."), width, image_preview_size)
+                    placeholder_frame(Some("Downloading..."), width, image_preview_size)
                 },
                 ImageStatus::Loaded(backend) => {
-                    Message::placeholder_frame(None, width, &backend.rect().into())
+                    proto = Some(backend.as_ref());
+                    placeholder_frame(None, width, &backend.rect().into())
                 },
                 ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
-            } {
+            };
+
+            if let Some(placeholder) = placeholder {
                 msg.to_mut().insert_str(0, &placeholder);
             }
 
-            wrapped_text(msg, width, style)
+            (wrapped_text(msg, width, style), proto)
         }
     }
 
@@ -1006,35 +1039,6 @@ impl Message {
         settings: &'a ApplicationSettings,
     ) -> Span<'a> {
         settings.get_user_span(self.sender.as_ref(), info)
-    }
-
-    /// Before the image is loaded, already display a placeholder frame of the image size.
-    fn placeholder_frame(
-        text: Option<&str>,
-        outer_width: usize,
-        image_preview_size: &ImagePreviewSize,
-    ) -> Option<String> {
-        let ImagePreviewSize { width, height } = image_preview_size;
-        if outer_width < *width || (*width < 2 || *height < 2) {
-            return None;
-        }
-        let mut placeholder = "\u{230c}".to_string();
-        placeholder.push_str(&" ".repeat(width - 2));
-        placeholder.push_str("\u{230d}\n");
-        if *height > 2 {
-            if let Some(text) = text {
-                if text.width() <= width - 2 {
-                    placeholder.push(' ');
-                    placeholder.push_str(text);
-                }
-            }
-        }
-
-        placeholder.push_str(&"\n".repeat(height - 2));
-        placeholder.push('\u{230e}');
-        placeholder.push_str(&" ".repeat(width - 2));
-        placeholder.push_str("\u{230f}\n");
-        Some(placeholder)
     }
 
     fn show_sender<'a>(
@@ -1287,7 +1291,7 @@ pub mod tests {
         }
 
         assert_eq!(
-            Message::placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1298,22 +1302,13 @@ pub mod tests {
             )
         );
 
-        assert_eq!(
-            Message::placeholder_frame(None, 2, &ImagePreviewSize { width: 4, height: 4 }),
-            None
-        );
-        assert_eq!(
-            Message::placeholder_frame(None, 4, &ImagePreviewSize { width: 1, height: 4 }),
-            None
-        );
+        assert_eq!(placeholder_frame(None, 2, &ImagePreviewSize { width: 4, height: 4 }), None);
+        assert_eq!(placeholder_frame(None, 4, &ImagePreviewSize { width: 1, height: 4 }), None);
+
+        assert_eq!(placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 1 }), None);
 
         assert_eq!(
-            Message::placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 1 }),
-            None
-        );
-
-        assert_eq!(
-            Message::placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1324,10 +1319,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            Message::placeholder_frame(Some("idontfit"), 4, &ImagePreviewSize {
-                width: 4,
-                height: 4,
-            }),
+            placeholder_frame(Some("idontfit"), 4, &ImagePreviewSize { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1338,7 +1330,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            Message::placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 2 }),
+            placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 2 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1347,7 +1339,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            Message::placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 2, height: 3 }),
+            placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 2, height: 3 }),
             pretty_frame_test(
                 r#"
 ⌌⌍
