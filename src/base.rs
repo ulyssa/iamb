@@ -1273,6 +1273,9 @@ pub struct ChatStore {
 
     /// Last draw time, used to match with RoomInfo's draw_last.
     pub draw_curr: Option<Instant>,
+
+    /// Whether to ring the terminal bell on the next redraw.
+    pub ring_bell: bool,
 }
 
 impl ChatStore {
@@ -1294,6 +1297,7 @@ impl ChatStore {
             need_load: Default::default(),
             sync_info: Default::default(),
             draw_curr: None,
+            ring_bell: false,
         }
     }
 

@@ -28,6 +28,7 @@ use crate::{
         ApplicationSettings,
         DirectoryValues,
         Notifications,
+        NotifyVia,
         ProfileConfig,
         SortOverrides,
         TunableValues,
@@ -187,7 +188,11 @@ pub fn mock_tunables() -> TunableValues {
         open_command: None,
         username_display: UserDisplayStyle::Username,
         message_user_color: false,
-        notifications: Notifications { enabled: false, show_message: None },
+        notifications: Notifications {
+            enabled: false,
+            via: NotifyVia::Desktop,
+            show_message: true,
+        },
         image_preview: None,
         user_gutter_width: 30,
     }

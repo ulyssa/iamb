@@ -86,6 +86,10 @@ fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
 }
 
+fn default_true() -> bool {
+    true
+}
+
 fn validate_profile_name(name: &str) -> bool {
     if name.is_empty() {
         return false;
@@ -391,10 +395,24 @@ pub enum UserDisplayStyle {
     DisplayName,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum NotifyVia {
+    /// Deliver notifications via terminal bell.
+    Bell,
+    /// Deliver notifications via desktop mechanism.
+    #[default]
+    Desktop,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct Notifications {
+    #[serde(default)]
     pub enabled: bool,
-    pub show_message: Option<bool>,
+    #[serde(default)]
+    pub via: NotifyVia,
+    #[serde(default = "default_true")]
+    pub show_message: bool,
 }
 
 #[derive(Clone)]

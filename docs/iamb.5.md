@@ -90,9 +90,10 @@ overridden as described in *PROFILES*.
 > Defines whether or not the message body is colored like the username.
 
 **notifications** (type: notifications object)
-> Configures push-notifications, which are delivered as desktop 
-> notifications if available.
+> Configures push-notifications.
 > *enabled* `true` to enable the feature, defaults to `false`.
+> *via* `"desktop"` to use desktop mechanism (default), or `"bell"` to use
+> terminal bell.
 > *show_message* to show the message in the desktop notification. Defaults
 > to `true`. Messages are truncated beyond a small length.
 > The notification _rules_ are stored server side, loaded once at startup,
