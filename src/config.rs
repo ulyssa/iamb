@@ -141,7 +141,10 @@ pub enum ConfigError {
     IO(#[from] std::io::Error),
 
     #[error("Error loading configuration file: {0}")]
-    Invalid(#[from] serde_json::Error),
+    Invalid(#[from] toml::de::Error),
+
+    #[error("Error loading JSON configuration file: {0}")]
+    InvalidJSON(#[from] serde_json::Error),
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -717,18 +720,16 @@ pub struct IambConfig {
 }
 
 impl IambConfig {
-    pub fn load(config_json: &Path) -> Result<Self, ConfigError> {
-        if !config_json.is_file() {
-            usage!(
-                "Please create a configuration file at {}\n\n\
-                For more information try '--help'",
-                config_json.display(),
-            );
-        }
+    pub fn load_toml(path: &Path) -> Result<Self, ConfigError> {
+        let s = std::fs::read_to_string(path)?;
+        let config = toml::from_str(&s)?;
 
-        let file = File::open(config_json)?;
-        let reader = BufReader::new(file);
-        let config = serde_json::from_reader(reader)?;
+        Ok(config)
+    }
+
+    pub fn load_json(path: &Path) -> Result<Self, ConfigError> {
+        let s = std::fs::read_to_string(path)?;
+        let config = serde_json::from_str(&s)?;
 
         Ok(config)
     }
@@ -758,9 +759,22 @@ impl ApplicationSettings {
                 For more information try '--help'"
             );
         });
+
         config_dir.push("iamb");
-        let mut config_json = config_dir.clone();
-        config_json.push("config.json");
+        let config_json = config_dir.join("config.json");
+        let config_toml = config_dir.join("config.toml");
+
+        let config = if config_toml.is_file() {
+            IambConfig::load_toml(config_toml.as_path())?
+        } else if config_json.is_file() {
+            IambConfig::load_json(config_json.as_path())?
+        } else {
+            usage!(
+                "Please create a configuration file at {}\n\n\
+                For more information try '--help'",
+                config_toml.display(),
+            );
+        };
 
         let IambConfig {
             mut profiles,
@@ -769,7 +783,7 @@ impl ApplicationSettings {
             settings: global,
             layout,
             macros,
-        } = IambConfig::load(config_json.as_path())?;
+        } = config;
 
         validate_profile_names(&profiles);
 
@@ -786,9 +800,8 @@ impl ApplicationSettings {
         } else {
             usage!(
                 "No profile specified. \
-                Please use -P or add \"default_profile\" to {}.\n\n\
+                Please use -P or add \"default_profile\" to your configuration.\n\n\
                 For more information try '--help'",
-                config_json.display()
             );
         };
 
@@ -1158,9 +1171,9 @@ mod tests {
     }
 
     #[test]
-    fn test_load_example_config_json() {
-        let path = PathBuf::from("docs/example_config.json");
-        let config = IambConfig::load(&path).expect("can load example_config.json");
+    fn test_load_example_config_toml() {
+        let path = PathBuf::from("config.example.toml");
+        let config = IambConfig::load_toml(&path).expect("can load example_config.toml");
 
         let IambConfig {
             profiles,
@@ -1169,7 +1182,7 @@ mod tests {
             dirs,
             layout,
             macros,
-        } = config;
+        } = &config;
 
         // There should be an example object for each top-level field.
         assert!(!profiles.is_empty());
