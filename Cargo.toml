@@ -1,6 +1,6 @@
 [package]
 name = "iamb"
-version = "0.0.9-alpha.1"
+version = "0.0.9"
 edition = "2018"
 authors = ["Ulyssa <git@ulyssa.dev>"]
 repository = "https://github.com/ulyssa/iamb"
@@ -19,9 +19,6 @@ default = ["bundled"]
 bundled = ["matrix-sdk/bundled-sqlite", "rustls-tls"]
 native-tls = ["matrix-sdk/native-tls"]
 rustls-tls = ["matrix-sdk/rustls-tls"]
-
-[build-dependencies]
-mandown = "0.1.3"
 
 [build-dependencies.vergen]
 version = "8"

@@ -23,5 +23,16 @@ enable it when building:
 Note that this [can fail][ring-lto] in some build environments if both Clang
 and GCC are present.
 
+## Documentation
+
+In addition to the compiled binary, there are other files in the repo that
+you'll want to install as part of a package:
+
+| Repository Path      | Installed Path (may vary per OS)    |
+| -------------------- | ----------------------------------- |
+| /config.example.toml | /usr/share/iamb/config.example.toml |
+| /docs/iamb.1         | /usr/share/man/man1/iamb.1          |
+| /docs/iamb.5         | /usr/share/man/man5/iamb.5          |
+
 [ring-lto]: https://github.com/briansmith/ring/issues/1444
 [rustls]: https://crates.io/crates/rustls

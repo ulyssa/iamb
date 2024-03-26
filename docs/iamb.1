@@ -1,0 +1,196 @@
+.\" iamb(1) manual page
+.\"
+.\" This manual page is written using the mdoc(7) macros. For more
+.\" information, see <https://manpages.bsd.lv/mdoc.html>.
+.\"
+.\" You can preview this file with:
+.\"     $ man ./docs/iamb.1
+.Dd Mar 24, 2024
+.Dt IAMB 1
+.Os
+.Sh NAME
+.Nm iamb
+.Nd a terminal-based client for Matrix for the Vim addict
+.Sh SYNOPSIS
+.Nm
+.Op Fl hV
+.Op Fl P Ar profile
+.Op Fl C Ar dir
+.Sh DESCRIPTION
+.Nm
+is a client for the Matrix communication protocol.
+It provides a terminal user interface with familiar Vim keybindings, and
+includes support for multiple profiles, threads, spaces, notifications,
+reactions, custom keybindings, and more.
+.Pp
+This manual page includes a quick rundown of the available commands in
+.Nm .
+For example usage and a full description of each one and its arguments, please
+refer to the full documentation online.
+.Sh OPTIONS
+.Bl -tag -width Ds
+.It Fl P , Fl Fl profile
+The profile to start
+.Nm
+with.
+If this flag is not specified,
+then it defaults to using
+.Sy default_profile
+(see
+.Xr iamb 5 ) .
+.It Fl C , Fl Fl config-directory
+Path to the directory the configuration file is located in.
+.It Fl h , Fl Fl help
+Show the help text and quit.
+.It Fl V , Fl Fl version
+Show the current
+.Nm
+version and quit.
+.El
+
+.Sh "GENERAL COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":chats"
+View a list of joined rooms and direct messages.
+.It Sy ":dms"
+View a list of direct messages.
+.It Sy ":logout"
+Log out of
+.Nm .
+.It Sy ":rooms"
+View a list of joined rooms.
+.It Sy ":spaces"
+View a list of joined spaces.
+.It Sy ":verify"
+View a list of ongoing E2EE verifications.
+.It Sy ":welcome"
+View the startup Welcome window.
+.El
+
+.Sh "MESSAGE COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":download"
+Download an attachment from the selected message.
+.It Sy ":edit"
+Edit the selected message.
+.It Sy ":editor"
+Open an external
+.Ev $EDITOR
+to compose a message.
+.It Sy ":open"
+Download and then open an attachment, or open a link in a message.
+.It Sy ":react [shortcode]"
+React to the selected message with an Emoji.
+.It Sy ":redact [reason]"
+Redact the selected message.
+.It Sy ":reply"
+Reply to the selected message.
+.It Sy ":unreact [shortcode]"
+Remove your reaction from the selected message.
+When no arguments are given, remove all of your reactions from the message.
+.It Sy ":upload"
+Upload an attachment and send it to the currently selected room.
+.El
+
+.Sh "ROOM COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":create"
+Create a new room.
+.It Sy ":invite accept"
+Accept an invitation to the currently focused room.
+.It Sy ":invite reject"
+Reject an invitation to the currently focused room.
+.It Sy ":invite send [user]"
+Send an invitation to a user to join the currently focused room.
+.It Sy ":join [room]"
+Join a room.
+.It Sy ":leave"
+Leave the currently focused room.
+.It Sy ":members"
+View a list of members of the currently focused room.
+.It Sy ":room name set [name]"
+Set the name of the currently focused room.
+.It Sy ":room name unset"
+Unset the name of the currently focused room.
+.It Sy ":room tag set [tag]"
+Add a tag to the currently focused room.
+.It Sy ":room tag unset [tag]"
+Remove a tag from the currently focused room.
+.It Sy ":room topic set [topic]"
+Set the topic of the currently focused room.
+.It Sy ":room topic unset"
+Unset the topic of the currently focused room.
+.El
+
+.Sh "WINDOW COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":horizontal [cmd]"
+Change the behaviour of the given command to be horizontal.
+.It Sy ":leftabove [cmd]"
+Change the behaviour of the given command to open before the current window.
+.It Sy ":only" , Sy ":on"
+Quit all but one window in the current tab.
+.It Sy ":quit" , Sy ":q"
+Quit a window.
+.It Sy ":quitall" , Sy ":qa"
+Quit all windows in the current tab.
+.It Sy ":resize"
+Resize a window.
+.It Sy ":rightbelow [cmd]"
+Change the behaviour of the given command to open after the current window.
+.It Sy ":split" , Sy ":sp"
+Horizontally split a window.
+.It Sy ":vertical [cmd]"
+Change the layout of the following command to be vertical.
+.It Sy ":vsplit" , Sy ":vsp"
+Vertically split a window.
+.El
+
+.Sh "TAB COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":tab [cmd]"
+Run a command that opens a window in a new tab.
+.It Sy ":tabclose" , Sy ":tabc"
+Close a tab.
+.It Sy ":tabedit [room]" , Sy ":tabe"
+Open a room in a new tab.
+.It Sy ":tabrewind" , Sy ":tabr"
+Go to the first tab.
+.It Sy ":tablast" , Sy ":tabl"
+Go to the last tab.
+.It Sy ":tabnext" , Sy ":tabn"
+Go to the next tab.
+.It Sy ":tabonly" , Sy ":tabo"
+Close all but one tab.
+.It Sy ":tabprevious" , Sy ":tabp"
+Go to the preview tab.
+.El
+
+.Sh EXAMPLES
+.Ss Example 1: Starting with a specific profile
+To start with a profile named
+.Sy personal
+instead of the
+.Sy default_profile
+value:
+.Bd -literal -offset indent
+$ iamb -P personal
+.Ed
+.Ss Example 2: Using an alternate configuration directory
+By default,
+.Nm
+will use the XDG directories, but you may sometimes want to store
+your configuration elsewhere.
+.Bd -literal -offset indent
+$ iamb -C ~/src/iamb-dev/dev-config/
+.Ed
+.Sh "REPORTING BUGS"
+Please report bugs in
+.Nm
+or its manual pages at
+.Lk https://github.com/ulyssa/iamb/issues
+.Sh "SEE ALSO"
+.Xr iamb 5
+.Pp
+Extended documentation is available online at
+.Lk https://iamb.chat
