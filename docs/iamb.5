@@ -1,0 +1,555 @@
+.\" iamb(7) manual page
+.\"
+.\" This manual page is written using the mdoc(7) macros. For more
+.\" information, see <https://manpages.bsd.lv/mdoc.html>.
+.\"
+.\" You can preview this file with:
+.\"     $ man ./docs/iamb.1
+.Dd Mar 24, 2024
+.Dt IAMB 5
+.Os
+.Sh NAME
+.Nm config.toml
+.Nd configuration file for
+.Sy iamb
+.Sh DESCRIPTION
+Configuration must be placed under
+.Pa ~/.config/iamb/
+and named
+.Nm .
+(If
+.Ev $XDG_CONFIG_HOME
+is set, then
+.Sy iamb
+will look for a directory named
+.Pa iamb
+there instead.)
+.Pp
+Example configuration usually comes bundled with your installation and can
+typically be found in
+.Pa /usr/share/iamb .
+.Pp
+As implied by the filename, the configuration is formatted in TOML.
+It's structure and fields are described below.
+.Sh CONFIGURATION
+These options are sections at the top-level of the file.
+.Bl -tag -width Ds
+.It Sy profiles
+A map of profile names containing per-account information.
+See
+.Sx PROFILES .
+.It Sy default_profile
+The name of the default profile to connect to, unless overwritten by a
+commandline switch.
+It should be one of the names defined in the
+.Sy profiles
+section.
+.It Sy settings
+Overwrite general settings for
+.Sy iamb .
+See
+.Sx SETTINGS
+for a description of possible values.
+.It Sy layout
+Configure the default window layout to use when starting
+.Sy iamb .
+See
+.Sx "STARTUP LAYOUT"
+for more information on how to configure this object.
+.It Sy macros
+Map keybindings to other keybindings.
+See
+.Sx "CUSTOM KEYBINDINGS"
+for how to configure this object.
+.It Sy dirs
+Configure the directories to use for data, logs, and more.
+See
+.Sx DIRECTORIES
+for the possible values you can set in this object.
+.El
+.Sh PROFILES
+These options are configured as fields in the
+.Sy profiles
+object.
+.Bl -tag -width Ds
+.It Sy user_id
+The user ID to use when connecting to the server.
+For example "user" in "@user:matrix.org".
+.It Sy url
+The URL of the user's server.
+(For example "https://matrix.org" for "@user:matrix.org".)
+This is only needed when the server does not have a
+.Pa /.well-known/matrix/client
+entry.
+.El
+.Pp
+In addition to the above fields, you can also reuse the following fields to set
+per-profile overrides of their global values:
+.Bl -bullet -offset indent -width 1m
+.It
+.Sy dirs
+.It
+.Sy layout
+.It
+.Sy macros
+.It
+.Sy settings
+.El
+.Ss Example 1: A single profile
+.Bd -literal -offset indent
+[profiles.personal]
+user_id = "@user:matrix.org"
+.Ed
+.Ss Example 2: Two profiles with a default
+In the following example, there are two profiles,
+.Dq personal
+(set to be the default) and
+.Dq work .
+The
+.Dq work
+profile has an explicit URL set for its homeserver.
+.Bd -literal -offset indent
+default_profile = "personal"
+
+[profiles.personal]
+user_id = "@user:matrix.org"
+
+[profiles.work]
+user_id = "@user:example.com"
+url = "https://matrix.example.com"
+.Ed
+.Sh SETTINGS
+These options are configured as an object under the
+.Sy settings
+key and can be overridden as described in
+.Sx PROFILES .
+.Bl -tag -width Ds
+
+.It Sy default_room
+The room to show by default instead of the
+.Sy :welcome
+window.
+
+.It Sy image_preview
+Enable image previews and configure it.
+An empty object will enable the feature with default settings, omitting it will disable the feature.
+The available fields in this object are:
+.Bl -tag -width Ds
+.It Sy size
+An optional object with
+.Sy width
+and
+.Sy height
+fields to specify the preview size in cells.
+Defaults to 66 and 10.
+.It Sy protocol
+An optional object to override settings that will normally be guessed automatically:
+.Bl -tag -width Ds
+.It Sy type
+An optional string set to one of the protocol types:
+.Dq Sy sixel ,
+.Dq Sy kitty , and
+.Dq Sy halfblocks .
+.It Sy font_size
+An optional list of two numbers representing font width and height in pixels.
+.El
+.El
+.It Sy log_level
+Specifies the lowest log level that should be shown.
+Possible values are:
+.Dq Sy trace ,
+.Dq Sy debug ,
+.Dq Sy info ,
+.Dq Sy warn , and
+.Dq Sy error .
+
+.It Sy message_shortcode_display
+Defines whether or not Emoji characters in messages should be replaced by their
+respective shortcodes.
+
+.It Sy message_user_color
+Defines whether or not the message body is colored like the username.
+
+.It Sy notifications
+When this subsection is present, you can enable and configure push notifications.
+See
+.Sx NOTIFICATIONS
+for more details.
+
+.It Sy open_command
+Defines a custom  command and its arguments to run when opening downloads instead of the default.
+(For example,
+.Sy ["my-open",\ "--file"] . )
+
+.It Sy reaction_display
+Defines whether or not reactions should be shown.
+
+.It Sy reaction_shortcode_display
+Defines whether or not reactions should be shown as their respective shortcode.
+
+.It Sy read_receipt_send
+Defines whether or not read confirmations are sent.
+
+.It Sy read_receipt_display
+Defines whether or not read confirmations are displayed.
+
+.It Sy request_timeout
+Defines the maximum time per request in seconds.
+
+.It Sy sort
+Configures how to sort the lists shown in windows like
+.Sy :rooms
+or
+.Sy :members .
+See
+.Sx "SORTING LISTS"
+for more details.
+
+.It Sy typing_notice_send
+Defines whether or not the typing state is sent.
+
+.It Sy typing_notice_display
+Defines whether or not the typing state is displayed.
+
+.It Sy user
+Overrides values for the specified user.
+See
+.Sx "USER OVERRIDES"
+for details on the format.
+
+.It Sy username_display
+Defines how usernames are shown for message senders.
+Possible values are
+.Dq Sy username ,
+.Dq Sy localpart , or
+.Dq Sy displayname .
+
+.It Sy user_gutter_width
+Specify the width of the column where usernames are displayed in a room.
+Usernames that are too long are truncated.
+Defaults to 30.
+.El
+
+.Ss Example 1: Avoid showing Emojis (useful for terminals w/o support)
+.Bd -literal -offset indent
+[settings]
+username = "username"
+message_shortcode_display = true
+reaction_shortcode_display = true
+.Ed
+
+.Ss Example 2: Increase request timeout to 2 minutes for a slow homeserver
+.Bd -literal -offset indent
+[settings]
+request_timeout = 120
+.Ed
+
+.Sh NOTIFICATIONS
+
+The
+.Sy settings.notifications
+subsection allows configuring how notifications for new messages behave.
+
+The available fields in this subsection are:
+.Bl -tag -width Ds
+.It Sy enabled
+Defaults to
+.Sy false .
+Setting this field to
+.Sy true
+enables notifications.
+
+.It Sy via
+Defaults to
+.Dq Sy desktop
+to use the desktop mechanism (default).
+Setting this field to
+.Dq Sy bell
+will use the terminal bell instead.
+
+.It Sy show_message
+controls whether to show the message in the desktop notification, and defaults to
+.Sy true .
+Messages are truncated beyond a small length.
+The notification rules are stored server side, loaded once at startup, and are currently not configurable in iamb.
+In other words, you can simply change the rules with another client.
+.El
+
+.Ss Example 1: Enable notifications with default options
+.Bd -literal -offset indent
+[settings]
+notifications = {}
+.Ed
+.Ss Example 2: Enable notifications using terminal bell
+.Bd -literal -offset indent
+[settings.notifications]
+via = "bell"
+show_message = false
+.Ed
+
+.Sh "SORTING LISTS"
+
+The
+.Sy settings.sort
+subsection allows configuring how different windows have their contents sorted.
+
+Fields available within this subsection are:
+.Bl -tag -width Ds
+.It Sy rooms
+How to sort the
+.Sy :rooms
+window.
+Defaults to
+.Sy ["favorite",\ "lowpriority",\ "unread",\ "name"] .
+.It Sy chats
+How to sort the
+.Sy :chats
+window.
+Defaults to the
+.Sy rooms
+value.
+.It Sy dms
+How to sort the
+.Sy :dms
+window.
+Defaults to the
+.Sy rooms
+value.
+.It Sy spaces
+How to sort the
+.Sy :spaces
+window.
+Defaults to the
+.Sy rooms
+value.
+.It Sy members
+How to sort the
+.Sy :members
+window.
+Defaults to
+.Sy ["power",\ "id"] .
+.El
+.El
+
+.Ss Example 1: Group room members by ther server first
+.Bd -literal -offset indent
+[settings.sort]
+members = ["server", "localpart"]
+.Ed
+
+.Sh "USER OVERRIDES"
+
+The
+.Sy settings.users
+subsections allows overriding how specific senders are displayed.
+Overrides are mapped onto Matrix User IDs such as
+.Sy @user:matrix.org ,
+and are typically written as inline tables containing the following keys:
+
+.Bl -tag -width Ds
+.It Sy name
+Change the display name of the user.
+
+.It Sy color
+Change the color the user is shown as.
+Possible values are:
+.Dq Sy black ,
+.Dq Sy blue ,
+.Dq Sy cyan ,
+.Dq Sy dark-gray ,
+.Dq Sy gray ,
+.Dq Sy green ,
+.Dq Sy light-blue ,
+.Dq Sy light-cyan ,
+.Dq Sy light-green ,
+.Dq Sy light-magenta ,
+.Dq Sy light-red ,
+.Dq Sy light-yellow ,
+.Dq Sy magenta ,
+.Dq Sy none ,
+.Dq Sy red ,
+.Dq Sy white ,
+and
+.Dq Sy yellow .
+.El
+
+.Ss Example 1: Override how @ada:example.com appears in chat
+.Bd -literal -offset indent
+[settings.users]
+"@ada:example.com" = { name = "Ada Lovelace", color = "light-red" }
+.Ed
+
+.Sh STARTUP LAYOUT
+
+The
+.Sy layout
+section allows configuring the initial set of tabs and windows to show when
+starting the client.
+
+.Bl -tag -width Ds
+.It Sy style
+Specifies what window layout to load when starting.
+Valid values are
+.Dq Sy restore
+to restore the layout from the last time the client was exited,
+.Dq Sy new
+to open a single window (uses the value of
+.Sy default_room
+if set), or
+.Dq Sy config
+to open the layout described under
+.Sy tabs .
+
+.It Sy tabs
+If
+.Sy style
+is set to
+.Sy config ,
+then this value will be used to open a set of tabs and windows at startup.
+Each object can contain either a
+.Sy window
+key specifying a username, room identifier or room alias to show, or a
+.Sy split
+key specifying an array of window objects.
+.El
+
+.Ss Example 1: Show a single room every startup
+.Bd -literal -offset indent
+[settings]
+default_room = "#iamb-users:0x.badd.cafe"
+
+[layout]
+style = "new"
+.Ed
+.Ss Example 2: Show a specific layout every startup
+.Bd -literal -offset indent
+[layout]
+style = "config"
+
+[[layout.tabs]]
+window = "iamb://dms"
+
+[[layout.tabs]]
+window = "iamb://rooms"
+
+[[layout.tabs]]
+split = [
+    { "window" = "#iamb-users:0x.badd.cafe" },
+    { "window" = "#iamb-dev:0x.badd.cafe" }
+]
+.Ed
+
+.Sh "CUSTOM KEYBINDINGS"
+
+The
+.Sy macros
+subsections allow configuring custom keybindings.
+Available subsections are:
+
+.Bl -tag -width Ds
+.It Sy insert , Sy i
+Map the key sequences in this section in
+.Sy Insert
+mode.
+
+.It Sy normal , Sy n
+Map the key sequences in this section in
+.Sy Normal
+mode.
+
+.It Sy visual , Sy v
+Map the key sequences in this section in
+.Sy Visual
+mode.
+
+.It Sy select
+Map the key sequences in this section in
+.Sy Select
+mode.
+
+.It Sy command , Sy c
+Map the key sequences in this section in
+.Sy Visual
+mode.
+
+.It Sy operator-pending
+Map the key sequences in this section in
+.Sy "Operator Pending"
+mode.
+.El
+
+Multiple modes can be given together by separating their names with
+.Dq Sy | .
+
+.Ss Example 1: Use "jj" to exit Insert mode
+.Bd -literal -offset indent
+[macros.insert]
+"jj" = "<Esc>"
+.Ed
+
+.Ss Example 2: Use "V" for switching between message bar and room history
+.Bd -literal -offset indent
+[macros."normal|visual"]
+"V" = "<C-W>m"
+.Ed
+
+.Sh DIRECTORIES
+
+Specifies the directories to save data in.
+Configured as an object under the key
+.Sy dirs .
+
+.Bl -tag -width Ds
+.It Sy cache
+Specifies where to store assets and temporary data in.
+(For example,
+.Sy image_preview
+and
+.Sy logs
+will also go in here by default.)
+Defaults to
+.Ev $XDG_CACHE_HOME/iamb .
+
+.It Sy data
+Specifies where to store persistent data in, such as E2EE room keys.
+Defaults to
+.Ev $XDG_DATA_HOME/iamb .
+
+.It Sy downloads
+Specifies where to store downloaded files.
+Defaults to
+.Ev $XDG_DOWNLOAD_DIR .
+
+.It Sy image_previews
+Specifies where to store automatically downloaded image previews.
+Defaults to
+.Ev ${cache}/image_preview_downloads .
+
+.It Sy logs
+Specifies where to store log files.
+Defaults to
+.Ev ${cache}/logs .
+.El
+.Sh FILES
+.Bl -tag -width Ds
+.It Pa ~/.config/iamb/config.toml
+The TOML configuration file that
+.Sy iamb
+loads by default.
+.It Pa ~/.config/iamb/config.json
+A JSON configuration file that
+.Sy iamb
+will load if the TOML one is not found.
+.It Pa /usr/share/iamb/config.example.toml
+A sample configuration file with examples of how to set different values.
+.El
+.Sh "REPORTING BUGS"
+Please report bugs in
+.Sy iamb
+or its manual pages at
+.Lk https://github.com/ulyssa/iamb/issues
+.Sh SEE ALSO
+.Xr iamb 1
+.Pp
+Extended documentation is available online at
+.Lk https://iamb.chat

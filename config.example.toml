@@ -31,7 +31,19 @@ members = ["power", "id"]
 "@user:matrix.org" = { "name" = "John Doe", "color" = "magenta" }
 
 [layout]
-style = "restore"
+style = "config"
+
+[[layout.tabs]]
+window = "iamb://dms"
+
+[[layout.tabs]]
+window = "iamb://rooms"
+
+[[layout.tabs]]
+split = [
+    { "window" = "#iamb-users:0x.badd.cafe" },
+    { "window" = "#iamb-dev:0x.badd.cafe" }
+]
 
 [macros.insert]
 "jj" = "<Esc>"
