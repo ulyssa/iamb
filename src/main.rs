@@ -87,6 +87,7 @@ use crate::{
         IambId,
         IambInfo,
         IambResult,
+        KeysAction,
         ProgramAction,
         ProgramContext,
         ProgramStore,
@@ -529,6 +530,7 @@ impl Application {
 
                 None
             },
+            IambAction::Keys(act) => self.keys_command(act, ctx, store).await?,
             IambAction::Message(act) => {
                 self.screen.current_window_mut()?.message_command(act, ctx, store).await?
             },
@@ -599,6 +601,36 @@ impl Application {
                 let prompt = Box::new(prompt);
 
                 Err(UIError::NeedConfirm(prompt))
+            },
+        }
+    }
+
+    async fn keys_command(
+        &mut self,
+        action: KeysAction,
+        _: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        let encryption = store.application.worker.client.encryption();
+
+        match action {
+            KeysAction::Export(path, passphrase) => {
+                encryption
+                    .export_room_keys(path.into(), &passphrase, |_| true)
+                    .await
+                    .map_err(IambError::from)?;
+
+                Ok(Some("Successfully exported room keys".into()))
+            },
+            KeysAction::Import(path, passphrase) => {
+                let res = encryption
+                    .import_room_keys(path.into(), &passphrase)
+                    .await
+                    .map_err(IambError::from)?;
+
+                let msg = format!("Imported {} of {} keys", res.imported_count, res.total_count);
+
+                Ok(Some(msg.into()))
             },
         }
     }
