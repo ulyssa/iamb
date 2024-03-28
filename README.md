@@ -1,4 +1,5 @@
-# iamb
+<div align="center">
+    <h1><img width="200" height="200" src="docs/iamb.svg"></h1>
 
 [![Build Status](https://github.com/ulyssa/iamb/actions/workflows/ci.yml/badge.svg)](https://github.com/ulyssa/iamb/actions?query=workflow%3ACI+)
 [![License: Apache 2.0](https://img.shields.io/crates/l/iamb.svg?logo=apache)](https://crates.io/crates/iamb)
@@ -6,14 +7,17 @@
 [![Latest Version](https://img.shields.io/crates/v/iamb.svg?logo=rust)](https://crates.io/crates/iamb)
 [![iamb](https://snapcraft.io/iamb/badge.svg)](https://snapcraft.io/iamb)
 
+![Example Usage](https://iamb.chat/static/images/iamb-demo.gif)
+
+</div>
+
+
 ## About
 
 `iamb` is a Matrix client for the terminal that uses Vim keybindings.
 
 This project is a work-in-progress, and there's still a lot to be implemented,
 but much of the basic client functionality is already present.
-
-![Example Usage](https://iamb.chat/static/images/iamb-demo.gif)
 
 ## Documentation
 
