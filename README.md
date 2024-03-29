@@ -2,9 +2,9 @@
     <h1><img width="200" height="200" src="docs/iamb.svg"></h1>
 
 [![Build Status](https://github.com/ulyssa/iamb/actions/workflows/ci.yml/badge.svg)](https://github.com/ulyssa/iamb/actions?query=workflow%3ACI+)
-[![License: Apache 2.0](https://img.shields.io/crates/l/iamb.svg?logo=apache)](https://crates.io/crates/iamb)
+[![License: Apache 2.0](https://img.shields.io/crates/l/iamb.svg?logo=apache)][crates-io-iamb]
 [![#iamb:0x.badd.cafe](https://img.shields.io/badge/matrix-%23iamb:0x.badd.cafe-blue)](https://matrix.to/#/#iamb:0x.badd.cafe)
-[![Latest Version](https://img.shields.io/crates/v/iamb.svg?logo=rust)](https://crates.io/crates/iamb)
+[![Latest Version](https://img.shields.io/crates/v/iamb.svg?logo=rust)][crates-io-iamb]
 [![iamb](https://snapcraft.io/iamb/badge.svg)](https://snapcraft.io/iamb)
 
 ![Example Usage](https://iamb.chat/static/images/iamb-demo.gif)
@@ -14,10 +14,18 @@
 
 ## About
 
-`iamb` is a Matrix client for the terminal that uses Vim keybindings.
+`iamb` is a Matrix client for the terminal that uses Vim keybindings. It includes support for:
 
-This project is a work-in-progress, and there's still a lot to be implemented,
-but much of the basic client functionality is already present.
+- Threads, spaces, E2EE, and read receipts
+- Image previews in terminals that support it (sixels, Kitty, and iTerm2), or using pixelated blocks for those that don't
+- Notifications via terminal bell or desktop environment
+- Creating, joining, and leaving rooms
+- Sending and accepting room invitations
+- Editing, redacting, and reacting to messages
+- Custom keybindings
+- Multiple profiles
+
+_You may want to [see this page as it was when the latest version was published][crates-io-iamb]._
 
 ## Documentation
 
@@ -31,6 +39,8 @@ Install Rust (1.70.0 or above) and Cargo, and then run:
 ```
 cargo install --locked iamb
 ```
+
+See [Configuration](#configuration) for getting a profile set up.
 
 ### NetBSD
 
@@ -64,7 +74,7 @@ nix profile install "github:ulyssa/iamb"
 
 ### Snap
 
-A snap for Linux distributions which [support](https://snapcraft.io/docs/installing-snapd) the packaging system. 
+A snap for Linux distributions which [support](https://snapcraft.io/docs/installing-snapd) the packaging system.
 
 ```
 snap install iamb
@@ -72,85 +82,31 @@ snap install iamb
 
 ## Configuration
 
-You can create a basic configuration in `$CONFIG_DIR/iamb/config.json` that looks like:
+You can create a basic configuration in `$CONFIG_DIR/iamb/config.toml` that looks like:
 
-```json
-{
-    "profiles": {
-        "example.com": {
-            "user_id": "@user:example.com"
-        }
-    }
-}
+```toml
+[profiles."example.com"]
+user_id = "@user:example.com"
 ```
 
 If you homeserver is located on a different domain than the server part of the
 `user_id` and you don't have a [`/.well-known`][well_known_entry] entry, then
 you can explicitly specify the homeserver URL to use:
 
-```json
-{
-    "profiles": {
-        "example.com": {
-            "url": "https://example.com",
-            "user_id": "@user:example.com"
-        }
-    }
-}
+```toml
+[profiles."example.com"]
+url = "https://example.com"
+user_id = "@user:example.com"
 ```
 
-## Comparison With Other Clients
-
-To get an idea of what is and isn't yet implemented, here is a subset of the
-Matrix website's [features comparison table][client-comparison-matrix], showing
-two other TUI clients and Element Web:
-
-|                                         | iamb        | [gomuks] | [weechat-matrix] | Element Web/Desktop |
-| --------------------------------------- | :---------- | :------: | :--------------: | :-----------------: |
-| Room directory                          | ❌  ([#14]) | ❌       | ✔️                | ✔️                   |
-| Room tag showing                        | ✔️           | ✔️        | ❌               | ✔️                   |
-| Room tag editing                        | ✔️           | ✔️        | ❌               | ✔️                   |
-| Search joined rooms                     | ❌  ([#16]) | ✔️        | ❌               | ✔️                   |
-| Room user list                          | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Display Room Description                | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Edit Room Description                   | ✔️           | ❌       | ✔️                | ✔️                   |
-| Highlights                              | ❌  ([#8])  | ✔️        | ✔️                | ✔️                   |
-| Pushrules                               | ❌          | ✔️        | ❌               | ✔️                   |
-| Send read markers                       | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Display read markers                    | ✔️           | ❌       | ❌               | ✔️                   |
-| Sending Invites                         | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Accepting Invites                       | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Typing Notification                     | ✔️           | ✔️        | ✔️                | ✔️                   |
-| E2E                                     | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Replies                                 | ✔️           | ✔️        | ❌               | ✔️                   |
-| Attachment uploading                    | ✔️           | ❌       | ✔️                | ✔️                   |
-| Attachment downloading                  | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Send stickers                           | ❌          | ❌       | ❌               | ✔️                   |
-| Send formatted messages (markdown)      | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Rich Text Editor for formatted messages | ❌          | ❌       | ❌               | ✔️                   |
-| Display formatted messages              | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Redacting                               | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Multiple Matrix Accounts                | ✔️           | ❌       | ✔️                | ❌                  |
-| New user registration                   | ❌          | ❌       | ❌               | ✔️                   |
-| VOIP                                    | ❌          | ❌       | ❌               | ✔️                   |
-| Reactions                               | ✔️           | ✔️        | ❌               | ✔️                   |
-| Message editing                         | ✔️           | ✔️        | ❌               | ✔️                   |
-| Room upgrades                           | ❌ ([#41])  | ✔️        | ❌               | ✔️                   |
-| Localisations                           | ❌          | 1        | ❌               | 44                  |
-| SSO Support                             | ✔️           | ✔️        | ✔️                | ✔️                   |
-| Image preview                           | ✔️           | ❌       | ❌               | ✔️                   |
-                                                                                       
 ## License
 
 iamb is released under the [Apache License, Version 2.0].
 
 [Apache License, Version 2.0]: https://github.com/ulyssa/iamb/blob/master/LICENSE
 [client-comparison-matrix]: https://matrix.org/clients-matrix/
+[crates-io-iamb]: https://crates.io/crates/iamb
 [iamb.chat]: https://iamb.chat
 [gomuks]: https://github.com/tulir/gomuks
 [weechat-matrix]: https://github.com/poljar/weechat-matrix
 [well_known_entry]: https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixclient
-[#8]: https://github.com/ulyssa/iamb/issues/8
-[#14]: https://github.com/ulyssa/iamb/issues/14
-[#16]: https://github.com/ulyssa/iamb/issues/16
-[#41]: https://github.com/ulyssa/iamb/issues/41
