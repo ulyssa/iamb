@@ -866,6 +866,7 @@ async fn login_normal(
 ) -> IambResult<()> {
     println!("* Logging in for {}...", settings.profile.user_id);
     login(worker, settings).await?;
+    println!("* Syncing...");
     worker::do_first_sync(&worker.client, store)
         .await
         .map_err(IambError::from)?;
