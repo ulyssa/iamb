@@ -19,6 +19,7 @@ use crate::base::{
     HomeserverAction,
     IambAction,
     IambId,
+    KeysAction,
     MessageAction,
     ProgramCommand,
     ProgramCommands,
@@ -98,6 +99,29 @@ fn iamb_invite(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     let iact = IambAction::from(ract);
     let step = CommandStep::Continue(iact.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_keys(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() != 3 {
+        return Err(CommandError::InvalidArgument);
+    }
+
+    let act = args.remove(0);
+    let path = args.remove(0);
+    let passphrase = args.remove(0);
+
+    let act = match act.as_str() {
+        "export" => KeysAction::Export(path, passphrase),
+        "import" => KeysAction::Import(path, passphrase),
+        _ => return Err(CommandError::InvalidArgument),
+    };
+
+    let vact = IambAction::Keys(act);
+    let step = CommandStep::Continue(vact.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -523,6 +547,7 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_invite,
     });
     cmds.add_command(ProgramCommand { name: "join".into(), aliases: vec![], f: iamb_join });
+    cmds.add_command(ProgramCommand { name: "keys".into(), aliases: vec![], f: iamb_keys });
     cmds.add_command(ProgramCommand {
         name: "leave".into(),
         aliases: vec![],
@@ -957,6 +982,33 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("redact Removed Removed", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_keys() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let res = cmds.input_cmd("keys import /a/b/c pword", ctx.clone()).unwrap();
+        let act = IambAction::Keys(KeysAction::Import("/a/b/c".into(), "pword".into()));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("keys export /a/b/c pword", ctx.clone()).unwrap();
+        let act = IambAction::Keys(KeysAction::Export("/a/b/c".into(), "pword".into()));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        // Invalid invocations.
+        let res = cmds.input_cmd("keys", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("keys import", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("keys import foo", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("keys import foo bar baz", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
     }
 }

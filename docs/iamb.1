@@ -61,10 +61,20 @@ Log out of
 View a list of joined rooms.
 .It Sy ":spaces"
 View a list of joined spaces.
-.It Sy ":verify"
-View a list of ongoing E2EE verifications.
 .It Sy ":welcome"
 View the startup Welcome window.
+.El
+
+.Sh "E2EE COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":keys export [path] [passphrase]"
+Export and encrypt keys to
+.Pa path .
+.It Sy ":keys import [path] [passphrase]"
+Import and decrypt keys from
+.Pa path .
+.It Sy ":verify"
+View a list of ongoing E2EE verifications.
 .El
 
 .Sh "MESSAGE COMMANDS"

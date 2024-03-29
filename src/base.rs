@@ -420,6 +420,15 @@ pub enum HomeserverAction {
     Logout(String, bool),
 }
 
+/// An action performed against the user's room keys.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum KeysAction {
+    /// Export room keys to a file, encrypted with a passphrase.
+    Export(String, String),
+    /// Import room keys from a file, encrypted with a passphrase.
+    Import(String, String),
+}
+
 /// An action that the main program loop should.
 ///
 /// See [the commands module][super::commands] for where these are usually created.
@@ -427,6 +436,9 @@ pub enum HomeserverAction {
 pub enum IambAction {
     /// Perform an action against the homeserver.
     Homeserver(HomeserverAction),
+
+    /// Perform an action over room keys.
+    Keys(KeysAction),
 
     /// Perform an action on the currently selected message.
     Message(MessageAction),
@@ -485,6 +497,7 @@ impl ApplicationAction for IambAction {
     fn is_edit_sequence(&self, _: &EditContext) -> SequenceStatus {
         match self {
             IambAction::Homeserver(..) => SequenceStatus::Break,
+            IambAction::Keys(..) => SequenceStatus::Break,
             IambAction::Message(..) => SequenceStatus::Break,
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
@@ -498,6 +511,7 @@ impl ApplicationAction for IambAction {
     fn is_last_action(&self, _: &EditContext) -> SequenceStatus {
         match self {
             IambAction::Homeserver(..) => SequenceStatus::Atom,
+            IambAction::Keys(..) => SequenceStatus::Atom,
             IambAction::Message(..) => SequenceStatus::Atom,
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
@@ -511,6 +525,7 @@ impl ApplicationAction for IambAction {
     fn is_last_selection(&self, _: &EditContext) -> SequenceStatus {
         match self {
             IambAction::Homeserver(..) => SequenceStatus::Ignore,
+            IambAction::Keys(..) => SequenceStatus::Ignore,
             IambAction::Message(..) => SequenceStatus::Ignore,
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
@@ -526,6 +541,7 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
             IambAction::Room(..) => false,
+            IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
             IambAction::OpenLink(..) => false,
             IambAction::ToggleScrollbackFocus => false,
@@ -584,6 +600,9 @@ pub enum IambError {
     /// A failure related to the cryptographic store.
     #[error("Cryptographic storage error: {0}")]
     CryptoStore(#[from] matrix_sdk::encryption::CryptoStoreError),
+
+    #[error("Failed to import room keys: {0}")]
+    FailedKeyImport(#[from] matrix_sdk::encryption::RoomKeyImportError),
 
     /// A failure related to the cryptographic store.
     #[error("Cannot export keys from sled: {0}")]
@@ -1767,7 +1786,7 @@ fn complete_cmdarg(
     match cmd.name.as_str() {
         "cancel" | "dms" | "edit" | "redact" | "reply" => vec![],
         "members" | "rooms" | "spaces" | "welcome" => vec![],
-        "download" | "open" | "upload" => complete_path(text, cursor),
+        "download" | "keys" | "open" | "upload" => complete_path(text, cursor),
         "react" | "unreact" => complete_emoji(text, cursor, store),
 
         "invite" => complete_users(text, cursor, store),
