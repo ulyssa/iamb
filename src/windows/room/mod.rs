@@ -249,6 +249,16 @@ impl RoomState {
 
                 Ok(vec![(act, cmd.context.clone())])
             },
+            RoomAction::SetDirect(is_direct) => {
+                let room = store
+                    .application
+                    .get_joined_room(self.id())
+                    .ok_or(UIError::Application(IambError::NotJoined))?;
+
+                room.set_is_direct(is_direct).await.map_err(IambError::from)?;
+
+                Ok(vec![])
+            },
             RoomAction::Set(field, value) => {
                 let room = store
                     .application

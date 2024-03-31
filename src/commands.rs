@@ -422,6 +422,14 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let act: IambAction = match (field.as_str(), action.as_str(), args.pop()) {
+        // :room dm set
+        ("dm", "set", None) => RoomAction::SetDirect(true).into(),
+        ("dm", "set", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room dm set
+        ("dm", "unset", None) => RoomAction::SetDirect(false).into(),
+        ("dm", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
         // :room name set <room-name>
         ("name", "set", Some(s)) => RoomAction::Set(RoomField::Name, s).into(),
         ("name", "set", None) => return Result::Err(CommandError::InvalidArgument),
@@ -786,6 +794,32 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("room name unset foo", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_room_dm_set() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let res = cmds.input_cmd("room dm set", ctx.clone()).unwrap();
+        let act = RoomAction::SetDirect(true);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room dm set true", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_room_dm_unset() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let res = cmds.input_cmd("room dm unset", ctx.clone()).unwrap();
+        let act = RoomAction::SetDirect(false);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room dm unset true", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
     }
 

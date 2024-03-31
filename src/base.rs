@@ -389,6 +389,9 @@ pub enum RoomAction {
     /// Open the members window.
     Members(Box<CommandContext>),
 
+    /// Set whether a room is a direct message.
+    SetDirect(bool),
+
     /// Set a room property.
     Set(RoomField, String),
 
