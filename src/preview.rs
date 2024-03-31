@@ -100,7 +100,7 @@ pub fn spawn_insert_preview(
                     })
                     .and_then(|(picker, msg, image_preview)| {
                         picker
-                            .new_protocol(img, image_preview.size.into(), Resize::Fit)
+                            .new_protocol(img, image_preview.size.into(), Resize::Fit(None))
                             .map_err(|err| IambError::Preview(format!("{err:?}")))
                             .map(|backend| (backend, msg))
                     }) {

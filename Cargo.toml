@@ -46,7 +46,7 @@ notify-rust = { version = "4.10.0", default-features = false, features = ["zbus"
 open = "3.2.0"
 rand = "0.8.5"
 ratatui = "0.23"
-ratatui-image = { version = "0.8.1", features = ["serde"] }
+ratatui-image = { version = "1.0.0", features = ["serde"] }
 regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"
