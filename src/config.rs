@@ -912,15 +912,16 @@ impl ApplicationSettings {
             .unwrap_or_default()
     }
 
-    pub fn get_user_style(&self, user_id: &UserId) -> Style {
-        let color = self
-            .tunables
+    pub fn get_user_color(&self, user_id: &UserId) -> Color {
+        self.tunables
             .users
             .get(user_id)
             .and_then(|user| user.color.as_ref().map(|c| c.0))
-            .unwrap_or_else(|| user_color(user_id.as_str()));
+            .unwrap_or_else(|| user_color(user_id.as_str()))
+    }
 
-        user_style_from_color(color)
+    pub fn get_user_style(&self, user_id: &UserId) -> Style {
+        user_style_from_color(self.get_user_color(user_id))
     }
 
     pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {

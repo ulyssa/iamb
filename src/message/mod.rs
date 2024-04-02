@@ -863,7 +863,7 @@ impl Message {
         }
 
         if settings.tunables.message_user_color {
-            let color = crate::config::user_color(self.sender.as_str());
+            let color = settings.get_user_color(&self.sender);
             style = style.fg(color);
         }
 
