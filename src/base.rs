@@ -1149,6 +1149,22 @@ impl RoomInfo {
 
         return top;
     }
+
+    /// Checks if a given user has reacted with the given emoji on the given event
+    pub fn user_reactions_contains(
+        &mut self,
+        user_id: &UserId,
+        event_id: &EventId,
+        emoji: &str,
+    ) -> bool {
+        if let Some(reactions) = self.reactions.get(event_id) {
+            reactions
+                .values()
+                .any(|(annotation, user)| annotation == emoji && user == user_id)
+        } else {
+            false
+        }
+    }
 }
 
 /// Generate a [CompletionMap] for Emoji shortcodes.

@@ -372,6 +372,13 @@ impl ChatState {
                     },
                 };
 
+                if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
+                    let msg = format!("You’ve already reacted to this message with {}", emoji);
+                    let err = UIError::Failure(msg);
+
+                    return Err(err);
+                }
+
                 let reaction = Annotation::new(event_id, emoji);
                 let msg = ReactionEventContent::new(reaction);
                 let _ = room.send(msg).await.map_err(IambError::from)?;
