@@ -3,7 +3,7 @@
 //! The types defined here get used throughout iamb.
 use std::borrow::Cow;
 use std::collections::hash_map::IntoIter;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::hash::Hash;
@@ -838,9 +838,14 @@ impl RoomInfo {
         if let Some(reacts) = self.reactions.get(event_id) {
             let mut counts = HashMap::new();
 
-            for (key, _) in reacts.values() {
-                let count = counts.entry(key.as_str()).or_default();
-                *count += 1;
+            let mut seen_user_reactions = BTreeSet::new();
+
+            for (key, user) in reacts.values() {
+                if !seen_user_reactions.contains(&(key, user)) {
+                    seen_user_reactions.insert((key, user));
+                    let count = counts.entry(key.as_str()).or_default();
+                    *count += 1;
+                }
             }
 
             let mut reactions = counts.into_iter().collect::<Vec<_>>();
@@ -1855,7 +1860,77 @@ pub mod tests {
     use super::*;
     use crate::config::user_style_from_color;
     use crate::tests::*;
+    use matrix_sdk::ruma::{
+        events::{reaction::ReactionEventContent, relation::Annotation, MessageLikeUnsigned},
+        owned_event_id,
+        owned_room_id,
+        owned_user_id,
+        MilliSecondsSinceUnixEpoch,
+    };
+    use pretty_assertions::assert_eq;
     use ratatui::style::Color;
+
+    #[test]
+    fn multiple_identical_reactions() {
+        let mut info = RoomInfo::default();
+
+        let content = ReactionEventContent::new(Annotation::new(
+            owned_event_id!("$my_reaction"),
+            "🏠".to_owned(),
+        ));
+
+        for i in 0..3 {
+            let event_id = format!("$house_{}", i);
+            info.insert_reaction(MessageLikeEvent::Original(
+                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
+                    content: content.clone(),
+                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
+                    sender: owned_user_id!("@foo:example.org"),
+                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
+                    room_id: owned_room_id!("!foo:example.org"),
+                    unsigned: MessageLikeUnsigned::new(),
+                },
+            ));
+        }
+
+        let content = ReactionEventContent::new(Annotation::new(
+            owned_event_id!("$my_reaction"),
+            "🙂".to_owned(),
+        ));
+
+        for i in 0..2 {
+            let event_id = format!("$smile_{}", i);
+            info.insert_reaction(MessageLikeEvent::Original(
+                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
+                    content: content.clone(),
+                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
+                    sender: owned_user_id!("@foo:example.org"),
+                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
+                    room_id: owned_room_id!("!foo:example.org"),
+                    unsigned: MessageLikeUnsigned::new(),
+                },
+            ));
+        }
+
+        for i in 2..4 {
+            let event_id = format!("$smile_{}", i);
+            info.insert_reaction(MessageLikeEvent::Original(
+                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
+                    content: content.clone(),
+                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
+                    sender: owned_user_id!("@bar:example.org"),
+                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
+                    room_id: owned_room_id!("!foo:example.org"),
+                    unsigned: MessageLikeUnsigned::new(),
+                },
+            ));
+        }
+
+        assert_eq!(info.get_reactions(&owned_event_id!("$my_reaction")), vec![
+            ("🏠", 1),
+            ("🙂", 2)
+        ]);
+    }
 
     #[test]
     fn test_typing_spans() {
