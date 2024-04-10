@@ -559,9 +559,11 @@ impl Tunables {
             notifications: self.notifications.or(other.notifications),
             image_preview: self.image_preview.or(other.image_preview),
             user_gutter_width: self.user_gutter_width.or(other.user_gutter_width),
-            external_edit_file_suffix: self
-                .external_edit_file_suffix
-                .or(other.external_edit_file_suffix),
+            external_edit_file_suffix: Some(
+                self.external_edit_file_suffix
+                    .or(other.external_edit_file_suffix)
+                    .unwrap_or_else(|| ".md".to_string()),
+            ),
         }
     }
 
