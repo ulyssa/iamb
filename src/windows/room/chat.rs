@@ -5,7 +5,8 @@ use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-use edit::edit as external_edit;
+use edit::edit_with_builder as external_edit;
+use edit::Builder;
 use modalkit::editing::store::RegisterError;
 use std::process::Command;
 use tokio;
@@ -481,7 +482,11 @@ impl ChatState {
                 let msg = self.tbox.get();
 
                 let msg = if let SendAction::SubmitFromEditor = act {
-                    external_edit(msg.trim_end().to_string())?
+
+                    let suffix = store.application.settings.tunables.external_edit_file_suffix.as_ref().map(|s| s.as_str()).unwrap_or_default();
+                    //external_edit(msg.trim_end().to_string(), Builder::new().suffix(""))?
+                    external_edit(msg.trim_end().to_string(), Builder::new().suffix(suffix))?
+                
                 } else if msg.is_blank() {
                     return Ok(None);
                 } else {

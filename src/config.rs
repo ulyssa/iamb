@@ -54,6 +54,9 @@ const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 4] = [
 
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
 
+//const DEFAULT_EXT_EDIT_FILE_SUFFIX: Option<String> = Some(".txt".to_string());
+//const DEFAULT_EXT_EDIT_FILE_SUFFIX: String = ".txt".to_string();
+
 const COLORS: [Color; 13] = [
     Color::Blue,
     Color::Cyan,
@@ -507,6 +510,7 @@ pub struct TunableValues {
     pub notifications: Notifications,
     pub image_preview: Option<ImagePreviewValues>,
     pub user_gutter_width: usize,
+    pub external_edit_file_suffix: Option<String>,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -530,6 +534,7 @@ pub struct Tunables {
     pub notifications: Option<Notifications>,
     pub image_preview: Option<ImagePreview>,
     pub user_gutter_width: Option<usize>,
+    pub external_edit_file_suffix: Option<String>,
 }
 
 impl Tunables {
@@ -557,6 +562,8 @@ impl Tunables {
             notifications: self.notifications.or(other.notifications),
             image_preview: self.image_preview.or(other.image_preview),
             user_gutter_width: self.user_gutter_width.or(other.user_gutter_width),
+            external_edit_file_suffix: self.external_edit_file_suffix.or(other.external_edit_file_suffix),
+                    
         }
     }
 
@@ -580,6 +587,9 @@ impl Tunables {
             notifications: self.notifications.unwrap_or_default(),
             image_preview: self.image_preview.map(ImagePreview::values),
             user_gutter_width: self.user_gutter_width.unwrap_or(30),
+            //external_edit_file_suffix: self.external_edit_file_suffix.unwrap_or(DEFAULT_EXT_EDIT_FILE_SUFFIX),
+            //external_edit_file_suffix: self.external_edit_file_suffix.unwrap_or_else(|| DEFAULT_EXT_EDIT_FILE_SUFFIX.unwrap()),
+            external_edit_file_suffix: self.external_edit_file_suffix,
         }
     }
 }

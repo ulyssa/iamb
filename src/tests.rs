@@ -186,6 +186,7 @@ pub fn mock_tunables() -> TunableValues {
         .into_iter()
         .collect::<HashMap<_, _>>(),
         open_command: None,
+        external_edit_file_suffix: None,
         username_display: UserDisplayStyle::Username,
         message_user_color: false,
         notifications: Notifications {
