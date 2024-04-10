@@ -482,7 +482,6 @@ impl ChatState {
                 let msg = self.tbox.get();
 
                 let msg = if let SendAction::SubmitFromEditor = act {
-                    //let suffix = store.application.settings.tunables.external_edit_file_suffix.as_ref().map(|s| s.as_str()).unwrap_or_default();
                     let suffix = store
                         .application
                         .settings
