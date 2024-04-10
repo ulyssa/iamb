@@ -6,6 +6,7 @@ url = "https://matrix.org"
 
 [settings]
 default_room = "#iamb-users:0x.badd.cafe"
+external_edit_file_suffix = ".md"
 log_level = "warn"
 message_shortcode_display = false
 open_command = ["my-open", "--file"]
