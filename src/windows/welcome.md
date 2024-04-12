@@ -37,10 +37,10 @@ The different subcommands are:
 
 ## Additional Configuration
 
-You can customize iamb in your `$CONFIG_DIR/iamb/config.json` file, where
-`$CONFIG_DIR` is your system's per-user configuration directory.
+You can customize iamb in your `$CONFIG_DIR/iamb/config.toml` file, where
+`$CONFIG_DIR` is your system's per-user configuration directory. For example,
+this is typically `~/.config/iamb/config.toml` on systems that use the XDG
+Base Directory Specification.
 
-You can edit the following values in the file:
-
-- `"default_profile"`, a profile name to use when starting iamb if one wasn't specified
-- `"cache"`, a directory for cached iamb
+See the manual pages or <https://iamb.chat> for more details on how to
+further configure or use iamb.
