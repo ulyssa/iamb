@@ -507,7 +507,7 @@ pub struct TunableValues {
     pub notifications: Notifications,
     pub image_preview: Option<ImagePreviewValues>,
     pub user_gutter_width: usize,
-    pub external_edit_file_suffix: Option<String>,
+    pub external_edit_file_suffix: String,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -559,11 +559,9 @@ impl Tunables {
             notifications: self.notifications.or(other.notifications),
             image_preview: self.image_preview.or(other.image_preview),
             user_gutter_width: self.user_gutter_width.or(other.user_gutter_width),
-            external_edit_file_suffix: Some(
-                self.external_edit_file_suffix
-                    .or(other.external_edit_file_suffix)
-                    .unwrap_or_else(|| ".md".to_string()),
-            ),
+            external_edit_file_suffix: self
+                .external_edit_file_suffix
+                .or(other.external_edit_file_suffix),
         }
     }
 
@@ -587,7 +585,9 @@ impl Tunables {
             notifications: self.notifications.unwrap_or_default(),
             image_preview: self.image_preview.map(ImagePreview::values),
             user_gutter_width: self.user_gutter_width.unwrap_or(30),
-            external_edit_file_suffix: self.external_edit_file_suffix,
+            external_edit_file_suffix: self
+                .external_edit_file_suffix
+                .unwrap_or_else(|| ".md".to_string()),
         }
     }
 }
