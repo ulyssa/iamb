@@ -961,6 +961,8 @@ impl Message {
         let proto = proto.map(|p| {
             let y_off = text.lines.len() as u16;
             let x_off = fmt.cols.user_gutter_width(settings);
+            // Adjust y_off by 1 if a date was printed before the message to account for the extra line.
+            let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
             (p, x_off, y_off)
         });
 
