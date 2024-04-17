@@ -1,6 +1,6 @@
 [package]
 name = "iamb"
-version = "0.0.9"
+version = "0.0.10-alpha.1"
 edition = "2018"
 authors = ["Ulyssa <git@ulyssa.dev>"]
 repository = "https://github.com/ulyssa/iamb"
@@ -26,14 +26,13 @@ default-features = false
 features = ["build", "git", "gitcl",]
 
 [dependencies]
-arboard = "3.3.0"
 bitflags = "^2.3"
 chrono = "0.4"
 clap = {version = "~4.3", features = ["derive"]}
-comrak = {version = "0.18.0", features = ["shortcodes"]}
+comrak = {version = "0.22.0", features = ["shortcodes"]}
 css-color-parser = "0.1.2"
 dirs = "4.0.0"
-emojis = "~0.5.2"
+emojis = "0.5"
 futures = "0.3"
 gethostname = "0.4.1"
 html5ever = "0.26.0"
