@@ -608,6 +608,7 @@ pub enum IambError {
     FailedKeyImport(#[from] matrix_sdk::encryption::RoomKeyImportError),
 
     /// A failure related to the cryptographic store.
+    #[cfg(feature = "sled-export")]
     #[error("Cannot export keys from sled: {0}")]
     UpgradeSled(#[from] crate::sled_export::SledMigrationError),
 
@@ -619,7 +620,7 @@ pub enum IambError {
     #[error("Matrix client error: {0}")]
     Matrix(#[from] matrix_sdk::Error),
 
-    /// A failure in the sled storage.
+    /// A failure in the storage.
     #[error("Matrix client storage error: {0}")]
     Store(#[from] matrix_sdk::StoreError),
 

@@ -16,6 +16,7 @@ build = "build.rs"
 
 [features]
 default = ["bundled"]
+sled-export = ["dep:temp-dir", "dep:sled"]
 bundled = ["matrix-sdk/bundled-sqlite", "rustls-tls"]
 native-tls = ["matrix-sdk/native-tls"]
 rustls-tls = ["matrix-sdk/rustls-tls"]
@@ -50,8 +51,8 @@ regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"
 serde_json = "^1.0"
-sled = "0.34.7"
-temp-dir = "0.1.12"
+sled = { version = "0.34.7", optional = true }
+temp-dir = { version = "0.1.12", optional = true }
 thiserror = "^1.0.37"
 toml = "^0.8.12"
 tracing = "~0.1.36"

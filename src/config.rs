@@ -748,6 +748,7 @@ pub struct ApplicationSettings {
     pub layout_json: PathBuf,
     pub session_json: PathBuf,
     pub session_json_old: PathBuf,
+    #[cfg(feature = "sled-export")]
     pub sled_dir: PathBuf,
     pub sqlite_dir: PathBuf,
     pub profile_name: String,
@@ -836,7 +837,9 @@ impl ApplicationSettings {
         profile_data_dir.push("profiles");
         profile_data_dir.push(profile_name.as_str());
 
+        #[cfg(feature = "sled-export")]
         let mut sled_dir = profile_dir.clone();
+        #[cfg(feature = "sled-export")]
         sled_dir.push("matrix");
 
         let mut sqlite_dir = profile_data_dir.clone();
@@ -857,6 +860,7 @@ impl ApplicationSettings {
         layout_json.push("layout.json");
 
         let settings = ApplicationSettings {
+            #[cfg(feature = "sled-export")]
             sled_dir,
             layout_json,
             session_json,

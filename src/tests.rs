@@ -204,6 +204,7 @@ pub fn mock_settings() -> ApplicationSettings {
         layout_json: PathBuf::new(),
         session_json: PathBuf::new(),
         session_json_old: PathBuf::new(),
+        #[cfg(feature = "sled-export")]
         sled_dir: PathBuf::new(),
         sqlite_dir: PathBuf::new(),
 
