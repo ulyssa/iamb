@@ -128,9 +128,7 @@ pub fn space_text(width: usize, style: Style) -> Text<'static> {
 
 pub fn join_cell_text<'a>(texts: Vec<(Text<'a>, usize)>, join: Span<'a>, style: Style) -> Text<'a> {
     let height = texts.iter().map(|t| t.0.height()).max().unwrap_or(0);
-    let mut text = Text {
-        lines: vec![Line::from(vec![join.clone()]); height],
-    };
+    let mut text = Text::from(vec![Line::from(vec![join.clone()]); height]);
 
     for (mut t, w) in texts.into_iter() {
         for i in 0..height {

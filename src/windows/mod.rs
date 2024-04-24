@@ -1368,7 +1368,7 @@ impl ListItem<IambInfo> for VerifyItem {
             ]));
         }
 
-        Text { lines }
+        Text::from(lines)
     }
 
     fn get_word(&self) -> Option<String> {
