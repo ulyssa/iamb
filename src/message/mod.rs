@@ -936,7 +936,7 @@ impl Message {
 
         let style = self.get_render_style(selected, settings);
         let mut fmt = self.get_render_format(prev, width, info, settings);
-        let mut text = Text { lines: vec![] };
+        let mut text = Text::default();
         let width = fmt.width();
 
         // Show the message that this one replied to, if any.

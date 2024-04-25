@@ -51,6 +51,9 @@ use modalkit::crossterm::{
         EnableFocusChange,
         Event,
         KeyEventKind,
+        KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags,
+        PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
@@ -255,16 +258,7 @@ impl Application {
         settings: ApplicationSettings,
         store: AsyncProgramStore,
     ) -> IambResult<Application> {
-        let mut stdout = stdout();
-        crossterm::terminal::enable_raw_mode()?;
-        crossterm::execute!(stdout, EnterAlternateScreen)?;
-        crossterm::execute!(stdout, EnableBracketedPaste)?;
-        crossterm::execute!(stdout, EnableFocusChange)?;
-
-        let title = format!("iamb ({})", settings.profile.user_id);
-        crossterm::execute!(stdout, SetTitle(title))?;
-
-        let backend = CrosstermBackend::new(stdout);
+        let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend)?;
 
         let mut bindings = crate::keybindings::setup_keybindings();
@@ -920,6 +914,70 @@ async fn login_normal(
     Ok(())
 }
 
+struct EnableModifyOtherKeys;
+struct DisableModifyOtherKeys;
+
+impl crossterm::Command for EnableModifyOtherKeys {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        write!(f, "\x1B[>4;2m")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl crossterm::Command for DisableModifyOtherKeys {
+    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
+        write!(f, "\x1B[>4;0m")
+    }
+
+    #[cfg(windows)]
+    fn execute_winapi(&self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+/// Set up the terminal for drawing the TUI, and getting additional info.
+fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
+    let title = format!("iamb ({})", title);
+
+    // Enable raw mode and enter the alternate screen.
+    crossterm::terminal::enable_raw_mode()?;
+    crossterm::execute!(stdout(), EnterAlternateScreen)?;
+
+    if enable_enhanced_keys {
+        // Enable the Kitty keyboard enhancement protocol for improved keypresses.
+        crossterm::queue!(
+            stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )?;
+    } else {
+        crossterm::queue!(stdout(), EnableModifyOtherKeys)?;
+    }
+
+    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
+}
+
+// Do our best to reverse what we did in setup_tty() when we exit or crash.
+fn restore_tty(enable_enhanced_keys: bool) {
+    if enable_enhanced_keys {
+        let _ = crossterm::queue!(stdout(), PopKeyboardEnhancementFlags);
+    }
+
+    let _ = crossterm::execute!(
+        stdout(),
+        DisableModifyOtherKeys,
+        DisableBracketedPaste,
+        DisableFocusChange,
+        LeaveAlternateScreen,
+        CursorShow,
+    );
+
+    let _ = crossterm::terminal::disable_raw_mode();
+}
+
 async fn run(settings: ApplicationSettings) -> IambResult<()> {
     // Get old keys the first time we run w/ the upgraded SDK.
     #[cfg(feature = "sled-export")]
@@ -958,27 +1016,30 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
         Ok(()) => (),
     }
 
-    fn restore_tty() {
-        let _ = crossterm::terminal::disable_raw_mode();
-        let _ = crossterm::execute!(stdout(), DisableBracketedPaste);
-        let _ = crossterm::execute!(stdout(), DisableFocusChange);
-        let _ = crossterm::execute!(stdout(), LeaveAlternateScreen);
-        let _ = crossterm::execute!(stdout(), CursorShow);
-    }
+    // Set up the terminal for drawing, and cleanup properly on panics.
+    let enable_enhanced_keys = match crossterm::terminal::supports_keyboard_enhancement() {
+        Ok(supported) => supported,
+        Err(e) => {
+            tracing::warn!(err = %e,
+               "Failed to determine whether the terminal supports keyboard enhancements");
+            false
+        },
+    };
+    setup_tty(settings.profile.user_id.as_str(), enable_enhanced_keys)?;
 
-    // Make sure panics clean up the terminal properly.
     let orig_hook = std::panic::take_hook();
     std::panic::set_hook(Box::new(move |panic_info| {
-        restore_tty();
+        restore_tty(enable_enhanced_keys);
         orig_hook(panic_info);
         process::exit(1);
     }));
 
+    // And finally, start running the terminal UI.
     let mut application = Application::new(settings, store).await?;
-
-    // We can now run the application.
     application.run().await?;
-    restore_tty();
+
+    // Clean up the terminal on exit.
+    restore_tty(enable_enhanced_keys);
 
     Ok(())
 }

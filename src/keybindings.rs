@@ -3,13 +3,13 @@
 //! The keybindings are set up here. We define some iamb-specific keybindings, but the default Vim
 //! keys come from [modalkit::env::vim::keybindings].
 use modalkit::{
-    actions::{MacroAction, WindowAction},
+    actions::{InsertTextAction, MacroAction, WindowAction},
     env::vim::keybindings::{InputStep, VimBindings},
     env::vim::VimMode,
     env::CommonKeyClass,
     key::TerminalKey,
     keybindings::{EdgeEvent, EdgeRepeat, InputBindings},
-    prelude::Count,
+    prelude::*,
 };
 
 use crate::base::{IambAction, IambInfo, Keybindings, MATRIX_ID_WORD};
@@ -36,6 +36,7 @@ pub fn setup_keybindings() -> Keybindings {
     let ctrl_z = "<C-Z>".parse::<TerminalKey>().unwrap();
     let key_m_lc = "m".parse::<TerminalKey>().unwrap();
     let key_z_lc = "z".parse::<TerminalKey>().unwrap();
+    let shift_enter = "<S-Enter>".parse::<TerminalKey>().unwrap();
 
     let cwz = vec![once(&ctrl_w), once(&key_z_lc)];
     let cwcz = vec![once(&ctrl_w), once(&ctrl_z)];
@@ -57,6 +58,17 @@ pub fn setup_keybindings() -> Keybindings {
     ism.add_mapping(VimMode::Visual, &cwm, &stoggle);
     ism.add_mapping(VimMode::Normal, &cwcm, &stoggle);
     ism.add_mapping(VimMode::Visual, &cwcm, &stoggle);
+
+    let shift_enter = vec![once(&shift_enter)];
+    let newline = IambStep::new().actions(vec![InsertTextAction::Type(
+        Char::Single('\n').into(),
+        MoveDir1D::Previous,
+        1.into(),
+    )
+    .into()]);
+    ism.add_mapping(VimMode::Insert, &cwm, &newline);
+    ism.add_mapping(VimMode::Insert, &shift_enter, &newline);
+
     ism
 }
 

@@ -148,7 +148,7 @@ impl<'a> StatefulWidget for Space<'a> {
                         Span::styled(e.to_string(), Style::default().fg(Color::Red)).into(),
                     ];
 
-                    empty_message = Text { lines }.into();
+                    empty_message = Text::from(lines).into();
                 },
             }
         }

@@ -148,7 +148,7 @@ impl RoomState {
         let l2 = Line::from(
             "You can run `:invite accept` or `:invite reject` to accept or reject this invitation.",
         );
-        let text = Text { lines: vec![l1, l2] };
+        let text = Text::from(vec![l1, l2]);
 
         Paragraph::new(text).alignment(Alignment::Center).render(area, buf);
 
