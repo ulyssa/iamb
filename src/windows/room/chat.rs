@@ -484,7 +484,14 @@ impl ChatState {
                 let msg = if let SendAction::SubmitFromEditor = act {
                     let suffix =
                         store.application.settings.tunables.external_edit_file_suffix.as_str();
-                    external_edit(msg.trim_end().to_string(), Builder::new().suffix(suffix))?
+                    let edited_msg =
+                        external_edit(msg.trim_end().to_string(), Builder::new().suffix(suffix))?
+                            .trim_end()
+                            .to_string();
+                    if edited_msg.is_empty() {
+                        return Ok(None);
+                    }
+                    edited_msg
                 } else if msg.is_blank() {
                     return Ok(None);
                 } else {
