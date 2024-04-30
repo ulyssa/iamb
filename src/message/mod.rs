@@ -510,6 +510,27 @@ impl MessageEvent {
     }
 }
 
+/// Macro rule converting a File / Image / Audio / Video to its text content with the shape:
+/// `[Attached <type>: <content>[ (<human readable file size>)]]`
+macro_rules! display_file_to_text {
+    ( $msgtype:ident, $content:expr ) => {
+        return Cow::Owned(format!(
+            "[Attached {}: {}{}]",
+            stringify!($msgtype),
+            $content.body,
+            $content
+                .info
+                .as_ref()
+                .map(|info| {
+                    info.size
+                        .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
+                        .unwrap_or_else(String::new)
+                })
+                .unwrap_or_else(String::new)
+        ))
+    };
+}
+
 fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
     let s = match &content.msgtype {
         MessageType::Text(content) => content.body.as_str(),
@@ -519,64 +540,16 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
         MessageType::ServerNotice(content) => content.body.as_str(),
 
         MessageType::Audio(content) => {
-            return Cow::Owned(format!(
-                "[Attached Audio: {}{}]",
-                content.body,
-                content
-                    .info
-                    .as_ref()
-                    .map(|info| {
-                        info.size
-                            .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
-                            .unwrap_or_else(String::new)
-                    })
-                    .unwrap_or_else(String::new)
-            ));
+            display_file_to_text!(Audio, content);
         },
         MessageType::File(content) => {
-            return Cow::Owned(format!(
-                "[Attached File: {}{}]",
-                content.body,
-                content
-                    .info
-                    .as_ref()
-                    .map(|info| {
-                        info.size
-                            .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
-                            .unwrap_or_else(String::new)
-                    })
-                    .unwrap_or_else(String::new)
-            ));
+            display_file_to_text!(File, content);
         },
         MessageType::Image(content) => {
-            return Cow::Owned(format!(
-                "[Attached Image: {}{}]",
-                content.body,
-                content
-                    .info
-                    .as_ref()
-                    .map(|info| {
-                        info.size
-                            .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
-                            .unwrap_or_else(String::new)
-                    })
-                    .unwrap_or_else(String::new)
-            ));
+            display_file_to_text!(Image, content);
         },
         MessageType::Video(content) => {
-            return Cow::Owned(format!(
-                "[Attached Video: {}{}]",
-                content.body,
-                content
-                    .info
-                    .as_ref()
-                    .map(|info| {
-                        info.size
-                            .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
-                            .unwrap_or_else(String::new)
-                    })
-                    .unwrap_or_else(String::new)
-            ));
+            display_file_to_text!(Video, content);
         },
         _ => {
             return Cow::Owned(format!("[Unknown message type: {:?}]", content.msgtype()));
