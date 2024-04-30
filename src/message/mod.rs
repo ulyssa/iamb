@@ -10,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 
 use chrono::{DateTime, Local as LocalTz, NaiveDateTime, TimeZone};
 use comrak::{markdown_to_html, ComrakOptions};
+use humansize::{format_size, DECIMAL};
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
@@ -518,16 +519,64 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
         MessageType::ServerNotice(content) => content.body.as_str(),
 
         MessageType::Audio(content) => {
-            return Cow::Owned(format!("[Attached Audio: {}]", content.body));
+            return Cow::Owned(format!(
+                "[Attached Audio: {}{}]",
+                content.body,
+                content
+                    .info
+                    .as_ref()
+                    .map(|info| {
+                        info.size
+                            .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
+                            .unwrap_or_else(String::new)
+                    })
+                    .unwrap_or_else(String::new)
+            ));
         },
         MessageType::File(content) => {
-            return Cow::Owned(format!("[Attached File: {}]", content.body));
+            return Cow::Owned(format!(
+                "[Attached File: {}{}]",
+                content.body,
+                content
+                    .info
+                    .as_ref()
+                    .map(|info| {
+                        info.size
+                            .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
+                            .unwrap_or_else(String::new)
+                    })
+                    .unwrap_or_else(String::new)
+            ));
         },
         MessageType::Image(content) => {
-            return Cow::Owned(format!("[Attached Image: {}]", content.body));
+            return Cow::Owned(format!(
+                "[Attached Image: {}{}]",
+                content.body,
+                content
+                    .info
+                    .as_ref()
+                    .map(|info| {
+                        info.size
+                            .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
+                            .unwrap_or_else(String::new)
+                    })
+                    .unwrap_or_else(String::new)
+            ));
         },
         MessageType::Video(content) => {
-            return Cow::Owned(format!("[Attached Video: {}]", content.body));
+            return Cow::Owned(format!(
+                "[Attached Video: {}{}]",
+                content.body,
+                content
+                    .info
+                    .as_ref()
+                    .map(|info| {
+                        info.size
+                            .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
+                            .unwrap_or_else(String::new)
+                    })
+                    .unwrap_or_else(String::new)
+            ));
         },
         _ => {
             return Cow::Owned(format!("[Unknown message type: {:?}]", content.msgtype()));
