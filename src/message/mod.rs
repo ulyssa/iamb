@@ -1179,6 +1179,19 @@ impl ToString for Message {
 
 #[cfg(test)]
 pub mod tests {
+    use matrix_sdk::ruma::events::room::{
+        message::{
+            AudioInfo,
+            AudioMessageEventContent,
+            FileInfo,
+            FileMessageEventContent,
+            ImageMessageEventContent,
+            VideoInfo,
+            VideoMessageEventContent,
+        },
+        ImageInfo,
+    };
+
     use super::*;
     use crate::tests::*;
 
@@ -1426,6 +1439,85 @@ pub mod tests {
 ⌎⌏
 "#
             )
+        );
+    }
+
+    #[test]
+    fn test_display_attachment_size() {
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+                ImageMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(ImageInfo::default())))
+            ))),
+            "[Attached Image: Alt text]".to_string()
+        );
+
+        let mut info = ImageInfo::default();
+        info.size = Some(442630_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+                ImageMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached Image: Alt text (442.63 kB)]".to_string()
+        );
+
+        let mut info = ImageInfo::default();
+        info.size = Some(12_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+                ImageMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached Image: Alt text (12 B)]".to_string()
+        );
+
+        let mut info = AudioInfo::default();
+        info.size = Some(4294967295_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Audio(
+                AudioMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached Audio: Alt text (4.29 GB)]".to_string()
+        );
+
+        let mut info = FileInfo::default();
+        info.size = Some(4426300_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::File(
+                FileMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached File: Alt text (4.43 MB)]".to_string()
+        );
+
+        let mut info = VideoInfo::default();
+        info.size = Some(44000_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Video(
+                VideoMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached Video: Alt text (44 kB)]".to_string()
         );
     }
 }
