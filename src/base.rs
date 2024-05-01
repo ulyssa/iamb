@@ -369,6 +369,15 @@ pub enum RoomField {
 
     /// The room topic.
     Topic,
+
+    /// The room's entire list of alternative aliases.
+    Aliases,
+
+    /// A specific alternative alias to the room.
+    Alias(String),
+
+    /// The room's canonical alias.
+    CanonicalAlias,
 }
 
 /// An action that operates on a focused room.
@@ -658,6 +667,10 @@ pub enum IambError {
     /// An unknown room was specified.
     #[error("Unknown room identifier: {0}")]
     UnknownRoom(OwnedRoomId),
+
+    /// An invalid room alias id was specified.
+    #[error("Invalid room alias id: {0}")]
+    InvalidRoomAliasId(#[from] matrix_sdk::ruma::IdParseError),
 
     /// A failure occurred during verification.
     #[error("Verification request error: {0}")]
