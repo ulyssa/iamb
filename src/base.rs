@@ -406,6 +406,9 @@ pub enum RoomAction {
 
     /// Unset a room property.
     Unset(RoomField),
+
+    /// List the values in a list room property.
+    Show(RoomField),
 }
 
 /// An action that sends a message to a room.

@@ -198,7 +198,7 @@ impl RoomState {
     pub async fn room_command(
         &mut self,
         act: RoomAction,
-        _: ProgramContext,
+        ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         match act {
@@ -441,6 +441,54 @@ impl RoomState {
                 }
 
                 Ok(vec![])
+            },
+            RoomAction::Show(field) => {
+                let room = store
+                    .application
+                    .get_joined_room(self.id())
+                    .ok_or(UIError::Application(IambError::NotJoined))?;
+
+                let action;
+                match field {
+                    RoomField::Name => {
+                        action = InfoMessage::Message(match room.name() {
+                            None => "Room has no name".into(),
+                            Some(name) => format!("Room name: \"{name}\"."),
+                        });
+                    },
+                    RoomField::Topic => {
+                        action = InfoMessage::Message(match room.topic() {
+                            None => "Room has no topic".into(),
+                            Some(topic) => format!("Room topic: \"{topic}\"."),
+                        });
+                    },
+                    RoomField::Aliases => {
+                        let aliases = room.alt_aliases();
+                        action = InfoMessage::Message(match aliases.is_empty() {
+                            true => "No alternative aliases in room.".into(),
+                            false => {
+                                format!(
+                                    "Alternative aliases: {}.",
+                                    aliases
+                                        .iter()
+                                        .map(OwnedRoomAliasId::to_string)
+                                        .collect::<Vec<String>>()
+                                        .join(", ")
+                                )
+                            },
+                        })
+                    },
+                    RoomField::CanonicalAlias => {
+                        action = InfoMessage::Message(match room.canonical_alias() {
+                            None => "No canonical alias for room.".into(),
+                            Some(can) => format!("Canonical alias: {can}."),
+                        })
+                    },
+                    RoomField::Tag(_) | RoomField::Alias(_) => {
+                        unreachable!("Nothing should ever enter this code path");
+                    },
+                }
+                Ok(vec![(Action::ShowInfoMessage(action), ctx)])
             },
         }
     }
