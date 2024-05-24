@@ -1344,7 +1344,7 @@ impl ChatStore {
             sync_info: Default::default(),
             draw_curr: None,
             ring_bell: false,
-            focused: false,
+            focused: true,
         }
     }
 
