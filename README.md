@@ -11,7 +11,6 @@
 
 </div>
 
-
 ## About
 
 `iamb` is a Matrix client for the terminal that uses Vim keybindings. It includes support for:
@@ -58,12 +57,13 @@ Arch User Repositories (AUR). To install it simply run with your favorite AUR he
 ```
 paru iamb-git
 ```
+
 ### openSUSE Tumbleweed
 
-On openSUSE Tumbleweed a [package](https://build.opensuse.org/package/show/home%3Asmolsheep/iamb) is available from openSUSE Build Service (OBS). To install just use OBS Package Installer:
+On openSUSE Tumbleweed a [package](https://build.opensuse.org/package/show/openSUSE:Factory/iamb) is available from the official repositories. To install it simply run:
 
 ```
-opi iamb
+zypper install iamb
 ```
 
 ### Nix / NixOS (flake)
