@@ -41,6 +41,14 @@ cargo install --locked iamb
 
 See [Configuration](#configuration) for getting a profile set up.
 
+### FreeBSD
+
+On FreeBSD a package is available from the official repositories. To install it simply run:
+
+```
+pkg install iamb
+```
+
 ### NetBSD
 
 On NetBSD a package is available from the official repositories. To install it simply run:
