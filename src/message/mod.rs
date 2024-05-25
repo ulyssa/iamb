@@ -10,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 
 use chrono::{DateTime, Local as LocalTz, NaiveDateTime, TimeZone};
 use comrak::{markdown_to_html, ComrakOptions};
+use humansize::{format_size, DECIMAL};
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
@@ -509,6 +510,27 @@ impl MessageEvent {
     }
 }
 
+/// Macro rule converting a File / Image / Audio / Video to its text content with the shape:
+/// `[Attached <type>: <content>[ (<human readable file size>)]]`
+macro_rules! display_file_to_text {
+    ( $msgtype:ident, $content:expr ) => {
+        return Cow::Owned(format!(
+            "[Attached {}: {}{}]",
+            stringify!($msgtype),
+            $content.body,
+            $content
+                .info
+                .as_ref()
+                .map(|info| {
+                    info.size
+                        .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
+                        .unwrap_or_else(String::new)
+                })
+                .unwrap_or_else(String::new)
+        ))
+    };
+}
+
 fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
     let s = match &content.msgtype {
         MessageType::Text(content) => content.body.as_str(),
@@ -518,16 +540,16 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
         MessageType::ServerNotice(content) => content.body.as_str(),
 
         MessageType::Audio(content) => {
-            return Cow::Owned(format!("[Attached Audio: {}]", content.body));
+            display_file_to_text!(Audio, content);
         },
         MessageType::File(content) => {
-            return Cow::Owned(format!("[Attached File: {}]", content.body));
+            display_file_to_text!(File, content);
         },
         MessageType::Image(content) => {
-            return Cow::Owned(format!("[Attached Image: {}]", content.body));
+            display_file_to_text!(Image, content);
         },
         MessageType::Video(content) => {
-            return Cow::Owned(format!("[Attached Video: {}]", content.body));
+            display_file_to_text!(Video, content);
         },
         _ => {
             return Cow::Owned(format!("[Unknown message type: {:?}]", content.msgtype()));
@@ -1130,6 +1152,19 @@ impl ToString for Message {
 
 #[cfg(test)]
 pub mod tests {
+    use matrix_sdk::ruma::events::room::{
+        message::{
+            AudioInfo,
+            AudioMessageEventContent,
+            FileInfo,
+            FileMessageEventContent,
+            ImageMessageEventContent,
+            VideoInfo,
+            VideoMessageEventContent,
+        },
+        ImageInfo,
+    };
+
     use super::*;
     use crate::tests::*;
 
@@ -1377,6 +1412,85 @@ pub mod tests {
 ⌎⌏
 "#
             )
+        );
+    }
+
+    #[test]
+    fn test_display_attachment_size() {
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+                ImageMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(ImageInfo::default())))
+            ))),
+            "[Attached Image: Alt text]".to_string()
+        );
+
+        let mut info = ImageInfo::default();
+        info.size = Some(442630_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+                ImageMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached Image: Alt text (442.63 kB)]".to_string()
+        );
+
+        let mut info = ImageInfo::default();
+        info.size = Some(12_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+                ImageMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached Image: Alt text (12 B)]".to_string()
+        );
+
+        let mut info = AudioInfo::default();
+        info.size = Some(4294967295_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Audio(
+                AudioMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached Audio: Alt text (4.29 GB)]".to_string()
+        );
+
+        let mut info = FileInfo::default();
+        info.size = Some(4426300_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::File(
+                FileMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached File: Alt text (4.43 MB)]".to_string()
+        );
+
+        let mut info = VideoInfo::default();
+        info.size = Some(44000_u32.into());
+        assert_eq!(
+            body_cow_content(&RoomMessageEventContent::new(MessageType::Video(
+                VideoMessageEventContent::plain(
+                    "Alt text".to_string(),
+                    "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
+                )
+                .info(Some(Box::new(info)))
+            ))),
+            "[Attached Video: Alt text (44 kB)]".to_string()
         );
     }
 }
