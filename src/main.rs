@@ -355,9 +355,13 @@ impl Application {
                     // Do nothing for now.
                 },
                 Event::FocusGained => {
+                    let mut store = self.store.lock().await;
+                    store.application.focused = true;
                     self.focused = true;
                 },
                 Event::FocusLost => {
+                    let mut store = self.store.lock().await;
+                    store.application.focused = false;
                     self.focused = false;
                 },
                 Event::Resize(_, _) => {

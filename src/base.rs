@@ -1319,6 +1319,9 @@ pub struct ChatStore {
 
     /// Whether to ring the terminal bell on the next redraw.
     pub ring_bell: bool,
+
+    /// Whether the application is currently focused
+    pub focused: bool,
 }
 
 impl ChatStore {
@@ -1341,6 +1344,7 @@ impl ChatStore {
             sync_info: Default::default(),
             draw_curr: None,
             ring_bell: false,
+            focused: true,
         }
     }
 

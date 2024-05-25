@@ -44,7 +44,7 @@ pub async fn register_notifications(
                     return;
                 }
 
-                if is_open(&store, room.room_id()).await {
+                if is_focused(&store).await && is_open(&store, room.room_id()).await {
                     return;
                 }
 
@@ -137,6 +137,11 @@ async fn is_open(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
         }
     }
     false
+}
+
+async fn is_focused(store: &AsyncProgramStore) -> bool {
+    let locked = store.lock().await;
+    locked.application.focused
 }
 
 pub async fn parse_notification(
