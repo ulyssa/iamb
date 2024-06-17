@@ -260,6 +260,7 @@ pub enum StyleTreeNode {
     Anchor(Box<StyleTreeNode>, char, Url),
     Blockquote(Box<StyleTreeNode>),
     Break,
+    #[allow(dead_code)]
     Code(Box<StyleTreeNode>, Option<String>),
     Header(Box<StyleTreeNode>, usize),
     Image(Option<String>),
