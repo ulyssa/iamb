@@ -14,8 +14,7 @@ use matrix_sdk::{
             },
             MessageLikeEvent,
         },
-        OwnedEventId,
-        OwnedRoomId,
+        OwnedEventId, OwnedRoomId,
     },
     Media,
 };
@@ -155,18 +154,14 @@ async fn download_or_load(
             f.read_to_end(&mut buffer)?;
             Ok(buffer)
         },
-        Err(_) => {
-            media
-                .get_media_content(&MediaRequest { source, format: MediaFormat::File }, true)
-                .await
-                .and_then(|buffer| {
-                    if let Err(err) =
-                        File::create(&cache_path).and_then(|mut f| f.write_all(&buffer))
-                    {
-                        return Err(err.into());
-                    }
-                    Ok(buffer)
-                })
-        },
+        Err(_) => media
+            .get_media_content(&MediaRequest { source, format: MediaFormat::File }, true)
+            .await
+            .and_then(|buffer| {
+                if let Err(err) = File::create(&cache_path).and_then(|mut f| f.write_all(&buffer)) {
+                    return Err(err.into());
+                }
+                Ok(buffer)
+            }),
     }
 }

@@ -6,8 +6,7 @@ use matrix_sdk::{
     ruma::{
         api::client::push::get_notifications::v3::Notification,
         events::{room::message::MessageType, AnyMessageLikeEventContent, AnySyncTimelineEvent},
-        MilliSecondsSinceUnixEpoch,
-        RoomId,
+        MilliSecondsSinceUnixEpoch, RoomId,
     },
     Client,
 };

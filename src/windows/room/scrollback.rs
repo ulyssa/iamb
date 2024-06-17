@@ -14,20 +14,8 @@ use ratatui::{
 };
 
 use modalkit::actions::{
-    Action,
-    CursorAction,
-    EditAction,
-    Editable,
-    EditorAction,
-    EditorActions,
-    HistoryAction,
-    InsertTextAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
-    Searchable,
-    SelectionAction,
+    Action, CursorAction, EditAction, Editable, EditorAction, EditorActions, HistoryAction,
+    InsertTextAction, Jumpable, PromptAction, Promptable, Scrollable, Searchable, SelectionAction,
     WindowAction,
 };
 use modalkit::editing::{
@@ -43,16 +31,8 @@ use modalkit::prelude::*;
 
 use crate::{
     base::{
-        IambBufferId,
-        IambId,
-        IambInfo,
-        IambResult,
-        Need,
-        ProgramContext,
-        ProgramStore,
-        RoomFetchStatus,
-        RoomFocus,
-        RoomInfo,
+        IambBufferId, IambId, IambInfo, IambResult, Need, ProgramContext, ProgramStore,
+        RoomFetchStatus, RoomFocus, RoomInfo,
     },
     config::ApplicationSettings,
     message::{Message, MessageCursor, MessageKey, Messages},
@@ -401,13 +381,13 @@ impl ScrollbackState {
             },
             MoveType::BufferPos(MovePosition::Middle) => None,
             MoveType::BufferPos(MovePosition::End) => Some(MessageCursor::latest()),
-            MoveType::FinalNonBlank(dir) |
-            MoveType::FirstWord(dir) |
-            MoveType::Line(dir) |
-            MoveType::ScreenLine(dir) |
-            MoveType::ParagraphBegin(dir) |
-            MoveType::SectionBegin(dir) |
-            MoveType::SectionEnd(dir) => {
+            MoveType::FinalNonBlank(dir)
+            | MoveType::FirstWord(dir)
+            | MoveType::Line(dir)
+            | MoveType::ScreenLine(dir)
+            | MoveType::ParagraphBegin(dir)
+            | MoveType::SectionBegin(dir)
+            | MoveType::SectionEnd(dir) => {
                 let thread = self.get_thread(info)?;
 
                 match dir {
@@ -637,11 +617,9 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         return Ok(None);
                     },
                     EditTarget::Boundary(rt, inc, term, count) => {
-                        self.range(key, rt, *inc, count, ctx, info).map(|r| {
-                            match term {
-                                MoveTerminus::Beginning => r.start,
-                                MoveTerminus::End => r.end,
-                            }
+                        self.range(key, rt, *inc, count, ctx, info).map(|r| match term {
+                            MoveTerminus::Beginning => r.start,
+                            MoveTerminus::End => r.end,
                         })
                     },
                     EditTarget::CharJump(mark) | EditTarget::LineJump(mark) => {
@@ -1407,9 +1385,9 @@ impl<'a> StatefulWidget for Scrollback<'a> {
             }
         }
 
-        if self.room_focused &&
-            settings.tunables.read_receipt_send &&
-            state.cursor.timestamp.is_none()
+        if self.room_focused
+            && settings.tunables.read_receipt_send
+            && state.cursor.timestamp.is_none()
         {
             // If the cursor is at the last message, then update the read marker.
             if let Some((k, _)) = thread.last_key_value() {
@@ -1457,11 +1435,11 @@ mod tests {
         assert_eq!(scrollback.cursor, MessageCursor::latest());
 
         // Search backwards to MSG4.
-        scrollback.search(prev.clone(), 1.into(), &ctx, &mut store).unwrap();
+        scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG4_KEY.clone().into());
 
         // Search backwards to MSG2.
-        scrollback.search(prev.clone(), 1.into(), &ctx, &mut store).unwrap();
+        scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
         assert_eq!(
             std::mem::take(&mut store.application.need_load)
@@ -1472,7 +1450,7 @@ mod tests {
         );
 
         // Can't go any further; need_load now contains the room ID.
-        scrollback.search(prev.clone(), 1.into(), &ctx, &mut store).unwrap();
+        scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
         assert_eq!(
             std::mem::take(&mut store.application.need_load)
@@ -1482,11 +1460,11 @@ mod tests {
         );
 
         // Search forward twice to MSG1.
-        scrollback.search(next.clone(), 2.into(), &ctx, &mut store).unwrap();
+        scrollback.search(next, 2.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG1_KEY.clone().into());
 
         // Can't go any further.
-        scrollback.search(next.clone(), 2.into(), &ctx, &mut store).unwrap();
+        scrollback.search(next, 2.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG1_KEY.clone().into());
     }
 

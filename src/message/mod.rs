@@ -5,6 +5,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::hash_set;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 
@@ -19,32 +20,18 @@ use matrix_sdk::ruma::{
         relation::Thread,
         room::{
             encrypted::{
-                OriginalRoomEncryptedEvent,
-                RedactedRoomEncryptedEvent,
-                RoomEncryptedEvent,
+                OriginalRoomEncryptedEvent, RedactedRoomEncryptedEvent, RoomEncryptedEvent,
             },
             message::{
-                FormattedBody,
-                MessageFormat,
-                MessageType,
-                OriginalRoomMessageEvent,
-                RedactedRoomMessageEvent,
-                Relation,
-                RoomMessageEvent,
-                RoomMessageEventContent,
+                FormattedBody, MessageFormat, MessageType, OriginalRoomMessageEvent,
+                RedactedRoomMessageEvent, Relation, RoomMessageEvent, RoomMessageEventContent,
                 TextMessageEventContent,
             },
             redaction::SyncRoomRedactionEvent,
         },
-        RedactContent,
-        RedactedUnsigned,
+        RedactContent, RedactedUnsigned,
     },
-    EventId,
-    MilliSecondsSinceUnixEpoch,
-    OwnedEventId,
-    OwnedUserId,
-    RoomVersionId,
-    UInt,
+    EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, RoomVersionId, UInt,
 };
 
 use ratatui::{
@@ -906,8 +893,8 @@ impl Message {
         };
         let user_gutter = settings.tunables.user_gutter_width;
 
-        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
-            settings.tunables.read_receipt_display
+        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width
+            && settings.tunables.read_receipt_display
         {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
@@ -1074,9 +1061,9 @@ impl Message {
         settings: &'a ApplicationSettings,
     ) -> Option<Span<'a>> {
         if let Some(prev) = prev {
-            if self.sender == prev.sender &&
-                self.timestamp.same_day(&prev.timestamp) &&
-                !self.event.is_emote()
+            if self.sender == prev.sender
+                && self.timestamp.same_day(&prev.timestamp)
+                && !self.event.is_emote()
             {
                 return None;
             }
@@ -1144,9 +1131,9 @@ impl From<RoomMessageEvent> for Message {
     }
 }
 
-impl ToString for Message {
-    fn to_string(&self) -> String {
-        self.event.body().into_owned()
+impl Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.event.body())
     }
 }
 
@@ -1154,13 +1141,8 @@ impl ToString for Message {
 pub mod tests {
     use matrix_sdk::ruma::events::room::{
         message::{
-            AudioInfo,
-            AudioMessageEventContent,
-            FileInfo,
-            FileMessageEventContent,
-            ImageMessageEventContent,
-            VideoInfo,
-            VideoMessageEventContent,
+            AudioInfo, AudioMessageEventContent, FileInfo, FileMessageEventContent,
+            ImageMessageEventContent, VideoInfo, VideoMessageEventContent,
         },
         ImageInfo,
     };
@@ -1423,7 +1405,7 @@ pub mod tests {
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
-                .info(Some(Box::new(ImageInfo::default())))
+                .info(Some(Box::default()))
             ))),
             "[Attached Image: Alt text]".to_string()
         );

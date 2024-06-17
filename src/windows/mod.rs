@@ -7,6 +7,7 @@
 //! example, [sending messages][crate::base::SendAction] delegate to the [room window][RoomState],
 //! where we have the message bar and room ID easily accesible and resetable.
 use std::cmp::{Ord, Ordering, PartialOrd};
+use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -17,10 +18,7 @@ use matrix_sdk::{
     ruma::{
         events::room::member::MembershipState,
         events::tag::{TagName, Tags},
-        OwnedRoomAliasId,
-        OwnedRoomId,
-        RoomAliasId,
-        RoomId,
+        OwnedRoomAliasId, OwnedRoomId, RoomAliasId, RoomId,
     },
 };
 
@@ -34,13 +32,7 @@ use ratatui::{
 
 use modalkit::{
     actions::{
-        Action,
-        Editable,
-        EditorAction,
-        Jumpable,
-        PromptAction,
-        Promptable,
-        Scrollable,
+        Action, Editable, EditorAction, Jumpable, PromptAction, Promptable, Scrollable,
         WindowAction,
     },
     editing::completion::CompletionList,
@@ -50,31 +42,13 @@ use modalkit::{
 
 use modalkit_ratatui::{
     list::{List, ListCursor, ListItem, ListState},
-    TermOffset,
-    TerminalCursor,
-    Window,
-    WindowOps,
+    TermOffset, TerminalCursor, Window, WindowOps,
 };
 
 use crate::base::{
-    ChatStore,
-    IambBufferId,
-    IambError,
-    IambId,
-    IambInfo,
-    IambResult,
-    MessageAction,
-    Need,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomAction,
-    SendAction,
-    SortColumn,
-    SortFieldRoom,
-    SortFieldUser,
-    SortOrder,
-    UnreadInfo,
+    ChatStore, IambBufferId, IambError, IambId, IambInfo, IambResult, MessageAction, Need,
+    ProgramAction, ProgramContext, ProgramStore, RoomAction, SendAction, SortColumn, SortFieldRoom,
+    SortFieldUser, SortOrder, UnreadInfo,
 };
 
 use self::{room::RoomState, welcome::WelcomeState};
@@ -820,7 +794,7 @@ impl GenericChatItem {
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
         let unread = info.unreads(&store.application.settings);
-        info.tags = room_info.deref().1.clone();
+        info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
@@ -870,9 +844,9 @@ impl RoomLikeItem for GenericChatItem {
     }
 }
 
-impl ToString for GenericChatItem {
-    fn to_string(&self) -> String {
-        return self.name.clone();
+impl Display for GenericChatItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.name)
     }
 }
 
@@ -930,7 +904,7 @@ impl RoomItem {
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
         let unread = info.unreads(&store.application.settings);
-        info.tags = room_info.deref().1.clone();
+        info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
@@ -980,9 +954,9 @@ impl RoomLikeItem for RoomItem {
     }
 }
 
-impl ToString for RoomItem {
-    fn to_string(&self) -> String {
-        return self.name.clone();
+impl Display for RoomItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, ":verify request {}", self.name)
     }
 }
 
@@ -1034,7 +1008,7 @@ impl DirectItem {
         let info = store.application.rooms.get_or_default(room_id);
         let name = info.name.clone().unwrap_or_default();
         let unread = info.unreads(&store.application.settings);
-        info.tags = room_info.deref().1.clone();
+        info.tags.clone_from(&room_info.deref().1);
 
         DirectItem { room_info, name, alias, unread }
     }
@@ -1080,9 +1054,9 @@ impl RoomLikeItem for DirectItem {
     }
 }
 
-impl ToString for DirectItem {
-    fn to_string(&self) -> String {
-        return self.name.clone();
+impl Display for DirectItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, ":verify request {}", self.name)
     }
 }
 
@@ -1179,9 +1153,9 @@ impl RoomLikeItem for SpaceItem {
     }
 }
 
-impl ToString for SpaceItem {
-    fn to_string(&self) -> String {
-        return self.room_id().to_string();
+impl Display for SpaceItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, ":verify request {}", self.room_id())
     }
 }
 
@@ -1300,16 +1274,18 @@ impl From<(&String, &SasVerification)> for VerifyItem {
     }
 }
 
-impl ToString for VerifyItem {
-    fn to_string(&self) -> String {
+impl Display for VerifyItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         if self.sasv1.is_done() {
-            String::new()
-        } else if self.sasv1.is_cancelled() {
-            format!(":verify request {}", self.sasv1.other_user_id())
+            return Ok(());
+        }
+
+        if self.sasv1.is_cancelled() {
+            write!(f, ":verify request {}", self.sasv1.other_user_id())
         } else if self.sasv1.emoji().is_some() {
-            format!(":verify confirm {}", self.user_dev)
+            write!(f, ":verify confirm {}", self.user_dev)
         } else {
-            format!(":verify accept {}", self.user_dev)
+            write!(f, ":verify accept {}", self.user_dev)
         }
     }
 }
@@ -1413,9 +1389,9 @@ impl MemberItem {
     }
 }
 
-impl ToString for MemberItem {
-    fn to_string(&self) -> String {
-        self.member.user_id().to_string()
+impl Display for MemberItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.member.user_id())
     }
 }
 
