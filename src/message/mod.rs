@@ -5,6 +5,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::collections::hash_set;
 use std::collections::BTreeMap;
 use std::convert::TryFrom;
+use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 
@@ -1144,9 +1145,9 @@ impl From<RoomMessageEvent> for Message {
     }
 }
 
-impl ToString for Message {
-    fn to_string(&self) -> String {
-        self.event.body().into_owned()
+impl Display for Message {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.event.body())
     }
 }
 
@@ -1423,7 +1424,7 @@ pub mod tests {
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
-                .info(Some(Box::new(ImageInfo::default())))
+                .info(Some(Box::default()))
             ))),
             "[Attached Image: Alt text]".to_string()
         );
