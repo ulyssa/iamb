@@ -1173,7 +1173,7 @@ mod tests {
         let j = "j".parse::<TerminalKey>().unwrap();
         let esc = "<Esc>".parse::<TerminalKey>().unwrap();
 
-        let jj = Keys(vec![j.clone(), j], "jj".into());
+        let jj = Keys(vec![j, j], "jj".into());
         let run = mapped.get(&jj).unwrap();
         let exp = Keys(vec![esc], "<Esc>".into());
         assert_eq!(run, &exp);
