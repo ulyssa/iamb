@@ -20,18 +20,10 @@ use matrix_sdk::{
         events::reaction::ReactionEventContent,
         events::relation::{Annotation, Replacement},
         events::room::message::{
-            AddMentions,
-            ForwardThread,
-            MessageType,
-            OriginalRoomMessageEvent,
-            Relation,
-            ReplyWithinThread,
-            RoomMessageEventContent,
-            TextMessageEventContent,
+            AddMentions, ForwardThread, MessageType, OriginalRoomMessageEvent, Relation,
+            ReplyWithinThread, RoomMessageEventContent, TextMessageEventContent,
         },
-        OwnedEventId,
-        OwnedRoomId,
-        RoomId,
+        OwnedEventId, OwnedRoomId, RoomId,
     },
     RoomState,
 };
@@ -47,19 +39,11 @@ use modalkit::keybindings::dialog::{MultiChoice, MultiChoiceItem, PromptYesNo};
 
 use modalkit_ratatui::{
     textbox::{TextBox, TextBoxState},
-    PromptActions,
-    TerminalCursor,
-    WindowOps,
+    PromptActions, TerminalCursor, WindowOps,
 };
 
 use modalkit::actions::{
-    Action,
-    Editable,
-    EditorAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
+    Action, Editable, EditorAction, Jumpable, PromptAction, Promptable, Scrollable,
 };
 use modalkit::editing::{
     completion::CompletionList,
@@ -71,19 +55,8 @@ use modalkit::errors::{EditError, EditResult, UIError};
 use modalkit::prelude::*;
 
 use crate::base::{
-    DownloadFlags,
-    IambAction,
-    IambBufferId,
-    IambError,
-    IambInfo,
-    IambResult,
-    MessageAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomFocus,
-    RoomInfo,
-    SendAction,
+    DownloadFlags, IambAction, IambBufferId, IambError, IambInfo, IambResult, MessageAction,
+    ProgramAction, ProgramContext, ProgramStore, RoomFocus, RoomInfo, SendAction,
 };
 
 use crate::message::{text_to_message, Message, MessageEvent, MessageKey, MessageTimeStamp};
@@ -300,12 +273,10 @@ impl ChatState {
                             store.application.settings.tunables.open_command.as_ref(),
                             target,
                         ) {
-                            Ok(_) => {
-                                InfoMessage::from(format!(
-                                    "Attachment downloaded to {} and opened",
-                                    filename.display()
-                                ))
-                            },
+                            Ok(_) => InfoMessage::from(format!(
+                                "Attachment downloaded to {} and opened",
+                                filename.display()
+                            )),
                             Err(err) => {
                                 return Err(err);
                             },
@@ -635,15 +606,11 @@ impl ChatState {
 macro_rules! delegate {
     ($s: expr, $id: ident => $e: expr) => {
         match $s.focus {
-            RoomFocus::Scrollback => {
-                match $s {
-                    ChatState { scrollback: $id, .. } => $e,
-                }
+            RoomFocus::Scrollback => match $s {
+                ChatState { scrollback: $id, .. } => $e,
             },
-            RoomFocus::MessageBar => {
-                match $s {
-                    ChatState { tbox: $id, .. } => $e,
-                }
+            RoomFocus::MessageBar => match $s {
+                ChatState { tbox: $id, .. } => $e,
             },
         }
     };
@@ -721,9 +688,9 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
         match delegate!(self, w => w.editor_command(act, ctx, store)) {
             res @ Ok(_) => res,
             Err(EditError::WrongBuffer(IambBufferId::Room(room_id, thread, focus)))
-                if room_id == self.room_id &&
-                    thread.as_ref() == self.thread() &&
-                    act.is_switchable(ctx) =>
+                if room_id == self.room_id
+                    && thread.as_ref() == self.thread()
+                    && act.is_switchable(ctx) =>
             {
                 // Switch focus.
                 self.focus = focus;

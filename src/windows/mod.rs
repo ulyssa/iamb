@@ -18,10 +18,7 @@ use matrix_sdk::{
     ruma::{
         events::room::member::MembershipState,
         events::tag::{TagName, Tags},
-        OwnedRoomAliasId,
-        OwnedRoomId,
-        RoomAliasId,
-        RoomId,
+        OwnedRoomAliasId, OwnedRoomId, RoomAliasId, RoomId,
     },
 };
 
@@ -35,13 +32,7 @@ use ratatui::{
 
 use modalkit::{
     actions::{
-        Action,
-        Editable,
-        EditorAction,
-        Jumpable,
-        PromptAction,
-        Promptable,
-        Scrollable,
+        Action, Editable, EditorAction, Jumpable, PromptAction, Promptable, Scrollable,
         WindowAction,
     },
     editing::completion::CompletionList,
@@ -51,31 +42,13 @@ use modalkit::{
 
 use modalkit_ratatui::{
     list::{List, ListCursor, ListItem, ListState},
-    TermOffset,
-    TerminalCursor,
-    Window,
-    WindowOps,
+    TermOffset, TerminalCursor, Window, WindowOps,
 };
 
 use crate::base::{
-    ChatStore,
-    IambBufferId,
-    IambError,
-    IambId,
-    IambInfo,
-    IambResult,
-    MessageAction,
-    Need,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomAction,
-    SendAction,
-    SortColumn,
-    SortFieldRoom,
-    SortFieldUser,
-    SortOrder,
-    UnreadInfo,
+    ChatStore, IambBufferId, IambError, IambId, IambInfo, IambResult, MessageAction, Need,
+    ProgramAction, ProgramContext, ProgramStore, RoomAction, SendAction, SortColumn, SortFieldRoom,
+    SortFieldUser, SortOrder, UnreadInfo,
 };
 
 use self::{room::RoomState, welcome::WelcomeState};
@@ -1086,7 +1059,6 @@ impl Display for DirectItem {
         write!(f, ":verify request {}", self.name)
     }
 }
-
 
 impl ListItem<IambInfo> for DirectItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {

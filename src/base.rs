@@ -20,12 +20,7 @@ use ratatui::{
 };
 use ratatui_image::picker::{Picker, ProtocolType};
 use serde::{
-    de::Error as SerdeError,
-    de::Visitor,
-    Deserialize,
-    Deserializer,
-    Serialize,
-    Serializer,
+    de::Error as SerdeError, de::Visitor, Deserialize, Deserializer, Serialize, Serializer,
 };
 use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
@@ -39,10 +34,7 @@ use matrix_sdk::{
             relation::{Replacement, Thread},
             room::encrypted::RoomEncryptedEvent,
             room::message::{
-                OriginalRoomMessageEvent,
-                Relation,
-                RoomMessageEvent,
-                RoomMessageEventContent,
+                OriginalRoomMessageEvent, Relation, RoomMessageEvent, RoomMessageEventContent,
                 RoomMessageEventContentWithoutRelation,
             },
             room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
@@ -50,13 +42,7 @@ use matrix_sdk::{
             MessageLikeEvent,
         },
         presence::PresenceState,
-        EventId,
-        OwnedEventId,
-        OwnedRoomId,
-        OwnedUserId,
-        RoomId,
-        RoomVersionId,
-        UserId,
+        EventId, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, RoomVersionId, UserId,
     },
     RoomState as MatrixRoomState,
 };
@@ -65,12 +51,8 @@ use modalkit::{
     actions::Action,
     editing::{
         application::{
-            ApplicationAction,
-            ApplicationContentId,
-            ApplicationError,
-            ApplicationInfo,
-            ApplicationStore,
-            ApplicationWindowId,
+            ApplicationAction, ApplicationContentId, ApplicationError, ApplicationInfo,
+            ApplicationStore, ApplicationWindowId,
         },
         completion::{complete_path, CompletionMap},
         context::EditContext,
@@ -106,10 +88,10 @@ pub const MATRIX_ID_WORD: WordStyle = WordStyle::CharSet(is_mxid_char);
 /// in the server name, but in practice that should be uncommon, and people
 /// can just use `gf` and friends in Visual mode instead.
 fn is_mxid_char(c: char) -> bool {
-    return c >= 'a' && c <= 'z' ||
-        c >= 'A' && c <= 'Z' ||
-        c >= '0' && c <= '9' ||
-        ":-./@_#!".contains(c);
+    return c >= 'a' && c <= 'z'
+        || c >= 'A' && c <= 'Z'
+        || c >= '0' && c <= '9'
+        || ":-./@_#!".contains(c);
 }
 
 const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
@@ -951,9 +933,9 @@ impl RoomInfo {
             MessageEvent::Local(_, content) => {
                 content.apply_replacement(new_msgtype);
             },
-            MessageEvent::Redacted(_) |
-            MessageEvent::EncryptedOriginal(_) |
-            MessageEvent::EncryptedRedacted(_) => {
+            MessageEvent::Redacted(_)
+            | MessageEvent::EncryptedOriginal(_)
+            | MessageEvent::EncryptedRedacted(_) => {
                 return;
             },
         }
@@ -1010,16 +992,14 @@ impl RoomInfo {
             RoomMessageEvent::Original(OriginalRoomMessageEvent {
                 content: RoomMessageEventContent { relates_to: Some(ref relates_to), .. },
                 ..
-            }) => {
-                match relates_to {
-                    Relation::Replacement(repl) => self.insert_edit(repl.clone()),
-                    Relation::Thread(Thread { event_id, .. }) => {
-                        let event_id = event_id.clone();
-                        self.insert_thread(msg, event_id);
-                    },
-                    Relation::Reply { .. } => self.insert_message(msg),
-                    _ => self.insert_message(msg),
-                }
+            }) => match relates_to {
+                Relation::Replacement(repl) => self.insert_edit(repl.clone()),
+                Relation::Thread(Thread { event_id, .. }) => {
+                    let event_id = event_id.clone();
+                    self.insert_thread(msg, event_id);
+                },
+                Relation::Reply { .. } => self.insert_message(msg),
+                _ => self.insert_message(msg),
             },
             _ => self.insert_message(msg),
         }
@@ -1860,10 +1840,7 @@ pub mod tests {
     use crate::tests::*;
     use matrix_sdk::ruma::{
         events::{reaction::ReactionEventContent, relation::Annotation, MessageLikeUnsigned},
-        owned_event_id,
-        owned_room_id,
-        owned_user_id,
-        MilliSecondsSinceUnixEpoch,
+        owned_event_id, owned_room_id, owned_user_id, MilliSecondsSinceUnixEpoch,
     };
     use pretty_assertions::assert_eq;
     use ratatui::style::Color;
@@ -1924,10 +1901,10 @@ pub mod tests {
             ));
         }
 
-        assert_eq!(info.get_reactions(&owned_event_id!("$my_reaction")), vec![
-            ("🏠", 1),
-            ("🙂", 2)
-        ]);
+        assert_eq!(
+            info.get_reactions(&owned_event_id!("$my_reaction")),
+            vec![("🏠", 1), ("🙂", 2)]
+        );
     }
 
     #[test]
@@ -2016,10 +1993,10 @@ pub mod tests {
         need_load.insert(room_id.clone(), Need::MESSAGES);
         need_load.insert(room_id.clone(), Need::MEMBERS);
 
-        assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
-            room_id,
-            Need::MESSAGES | Need::MEMBERS,
-        )],);
+        assert_eq!(
+            need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(),
+            vec![(room_id, Need::MESSAGES | Need::MEMBERS,)],
+        );
     }
 
     #[tokio::test]

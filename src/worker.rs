@@ -56,31 +56,15 @@ use matrix_sdk::{
             },
             tag::Tags,
             typing::SyncTypingEvent,
-            AnyInitialStateEvent,
-            AnyMessageLikeEvent,
-            AnyTimelineEvent,
-            EmptyStateKey,
-            InitialStateEvent,
-            SyncEphemeralRoomEvent,
-            SyncMessageLikeEvent,
-            SyncStateEvent,
+            AnyInitialStateEvent, AnyMessageLikeEvent, AnyTimelineEvent, EmptyStateKey,
+            InitialStateEvent, SyncEphemeralRoomEvent, SyncMessageLikeEvent, SyncStateEvent,
         },
         room::RoomType,
         serde::Raw,
-        EventEncryptionAlgorithm,
-        EventId,
-        OwnedEventId,
-        OwnedRoomId,
-        OwnedRoomOrAliasId,
-        OwnedUserId,
-        RoomId,
-        RoomVersionId,
+        EventEncryptionAlgorithm, EventId, OwnedEventId, OwnedRoomId, OwnedRoomOrAliasId,
+        OwnedUserId, RoomId, RoomVersionId,
     },
-    Client,
-    ClientBuildError,
-    DisplayName,
-    Error as MatrixError,
-    RoomMemberships,
+    Client, ClientBuildError, DisplayName, Error as MatrixError, RoomMemberships,
 };
 
 use modalkit::errors::UIError;
@@ -90,16 +74,8 @@ use crate::base::Need;
 use crate::notifications::register_notifications;
 use crate::{
     base::{
-        AsyncProgramStore,
-        ChatStore,
-        CreateRoomFlags,
-        CreateRoomType,
-        IambError,
-        IambResult,
-        ProgramStore,
-        RoomFetchStatus,
-        RoomInfo,
-        VerifyAction,
+        AsyncProgramStore, ChatStore, CreateRoomFlags, CreateRoomType, IambError, IambResult,
+        ProgramStore, RoomFetchStatus, RoomInfo, VerifyAction,
     },
     ApplicationSettings,
 };
@@ -622,64 +598,56 @@ pub enum WorkerTask {
 impl Debug for WorkerTask {
     fn fmt(&self, f: &mut Formatter<'_>) -> Result<(), std::fmt::Error> {
         match self {
-            WorkerTask::Init(_, _) => {
-                f.debug_tuple("WorkerTask::Init")
-                    .field(&format_args!("_"))
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::Login(style, _) => {
-                f.debug_tuple("WorkerTask::Login")
-                    .field(style)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
+            WorkerTask::Init(_, _) => f
+                .debug_tuple("WorkerTask::Init")
+                .field(&format_args!("_"))
+                .field(&format_args!("_"))
+                .finish(),
+            WorkerTask::Login(style, _) => f
+                .debug_tuple("WorkerTask::Login")
+                .field(style)
+                .field(&format_args!("_"))
+                .finish(),
             WorkerTask::Logout(user_id, _) => {
                 f.debug_tuple("WorkerTask::Logout").field(user_id).finish()
             },
             WorkerTask::GetInviter(invite, _) => {
                 f.debug_tuple("WorkerTask::GetInviter").field(invite).finish()
             },
-            WorkerTask::GetRoom(room_id, _) => {
-                f.debug_tuple("WorkerTask::GetRoom")
-                    .field(room_id)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::JoinRoom(s, _) => {
-                f.debug_tuple("WorkerTask::JoinRoom")
-                    .field(s)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::Members(room_id, _) => {
-                f.debug_tuple("WorkerTask::Members")
-                    .field(room_id)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::SpaceMembers(room_id, _) => {
-                f.debug_tuple("WorkerTask::SpaceMembers")
-                    .field(room_id)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
+            WorkerTask::GetRoom(room_id, _) => f
+                .debug_tuple("WorkerTask::GetRoom")
+                .field(room_id)
+                .field(&format_args!("_"))
+                .finish(),
+            WorkerTask::JoinRoom(s, _) => f
+                .debug_tuple("WorkerTask::JoinRoom")
+                .field(s)
+                .field(&format_args!("_"))
+                .finish(),
+            WorkerTask::Members(room_id, _) => f
+                .debug_tuple("WorkerTask::Members")
+                .field(room_id)
+                .field(&format_args!("_"))
+                .finish(),
+            WorkerTask::SpaceMembers(room_id, _) => f
+                .debug_tuple("WorkerTask::SpaceMembers")
+                .field(room_id)
+                .field(&format_args!("_"))
+                .finish(),
             WorkerTask::TypingNotice(room_id) => {
                 f.debug_tuple("WorkerTask::TypingNotice").field(room_id).finish()
             },
-            WorkerTask::Verify(act, sasv1, _) => {
-                f.debug_tuple("WorkerTask::Verify")
-                    .field(act)
-                    .field(sasv1)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::VerifyRequest(user_id, _) => {
-                f.debug_tuple("WorkerTask::VerifyRequest")
-                    .field(user_id)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
+            WorkerTask::Verify(act, sasv1, _) => f
+                .debug_tuple("WorkerTask::Verify")
+                .field(act)
+                .field(sasv1)
+                .field(&format_args!("_"))
+                .finish(),
+            WorkerTask::VerifyRequest(user_id, _) => f
+                .debug_tuple("WorkerTask::VerifyRequest")
+                .field(user_id)
+                .field(&format_args!("_"))
+                .finish(),
         }
     }
 }
@@ -925,31 +893,27 @@ impl ClientWorker {
         self.client.add_event_handler_context(store.clone());
 
         let _ = self.client.add_event_handler(
-            |ev: SyncTypingEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let room_id = room.room_id().to_owned();
-                    let mut locked = store.lock().await;
+            |ev: SyncTypingEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| async move {
+                let room_id = room.room_id().to_owned();
+                let mut locked = store.lock().await;
 
-                    let users = ev
-                        .content
-                        .user_ids
-                        .into_iter()
-                        .filter(|u| u != &locked.application.settings.profile.user_id)
-                        .collect();
+                let users = ev
+                    .content
+                    .user_ids
+                    .into_iter()
+                    .filter(|u| u != &locked.application.settings.profile.user_id)
+                    .collect();
 
-                    locked.application.get_room_info(room_id).set_typing(users);
-                }
+                locked.application.get_room_info(room_id).set_typing(users);
             },
         );
 
-        let _ =
-            self.client
-                .add_event_handler(|ev: PresenceEvent, store: Ctx<AsyncProgramStore>| {
-                    async move {
-                        let mut locked = store.lock().await;
-                        locked.application.presences.insert(ev.sender, ev.content.presence);
-                    }
-                });
+        let _ = self.client.add_event_handler(
+            |ev: PresenceEvent, store: Ctx<AsyncProgramStore>| async move {
+                let mut locked = store.lock().await;
+                locked.application.presences.insert(ev.sender, ev.content.presence);
+            },
+        );
 
         let _ = self.client.add_event_handler(
             |ev: SyncStateEvent<RoomNameEventContent>,
@@ -1150,16 +1114,14 @@ impl ClientWorker {
         );
 
         let _ = self.client.add_event_handler(
-            |ev: ToDeviceKeyVerificationRequestEvent, client: Client| {
-                async move {
-                    let request = client
-                        .encryption()
-                        .get_verification_request(&ev.sender, &ev.content.transaction_id)
-                        .await;
+            |ev: ToDeviceKeyVerificationRequestEvent, client: Client| async move {
+                let request = client
+                    .encryption()
+                    .get_verification_request(&ev.sender, &ev.content.transaction_id)
+                    .await;
 
-                    if let Some(request) = request {
-                        request.accept().await.unwrap();
-                    }
+                if let Some(request) = request {
+                    request.accept().await.unwrap();
                 }
             },
         );
@@ -1182,19 +1144,22 @@ impl ClientWorker {
             },
         );
 
-        let _ = self.client.add_event_handler(
-            |ev: ToDeviceKeyVerificationKeyEvent, client: Client, store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let tx_id = ev.content.transaction_id;
+        let _ =
+            self.client.add_event_handler(
+                |ev: ToDeviceKeyVerificationKeyEvent,
+                 client: Client,
+                 store: Ctx<AsyncProgramStore>| {
+                    async move {
+                        let tx_id = ev.content.transaction_id;
 
-                    if let Some(Verification::SasV1(sas)) =
-                        client.encryption().get_verification(&ev.sender, tx_id.as_ref()).await
-                    {
-                        store.lock().await.application.insert_sas(sas);
+                        if let Some(Verification::SasV1(sas)) =
+                            client.encryption().get_verification(&ev.sender, tx_id.as_ref()).await
+                        {
+                            store.lock().await.application.insert_sas(sas);
+                        }
                     }
-                }
-            },
-        );
+                },
+            );
 
         let _ = self.client.add_event_handler(
             |ev: ToDeviceKeyVerificationDoneEvent,

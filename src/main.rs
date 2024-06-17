@@ -40,17 +40,9 @@ use modalkit::crossterm::{
     self,
     cursor::Show as CursorShow,
     event::{
-        poll,
-        read,
-        DisableBracketedPaste,
-        DisableFocusChange,
-        EnableBracketedPaste,
-        EnableFocusChange,
-        Event,
-        KeyEventKind,
-        KeyboardEnhancementFlags,
-        PopKeyboardEnhancementFlags,
-        PushKeyboardEnhancementFlags,
+        poll, read, DisableBracketedPaste, DisableFocusChange, EnableBracketedPaste,
+        EnableFocusChange, Event, KeyEventKind, KeyboardEnhancementFlags,
+        PopKeyboardEnhancementFlags, PushKeyboardEnhancementFlags,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
@@ -82,18 +74,8 @@ mod tests;
 
 use crate::{
     base::{
-        AsyncProgramStore,
-        ChatStore,
-        HomeserverAction,
-        IambAction,
-        IambError,
-        IambId,
-        IambInfo,
-        IambResult,
-        KeysAction,
-        ProgramAction,
-        ProgramContext,
-        ProgramStore,
+        AsyncProgramStore, ChatStore, HomeserverAction, IambAction, IambError, IambId, IambInfo,
+        IambResult, KeysAction, ProgramAction, ProgramContext, ProgramStore,
     },
     config::{ApplicationSettings, Iamb},
     windows::IambWindow,
@@ -102,19 +84,8 @@ use crate::{
 
 use modalkit::{
     actions::{
-        Action,
-        Commandable,
-        Editable,
-        EditorAction,
-        InsertTextAction,
-        Jumpable,
-        Promptable,
-        Scrollable,
-        TabAction,
-        TabContainer,
-        TabCount,
-        WindowAction,
-        WindowContainer,
+        Action, Commandable, Editable, EditorAction, InsertTextAction, Jumpable, Promptable,
+        Scrollable, TabAction, TabContainer, TabCount, WindowAction, WindowContainer,
     },
     editing::{context::Resolve, key::KeyManager, store::Store},
     errors::{EditError, UIError},
@@ -131,9 +102,7 @@ use modalkit_ratatui::{
     cmdbar::CommandBarState,
     screen::{Screen, ScreenState, TabLayoutDescription},
     windows::WindowLayoutDescription,
-    TerminalCursor,
-    TerminalExtOps,
-    Window,
+    TerminalCursor, TerminalExtOps, Window,
 };
 
 fn config_tab_to_desc(
@@ -667,8 +636,8 @@ impl Application {
                         continue;
                     },
                     Err(
-                        UIError::NeedConfirm(dialog) |
-                        UIError::EditingFailure(EditError::NeedConfirm(dialog)),
+                        UIError::NeedConfirm(dialog)
+                        | UIError::EditingFailure(EditError::NeedConfirm(dialog)),
                     ) => {
                         self.bindings.run_dialog(dialog);
                         continue;

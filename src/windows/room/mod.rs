@@ -6,11 +6,9 @@ use matrix_sdk::{
             room::{name::RoomNameEventContent, topic::RoomTopicEventContent},
             tag::{TagInfo, Tags},
         },
-        OwnedEventId,
-        RoomId,
+        OwnedEventId, RoomId,
     },
-    DisplayName,
-    RoomState as MatrixRoomState,
+    DisplayName, RoomState as MatrixRoomState,
 };
 
 use ratatui::{
@@ -22,13 +20,7 @@ use ratatui::{
 };
 
 use modalkit::actions::{
-    Action,
-    Editable,
-    EditorAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
+    Action, Editable, EditorAction, Jumpable, PromptAction, Promptable, Scrollable,
 };
 use modalkit::errors::{EditResult, UIError};
 use modalkit::prelude::*;
@@ -36,18 +28,8 @@ use modalkit::{editing::completion::CompletionList, keybindings::dialog::PromptY
 use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
 
 use crate::base::{
-    IambAction,
-    IambError,
-    IambId,
-    IambInfo,
-    IambResult,
-    MessageAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomAction,
-    RoomField,
-    SendAction,
+    IambAction, IambError, IambId, IambInfo, IambResult, MessageAction, ProgramAction,
+    ProgramContext, ProgramStore, RoomAction, RoomField, SendAction,
 };
 
 use self::chat::ChatState;

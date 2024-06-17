@@ -4,14 +4,7 @@ use std::path::PathBuf;
 use matrix_sdk::ruma::{
     event_id,
     events::room::message::{OriginalRoomMessageEvent, RoomMessageEventContent},
-    server_name,
-    user_id,
-    EventId,
-    OwnedEventId,
-    OwnedRoomId,
-    OwnedUserId,
-    RoomId,
-    UInt,
+    server_name, user_id, EventId, OwnedEventId, OwnedRoomId, OwnedUserId, RoomId, UInt,
 };
 
 use lazy_static::lazy_static;
@@ -23,23 +16,12 @@ use url::Url;
 use crate::{
     base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
     config::{
-        user_color,
-        user_style_from_color,
-        ApplicationSettings,
-        DirectoryValues,
-        Notifications,
-        NotifyVia,
-        ProfileConfig,
-        SortOverrides,
-        TunableValues,
-        UserColor,
-        UserDisplayStyle,
+        user_color, user_style_from_color, ApplicationSettings, DirectoryValues, Notifications,
+        NotifyVia, ProfileConfig, SortOverrides, TunableValues, UserColor, UserDisplayStyle,
         UserDisplayTunables,
     },
     message::{
-        Message,
-        MessageEvent,
-        MessageKey,
+        Message, MessageEvent, MessageKey,
         MessageTimeStamp::{LocalEcho, OriginServer},
         Messages,
     },
@@ -179,10 +161,13 @@ pub fn mock_tunables() -> TunableValues {
         sort: SortOverrides::default().values(),
         typing_notice_send: true,
         typing_notice_display: true,
-        users: vec![(TEST_USER5.clone(), UserDisplayTunables {
-            color: Some(UserColor(Color::Black)),
-            name: Some("USER 5".into()),
-        })]
+        users: vec![(
+            TEST_USER5.clone(),
+            UserDisplayTunables {
+                color: Some(UserColor(Color::Black)),
+                name: Some("USER 5".into()),
+            },
+        )]
         .into_iter()
         .collect::<HashMap<_, _>>(),
         open_command: None,

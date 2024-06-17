@@ -17,9 +17,7 @@ use ratatui::{
 
 use modalkit_ratatui::{
     list::{List, ListState},
-    TermOffset,
-    TerminalCursor,
-    WindowOps,
+    TermOffset, TerminalCursor, WindowOps,
 };
 
 use crate::base::{IambBufferId, IambInfo, ProgramStore, RoomFocus};

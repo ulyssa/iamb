@@ -20,9 +20,7 @@ use url::Url;
 use html5ever::{
     driver::{parse_fragment, ParseOpts},
     interface::{Attribute, QualName},
-    local_name,
-    namespace_url,
-    ns,
+    local_name, namespace_url, ns,
     tendril::{StrTendril, TendrilSink},
 };
 
@@ -288,13 +286,13 @@ impl StyleTreeNode {
                 urls.push((*c, url.clone()));
             },
 
-            StyleTreeNode::Blockquote(child) |
-            StyleTreeNode::Code(child, _) |
-            StyleTreeNode::Header(child, _) |
-            StyleTreeNode::Paragraph(child) |
-            StyleTreeNode::Pre(child) |
-            StyleTreeNode::Reply(child) |
-            StyleTreeNode::Style(child, _) => {
+            StyleTreeNode::Blockquote(child)
+            | StyleTreeNode::Code(child, _)
+            | StyleTreeNode::Header(child, _)
+            | StyleTreeNode::Paragraph(child)
+            | StyleTreeNode::Pre(child)
+            | StyleTreeNode::Reply(child)
+            | StyleTreeNode::Style(child, _) => {
                 child.gather_links(urls);
             },
 
@@ -822,89 +820,107 @@ pub mod tests {
         let s = "<h1>Header 1</h1>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("#", bold),
-            Span::styled(" ", bold),
-            Span::styled("Header", bold),
-            Span::styled(" ", bold),
-            Span::styled("1", bold),
-            space_span(10, Style::default())
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("#", bold),
+                Span::styled(" ", bold),
+                Span::styled("Header", bold),
+                Span::styled(" ", bold),
+                Span::styled("1", bold),
+                space_span(10, Style::default())
+            ])]
+        );
 
         let s = "<h2>Header 2</h2>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled(" ", bold),
-            Span::styled("Header", bold),
-            Span::styled(" ", bold),
-            Span::styled("2", bold),
-            space_span(9, Style::default())
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled(" ", bold),
+                Span::styled("Header", bold),
+                Span::styled(" ", bold),
+                Span::styled("2", bold),
+                space_span(9, Style::default())
+            ])]
+        );
 
         let s = "<h3>Header 3</h3>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled(" ", bold),
-            Span::styled("Header", bold),
-            Span::styled(" ", bold),
-            Span::styled("3", bold),
-            space_span(8, Style::default())
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled(" ", bold),
+                Span::styled("Header", bold),
+                Span::styled(" ", bold),
+                Span::styled("3", bold),
+                space_span(8, Style::default())
+            ])]
+        );
 
         let s = "<h4>Header 4</h4>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled(" ", bold),
-            Span::styled("Header", bold),
-            Span::styled(" ", bold),
-            Span::styled("4", bold),
-            space_span(7, Style::default())
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled(" ", bold),
+                Span::styled("Header", bold),
+                Span::styled(" ", bold),
+                Span::styled("4", bold),
+                space_span(7, Style::default())
+            ])]
+        );
 
         let s = "<h5>Header 5</h5>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled(" ", bold),
-            Span::styled("Header", bold),
-            Span::styled(" ", bold),
-            Span::styled("5", bold),
-            space_span(6, Style::default())
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled(" ", bold),
+                Span::styled("Header", bold),
+                Span::styled(" ", bold),
+                Span::styled("5", bold),
+                space_span(6, Style::default())
+            ])]
+        );
 
         let s = "<h6>Header 6</h6>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled("#", bold),
-            Span::styled(" ", bold),
-            Span::styled("Header", bold),
-            Span::styled(" ", bold),
-            Span::styled("6", bold),
-            space_span(5, Style::default())
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled("#", bold),
+                Span::styled(" ", bold),
+                Span::styled("Header", bold),
+                Span::styled(" ", bold),
+                Span::styled("6", bold),
+                space_span(5, Style::default())
+            ])]
+        );
     }
 
     #[test]
@@ -919,83 +935,110 @@ pub mod tests {
         let s = "<b>Bold!</b>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("Bold", bold),
-            Span::styled("!", bold),
-            space_span(15, def)
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("Bold", bold),
+                Span::styled("!", bold),
+                space_span(15, def)
+            ])]
+        );
 
         let s = "<strong>Bold!</strong>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("Bold", bold),
-            Span::styled("!", bold),
-            space_span(15, def)
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("Bold", bold),
+                Span::styled("!", bold),
+                space_span(15, def)
+            ])]
+        );
 
         let s = "<i>Italic!</i>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("Italic", italic),
-            Span::styled("!", italic),
-            space_span(13, def)
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("Italic", italic),
+                Span::styled("!", italic),
+                space_span(13, def)
+            ])]
+        );
 
         let s = "<em>Italic!</em>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("Italic", italic),
-            Span::styled("!", italic),
-            space_span(13, def)
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("Italic", italic),
+                Span::styled("!", italic),
+                space_span(13, def)
+            ])]
+        );
 
         let s = "<del>Strikethrough!</del>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("Strikethrough", strike),
-            Span::styled("!", strike),
-            space_span(6, def)
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("Strikethrough", strike),
+                Span::styled("!", strike),
+                space_span(6, def)
+            ])]
+        );
 
         let s = "<strike>Strikethrough!</strike>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("Strikethrough", strike),
-            Span::styled("!", strike),
-            space_span(6, def)
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("Strikethrough", strike),
+                Span::styled("!", strike),
+                space_span(6, def)
+            ])]
+        );
 
         let s = "<u>Underline!</u>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("Underline", underl),
-            Span::styled("!", underl),
-            space_span(10, def)
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("Underline", underl),
+                Span::styled("!", underl),
+                space_span(10, def)
+            ])]
+        );
 
         let s = "<font color=\"#ff0000\">Red!</u>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("Red", red),
-            Span::styled("!", red),
-            space_span(16, def)
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("Red", red),
+                Span::styled("!", red),
+                space_span(16, def)
+            ])]
+        );
 
         let s = "<font color=\"red\">Red!</u>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(20, Style::default(), false, false);
-        assert_eq!(text.lines, vec![Line::from(vec![
-            Span::styled("Red", red),
-            Span::styled("!", red),
-            space_span(16, def)
-        ])]);
+        assert_eq!(
+            text.lines,
+            vec![Line::from(vec![
+                Span::styled("Red", red),
+                Span::styled("!", red),
+                space_span(16, def)
+            ])]
+        );
     }
 
     #[test]
@@ -1183,83 +1226,101 @@ pub mod tests {
 
         // Table header
         assert_eq!(text.lines[0].spans, vec![Span::raw("┌────┬────┬───┐")]);
-        assert_eq!(text.lines[1].spans, vec![
-            Span::raw("│"),
-            Span::styled("Colu", bold),
-            Span::raw("│"),
-            Span::styled("Colu", bold),
-            Span::raw("│"),
-            Span::styled("Col", bold),
-            Span::raw("│")
-        ]);
-        assert_eq!(text.lines[2].spans, vec![
-            Span::raw("│"),
-            Span::styled("mn", bold),
-            Span::styled(" ", bold),
-            Span::styled("1", bold),
-            Span::raw("│"),
-            Span::styled("mn", bold),
-            Span::styled(" ", bold),
-            Span::styled("2", bold),
-            Span::raw("│"),
-            Span::styled("umn", bold),
-            Span::raw("│")
-        ]);
-        assert_eq!(text.lines[3].spans, vec![
-            Span::raw("│"),
-            Span::raw("    "),
-            Span::raw("│"),
-            Span::raw("    "),
-            Span::raw("│"),
-            Span::styled("3", bold),
-            Span::styled("  ", bold),
-            Span::raw("│")
-        ]);
+        assert_eq!(
+            text.lines[1].spans,
+            vec![
+                Span::raw("│"),
+                Span::styled("Colu", bold),
+                Span::raw("│"),
+                Span::styled("Colu", bold),
+                Span::raw("│"),
+                Span::styled("Col", bold),
+                Span::raw("│")
+            ]
+        );
+        assert_eq!(
+            text.lines[2].spans,
+            vec![
+                Span::raw("│"),
+                Span::styled("mn", bold),
+                Span::styled(" ", bold),
+                Span::styled("1", bold),
+                Span::raw("│"),
+                Span::styled("mn", bold),
+                Span::styled(" ", bold),
+                Span::styled("2", bold),
+                Span::raw("│"),
+                Span::styled("umn", bold),
+                Span::raw("│")
+            ]
+        );
+        assert_eq!(
+            text.lines[3].spans,
+            vec![
+                Span::raw("│"),
+                Span::raw("    "),
+                Span::raw("│"),
+                Span::raw("    "),
+                Span::raw("│"),
+                Span::styled("3", bold),
+                Span::styled("  ", bold),
+                Span::raw("│")
+            ]
+        );
 
         // First row
         assert_eq!(text.lines[4].spans, vec![Span::raw("├────┼────┼───┤")]);
-        assert_eq!(text.lines[5].spans, vec![
-            Span::raw("│"),
-            Span::raw("a"),
-            Span::raw("   "),
-            Span::raw("│"),
-            Span::raw("b"),
-            Span::raw("   "),
-            Span::raw("│"),
-            Span::raw("c"),
-            Span::raw("  "),
-            Span::raw("│")
-        ]);
+        assert_eq!(
+            text.lines[5].spans,
+            vec![
+                Span::raw("│"),
+                Span::raw("a"),
+                Span::raw("   "),
+                Span::raw("│"),
+                Span::raw("b"),
+                Span::raw("   "),
+                Span::raw("│"),
+                Span::raw("c"),
+                Span::raw("  "),
+                Span::raw("│")
+            ]
+        );
 
         // Second row
         assert_eq!(text.lines[6].spans, vec![Span::raw("├────┼────┼───┤")]);
-        assert_eq!(text.lines[7].spans, vec![
-            Span::raw("│"),
-            Span::raw("a"),
-            Span::raw("   "),
-            Span::raw("│"),
-            Span::raw("b"),
-            Span::raw("   "),
-            Span::raw("│"),
-            Span::raw("c"),
-            Span::raw("  "),
-            Span::raw("│")
-        ]);
+        assert_eq!(
+            text.lines[7].spans,
+            vec![
+                Span::raw("│"),
+                Span::raw("a"),
+                Span::raw("   "),
+                Span::raw("│"),
+                Span::raw("b"),
+                Span::raw("   "),
+                Span::raw("│"),
+                Span::raw("c"),
+                Span::raw("  "),
+                Span::raw("│")
+            ]
+        );
 
         // Third row
         assert_eq!(text.lines[8].spans, vec![Span::raw("├────┼────┼───┤")]);
-        assert_eq!(text.lines[9].spans, vec![
-            Span::raw("│"),
-            Span::raw("a"),
-            Span::raw("   "),
-            Span::raw("│"),
-            Span::raw("b"),
-            Span::raw("   "),
-            Span::raw("│"),
-            Span::raw("c"),
-            Span::raw("  "),
-            Span::raw("│")
-        ]);
+        assert_eq!(
+            text.lines[9].spans,
+            vec![
+                Span::raw("│"),
+                Span::raw("a"),
+                Span::raw("   "),
+                Span::raw("│"),
+                Span::raw("b"),
+                Span::raw("   "),
+                Span::raw("│"),
+                Span::raw("c"),
+                Span::raw("  "),
+                Span::raw("│")
+            ]
+        );
 
         // Bottom ruler
         assert_eq!(text.lines[10].spans, vec![Span::raw("└────┴────┴───┘")]);
@@ -1441,16 +1502,22 @@ pub mod tests {
             let tree = parse_matrix_html(s.as_str());
             // Test with emojis_shortcodes set to false
             let text = tree.to_text(20, Style::default(), false, false);
-            assert_eq!(text.lines, vec![Line::from(vec![
-                Span::raw(emoji),
-                space_span(20 - emoji_width, Style::default()),
-            ]),]);
+            assert_eq!(
+                text.lines,
+                vec![Line::from(vec![
+                    Span::raw(emoji),
+                    space_span(20 - emoji_width, Style::default()),
+                ]),]
+            );
             // Test with emojis_shortcodes set to true
             let text = tree.to_text(20, Style::default(), false, true);
-            assert_eq!(text.lines, vec![Line::from(vec![
-                Span::raw(replacement.as_str()),
-                space_span(20 - replacement_width, Style::default()),
-            ])]);
+            assert_eq!(
+                text.lines,
+                vec![Line::from(vec![
+                    Span::raw(replacement.as_str()),
+                    space_span(20 - replacement_width, Style::default()),
+                ])]
+            );
         }
     }
 }

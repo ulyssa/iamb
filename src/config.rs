@@ -22,13 +22,7 @@ use url::Url;
 use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
 
 use super::base::{
-    IambError,
-    IambId,
-    RoomInfo,
-    SortColumn,
-    SortFieldRoom,
-    SortFieldUser,
-    SortOrder,
+    IambError, IambId, RoomInfo, SortColumn, SortFieldRoom, SortFieldUser, SortOrder,
 };
 
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
@@ -986,16 +980,22 @@ mod tests {
     #[test]
     fn test_merge_users() {
         let a = None;
-        let b = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Red)),
-            name: Some("Hello".into()),
-        })]
+        let b = vec![(
+            user_id!("@a:b.c").to_owned(),
+            UserDisplayTunables {
+                color: Some(UserColor(Color::Red)),
+                name: Some("Hello".into()),
+            },
+        )]
         .into_iter()
         .collect::<HashMap<_, _>>();
-        let c = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Green)),
-            name: Some("World".into()),
-        })]
+        let c = vec![(
+            user_id!("@a:b.c").to_owned(),
+            UserDisplayTunables {
+                color: Some(UserColor(Color::Green)),
+                name: Some("World".into()),
+            },
+        )]
         .into_iter()
         .collect::<HashMap<_, _>>();
 
@@ -1046,10 +1046,13 @@ mod tests {
         .unwrap();
         assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
-        let users = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Black)),
-            name: Some("Tim".into()),
-        })];
+        let users = vec![(
+            user_id!("@a:b.c").to_owned(),
+            UserDisplayTunables {
+                color: Some(UserColor(Color::Black)),
+                name: Some("Tim".into()),
+            },
+        )];
         assert_eq!(res.users, Some(users.into_iter().collect()));
     }
 
@@ -1091,14 +1094,20 @@ mod tests {
 
         // Check that we get the right default "rooms" and "dms" values.
         let res = res.values();
-        assert_eq!(res.sort.members, vec![
-            SortColumn(SortFieldUser::Server, SortOrder::Ascending),
-            SortColumn(SortFieldUser::LocalPart, SortOrder::Descending),
-        ]);
-        assert_eq!(res.sort.spaces, vec![
-            SortColumn(SortFieldRoom::Favorite, SortOrder::Descending),
-            SortColumn(SortFieldRoom::Alias, SortOrder::Ascending),
-        ]);
+        assert_eq!(
+            res.sort.members,
+            vec![
+                SortColumn(SortFieldUser::Server, SortOrder::Ascending),
+                SortColumn(SortFieldUser::LocalPart, SortOrder::Descending),
+            ]
+        );
+        assert_eq!(
+            res.sort.spaces,
+            vec![
+                SortColumn(SortFieldRoom::Favorite, SortOrder::Descending),
+                SortColumn(SortFieldRoom::Alias, SortOrder::Ascending),
+            ]
+        );
         assert_eq!(res.sort.rooms, Vec::from(DEFAULT_ROOM_SORT));
         assert_eq!(res.sort.dms, Vec::from(DEFAULT_ROOM_SORT));
     }
@@ -1121,9 +1130,12 @@ mod tests {
             "{\"style\": \"config\", \"tabs\": [{\"window\":\"@user:example.com\"}]}",
         )
         .unwrap();
-        assert_eq!(res, Layout::Config {
-            tabs: vec![WindowLayout::Window { window: user.clone() }]
-        });
+        assert_eq!(
+            res,
+            Layout::Config {
+                tabs: vec![WindowLayout::Window { window: user.clone() }]
+            }
+        );
 
         let res: Layout = serde_json::from_str(
             "{\
@@ -1150,9 +1162,10 @@ mod tests {
             ],
         };
         let split2 = WindowLayout::Split {
-            split: vec![WindowLayout::Window { window: dms }, WindowLayout::Window {
-                window: welcome,
-            }],
+            split: vec![
+                WindowLayout::Window { window: dms },
+                WindowLayout::Window { window: welcome },
+            ],
         };
         let split3 = WindowLayout::Split {
             split: vec![WindowLayout::Window { window: room }, split2],
