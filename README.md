@@ -39,6 +39,15 @@ Install Rust (1.70.0 or above) and Cargo, and then run:
 cargo install --locked iamb
 ```
 
+### Arch Linux
+
+On Arch Linux a [package](https://aur.archlinux.org/packages/iamb-git) is available in the
+Arch User Repositories (AUR). To install it simply run with your favorite AUR helper:
+
+```
+paru iamb-git
+```
+
 See [Configuration](#configuration) for getting a profile set up.
 
 ### FreeBSD
@@ -57,13 +66,18 @@ On NetBSD a package is available from the official repositories. To install it s
 pkgin install iamb
 ```
 
-### Arch Linux
+### MacOS
 
-On Arch Linux a [package](https://aur.archlinux.org/packages/iamb-git) is available in the
-Arch User Repositories (AUR). To install it simply run with your favorite AUR helper:
+On MacOS a [package](https://formulae.brew.sh/formula/iamb#default) is availabe in Homebrew's repository. To install it simply run:
 
 ```
-paru iamb-git
+brew install iamb
+```
+
+### Nix / NixOS (flake)
+
+```
+nix profile install "github:ulyssa/iamb"
 ```
 
 ### openSUSE Tumbleweed
@@ -72,12 +86,6 @@ On openSUSE Tumbleweed a [package](https://build.opensuse.org/package/show/openS
 
 ```
 zypper install iamb
-```
-
-### Nix / NixOS (flake)
-
-```
-nix profile install "github:ulyssa/iamb"
 ```
 
 ### Snap
