@@ -6,11 +6,9 @@ use matrix_sdk::{
             room::{name::RoomNameEventContent, topic::RoomTopicEventContent},
             tag::{TagInfo, Tags},
         },
-        OwnedEventId,
-        RoomId,
+        OwnedEventId, RoomId,
     },
-    DisplayName,
-    RoomState as MatrixRoomState,
+    DisplayName, RoomState as MatrixRoomState,
 };
 
 use ratatui::{
@@ -22,13 +20,7 @@ use ratatui::{
 };
 
 use modalkit::actions::{
-    Action,
-    Editable,
-    EditorAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
+    Action, Editable, EditorAction, Jumpable, PromptAction, Promptable, Scrollable,
 };
 use modalkit::errors::{EditResult, UIError};
 use modalkit::prelude::*;
@@ -36,18 +28,8 @@ use modalkit::{editing::completion::CompletionList, keybindings::dialog::PromptY
 use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
 
 use crate::base::{
-    IambAction,
-    IambError,
-    IambId,
-    IambInfo,
-    IambResult,
-    MessageAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomAction,
-    RoomField,
-    SendAction,
+    IambAction, IambError, IambId, IambInfo, IambResult, MessageAction, ProgramAction,
+    ProgramContext, ProgramStore, RoomAction, RoomField, SendAction,
 };
 
 use self::chat::ChatState;
@@ -280,6 +262,18 @@ impl RoomState {
                         let ev = RoomTopicEventContent::new(value);
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                     },
+                    RoomField::NotificicationMode(mode) => {
+                        store
+                            .application
+                            .worker
+                            .client
+                            .clone()
+                            .notification_settings()
+                            .await
+                            .set_room_notification_mode(self.id(), mode)
+                            .await
+                            .map_err(IambError::from)?;
+                    },
                 }
 
                 Ok(vec![])
@@ -302,6 +296,7 @@ impl RoomState {
                         let ev = RoomTopicEventContent::new("".into());
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                     },
+                    RoomField::NotificicationMode(_) => { /* Do Nothing? Set to default? */ },
                 }
 
                 Ok(vec![])
