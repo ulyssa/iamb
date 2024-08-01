@@ -66,9 +66,10 @@ On NetBSD a package is available from the official repositories. To install it s
 pkgin install iamb
 ```
 
-### MacOS
+### macOS
 
-On MacOS a [package](https://formulae.brew.sh/formula/iamb#default) is availabe in Homebrew's repository. To install it simply run:
+On macOS a [package](https://formulae.brew.sh/formula/iamb#default) is availabe in Homebrew's
+repository. To install it simply run:
 
 ```
 brew install iamb
