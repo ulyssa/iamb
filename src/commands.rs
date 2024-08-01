@@ -454,6 +454,42 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         ("tag", "unset", Some(s)) => RoomAction::Unset(RoomField::Tag(tag_name(s)?)).into(),
         ("tag", "unset", None) => return Result::Err(CommandError::InvalidArgument),
 
+        // :room aliases show
+        ("alias", "show", None) => RoomAction::Show(RoomField::Aliases).into(),
+        ("alias", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room aliases unset <alias>
+        ("alias", "unset", Some(s)) => RoomAction::Unset(RoomField::Alias(s)).into(),
+        ("alias", "unset", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room aliases set <alias>
+        ("alias", "set", Some(s)) => RoomAction::Set(RoomField::Alias(s), "".into()).into(),
+        ("alias", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room canonicalalias show
+        ("canonicalalias" | "canon", "show", None) => {
+            RoomAction::Show(RoomField::CanonicalAlias).into()
+        },
+        ("canonicalalias" | "canon", "show", Some(_)) => {
+            return Result::Err(CommandError::InvalidArgument)
+        },
+
+        // :room canonicalalias set
+        ("canonicalalias" | "canon", "set", Some(s)) => {
+            RoomAction::Set(RoomField::CanonicalAlias, s).into()
+        },
+        ("canonicalalias" | "canon", "set", None) => {
+            return Result::Err(CommandError::InvalidArgument)
+        },
+
+        // :room canonicalalias unset
+        ("canonicalalias" | "canon", "unset", None) => {
+            RoomAction::Unset(RoomField::CanonicalAlias).into()
+        },
+        ("canonicalalias" | "canon", "unset", Some(_)) => {
+            return Result::Err(CommandError::InvalidArgument)
+        },
+
         _ => return Result::Err(CommandError::InvalidArgument),
     };
 

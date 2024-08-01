@@ -1,12 +1,26 @@
 //! # Windows for Matrix rooms and spaces
+use std::collections::HashSet;
+
 use matrix_sdk::{
     room::Room as MatrixRoom,
     ruma::{
+        api::client::{
+            alias::{
+                create_alias::v3::Request as CreateAliasRequest,
+                delete_alias::v3::Request as DeleteAliasRequest,
+            },
+            error::ErrorKind as ClientApiErrorKind,
+        },
         events::{
-            room::{name::RoomNameEventContent, topic::RoomTopicEventContent},
+            room::{
+                canonical_alias::RoomCanonicalAliasEventContent,
+                name::RoomNameEventContent,
+                topic::RoomTopicEventContent,
+            },
             tag::{TagInfo, Tags},
         },
         OwnedEventId,
+        OwnedRoomAliasId,
         RoomId,
     },
     DisplayName,
@@ -52,6 +66,8 @@ use crate::base::{
 
 use self::chat::ChatState;
 use self::space::{Space, SpaceState};
+
+use std::convert::TryFrom;
 
 mod chat;
 mod scrollback;
@@ -182,7 +198,7 @@ impl RoomState {
     pub async fn room_command(
         &mut self,
         act: RoomAction,
-        _: ProgramContext,
+        ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         match act {
@@ -280,6 +296,87 @@ impl RoomState {
                         let ev = RoomTopicEventContent::new(value);
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                     },
+                    RoomField::CanonicalAlias => {
+                        let client = &mut store.application.worker.client;
+
+                        let Ok(orai) = OwnedRoomAliasId::try_from(value.as_str()) else {
+                            let err = IambError::InvalidRoomAlias(value);
+
+                            return Err(err.into());
+                        };
+
+                        let mut alt_aliases =
+                            room.alt_aliases().into_iter().collect::<HashSet<_>>();
+                        let canonical_old = room.canonical_alias();
+
+                        // If the room's alias is already that, ignore it
+                        if canonical_old.as_ref() == Some(&orai) {
+                            let msg = format!("The canonical room alias is already {orai}");
+
+                            return Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)]);
+                        }
+
+                        // Try creating the room alias on the server.
+                        let alias_create_req =
+                            CreateAliasRequest::new(orai.clone(), room.room_id().into());
+                        if let Err(e) = client.send(alias_create_req, None).await {
+                            if let Some(ClientApiErrorKind::Unknown) = e.client_api_error_kind() {
+                                // Ignore when it already exists.
+                            } else {
+                                return Err(IambError::from(e).into());
+                            }
+                        }
+
+                        // Demote the previous one to an alt alias.
+                        alt_aliases.extend(canonical_old);
+
+                        // At this point the room alias definitely exists, and we can update the
+                        // state event.
+                        let mut ev = RoomCanonicalAliasEventContent::new();
+                        ev.alias = Some(orai);
+                        ev.alt_aliases = alt_aliases.into_iter().collect();
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+                    },
+                    RoomField::Alias(alias) => {
+                        let client = &mut store.application.worker.client;
+
+                        let Ok(orai) = OwnedRoomAliasId::try_from(alias.as_str()) else {
+                            let err = IambError::InvalidRoomAlias(alias);
+
+                            return Err(err.into());
+                        };
+
+                        let mut alt_aliases =
+                            room.alt_aliases().into_iter().collect::<HashSet<_>>();
+                        let canonical = room.canonical_alias();
+
+                        if alt_aliases.contains(&orai) || canonical.as_ref() == Some(&orai) {
+                            let msg = format!("The alias {orai} already maps to this room");
+
+                            return Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)]);
+                        } else {
+                            alt_aliases.insert(orai.clone());
+                        }
+
+                        // If the room alias does not exist on the server, create it
+                        let alias_create_req = CreateAliasRequest::new(orai, room.room_id().into());
+                        if let Err(e) = client.send(alias_create_req, None).await {
+                            if let Some(ClientApiErrorKind::Unknown) = e.client_api_error_kind() {
+                                // Ignore when it already exists.
+                            } else {
+                                return Err(IambError::from(e).into());
+                            }
+                        }
+
+                        // And add it to the aliases in the state event.
+                        let mut ev = RoomCanonicalAliasEventContent::new();
+                        ev.alias = canonical;
+                        ev.alt_aliases = alt_aliases.into_iter().collect();
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+                    },
+                    RoomField::Aliases => {
+                        // This never happens, aliases is only used for showing
+                    },
                 }
 
                 Ok(vec![])
@@ -302,9 +399,119 @@ impl RoomState {
                         let ev = RoomTopicEventContent::new("".into());
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                     },
+                    RoomField::CanonicalAlias => {
+                        let Some(alias_to_destroy) = room.canonical_alias() else {
+                            let msg = format!("This room has no canonical alias to unset");
+
+                            return Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)]);
+                        };
+
+                        // Remove the canonical alias from the state event.
+                        let mut ev = RoomCanonicalAliasEventContent::new();
+                        ev.alias = None;
+                        ev.alt_aliases = room.alt_aliases();
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+
+                        // And then unmap it on the server.
+                        let del_req = DeleteAliasRequest::new(alias_to_destroy);
+                        let _ = store
+                            .application
+                            .worker
+                            .client
+                            .send(del_req, None)
+                            .await
+                            .map_err(IambError::from)?;
+                    },
+                    RoomField::Alias(alias) => {
+                        let Ok(orai) = OwnedRoomAliasId::try_from(alias.as_str()) else {
+                            let err = IambError::InvalidRoomAlias(alias);
+
+                            return Err(err.into());
+                        };
+
+                        let alt_aliases = room.alt_aliases();
+                        let canonical = room.canonical_alias();
+
+                        if !alt_aliases.contains(&orai) && canonical.as_ref() != Some(&orai) {
+                            let msg = format!("The alias {orai:?} isn't mapped to this room");
+
+                            return Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)]);
+                        }
+
+                        // Remove the alias from the state event if it's in it.
+                        let mut ev = RoomCanonicalAliasEventContent::new();
+                        ev.alias = canonical.filter(|canon| canon != &orai);
+                        ev.alt_aliases = alt_aliases;
+                        ev.alt_aliases.retain(|in_orai| in_orai != &orai);
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+
+                        // And then unmap it on the server.
+                        let del_req = DeleteAliasRequest::new(orai);
+                        let _ = store
+                            .application
+                            .worker
+                            .client
+                            .send(del_req, None)
+                            .await
+                            .map_err(IambError::from)?;
+                    },
+                    RoomField::Aliases => {
+                        // This will not happen, you cannot unset all aliases
+                    },
                 }
 
                 Ok(vec![])
+            },
+            RoomAction::Show(field) => {
+                let room = store
+                    .application
+                    .get_joined_room(self.id())
+                    .ok_or(UIError::Application(IambError::NotJoined))?;
+
+                let msg = match field {
+                    RoomField::Name => {
+                        match room.name() {
+                            None => "Room has no name".into(),
+                            Some(name) => format!("Room name: {name:?}"),
+                        }
+                    },
+                    RoomField::Topic => {
+                        match room.topic() {
+                            None => "Room has no topic".into(),
+                            Some(topic) => format!("Room topic: {topic:?}"),
+                        }
+                    },
+                    RoomField::Aliases => {
+                        let aliases = room
+                            .alt_aliases()
+                            .iter()
+                            .map(OwnedRoomAliasId::to_string)
+                            .collect::<Vec<String>>();
+
+                        if aliases.is_empty() {
+                            "No alternative aliases in room".into()
+                        } else {
+                            format!("Alternative aliases: {}.", aliases.join(", "))
+                        }
+                    },
+                    RoomField::CanonicalAlias => {
+                        match room.canonical_alias() {
+                            None => "No canonical alias for room".into(),
+                            Some(can) => format!("Canonical alias: {can}"),
+                        }
+                    },
+                    RoomField::Tag(_) => {
+                        format!("Cannot currently show value for a tag")
+                    },
+                    RoomField::Alias(_) => {
+                        format!("Cannot show a single alias; use `:room aliases show` instead.")
+                    },
+                };
+
+                let msg = InfoMessage::Pager(msg);
+                let act = Action::ShowInfoMessage(msg);
+
+                Ok(vec![(act, ctx)])
             },
         }
     }
