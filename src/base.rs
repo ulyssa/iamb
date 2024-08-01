@@ -608,6 +608,10 @@ pub enum IambError {
     #[error("Invalid user identifier: {0}")]
     InvalidUserId(String),
 
+    /// An invalid user identifier was specified.
+    #[error("Invalid room alias: {0}")]
+    InvalidRoomAlias(String),
+
     /// An invalid verification identifier was specified.
     #[error("Invalid verification user/device pair: {0}")]
     InvalidVerificationId(String),
