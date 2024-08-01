@@ -1087,7 +1087,6 @@ impl Display for DirectItem {
     }
 }
 
-
 impl ListItem<IambInfo> for DirectItem {
     fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
         let unread = self.unread.is_unread();
