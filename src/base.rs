@@ -1350,9 +1350,7 @@ impl ChatStore {
 
     /// Get a joined room.
     pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
-        let Some(room) = self.worker.client.get_room(room_id) else {
-            return None;
-        };
+        let room = self.worker.client.get_room(room_id)?;
 
         if room.state() == MatrixRoomState::Joined {
             Some(room)

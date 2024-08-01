@@ -82,7 +82,6 @@ fn send_notification_desktop(summary: String, body: Option<String>) {
     desktop_notification
         .summary(&summary)
         .appname("iamb")
-        .timeout(notify_rust::Timeout::Milliseconds(3000))
         .action("default", "default");
 
     if let Some(body) = body {

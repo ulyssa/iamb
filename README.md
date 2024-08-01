@@ -11,7 +11,6 @@
 
 </div>
 
-
 ## About
 
 `iamb` is a Matrix client for the terminal that uses Vim keybindings. It includes support for:
@@ -40,7 +39,24 @@ Install Rust (1.70.0 or above) and Cargo, and then run:
 cargo install --locked iamb
 ```
 
+### Arch Linux
+
+On Arch Linux a [package](https://aur.archlinux.org/packages/iamb-git) is available in the
+Arch User Repositories (AUR). To install it simply run with your favorite AUR helper:
+
+```
+paru iamb-git
+```
+
 See [Configuration](#configuration) for getting a profile set up.
+
+### FreeBSD
+
+On FreeBSD a package is available from the official repositories. To install it simply run:
+
+```
+pkg install iamb
+```
 
 ### NetBSD
 
@@ -50,26 +66,27 @@ On NetBSD a package is available from the official repositories. To install it s
 pkgin install iamb
 ```
 
-### Arch Linux
+### macOS
 
-On Arch Linux a [package](https://aur.archlinux.org/packages/iamb-git) is available in the
-Arch User Repositories (AUR). To install it simply run with your favorite AUR helper:
-
-```
-paru iamb-git
-```
-### openSUSE Tumbleweed
-
-On openSUSE Tumbleweed a [package](https://build.opensuse.org/package/show/home%3Asmolsheep/iamb) is available from openSUSE Build Service (OBS). To install just use OBS Package Installer:
+On macOS a [package](https://formulae.brew.sh/formula/iamb#default) is availabe in Homebrew's
+repository. To install it simply run:
 
 ```
-opi iamb
+brew install iamb
 ```
 
 ### Nix / NixOS (flake)
 
 ```
 nix profile install "github:ulyssa/iamb"
+```
+
+### openSUSE Tumbleweed
+
+On openSUSE Tumbleweed a [package](https://build.opensuse.org/package/show/openSUSE:Factory/iamb) is available from the official repositories. To install it simply run:
+
+```
+zypper install iamb
 ```
 
 ### Snap
