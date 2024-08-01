@@ -14,7 +14,7 @@ use matrix_sdk::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    base::{AsyncProgramStore, IambError, IambResult},
+    base::{AsyncProgramStore, IambError, IambResult, ProgramStore},
     config::{ApplicationSettings, NotifyVia},
 };
 
@@ -44,7 +44,7 @@ pub async fn register_notifications(
                     return;
                 }
 
-                if is_open(&store, room.room_id()).await {
+                if is_visible_room(&store, room.room_id()).await {
                     return;
                 }
 
@@ -82,7 +82,6 @@ fn send_notification_desktop(summary: String, body: Option<String>) {
     desktop_notification
         .summary(&summary)
         .appname("iamb")
-        .timeout(notify_rust::Timeout::Milliseconds(3000))
         .action("default", "default");
 
     if let Some(body) = body {
@@ -128,8 +127,7 @@ fn is_missing_mention(body: &Option<String>, mode: RoomNotificationMode, client:
     false
 }
 
-async fn is_open(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
-    let mut locked = store.lock().await;
+fn is_open(locked: &mut ProgramStore, room_id: &RoomId) -> bool {
     if let Some(draw_curr) = locked.application.draw_curr {
         let info = locked.application.get_room_info(room_id.to_owned());
         if let Some(draw_last) = info.draw_last {
@@ -137,6 +135,16 @@ async fn is_open(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
         }
     }
     false
+}
+
+fn is_focused(locked: &ProgramStore) -> bool {
+    locked.application.focused
+}
+
+async fn is_visible_room(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
+    let mut locked = store.lock().await;
+
+    is_focused(&locked) && is_open(&mut locked, room_id)
 }
 
 pub async fn parse_notification(

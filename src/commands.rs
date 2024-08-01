@@ -551,6 +551,9 @@ fn iamb_open(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let args = desc.arg.strings()?;
 
+    if args.is_empty() {
+        return Result::Err(CommandError::Error("Missing username".to_string()));
+    }
     if args.len() != 1 {
         return Result::Err(CommandError::InvalidArgument);
     }

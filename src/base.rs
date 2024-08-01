@@ -1339,6 +1339,9 @@ pub struct ChatStore {
 
     /// Whether to ring the terminal bell on the next redraw.
     pub ring_bell: bool,
+
+    /// Whether the application is currently focused
+    pub focused: bool,
 }
 
 impl ChatStore {
@@ -1361,14 +1364,13 @@ impl ChatStore {
             sync_info: Default::default(),
             draw_curr: None,
             ring_bell: false,
+            focused: true,
         }
     }
 
     /// Get a joined room.
     pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
-        let Some(room) = self.worker.client.get_room(room_id) else {
-            return None;
-        };
+        let room = self.worker.client.get_room(room_id)?;
 
         if room.state() == MatrixRoomState::Joined {
             Some(room)
