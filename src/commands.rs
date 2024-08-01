@@ -4,7 +4,10 @@
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
 use std::convert::TryFrom;
 
-use matrix_sdk::ruma::{events::tag::TagName, OwnedUserId};
+use matrix_sdk::{
+    notification_settings::RoomNotificationMode,
+    ruma::{events::tag::TagName, OwnedUserId},
+};
 
 use modalkit::{
     commands::{CommandError, CommandResult, CommandStep},
@@ -13,19 +16,8 @@ use modalkit::{
 };
 
 use crate::base::{
-    CreateRoomFlags,
-    CreateRoomType,
-    DownloadFlags,
-    HomeserverAction,
-    IambAction,
-    IambId,
-    KeysAction,
-    MessageAction,
-    ProgramCommand,
-    ProgramCommands,
-    RoomAction,
-    RoomField,
-    SendAction,
+    CreateRoomFlags, CreateRoomType, DownloadFlags, HomeserverAction, IambAction, IambId,
+    KeysAction, MessageAction, ProgramCommand, ProgramCommands, RoomAction, RoomField, SendAction,
     VerifyAction,
 };
 
@@ -34,7 +26,7 @@ type ProgResult = CommandResult<ProgramCommand>;
 
 /// Convert strings the user types into a tag name.
 fn tag_name(name: String) -> Result<TagName, CommandError> {
-    let tag = match name.as_str() {
+    let tag = match name.to_lowercase().as_str() {
         "fav" | "favorite" | "favourite" | "m.favourite" => TagName::Favorite,
         "low" | "lowpriority" | "low_priority" | "low-priority" | "m.lowpriority" => {
             TagName::LowPriority
@@ -54,6 +46,24 @@ fn tag_name(name: String) -> Result<TagName, CommandError> {
     };
 
     Ok(tag)
+}
+
+fn notification_mode(name: String) -> Result<RoomNotificationMode, CommandError> {
+    let mode = match name.to_lowercase().as_str() {
+        "0" | "mute" | "ignore" | "none" => RoomNotificationMode::Mute,
+        "1"
+        | "mentions"
+        | "keywords"
+        | "mentions_and_keywords_only"
+        | "mentions-and-keywords-only" => RoomNotificationMode::MentionsAndKeywordsOnly,
+        "2" | "all" | "any" | "all_messages" | "all-messages" => RoomNotificationMode::AllMessages,
+        _ => {
+            let msg = format!("Invalid user tag name: {name}");
+            return Err(CommandError::Error(msg));
+        },
+    };
+
+    Ok(mode)
 }
 
 fn iamb_invite(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
@@ -368,28 +378,24 @@ fn iamb_create(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     for arg in args {
         match arg {
-            OptionType::Flag(name, Some(arg)) => {
-                match name.as_str() {
-                    "alias" => {
-                        if alias.is_some() {
-                            let msg = "Multiple ++alias arguments are not allowed";
-                            let err = CommandError::Error(msg.into());
+            OptionType::Flag(name, Some(arg)) => match name.as_str() {
+                "alias" => {
+                    if alias.is_some() {
+                        let msg = "Multiple ++alias arguments are not allowed";
+                        let err = CommandError::Error(msg.into());
 
-                            return Err(err);
-                        } else {
-                            alias = Some(arg);
-                        }
-                    },
-                    _ => return Err(CommandError::InvalidArgument),
-                }
+                        return Err(err);
+                    } else {
+                        alias = Some(arg);
+                    }
+                },
+                _ => return Err(CommandError::InvalidArgument),
             },
-            OptionType::Flag(name, None) => {
-                match name.as_str() {
-                    "public" => flags |= CreateRoomFlags::PUBLIC,
-                    "space" => ct = CreateRoomType::Space,
-                    "enc" | "encrypted" => flags |= CreateRoomFlags::ENCRYPTED,
-                    _ => return Err(CommandError::InvalidArgument),
-                }
+            OptionType::Flag(name, None) => match name.as_str() {
+                "public" => flags |= CreateRoomFlags::PUBLIC,
+                "space" => ct = CreateRoomType::Space,
+                "enc" | "encrypted" => flags |= CreateRoomFlags::ENCRYPTED,
+                _ => return Err(CommandError::InvalidArgument),
             },
             OptionType::Positional(_) => {
                 let msg = ":create doesn't take any positional arguments";
@@ -449,6 +455,12 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         // :room tag set <tag-name>
         ("tag", "set", Some(s)) => RoomAction::Set(RoomField::Tag(tag_name(s)?), "".into()).into(),
         ("tag", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room notification set <notification-level>
+        ("notification", "set", Some(s)) => {
+            RoomAction::Set(RoomField::NotificicationMode(notification_mode(s)?), "".into()).into()
+        },
+        ("notification", "set", None) => return Result::Err(CommandError::InvalidArgument),
 
         // :room tag unset <tag-name>
         ("tag", "unset", Some(s)) => RoomAction::Unset(RoomField::Tag(tag_name(s)?)).into(),
@@ -958,6 +970,47 @@ mod tests {
             res,
             Err(CommandError::Error("Invalid user tag name: needs-leading-u-dot".into()))
         );
+    }
+    #[test]
+    fn test_cmd_room_notification_mode_set() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        for mute_str in ["0", "mute", "ignore", "none"] {
+            let cmd = format!("room notification set {mute_str}");
+            let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+            let act = RoomAction::Set(
+                RoomField::NotificicationMode(RoomNotificationMode::Mute),
+                "".into(),
+            );
+            assert_eq!(res, vec![(act.into(), ctx.clone())]);
+        }
+
+        for mention_str in [
+            "1",
+            "mentions",
+            "keywords",
+            "mentions_and_keywords_only",
+            "mentions-and-keywords-only",
+        ] {
+            let cmd = format!("room notification set {mention_str}");
+            let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+            let act = RoomAction::Set(
+                RoomField::NotificicationMode(RoomNotificationMode::MentionsAndKeywordsOnly),
+                "".into(),
+            );
+            assert_eq!(res, vec![(act.into(), ctx.clone())]);
+        }
+
+        for all_str in ["2", "all", "any", "all_messages", "all-messages"] {
+            let cmd = format!("room notification set {all_str}");
+            let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+            let act = RoomAction::Set(
+                RoomField::NotificicationMode(RoomNotificationMode::AllMessages),
+                "".into(),
+            );
+            assert_eq!(res, vec![(act.into(), ctx.clone())]);
+        }
     }
 
     #[test]
