@@ -27,11 +27,14 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
+#[cfg(feature = "sled-export")]
 use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
 use modalkit::keybindings::InputBindings;
+#[cfg(feature = "sled-export")]
 use rand::{distributions::Alphanumeric, Rng};
+#[cfg(feature = "sled-export")]
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing_subscriber::FmtSubscriber;
@@ -72,10 +75,12 @@ mod keybindings;
 mod message;
 mod notifications;
 mod preview;
-mod sled_export;
 mod util;
 mod windows;
 mod worker;
+
+#[cfg(feature = "sled-export")]
+mod sled_export;
 
 #[cfg(test)]
 mod tests;
@@ -709,6 +714,7 @@ impl Application {
     }
 }
 
+#[cfg(feature = "sled-export")]
 fn gen_passphrase() -> String {
     rand::thread_rng()
         .sample_iter(&Alphanumeric)
@@ -724,6 +730,7 @@ fn read_response(question: &str) -> String {
     input
 }
 
+#[cfg(feature = "sled-export")]
 fn read_yesno(question: &str) -> Option<char> {
     read_response(question).chars().next().map(|c| c.to_ascii_lowercase())
 }
@@ -736,7 +743,13 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
         return Ok(());
     }
 
-    if settings.session_json_old.is_file() && !settings.sled_dir.is_dir() {
+    #[cfg(not(feature = "sled-export"))]
+    let check_old_session = settings.session_json_old.is_file();
+
+    #[cfg(feature = "sled-export")]
+    let check_old_session = settings.session_json_old.is_file() && !settings.sled_dir.is_dir();
+
+    if check_old_session {
         let session = settings.read_session(&settings.session_json_old)?;
         worker.login(LoginStyle::SessionRestore(session.into()))?;
 
@@ -786,6 +799,7 @@ fn print_exit<T: Display, N>(v: T) -> N {
 
 // We can't access the OlmMachine directly, so write the keys to a temporary
 // file first, and then import them later.
+#[cfg(feature = "sled-export")]
 async fn check_import_keys(
     settings: &ApplicationSettings,
 ) -> IambResult<Option<(temp_dir::TempDir, String)>> {
@@ -836,6 +850,7 @@ async fn check_import_keys(
     Ok(Some((tmpdir, passphrase)))
 }
 
+#[cfg(feature = "sled-export")]
 async fn login_upgrade(
     keydir: TempDir,
     passphrase: String,
@@ -969,6 +984,7 @@ fn restore_tty(enable_enhanced_keys: bool) {
 
 async fn run(settings: ApplicationSettings) -> IambResult<()> {
     // Get old keys the first time we run w/ the upgraded SDK.
+    #[cfg(feature = "sled-export")]
     let import_keys = check_import_keys(&settings).await?;
 
     // Set up client state.
@@ -982,11 +998,15 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     let store = Arc::new(AsyncMutex::new(store));
     worker.init(store.clone());
 
+    #[cfg(feature = "sled-export")]
     let res = if let Some((keydir, pass)) = import_keys {
         login_upgrade(keydir, pass, &worker, &settings, &store).await
     } else {
         login_normal(&worker, &settings, &store).await
     };
+
+    #[cfg(not(feature = "sled-export"))]
+    let res = login_normal(&worker, &settings, &store).await;
 
     match res {
         Err(UIError::Application(IambError::Matrix(e))) => {
