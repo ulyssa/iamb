@@ -401,7 +401,7 @@ impl RoomState {
                     },
                     RoomField::CanonicalAlias => {
                         let Some(alias_to_destroy) = room.canonical_alias() else {
-                            let msg = format!("This room has no canonical alias to unset");
+                            let msg = "This room has no canonical alias to unset";
 
                             return Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)]);
                         };
@@ -500,11 +500,9 @@ impl RoomState {
                             Some(can) => format!("Canonical alias: {can}"),
                         }
                     },
-                    RoomField::Tag(_) => {
-                        format!("Cannot currently show value for a tag")
-                    },
+                    RoomField::Tag(_) => "Cannot currently show value for a tag".into(),
                     RoomField::Alias(_) => {
-                        format!("Cannot show a single alias; use `:room aliases show` instead.")
+                        "Cannot show a single alias; use `:room aliases show` instead.".into()
                     },
                 };
 

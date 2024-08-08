@@ -228,7 +228,9 @@ pub fn event_notification_body(
                 MessageType::VerificationRequest(_) => {
                     format!("{sender_name} sent a verification request.")
                 },
-                _ => unimplemented!(),
+                _ => {
+                    format!("[Unknown message type: {:?}]", &message.msgtype)
+                },
             };
             Some(body)
         },
