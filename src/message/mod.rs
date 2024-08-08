@@ -10,7 +10,6 @@ use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 
 use chrono::{DateTime, Local as LocalTz, NaiveDateTime, TimeZone};
-use comrak::{markdown_to_html, ComrakOptions};
 use humansize::{format_size, DECIMAL};
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
@@ -33,7 +32,6 @@ use matrix_sdk::ruma::{
                 Relation,
                 RoomMessageEvent,
                 RoomMessageEventContent,
-                TextMessageEventContent,
             },
             redaction::SyncRoomRedactionEvent,
         },
@@ -66,8 +64,11 @@ use crate::{
     util::{replace_emojis_in_str, space, space_span, take_width, wrapped_text},
 };
 
+mod compose;
 mod html;
 mod printer;
+
+pub use self::compose::text_to_message;
 
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 
@@ -128,22 +129,6 @@ const MIN_MSG_LEN: usize = 30;
 
 const TIME_GUTTER_EMPTY: &str = "            ";
 const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
-
-fn text_to_message_content(input: String) -> TextMessageEventContent {
-    let mut options = ComrakOptions::default();
-    options.extension.autolink = true;
-    options.extension.shortcodes = true;
-    options.extension.strikethrough = true;
-    options.render.hardbreaks = true;
-    let html = markdown_to_html(input.as_str(), &options);
-
-    TextMessageEventContent::html(input, html)
-}
-
-pub fn text_to_message(input: String) -> RoomMessageEventContent {
-    let msg = MessageType::Text(text_to_message_content(input));
-    RoomMessageEventContent::new(msg)
-}
 
 /// Before the image is loaded, already display a placeholder frame of the image size.
 fn placeholder_frame(
@@ -553,7 +538,18 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
             display_file_to_text!(Video, content);
         },
         _ => {
-            return Cow::Owned(format!("[Unknown message type: {:?}]", content.msgtype()));
+            match content.msgtype() {
+                // Just show the body text for the special Element messages.
+                "nic.custom.confetti" |
+                "nic.custom.fireworks" |
+                "io.element.effect.hearts" |
+                "io.element.effect.rainfall" |
+                "io.element.effect.snowfall" |
+                "io.element.effects.space_invaders" => content.body(),
+                other => {
+                    return Cow::Owned(format!("[Unknown message type: {other:?}]"));
+                },
+            }
         },
     };
 
@@ -1272,82 +1268,6 @@ pub mod tests {
 
         // MessageCursor::latest() should point at the most recent message after conversion.
         assert_eq!(identity(&mc6), mc1);
-    }
-
-    #[test]
-    fn test_markdown_autolink() {
-        let input = "http://example.com\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(
-            content.formatted.unwrap().body,
-            "<p><a href=\"http://example.com\">http://example.com</a></p>\n"
-        );
-
-        let input = "www.example.com\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(
-            content.formatted.unwrap().body,
-            "<p><a href=\"http://www.example.com\">www.example.com</a></p>\n"
-        );
-
-        let input = "See docs (they're at https://iamb.chat)\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(
-            content.formatted.unwrap().body,
-            "<p>See docs (they're at <a href=\"https://iamb.chat\">https://iamb.chat</a>)</p>\n"
-        );
-    }
-
-    #[test]
-    fn test_markdown_message() {
-        let input = "**bold**\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p><strong>bold</strong></p>\n");
-
-        let input = "*emphasis*\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p><em>emphasis</em></p>\n");
-
-        let input = "`code`\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p><code>code</code></p>\n");
-
-        let input = "```rust\nconst A: usize = 1;\n```\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(
-            content.formatted.unwrap().body,
-            "<pre><code class=\"language-rust\">const A: usize = 1;\n</code></pre>\n"
-        );
-
-        let input = ":heart:\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p>\u{2764}\u{FE0F}</p>\n");
-
-        let input = "para 1\n\npara 2\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p>para 1</p>\n<p>para 2</p>\n");
-
-        let input = "line 1\nline 2\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p>line 1<br />\nline 2</p>\n");
-
-        let input = "# Heading\n## Subheading\n\ntext\n";
-        let content = text_to_message_content(input.into());
-        assert_eq!(content.body, input);
-        assert_eq!(
-            content.formatted.unwrap().body,
-            "<h1>Heading</h1>\n<h2>Subheading</h2>\n<p>text</p>\n"
-        );
     }
 
     #[test]

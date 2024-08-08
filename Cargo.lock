@@ -2093,6 +2093,7 @@ dependencies = [
 name = "iamb"
 version = "0.0.10-alpha.1"
 dependencies = [
+ "anyhow",
  "bitflags 2.5.0",
  "chrono",
  "clap",
@@ -2114,6 +2115,7 @@ dependencies = [
  "mime_guess",
  "modalkit",
  "modalkit-ratatui",
+ "nom",
  "notify-rust",
  "open",
  "pretty_assertions",

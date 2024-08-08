@@ -26,6 +26,7 @@ default-features = false
 features = ["build", "git", "gitcl",]
 
 [dependencies]
+anyhow = "1.0"
 bitflags = "^2.3"
 chrono = "0.4"
 clap = {version = "~4.3", features = ["derive"]}
@@ -41,6 +42,7 @@ libc = "0.2"
 markup5ever_rcdom = "0.2.0"
 mime = "^0.3.16"
 mime_guess = "^2.0.4"
+nom = "7.0.0"
 notify-rust = { version = "4.10.0", default-features = false, features = ["zbus", "serde"] }
 open = "3.2.0"
 rand = "0.8.5"
