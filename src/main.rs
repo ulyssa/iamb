@@ -129,8 +129,8 @@ use modalkit::{
 
 use modalkit_ratatui::{
     cmdbar::CommandBarState,
-    screen::{Screen, ScreenState, TabLayoutDescription},
-    windows::WindowLayoutDescription,
+    screen::{Screen, ScreenState, TabbedLayoutDescription},
+    windows::{WindowLayoutDescription, WindowLayoutState},
     TerminalCursor,
     TerminalExtOps,
     Window,
@@ -176,6 +176,17 @@ fn config_tab_to_desc(
     Ok(desc)
 }
 
+fn restore_layout(
+    area: Rect,
+    settings: &ApplicationSettings,
+    store: &mut ProgramStore,
+) -> IambResult<FocusList<WindowLayoutState<IambWindow, IambInfo>>> {
+    let layout = std::fs::read(&settings.layout_json)?;
+    let tabs: TabbedLayoutDescription<IambInfo> =
+        serde_json::from_slice(&layout).map_err(IambError::from)?;
+    tabs.to_layout(area.into(), store)
+}
+
 fn setup_screen(
     settings: ApplicationSettings,
     store: &mut ProgramStore,
@@ -186,12 +197,14 @@ fn setup_screen(
 
     match settings.layout {
         config::Layout::Restore => {
-            if let Ok(layout) = std::fs::read(&settings.layout_json) {
-                let tabs: TabLayoutDescription<IambInfo> =
-                    serde_json::from_slice(&layout).map_err(IambError::from)?;
-                let tabs = tabs.to_layout(area.into(), store)?;
-
-                return Ok(ScreenState::from_list(tabs, cmd));
+            match restore_layout(area, &settings, store) {
+                Ok(tabs) => {
+                    return Ok(ScreenState::from_list(tabs, cmd));
+                },
+                Err(e) => {
+                    // Log the issue with restoring and then continue.
+                    tracing::warn!(err = %e, "Failed to restore layout from disk");
+                },
             }
         },
         config::Layout::New => {},
@@ -242,7 +255,7 @@ struct Application {
     focused: bool,
 
     /// The tab layout before the last executed [TabAction].
-    last_layout: Option<TabLayoutDescription<IambInfo>>,
+    last_layout: Option<TabbedLayoutDescription<IambInfo>>,
 
     /// Whether we need to do a full redraw (e.g., after running a subprocess).
     dirty: bool,
@@ -479,7 +492,7 @@ impl Application {
                 None
             },
             Action::Command(act) => {
-                let acts = store.application.cmds.command(&act, &ctx)?;
+                let acts = store.application.cmds.command(&act, &ctx, &mut store.registers)?;
                 self.action_prepend(acts);
 
                 None

@@ -66,14 +66,14 @@ edit = "0.1.4"
 humansize = "2.0.0"
 
 [dependencies.modalkit]
-version = "0.0.19"
+version = "0.0.20"
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "cb8c8aeb9a499b9b16615ce144f9014d78036e01"
+#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.19"
+version = "0.0.20"
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "cb8c8aeb9a499b9b16615ce144f9014d78036e01"
+#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
 
 [dependencies.matrix-sdk]
 version = "0.7.1"
