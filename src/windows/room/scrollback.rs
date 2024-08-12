@@ -673,8 +673,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let dir = ctx.get_search_regex_dir();
                         let dir = flip.resolve(&dir);
 
-                        let lsearch = store.registers.get(&Register::LastSearch)?;
-                        let lsearch = lsearch.value.to_string();
+                        let lsearch = store.registers.get_last_search().to_string();
                         let needle = Regex::new(lsearch.as_ref())?;
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
@@ -753,8 +752,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let dir = ctx.get_search_regex_dir();
                         let dir = flip.resolve(&dir);
 
-                        let lsearch = store.registers.get(&Register::LastSearch)?;
-                        let lsearch = lsearch.value.to_string();
+                        let lsearch = store.registers.get_last_search().to_string();
                         let needle = Regex::new(lsearch.as_ref())?;
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
@@ -1452,7 +1450,7 @@ mod tests {
         // MSG4: "help"
         // MSG5: "character"
         // MSG1: "writhe"
-        store.set_last_search("he");
+        store.registers.set_last_search("he");
 
         assert_eq!(scrollback.cursor, MessageCursor::latest());
 

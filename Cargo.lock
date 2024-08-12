@@ -2470,7 +2470,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0c2a198fb6b0eada2a8df47933734e6d35d350665a33a3593d7164fa52c75c19"
 dependencies = [
  "cfg-if",
- "windows-targets 0.48.5",
+ "windows-targets 0.52.5",
 ]
 
 [[package]]
@@ -2964,9 +2964,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.19"
+version = "0.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6820ebd6a3dbb8006e67a0300cf247e09764758b6ae0ea865ed716fe0265392b"
+checksum = "24f070af2372cc39349d6415c9a2ae050e1e9dc71dddc9a7a036babe7ad2b192"
 dependencies = [
  "anymap2",
  "arboard",
@@ -2986,9 +2986,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit-ratatui"
-version = "0.0.19"
+version = "0.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ac33423f5f8d3d1ac82b322734e129750b0b710b076b16a018917d8c2b1c8a80"
+checksum = "df272b6822a22154034a9761ea10235746fefec7623dc1a6ed0cfbaad6f5d070"
 dependencies = [
  "crossterm",
  "intervaltree",
