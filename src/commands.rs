@@ -221,24 +221,17 @@ fn iamb_edit(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 }
 
 fn iamb_react(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    let args = desc.arg.strings()?;
+    let mut args = desc.arg.strings()?;
 
     if args.len() != 1 {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let k = args[0].as_str();
+    let react = args.remove(0);
+    let mact = IambAction::from(MessageAction::React(react, desc.bang));
+    let step = CommandStep::Continue(mact.into(), ctx.context.clone());
 
-    if let Some(emoji) = emojis::get(k).or_else(|| emojis::get_by_shortcode(k)) {
-        let mact = IambAction::from(MessageAction::React(emoji.to_string()));
-        let step = CommandStep::Continue(mact.into(), ctx.context.clone());
-
-        return Ok(step);
-    } else {
-        let msg = format!("Invalid Emoji or shortcode: {k}");
-
-        return Result::Err(CommandError::Error(msg));
-    }
+    return Ok(step);
 }
 
 fn iamb_unreact(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
@@ -248,20 +241,8 @@ fn iamb_unreact(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let mact = if let Some(k) = args.pop() {
-        let k = k.as_str();
-
-        if let Some(emoji) = emojis::get(k).or_else(|| emojis::get_by_shortcode(k)) {
-            IambAction::from(MessageAction::Unreact(Some(emoji.to_string())))
-        } else {
-            let msg = format!("Invalid Emoji or shortcode: {k}");
-
-            return Result::Err(CommandError::Error(msg));
-        }
-    } else {
-        IambAction::from(MessageAction::Unreact(None))
-    };
-
+    let reaction = args.pop();
+    let mact = IambAction::from(MessageAction::Unreact(reaction, desc.bang));
     let step = CommandStep::Continue(mact.into(), ctx.context.clone());
 
     return Ok(step);
