@@ -152,7 +152,11 @@ pub enum MessageAction {
     Edit,
 
     /// React to a message with an Emoji.
-    React(String),
+    ///
+    /// `:react` will by default try to convert the [String] argument to an Emoji, and error when
+    /// it doesn't recognize it. The second [bool] argument forces it to be interpreted literally
+    /// when it is `true`.
+    React(String, bool),
 
     /// Redact a message, with an optional reason.
     ///
@@ -166,7 +170,11 @@ pub enum MessageAction {
     ///
     /// If no specific Emoji to remove to is specified, then all reactions from the user on the
     /// message are removed.
-    Unreact(Option<String>),
+    ///
+    /// Like `:react`, `:unreact` will by default try to convert the [String] argument to an Emoji,
+    /// and error when it doesn't recognize it. The second [bool] argument forces it to be
+    /// interpreted literally when it is `true`.
+    Unreact(Option<String>, bool),
 }
 
 /// The type of room being created.

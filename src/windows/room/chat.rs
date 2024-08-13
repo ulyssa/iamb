@@ -358,7 +358,22 @@ impl ChatState {
 
                 Ok(None)
             },
-            MessageAction::React(emoji) => {
+            MessageAction::React(reaction, literal) => {
+                let emoji = if literal {
+                    reaction
+                } else if let Some(emoji) =
+                    emojis::get(&reaction).or_else(|| emojis::get_by_shortcode(&reaction))
+                {
+                    emoji.to_string()
+                } else {
+                    let msg = format!("{reaction:?} is not a known Emoji shortcode; do you want to react with exactly {reaction:?}?");
+                    let act = IambAction::Message(MessageAction::React(reaction, true));
+                    let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
+                    let prompt = Box::new(prompt);
+
+                    return Err(UIError::NeedConfirm(prompt));
+                };
+
                 let room = self.get_joined(&store.application.worker)?;
                 let event_id = match &msg.event {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
@@ -422,7 +437,27 @@ impl ChatState {
 
                 Ok(None)
             },
-            MessageAction::Unreact(emoji) => {
+            MessageAction::Unreact(reaction, literal) => {
+                let emoji = match reaction {
+                    reaction if literal => reaction,
+                    Some(reaction) => {
+                        if let Some(emoji) =
+                            emojis::get(&reaction).or_else(|| emojis::get_by_shortcode(&reaction))
+                        {
+                            Some(emoji.to_string())
+                        } else {
+                            let msg = format!("{reaction:?} is not a known Emoji shortcode; do you want to remove exactly {reaction:?}?");
+                            let act =
+                                IambAction::Message(MessageAction::Unreact(Some(reaction), true));
+                            let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
+                            let prompt = Box::new(prompt);
+
+                            return Err(UIError::NeedConfirm(prompt));
+                        }
+                    },
+                    None => None,
+                };
+
                 let room = self.get_joined(&store.application.worker)?;
                 let event_id = match &msg.event {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
