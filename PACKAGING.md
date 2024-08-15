@@ -28,6 +28,7 @@ and GCC are present.
 In addition to the compiled binary, there are other files in the repo that
 you'll want to install as part of a package:
 
+<!-- Please keep in sync w/ the `deb`/`generate-rpm` sections of `Cargo.toml` -->
 | Repository Path         | Installed Path (may vary per OS)                |
 | ----------------------- | ----------------------------------------------- |
 | /iamb.desktop           | /usr/share/applications/iamb.desktop            |
