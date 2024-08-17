@@ -512,6 +512,20 @@ impl RoomState {
                             Some(topic) => format!("Room topic: {topic:?}"),
                         }
                     },
+                    RoomField::NotificationMode => {
+                        let client = &store.application.worker.client;
+                        let notifications = client.notification_settings().await;
+                        let mode = notifications.get_user_defined_room_notification_mode(self.id()).await;
+
+                        let level = match mode {
+                            Some(RoomNotificationMode::Mute) => "mute",
+                            Some(RoomNotificationMode::MentionsAndKeywordsOnly) => "keywords",
+                            Some(RoomNotificationMode::AllMessages) => "all",
+                            None => "default",
+                        };
+
+                        format!("Room notification level: {level:?}")
+                    },
                     RoomField::Aliases => {
                         let aliases = room
                             .alt_aliases()

@@ -439,6 +439,10 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         ("notification", "unset", None) => RoomAction::Unset(RoomField::NotificationMode).into(),
         ("notification", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
+        // :room notification show
+        ("notification", "show", None) => RoomAction::Show(RoomField::NotificationMode).into(),
+        ("notification", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
         // :room tag unset <tag-name>
         ("tag", "unset", Some(s)) => RoomAction::Unset(RoomField::Tag(tag_name(s)?)).into(),
         ("tag", "unset", None) => return Result::Err(CommandError::InvalidArgument),
