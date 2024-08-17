@@ -16,8 +16,19 @@ use modalkit::{
 };
 
 use crate::base::{
-    CreateRoomFlags, CreateRoomType, DownloadFlags, HomeserverAction, IambAction, IambId,
-    KeysAction, MessageAction, ProgramCommand, ProgramCommands, RoomAction, RoomField, SendAction,
+    CreateRoomFlags,
+    CreateRoomType,
+    DownloadFlags,
+    HomeserverAction,
+    IambAction,
+    IambId,
+    KeysAction,
+    MessageAction,
+    ProgramCommand,
+    ProgramCommands,
+    RoomAction,
+    RoomField,
+    SendAction,
     VerifyAction,
 };
 
@@ -51,11 +62,11 @@ fn tag_name(name: String) -> Result<TagName, CommandError> {
 fn notification_mode(name: String) -> Result<RoomNotificationMode, CommandError> {
     let mode = match name.to_lowercase().as_str() {
         "0" | "mute" | "ignore" | "none" => RoomNotificationMode::Mute,
-        "1"
-        | "mentions"
-        | "keywords"
-        | "mentions_and_keywords_only"
-        | "mentions-and-keywords-only" => RoomNotificationMode::MentionsAndKeywordsOnly,
+        "1" |
+        "mentions" |
+        "keywords" |
+        "mentions_and_keywords_only" |
+        "mentions-and-keywords-only" => RoomNotificationMode::MentionsAndKeywordsOnly,
         "2" | "all" | "any" | "all_messages" | "all-messages" => RoomNotificationMode::AllMessages,
         _ => {
             let msg = format!("Invalid user tag name: {name}");
@@ -378,24 +389,28 @@ fn iamb_create(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     for arg in args {
         match arg {
-            OptionType::Flag(name, Some(arg)) => match name.as_str() {
-                "alias" => {
-                    if alias.is_some() {
-                        let msg = "Multiple ++alias arguments are not allowed";
-                        let err = CommandError::Error(msg.into());
+            OptionType::Flag(name, Some(arg)) => {
+                match name.as_str() {
+                    "alias" => {
+                        if alias.is_some() {
+                            let msg = "Multiple ++alias arguments are not allowed";
+                            let err = CommandError::Error(msg.into());
 
-                        return Err(err);
-                    } else {
-                        alias = Some(arg);
-                    }
-                },
-                _ => return Err(CommandError::InvalidArgument),
+                            return Err(err);
+                        } else {
+                            alias = Some(arg);
+                        }
+                    },
+                    _ => return Err(CommandError::InvalidArgument),
+                }
             },
-            OptionType::Flag(name, None) => match name.as_str() {
-                "public" => flags |= CreateRoomFlags::PUBLIC,
-                "space" => ct = CreateRoomType::Space,
-                "enc" | "encrypted" => flags |= CreateRoomFlags::ENCRYPTED,
-                _ => return Err(CommandError::InvalidArgument),
+            OptionType::Flag(name, None) => {
+                match name.as_str() {
+                    "public" => flags |= CreateRoomFlags::PUBLIC,
+                    "space" => ct = CreateRoomType::Space,
+                    "enc" | "encrypted" => flags |= CreateRoomFlags::ENCRYPTED,
+                    _ => return Err(CommandError::InvalidArgument),
+                }
             },
             OptionType::Positional(_) => {
                 let msg = ":create doesn't take any positional arguments";
