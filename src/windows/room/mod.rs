@@ -515,7 +515,8 @@ impl RoomState {
                     RoomField::NotificationMode => {
                         let client = &store.application.worker.client;
                         let notifications = client.notification_settings().await;
-                        let mode = notifications.get_user_defined_room_notification_mode(self.id()).await;
+                        let mode =
+                            notifications.get_user_defined_room_notification_mode(self.id()).await;
 
                         let level = match mode {
                             Some(RoomNotificationMode::Mute) => "mute",

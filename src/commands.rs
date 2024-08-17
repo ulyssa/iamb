@@ -431,17 +431,17 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         ("tag", "set", Some(s)) => RoomAction::Set(RoomField::Tag(tag_name(s)?), "".into()).into(),
         ("tag", "set", None) => return Result::Err(CommandError::InvalidArgument),
 
-        // :room notification set <notification-level>
-        ("notification", "set", Some(s)) => RoomAction::Set(RoomField::NotificationMode, s).into(),
-        ("notification", "set", None) => return Result::Err(CommandError::InvalidArgument),
+        // :room notify set <notification-level>
+        ("notify", "set", Some(s)) => RoomAction::Set(RoomField::NotificationMode, s).into(),
+        ("notify", "set", None) => return Result::Err(CommandError::InvalidArgument),
 
-        // :room notification unset <notification-level>
-        ("notification", "unset", None) => RoomAction::Unset(RoomField::NotificationMode).into(),
-        ("notification", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+        // :room notify unset <notification-level>
+        ("notify", "unset", None) => RoomAction::Unset(RoomField::NotificationMode).into(),
+        ("notify", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
-        // :room notification show
-        ("notification", "show", None) => RoomAction::Show(RoomField::NotificationMode).into(),
-        ("notification", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+        // :room notify show
+        ("notify", "show", None) => RoomAction::Show(RoomField::NotificationMode).into(),
+        ("notify", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
         // :room tag unset <tag-name>
         ("tag", "unset", Some(s)) => RoomAction::Unset(RoomField::Tag(tag_name(s)?)).into(),
