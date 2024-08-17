@@ -988,46 +988,26 @@ mod tests {
             Err(CommandError::Error("Invalid user tag name: needs-leading-u-dot".into()))
         );
     }
+
     #[test]
     fn test_cmd_room_notification_mode_set() {
         let mut cmds = setup_commands();
         let ctx = EditContext::default();
 
-        for mute_str in ["0", "mute", "ignore", "none"] {
-            let cmd = format!("room notification set {mute_str}");
-            let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
-            let act = RoomAction::Set(
-                RoomField::NotificicationMode(RoomNotificationMode::Mute),
-                "".into(),
-            );
-            assert_eq!(res, vec![(act.into(), ctx.clone())]);
-        }
+        let cmd = format!("room notify set mute");
+        let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::NotificationMode, "mute".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
-        for mention_str in [
-            "1",
-            "mentions",
-            "keywords",
-            "mentions_and_keywords_only",
-            "mentions-and-keywords-only",
-        ] {
-            let cmd = format!("room notification set {mention_str}");
-            let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
-            let act = RoomAction::Set(
-                RoomField::NotificicationMode(RoomNotificationMode::MentionsAndKeywordsOnly),
-                "".into(),
-            );
-            assert_eq!(res, vec![(act.into(), ctx.clone())]);
-        }
+        let cmd = format!("room notify unset");
+        let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::NotificationMode);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
-        for all_str in ["2", "all", "any", "all_messages", "all-messages"] {
-            let cmd = format!("room notification set {all_str}");
-            let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
-            let act = RoomAction::Set(
-                RoomField::NotificicationMode(RoomNotificationMode::AllMessages),
-                "".into(),
-            );
-            assert_eq!(res, vec![(act.into(), ctx.clone())]);
-        }
+        let cmd = format!("room notify show");
+        let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+        let act = RoomAction::Show(RoomField::NotificationMode);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
     }
 
     #[test]

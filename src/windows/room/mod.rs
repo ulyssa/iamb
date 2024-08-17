@@ -83,7 +83,9 @@ macro_rules! delegate {
     };
 }
 
-fn notification_mode(name: String) -> IambResult<RoomNotificationMode> {
+fn notification_mode(name: impl Into<String>) -> IambResult<RoomNotificationMode> {
+    let name = name.into();
+
     let mode = match name.to_lowercase().as_str() {
         "mute" => RoomNotificationMode::Mute,
         "mentions" | "keywords" => RoomNotificationMode::MentionsAndKeywordsOnly,
@@ -721,5 +723,29 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::Chat(chat) => chat.get_selected_word(),
             RoomState::Space(space) => space.get_selected_word(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_room_notification_level() {
+        let tests = vec![
+            ("mute", RoomNotificationMode::Mute),
+            ("mentions", RoomNotificationMode::MentionsAndKeywordsOnly),
+            ("keywords", RoomNotificationMode::MentionsAndKeywordsOnly),
+            ("all", RoomNotificationMode::AllMessages),
+        ];
+
+        for (input, expect) in tests {
+            let res = notification_mode(input).unwrap();
+            assert_eq!(expect, res);
+        }
+
+        assert!(notification_mode("invalid").is_err());
+        assert!(notification_mode("not a level").is_err());
+        assert!(notification_mode("@user:example.com").is_err());
     }
 }
