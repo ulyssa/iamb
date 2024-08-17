@@ -53,8 +53,12 @@ impl SlashCommand {
     fn to_message(&self, input: &str) -> anyhow::Result<MessageType> {
         let msgtype = match self {
             SlashCommand::Emote => {
-                let html = text_to_html(input);
-                let msg = EmoteMessageEventContent::html(input, html);
+                let msg = if let Some(html) = text_to_html(input) {
+                    EmoteMessageEventContent::html(input, html)
+                } else {
+                    EmoteMessageEventContent::plain(input)
+                };
+
                 MessageType::Emote(msg)
             },
             SlashCommand::Html => {
@@ -66,8 +70,7 @@ impl SlashCommand {
                 MessageType::Text(msg)
             },
             SlashCommand::Markdown => {
-                let html = text_to_html(input);
-                let msg = TextMessageEventContent::html(input, html);
+                let msg = text_to_message_content(input.to_string());
                 MessageType::Text(msg)
             },
             SlashCommand::Confetti => {
@@ -128,18 +131,43 @@ fn parse_slash_command(input: &str) -> anyhow::Result<(&str, SlashCommand)> {
     }
 }
 
-fn text_to_html(input: &str) -> String {
+/// Check whether this character is not used for markup in Markdown.
+///
+/// Markdown uses just about every ASCII punctuation symbol in some way, especially
+/// once autolinking is involved, so we really just check whether it's non-punctuation or
+/// single/double quotations.
+fn not_markdown_char(c: char) -> bool {
+    if !c.is_ascii_punctuation() {
+        return true;
+    }
+
+    matches!(c, '"' | '\'')
+}
+
+/// Check whether the input actually needs to be processed as Markdown.
+fn not_markdown(input: &str) -> bool {
+    input.chars().all(not_markdown_char)
+}
+
+fn text_to_html(input: &str) -> Option<String> {
+    if not_markdown(input) {
+        return None;
+    }
+
     let mut options = ComrakOptions::default();
     options.extension.autolink = true;
     options.extension.shortcodes = true;
     options.extension.strikethrough = true;
     options.render.hardbreaks = true;
-    markdown_to_html(input, &options)
+    markdown_to_html(input, &options).into()
 }
 
 fn text_to_message_content(input: String) -> TextMessageEventContent {
-    let html = text_to_html(input.as_str());
-    TextMessageEventContent::html(input, html)
+    if let Some(html) = text_to_html(input.as_str()) {
+        TextMessageEventContent::html(input, html)
+    } else {
+        TextMessageEventContent::plain(input)
+    }
 }
 
 pub fn text_to_message(input: String) -> RoomMessageEventContent {
@@ -211,15 +239,18 @@ pub mod tests {
         assert_eq!(content.body, input);
         assert_eq!(content.formatted.unwrap().body, "<p>\u{2764}\u{FE0F}</p>\n");
 
-        let input = "para 1\n\npara 2\n";
+        let input = "para *1*\n\npara _2_\n";
         let content = text_to_message_content(input.into());
         assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p>para 1</p>\n<p>para 2</p>\n");
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p>para <em>1</em></p>\n<p>para <em>2</em></p>\n"
+        );
 
-        let input = "line 1\nline 2\n";
+        let input = "line 1\nline ~~2~~\n";
         let content = text_to_message_content(input.into());
         assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p>line 1<br />\nline 2</p>\n");
+        assert_eq!(content.formatted.unwrap().body, "<p>line 1<br />\nline <del>2</del></p>\n");
 
         let input = "# Heading\n## Subheading\n\ntext\n";
         let content = text_to_message_content(input.into());
@@ -228,6 +259,61 @@ pub mod tests {
             content.formatted.unwrap().body,
             "<h1>Heading</h1>\n<h2>Subheading</h2>\n<p>text</p>\n"
         );
+    }
+
+    #[test]
+    fn test_markdown_headers() {
+        let input = "hello\n=====\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(content.formatted.unwrap().body, "<h1>hello</h1>\n");
+
+        let input = "hello\n-----\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(content.formatted.unwrap().body, "<h2>hello</h2>\n");
+    }
+
+    #[test]
+    fn test_markdown_lists() {
+        let input = "- A\n- B\n- C\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<ul>\n<li>A</li>\n<li>B</li>\n<li>C</li>\n</ul>\n"
+        );
+
+        let input = "1) A\n2) B\n3) C\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<ol>\n<li>A</li>\n<li>B</li>\n<li>C</li>\n</ol>\n"
+        );
+    }
+
+    #[test]
+    fn test_no_markdown_conversion_on_simple_text() {
+        let input = "para 1\n\npara 2\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert!(content.formatted.is_none());
+
+        let input = "line 1\nline 2\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert!(content.formatted.is_none());
+
+        let input = "isn't markdown\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert!(content.formatted.is_none());
+
+        let input = "\"scare quotes\"\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert!(content.formatted.is_none());
     }
 
     #[test]
