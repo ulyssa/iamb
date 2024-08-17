@@ -378,6 +378,9 @@ pub enum RoomField {
     /// The room topic.
     Topic,
 
+    /// Notification level.
+    NotificationMode,
+
     /// The room's entire list of alternative aliases.
     Aliases,
 
@@ -612,6 +615,10 @@ pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
+    /// An invalid notification level was specified.
+    #[error("Invalid notification level: {0}")]
+    InvalidNotificationLevel(String),
+
     /// An invalid user identifier was specified.
     #[error("Invalid user identifier: {0}")]
     InvalidUserId(String),
@@ -690,6 +697,9 @@ pub enum IambError {
     /// A failure occurred during verification.
     #[error("Verification request error: {0}")]
     VerificationRequestError(#[from] matrix_sdk::encryption::identities::RequestVerificationError),
+
+    #[error("Notification setting error: {0}")]
+    NotificationSettingError(#[from] matrix_sdk::NotificationSettingsError),
 
     /// A failure related to images.
     #[error("Image error: {0}")]

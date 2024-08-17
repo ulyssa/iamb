@@ -2,6 +2,7 @@
 use std::collections::HashSet;
 
 use matrix_sdk::{
+    notification_settings::RoomNotificationMode,
     room::Room as MatrixRoom,
     ruma::{
         api::client::{
@@ -80,6 +81,19 @@ macro_rules! delegate {
             RoomState::Space($id) => $e,
         }
     };
+}
+
+fn notification_mode(name: impl Into<String>) -> IambResult<RoomNotificationMode> {
+    let name = name.into();
+
+    let mode = match name.to_lowercase().as_str() {
+        "mute" => RoomNotificationMode::Mute,
+        "mentions" | "keywords" => RoomNotificationMode::MentionsAndKeywordsOnly,
+        "all" => RoomNotificationMode::AllMessages,
+        _ => return Err(IambError::InvalidNotificationLevel(name).into()),
+    };
+
+    Ok(mode)
 }
 
 /// State for a Matrix room or space.
@@ -296,6 +310,16 @@ impl RoomState {
                         let ev = RoomTopicEventContent::new(value);
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                     },
+                    RoomField::NotificationMode => {
+                        let mode = notification_mode(value)?;
+                        let client = &store.application.worker.client;
+                        let notifications = client.notification_settings().await;
+
+                        notifications
+                            .set_room_notification_mode(self.id(), mode)
+                            .await
+                            .map_err(IambError::from)?;
+                    },
                     RoomField::CanonicalAlias => {
                         let client = &mut store.application.worker.client;
 
@@ -399,6 +423,15 @@ impl RoomState {
                         let ev = RoomTopicEventContent::new("".into());
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                     },
+                    RoomField::NotificationMode => {
+                        let client = &store.application.worker.client;
+                        let notifications = client.notification_settings().await;
+
+                        notifications
+                            .delete_user_defined_room_rules(self.id())
+                            .await
+                            .map_err(IambError::from)?;
+                    },
                     RoomField::CanonicalAlias => {
                         let Some(alias_to_destroy) = room.canonical_alias() else {
                             let msg = "This room has no canonical alias to unset";
@@ -480,6 +513,21 @@ impl RoomState {
                             None => "Room has no topic".into(),
                             Some(topic) => format!("Room topic: {topic:?}"),
                         }
+                    },
+                    RoomField::NotificationMode => {
+                        let client = &store.application.worker.client;
+                        let notifications = client.notification_settings().await;
+                        let mode =
+                            notifications.get_user_defined_room_notification_mode(self.id()).await;
+
+                        let level = match mode {
+                            Some(RoomNotificationMode::Mute) => "mute",
+                            Some(RoomNotificationMode::MentionsAndKeywordsOnly) => "keywords",
+                            Some(RoomNotificationMode::AllMessages) => "all",
+                            None => "default",
+                        };
+
+                        format!("Room notification level: {level:?}")
                     },
                     RoomField::Aliases => {
                         let aliases = room
@@ -675,5 +723,29 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::Chat(chat) => chat.get_selected_word(),
             RoomState::Space(space) => space.get_selected_word(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_room_notification_level() {
+        let tests = vec![
+            ("mute", RoomNotificationMode::Mute),
+            ("mentions", RoomNotificationMode::MentionsAndKeywordsOnly),
+            ("keywords", RoomNotificationMode::MentionsAndKeywordsOnly),
+            ("all", RoomNotificationMode::AllMessages),
+        ];
+
+        for (input, expect) in tests {
+            let res = notification_mode(input).unwrap();
+            assert_eq!(expect, res);
+        }
+
+        assert!(notification_mode("invalid").is_err());
+        assert!(notification_mode("not a level").is_err());
+        assert!(notification_mode("@user:example.com").is_err());
     }
 }

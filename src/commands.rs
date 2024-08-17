@@ -34,7 +34,7 @@ type ProgResult = CommandResult<ProgramCommand>;
 
 /// Convert strings the user types into a tag name.
 fn tag_name(name: String) -> Result<TagName, CommandError> {
-    let tag = match name.as_str() {
+    let tag = match name.to_lowercase().as_str() {
         "fav" | "favorite" | "favourite" | "m.favourite" => TagName::Favorite,
         "low" | "lowpriority" | "low_priority" | "low-priority" | "m.lowpriority" => {
             TagName::LowPriority
@@ -430,6 +430,18 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         // :room tag set <tag-name>
         ("tag", "set", Some(s)) => RoomAction::Set(RoomField::Tag(tag_name(s)?), "".into()).into(),
         ("tag", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room notify set <notification-level>
+        ("notify", "set", Some(s)) => RoomAction::Set(RoomField::NotificationMode, s).into(),
+        ("notify", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room notify unset <notification-level>
+        ("notify", "unset", None) => RoomAction::Unset(RoomField::NotificationMode).into(),
+        ("notify", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room notify show
+        ("notify", "show", None) => RoomAction::Show(RoomField::NotificationMode).into(),
+        ("notify", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
         // :room tag unset <tag-name>
         ("tag", "unset", Some(s)) => RoomAction::Unset(RoomField::Tag(tag_name(s)?)).into(),
@@ -975,6 +987,27 @@ mod tests {
             res,
             Err(CommandError::Error("Invalid user tag name: needs-leading-u-dot".into()))
         );
+    }
+
+    #[test]
+    fn test_cmd_room_notification_mode_set() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let cmd = format!("room notify set mute");
+        let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+        let act = RoomAction::Set(RoomField::NotificationMode, "mute".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let cmd = format!("room notify unset");
+        let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+        let act = RoomAction::Unset(RoomField::NotificationMode);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let cmd = format!("room notify show");
+        let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+        let act = RoomAction::Show(RoomField::NotificationMode);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
     }
 
     #[test]

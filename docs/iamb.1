@@ -122,6 +122,25 @@ View a list of members of the currently focused room.
 Set the name of the currently focused room.
 .It Sy ":room name unset"
 Unset the name of the currently focused room.
+.It Sy ":room notify set [level]"
+Set a notification level for the currently focused room.
+Valid levels are
+.Dq mute ,
+.Dq mentions ,
+.Dq keywords ,
+and
+.Dq all .
+Note that
+.Dq mentions
+and
+.Dq keywords
+are aliases for the same behaviour.
+.It Sy ":room notify unset"
+Unset any room-level notification configuration.
+.It Sy ":room notify show"
+Show the current room-level notification configuration.
+If the room is using the account-level default, then this will print
+.Dq default .
 .It Sy ":room tag set [tag]"
 Add a tag to the currently focused room.
 .It Sy ":room tag unset [tag]"
