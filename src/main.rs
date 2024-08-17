@@ -916,31 +916,6 @@ async fn login_normal(
     Ok(())
 }
 
-struct EnableModifyOtherKeys;
-struct DisableModifyOtherKeys;
-
-impl crossterm::Command for EnableModifyOtherKeys {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        write!(f, "\x1B[>4;2m")
-    }
-
-    #[cfg(windows)]
-    fn execute_winapi(&self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl crossterm::Command for DisableModifyOtherKeys {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        write!(f, "\x1B[>4;0m")
-    }
-
-    #[cfg(windows)]
-    fn execute_winapi(&self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 /// Set up the terminal for drawing the TUI, and getting additional info.
 fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
     let title = format!("iamb ({})", title);
@@ -955,8 +930,6 @@ fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
             stdout(),
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
         )?;
-    } else {
-        crossterm::queue!(stdout(), EnableModifyOtherKeys)?;
     }
 
     crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
@@ -970,7 +943,6 @@ fn restore_tty(enable_enhanced_keys: bool) {
 
     let _ = crossterm::execute!(
         stdout(),
-        DisableModifyOtherKeys,
         DisableBracketedPaste,
         DisableFocusChange,
         LeaveAlternateScreen,
