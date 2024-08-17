@@ -18,6 +18,11 @@ use crate::{
     config::{ApplicationSettings, NotifyVia},
 };
 
+const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
+    None => "iamb",
+    Some(iamb) => iamb,
+};
+
 pub async fn register_notifications(
     client: &Client,
     settings: &ApplicationSettings,
@@ -59,6 +64,7 @@ pub async fn register_notifications(
                         }
 
                         match notify_via {
+                            #[cfg(feature = "desktop")]
                             NotifyVia::Desktop => send_notification_desktop(summary, body),
                             NotifyVia::Bell => send_notification_bell(&store).await,
                         }
@@ -77,11 +83,13 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
     locked.application.ring_bell = true;
 }
 
+#[cfg(feature = "desktop")]
 fn send_notification_desktop(summary: String, body: Option<String>) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
         .summary(&summary)
-        .appname("iamb")
+        .appname(IAMB_XDG_NAME)
+        .icon(IAMB_XDG_NAME)
         .action("default", "default");
 
     if let Some(body) = body {
@@ -164,6 +172,12 @@ pub async fn parse_notification(
         .and_then(|m| m.display_name())
         .unwrap_or_else(|| sender_id.localpart());
 
+    let summary = if let Ok(room_name) = room.display_name().await {
+        format!("{sender_name} in {room_name}")
+    } else {
+        sender_name.to_string()
+    };
+
     let body = if show_body {
         event_notification_body(
             &event,
@@ -175,7 +189,7 @@ pub async fn parse_notification(
         None
     };
 
-    return Ok((sender_name.to_string(), body, server_ts));
+    return Ok((summary, body, server_ts));
 }
 
 pub fn event_notification_body(
