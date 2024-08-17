@@ -14,8 +14,13 @@ use matrix_sdk::{
 use unicode_segmentation::UnicodeSegmentation;
 
 use crate::{
-    base::{AsyncProgramStore, IambError, IambResult},
+    base::{AsyncProgramStore, IambError, IambResult, ProgramStore},
     config::{ApplicationSettings, NotifyVia},
+};
+
+const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
+    None => "iamb",
+    Some(iamb) => iamb,
 };
 
 pub async fn register_notifications(
@@ -44,7 +49,7 @@ pub async fn register_notifications(
                     return;
                 }
 
-                if is_open(&store, room.room_id()).await {
+                if is_visible_room(&store, room.room_id()).await {
                     return;
                 }
 
@@ -59,6 +64,7 @@ pub async fn register_notifications(
                         }
 
                         match notify_via {
+                            #[cfg(feature = "desktop")]
                             NotifyVia::Desktop => send_notification_desktop(summary, body),
                             NotifyVia::Bell => send_notification_bell(&store).await,
                         }
@@ -77,12 +83,13 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
     locked.application.ring_bell = true;
 }
 
+#[cfg(feature = "desktop")]
 fn send_notification_desktop(summary: String, body: Option<String>) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
         .summary(&summary)
-        .appname("iamb")
-        .timeout(notify_rust::Timeout::Milliseconds(3000))
+        .appname(IAMB_XDG_NAME)
+        .icon(IAMB_XDG_NAME)
         .action("default", "default");
 
     if let Some(body) = body {
@@ -128,8 +135,7 @@ fn is_missing_mention(body: &Option<String>, mode: RoomNotificationMode, client:
     false
 }
 
-async fn is_open(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
-    let mut locked = store.lock().await;
+fn is_open(locked: &mut ProgramStore, room_id: &RoomId) -> bool {
     if let Some(draw_curr) = locked.application.draw_curr {
         let info = locked.application.get_room_info(room_id.to_owned());
         if let Some(draw_last) = info.draw_last {
@@ -137,6 +143,16 @@ async fn is_open(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
         }
     }
     false
+}
+
+fn is_focused(locked: &ProgramStore) -> bool {
+    locked.application.focused
+}
+
+async fn is_visible_room(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
+    let mut locked = store.lock().await;
+
+    is_focused(&locked) && is_open(&mut locked, room_id)
 }
 
 pub async fn parse_notification(
@@ -156,6 +172,12 @@ pub async fn parse_notification(
         .and_then(|m| m.display_name())
         .unwrap_or_else(|| sender_id.localpart());
 
+    let summary = if let Ok(room_name) = room.display_name().await {
+        format!("{sender_name} in {room_name}")
+    } else {
+        sender_name.to_string()
+    };
+
     let body = if show_body {
         event_notification_body(
             &event,
@@ -167,7 +189,7 @@ pub async fn parse_notification(
         None
     };
 
-    return Ok((sender_name.to_string(), body, server_ts));
+    return Ok((summary, body, server_ts));
 }
 
 pub fn event_notification_body(
@@ -220,7 +242,9 @@ pub fn event_notification_body(
                 MessageType::VerificationRequest(_) => {
                     format!("{sender_name} sent a verification request.")
                 },
-                _ => unimplemented!(),
+                _ => {
+                    format!("[Unknown message type: {:?}]", &message.msgtype)
+                },
             };
             Some(body)
         },

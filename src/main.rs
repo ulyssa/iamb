@@ -129,8 +129,8 @@ use modalkit::{
 
 use modalkit_ratatui::{
     cmdbar::CommandBarState,
-    screen::{Screen, ScreenState, TabLayoutDescription},
-    windows::WindowLayoutDescription,
+    screen::{Screen, ScreenState, TabbedLayoutDescription},
+    windows::{WindowLayoutDescription, WindowLayoutState},
     TerminalCursor,
     TerminalExtOps,
     Window,
@@ -176,6 +176,17 @@ fn config_tab_to_desc(
     Ok(desc)
 }
 
+fn restore_layout(
+    area: Rect,
+    settings: &ApplicationSettings,
+    store: &mut ProgramStore,
+) -> IambResult<FocusList<WindowLayoutState<IambWindow, IambInfo>>> {
+    let layout = std::fs::read(&settings.layout_json)?;
+    let tabs: TabbedLayoutDescription<IambInfo> =
+        serde_json::from_slice(&layout).map_err(IambError::from)?;
+    tabs.to_layout(area.into(), store)
+}
+
 fn setup_screen(
     settings: ApplicationSettings,
     store: &mut ProgramStore,
@@ -186,12 +197,14 @@ fn setup_screen(
 
     match settings.layout {
         config::Layout::Restore => {
-            if let Ok(layout) = std::fs::read(&settings.layout_json) {
-                let tabs: TabLayoutDescription<IambInfo> =
-                    serde_json::from_slice(&layout).map_err(IambError::from)?;
-                let tabs = tabs.to_layout(area.into(), store)?;
-
-                return Ok(ScreenState::from_list(tabs, cmd));
+            match restore_layout(area, &settings, store) {
+                Ok(tabs) => {
+                    return Ok(ScreenState::from_list(tabs, cmd));
+                },
+                Err(e) => {
+                    // Log the issue with restoring and then continue.
+                    tracing::warn!(err = %e, "Failed to restore layout from disk");
+                },
             }
         },
         config::Layout::New => {},
@@ -242,7 +255,7 @@ struct Application {
     focused: bool,
 
     /// The tab layout before the last executed [TabAction].
-    last_layout: Option<TabLayoutDescription<IambInfo>>,
+    last_layout: Option<TabbedLayoutDescription<IambInfo>>,
 
     /// Whether we need to do a full redraw (e.g., after running a subprocess).
     dirty: bool,
@@ -355,9 +368,13 @@ impl Application {
                     // Do nothing for now.
                 },
                 Event::FocusGained => {
+                    let mut store = self.store.lock().await;
+                    store.application.focused = true;
                     self.focused = true;
                 },
                 Event::FocusLost => {
+                    let mut store = self.store.lock().await;
+                    store.application.focused = false;
                     self.focused = false;
                 },
                 Event::Resize(_, _) => {
@@ -475,7 +492,7 @@ impl Application {
                 None
             },
             Action::Command(act) => {
-                let acts = store.application.cmds.command(&act, &ctx)?;
+                let acts = store.application.cmds.command(&act, &ctx, &mut store.registers)?;
                 self.action_prepend(acts);
 
                 None
@@ -899,31 +916,6 @@ async fn login_normal(
     Ok(())
 }
 
-struct EnableModifyOtherKeys;
-struct DisableModifyOtherKeys;
-
-impl crossterm::Command for EnableModifyOtherKeys {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        write!(f, "\x1B[>4;2m")
-    }
-
-    #[cfg(windows)]
-    fn execute_winapi(&self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
-impl crossterm::Command for DisableModifyOtherKeys {
-    fn write_ansi(&self, f: &mut impl std::fmt::Write) -> std::fmt::Result {
-        write!(f, "\x1B[>4;0m")
-    }
-
-    #[cfg(windows)]
-    fn execute_winapi(&self) -> std::io::Result<()> {
-        Ok(())
-    }
-}
-
 /// Set up the terminal for drawing the TUI, and getting additional info.
 fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
     let title = format!("iamb ({})", title);
@@ -938,8 +930,6 @@ fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
             stdout(),
             PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
         )?;
-    } else {
-        crossterm::queue!(stdout(), EnableModifyOtherKeys)?;
     }
 
     crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
@@ -953,7 +943,6 @@ fn restore_tty(enable_enhanced_keys: bool) {
 
     let _ = crossterm::execute!(
         stdout(),
-        DisableModifyOtherKeys,
         DisableBracketedPaste,
         DisableFocusChange,
         LeaveAlternateScreen,

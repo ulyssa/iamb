@@ -1,0 +1,94 @@
+on:
+  push:
+    branches:
+      - main
+
+name: Binaries
+
+jobs:
+  package:
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest, macos-latest]
+        arch: [x86_64, aarch64]
+        exclude:
+          - platform: windows-latest
+            arch: aarch64
+        include:
+          - platform: ubuntu-latest
+            arch: x86_64
+            triple: unknown-linux-musl
+          - platform: ubuntu-latest
+            arch: aarch64
+            triple: unknown-linux-gnu
+          - platform: macos-latest
+            triple: apple-darwin
+          - platform: windows-latest
+            triple: pc-windows-msvc
+    runs-on: ${{ matrix.platform }}
+    env:
+      TARGET: ${{ matrix.arch }}-${{ matrix.triple }}
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+      with:
+        submodules: true
+    - name: Install Rust (stable)
+      uses: dtolnay/rust-toolchain@stable
+      with:
+          targets: ${{ env.TARGET }}
+    - name: Install C cross-compilation toolchain
+      if: matrix.platform == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt install -f -y build-essential crossbuild-essential-arm64 musl-dev
+        # Cross-compilation env vars for x86_64-unknown-linux-musl
+        echo CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc >> $GITHUB_ENV
+        echo AR_x86_64_unknown_linux_musl=x86_64-linux-gnu-ar >> $GITHUB_ENV
+        echo CC_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc >> $GITHUB_ENV
+        echo CXX_x86_64_unknown_linux_musl=x86_64-linux-gnu-g++ >> $GITHUB_ENV
+        # Cross-compilation env vars for aarch64-unknown-linux-gnu
+        echo CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc >> $GITHUB_ENV
+        echo AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar >> $GITHUB_ENV
+        echo CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc >> $GITHUB_ENV
+        echo CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ >> $GITHUB_ENV
+    - name: Cache cargo registry
+      uses: actions/cache@v3
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.3
+    - name: 'Build: binary'
+      run: cargo build --release --locked --target ${{ env.TARGET }}
+    - name: 'Upload: binary'
+      uses: actions/upload-artifact@v4
+      with:
+        name: iamb-${{ env.TARGET }}-binary
+        path: |
+          ./target/${{ env.TARGET }}/release/iamb
+          ./target/${{ env.TARGET }}/release/iamb.exe
+    - name: 'Package: deb'
+      if: matrix.platform == 'ubuntu-latest'
+      run: |
+        cargo install --locked cargo-deb
+        cargo deb --no-strip --target ${{ env.TARGET }}
+    - name: 'Upload: deb'
+      if: matrix.platform == 'ubuntu-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: iamb-${{ env.TARGET }}-deb
+        path: ./target/${{ env.TARGET }}/debian/iamb*.deb
+    - name: 'Package: rpm'
+      if: matrix.platform == 'ubuntu-latest'
+      run: |
+        cargo install --locked cargo-generate-rpm
+        cargo generate-rpm --target ${{ env.TARGET }}
+    - name: 'Upload: rpm'
+      if: matrix.platform == 'ubuntu-latest'
+      uses: actions/upload-artifact@v4
+      with:
+        name: iamb-${{ env.TARGET }}-rpm
+        path: ./target/${{ env.TARGET }}/generate-rpm/iamb*.rpm

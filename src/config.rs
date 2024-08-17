@@ -398,14 +398,24 @@ pub enum UserDisplayStyle {
     DisplayName,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum NotifyVia {
     /// Deliver notifications via terminal bell.
     Bell,
     /// Deliver notifications via desktop mechanism.
-    #[default]
+    #[cfg(feature = "desktop")]
     Desktop,
+}
+
+impl Default for NotifyVia {
+    fn default() -> Self {
+        #[cfg(not(feature = "desktop"))]
+        return NotifyVia::Bell;
+
+        #[cfg(feature = "desktop")]
+        return NotifyVia::Desktop;
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
@@ -1173,7 +1183,7 @@ mod tests {
         let j = "j".parse::<TerminalKey>().unwrap();
         let esc = "<Esc>".parse::<TerminalKey>().unwrap();
 
-        let jj = Keys(vec![j.clone(), j], "jj".into());
+        let jj = Keys(vec![j, j], "jj".into());
         let run = mapped.get(&jj).unwrap();
         let exp = Keys(vec![esc], "<Esc>".into());
         assert_eq!(run, &exp);

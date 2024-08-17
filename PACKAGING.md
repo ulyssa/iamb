@@ -28,15 +28,17 @@ and GCC are present.
 In addition to the compiled binary, there are other files in the repo that
 you'll want to install as part of a package:
 
-| Repository Path        | Installed Path (may vary per OS)                |
-| --------------------   | ----------------------------------------------- |
-| /iamb.desktop          | /usr/share/applications/iamb.desktop            |
-| /config.example.toml   | /usr/share/iamb/config.example.toml             |
-| /docs/iamb-256x256.png | /usr/share/icons/hicolor/256x256/apps/iamb.png  |
-| /docs/iamb-512x512.png | /usr/share/icons/hicolor/512x512/apps/iamb.png  |
-| /docs/iamb.svg         | /usr/share/icons/hicolor/scalable/apps/iamb.svg |
-| /docs/iamb.1           | /usr/share/man/man1/iamb.1                      |
-| /docs/iamb.5           | /usr/share/man/man5/iamb.5                      |
+<!-- Please keep in sync w/ the `deb`/`generate-rpm` sections of `Cargo.toml` -->
+| Repository Path         | Installed Path (may vary per OS)                |
+| ----------------------- | ----------------------------------------------- |
+| /iamb.desktop           | /usr/share/applications/iamb.desktop            |
+| /config.example.toml    | /usr/share/iamb/config.example.toml             |
+| /docs/iamb-256x256.png  | /usr/share/icons/hicolor/256x256/apps/iamb.png  |
+| /docs/iamb-512x512.png  | /usr/share/icons/hicolor/512x512/apps/iamb.png  |
+| /docs/iamb.svg          | /usr/share/icons/hicolor/scalable/apps/iamb.svg |
+| /docs/iamb.1            | /usr/share/man/man1/iamb.1                      |
+| /docs/iamb.5            | /usr/share/man/man5/iamb.5                      |
+| /docs/iamb.metainfo.xml | /usr/share/metainfo/iamb.metainfo.xml           |
 
 [ring-lto]: https://github.com/briansmith/ring/issues/1444
 [rustls]: https://crates.io/crates/rustls

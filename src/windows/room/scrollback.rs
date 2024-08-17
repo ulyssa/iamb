@@ -673,8 +673,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let dir = ctx.get_search_regex_dir();
                         let dir = flip.resolve(&dir);
 
-                        let lsearch = store.registers.get(&Register::LastSearch)?;
-                        let lsearch = lsearch.value.to_string();
+                        let lsearch = store.registers.get_last_search().to_string();
                         let needle = Regex::new(lsearch.as_ref())?;
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
@@ -753,8 +752,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let dir = ctx.get_search_regex_dir();
                         let dir = flip.resolve(&dir);
 
-                        let lsearch = store.registers.get(&Register::LastSearch)?;
-                        let lsearch = lsearch.value.to_string();
+                        let lsearch = store.registers.get_last_search().to_string();
                         let needle = Regex::new(lsearch.as_ref())?;
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
@@ -1452,16 +1450,16 @@ mod tests {
         // MSG4: "help"
         // MSG5: "character"
         // MSG1: "writhe"
-        store.set_last_search("he");
+        store.registers.set_last_search("he");
 
         assert_eq!(scrollback.cursor, MessageCursor::latest());
 
         // Search backwards to MSG4.
-        scrollback.search(prev.clone(), 1.into(), &ctx, &mut store).unwrap();
+        scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG4_KEY.clone().into());
 
         // Search backwards to MSG2.
-        scrollback.search(prev.clone(), 1.into(), &ctx, &mut store).unwrap();
+        scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
         assert_eq!(
             std::mem::take(&mut store.application.need_load)
@@ -1472,7 +1470,7 @@ mod tests {
         );
 
         // Can't go any further; need_load now contains the room ID.
-        scrollback.search(prev.clone(), 1.into(), &ctx, &mut store).unwrap();
+        scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
         assert_eq!(
             std::mem::take(&mut store.application.need_load)
@@ -1482,11 +1480,11 @@ mod tests {
         );
 
         // Search forward twice to MSG1.
-        scrollback.search(next.clone(), 2.into(), &ctx, &mut store).unwrap();
+        scrollback.search(next, 2.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG1_KEY.clone().into());
 
         // Can't go any further.
-        scrollback.search(next.clone(), 2.into(), &ctx, &mut store).unwrap();
+        scrollback.search(next, 2.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG1_KEY.clone().into());
     }
 

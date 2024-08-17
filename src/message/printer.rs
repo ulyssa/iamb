@@ -94,7 +94,7 @@ impl<'a> TextPrinter<'a> {
     }
 
     fn remaining(&self) -> usize {
-        self.width - self.curr_width
+        self.width.saturating_sub(self.curr_width)
     }
 
     /// If there is any text on the current line, start a new one.
@@ -274,5 +274,20 @@ impl<'a> TextPrinter<'a> {
     pub fn finish(mut self) -> Text<'a> {
         self.commit();
         self.text
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+
+    #[test]
+    fn test_push_nobreak() {
+        let mut printer = TextPrinter::new(5, Style::default(), false, false);
+        printer.push_span_nobreak("hello world".into());
+        let text = printer.finish();
+        assert_eq!(text.lines.len(), 1);
+        assert_eq!(text.lines[0].spans.len(), 1);
+        assert_eq!(text.lines[0].spans[0].content, "hello world");
     }
 }

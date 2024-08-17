@@ -130,6 +130,18 @@ Remove a tag from the currently focused room.
 Set the topic of the currently focused room.
 .It Sy ":room topic unset"
 Unset the topic of the currently focused room.
+.It Sy ":room alias set [alias]"
+Create and point the given alias to the room.
+.It Sy ":room alias unset [alias]"
+Delete the provided alias from the room's alternative alias list.
+.It Sy ":room alias show"
+Show alternative aliases to the room, if any are set.
+.It Sy ":room canon set [alias]"
+Set the room's canonical alias to the one provided, and make the previous one an alternative alias.
+.It Sy ":room canon unset [alias]"
+Delete the room's canonical alias.
+.It Sy ":room canon show"
+Show the room's canonical alias, if any is set.
 .El
 
 .Sh "WINDOW COMMANDS"
@@ -174,6 +186,43 @@ Go to the next tab.
 Close all but one tab.
 .It Sy ":tabprevious" , Sy ":tabp"
 Go to the preview tab.
+.El
+
+.Sh "SLASH COMMANDS"
+.Bl -tag -width Ds
+.It Sy "/markdown" , Sy "/md"
+Interpret the message body as Markdown markup.
+This is the default behaviour.
+.It Sy "/html" , Sy "/h"
+Send the message body as literal HTML.
+.It Sy "/plaintext" , Sy "/plain" , Sy "/p"
+Do not interpret any markup in the message body and send it as it is.
+.It Sy "/me"
+Send an emote message.
+.It Sy "/confetti"
+Produces no effect in
+.Nm ,
+but will display confetti in Matrix clients that support doing so.
+.It Sy "/fireworks"
+Produces no effect in
+.Nm ,
+but will display fireworks in Matrix clients that support doing so.
+.It Sy "/hearts"
+Produces no effect in
+.Nm ,
+but will display floating hearts in Matrix clients that support doing so.
+.It Sy "/rainfall"
+Produces no effect in
+.Nm ,
+but will display rainfall in Matrix clients that support doing so.
+.It Sy "/snowfall"
+Produces no effect in
+.Nm ,
+but will display snowfall in Matrix clients that support doing so.
+.It Sy "/spaceinvaders"
+Produces no effect in
+.Nm ,
+but will display aliens from Space Invaders in Matrix clients that support doing so.
 .El
 
 .Sh EXAMPLES

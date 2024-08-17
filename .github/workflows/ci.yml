@@ -45,12 +45,3 @@ jobs:
         reporter: 'github-check'
     - name: Run tests
       run: cargo test --locked
-    - name: Build artifacts
-      run: cargo build --release --locked
-    - name: Upload artifacts
-      uses: actions/upload-artifact@master
-      with:
-        name: iamb-${{ matrix.platform }}
-        path: |
-          ./target/release/iamb
-          ./target/release/iamb.exe

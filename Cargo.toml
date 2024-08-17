@@ -15,8 +15,9 @@ rust-version = "1.70"
 build = "build.rs"
 
 [features]
-default = ["bundled"]
+default = ["bundled", "desktop"]
 bundled = ["matrix-sdk/bundled-sqlite", "rustls-tls"]
+desktop = ["dep:notify-rust", "modalkit/clipboard"]
 native-tls = ["matrix-sdk/native-tls"]
 rustls-tls = ["matrix-sdk/rustls-tls"]
 
@@ -26,10 +27,10 @@ default-features = false
 features = ["build", "git", "gitcl",]
 
 [dependencies]
+anyhow = "1.0"
 bitflags = "^2.3"
 chrono = "0.4"
 clap = {version = "~4.3", features = ["derive"]}
-comrak = {version = "0.22.0", features = ["shortcodes"]}
 css-color-parser = "0.1.2"
 dirs = "4.0.0"
 emojis = "0.5"
@@ -41,7 +42,7 @@ libc = "0.2"
 markup5ever_rcdom = "0.2.0"
 mime = "^0.3.16"
 mime_guess = "^2.0.4"
-notify-rust = { version = "4.10.0", default-features = false, features = ["zbus", "serde"] }
+nom = "7.0.0"
 open = "3.2.0"
 rand = "0.8.5"
 ratatui = "0.26"
@@ -63,15 +64,27 @@ url = {version = "^2.2.2", features = ["serde"]}
 edit = "0.1.4"
 humansize = "2.0.0"
 
+[dependencies.comrak]
+version = "0.22.0"
+default-features = false
+features = ["shortcodes"]
+
+[dependencies.notify-rust]
+version = "4.10.0"
+default-features = false
+features = ["zbus", "serde"]
+optional = true
+
 [dependencies.modalkit]
-version = "0.0.19"
+version = "0.0.20"
+default-features = false
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "cb8c8aeb9a499b9b16615ce144f9014d78036e01"
+#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.19"
+version = "0.0.20"
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "cb8c8aeb9a499b9b16615ce144f9014d78036e01"
+#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
 
 [dependencies.matrix-sdk]
 version = "0.7.1"
@@ -90,3 +103,33 @@ pretty_assertions = "1.4.0"
 inherits = "release"
 incremental = false
 lto = true
+
+[package.metadata.deb]
+section = "net"
+license-file = ["LICENSE", "0"]
+assets = [
+    # Binary:
+    ["target/release/iamb", "usr/bin/iamb", "755"],
+    # Manual pages:
+    ["docs/iamb.1", "usr/share/man/man1/iamb.1", "644"],
+    ["docs/iamb.5", "usr/share/man/man5/iamb.5", "644"],
+    # Other assets:
+    ["iamb.desktop", "usr/share/applications/iamb.desktop", "644"],
+    ["config.example.toml", "usr/share/iamb/config.example.toml", "644"],
+    ["docs/iamb.svg", "usr/share/icons/hicolor/scalable/apps/iamb.svg", "644"],
+    ["docs/iamb.metainfo.xml", "usr/share/metainfo/iamb.metainfo.xml", "644"],
+]
+
+[package.metadata.generate-rpm]
+assets = [
+    # Binary:
+    { source = "target/release/iamb", dest = "/usr/bin/iamb", mode = "755" },
+    # Manual pages:
+    { source = "docs/iamb.1", dest = "/usr/share/man/man1/iamb.1", mode = "644" },
+    { source = "docs/iamb.5", dest = "/usr/share/man/man5/iamb.5", mode = "644" },
+    # Other assets:
+    { source = "iamb.desktop", dest = "/usr/share/applications/iamb.desktop", mode = "644" },
+    { source = "config.example.toml", dest = "/usr/share/iamb/config.example.toml", mode = "644"},
+    { source = "docs/iamb.svg", dest = "/usr/share/icons/hicolor/scalable/apps/iamb.svg", mode = "644"},
+    { source = "docs/iamb.metainfo.xml", dest = "/usr/share/metainfo/iamb.metainfo.xml", mode = "644"},
+]

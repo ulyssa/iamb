@@ -152,7 +152,11 @@ pub enum MessageAction {
     Edit,
 
     /// React to a message with an Emoji.
-    React(String),
+    ///
+    /// `:react` will by default try to convert the [String] argument to an Emoji, and error when
+    /// it doesn't recognize it. The second [bool] argument forces it to be interpreted literally
+    /// when it is `true`.
+    React(String, bool),
 
     /// Redact a message, with an optional reason.
     ///
@@ -166,7 +170,11 @@ pub enum MessageAction {
     ///
     /// If no specific Emoji to remove to is specified, then all reactions from the user on the
     /// message are removed.
-    Unreact(Option<String>),
+    ///
+    /// Like `:react`, `:unreact` will by default try to convert the [String] argument to an Emoji,
+    /// and error when it doesn't recognize it. The second [bool] argument forces it to be
+    /// interpreted literally when it is `true`.
+    Unreact(Option<String>, bool),
 }
 
 /// The type of room being created.
@@ -372,6 +380,15 @@ pub enum RoomField {
 
     /// Notification level.
     NotificationMode,
+
+    /// The room's entire list of alternative aliases.
+    Aliases,
+
+    /// A specific alternative alias to the room.
+    Alias(String),
+
+    /// The room's canonical alias.
+    CanonicalAlias,
 }
 
 /// An action that operates on a focused room.
@@ -400,6 +417,9 @@ pub enum RoomAction {
 
     /// Unset a room property.
     Unset(RoomField),
+
+    /// List the values in a list room property.
+    Show(RoomField),
 }
 
 /// An action that sends a message to a room.
@@ -603,6 +623,10 @@ pub enum IambError {
     #[error("Invalid user identifier: {0}")]
     InvalidUserId(String),
 
+    /// An invalid user identifier was specified.
+    #[error("Invalid room alias: {0}")]
+    InvalidRoomAlias(String),
+
     /// An invalid verification identifier was specified.
     #[error("Invalid verification user/device pair: {0}")]
     InvalidVerificationId(String),
@@ -665,6 +689,10 @@ pub enum IambError {
     /// An unknown room was specified.
     #[error("Unknown room identifier: {0}")]
     UnknownRoom(OwnedRoomId),
+
+    /// An invalid room alias id was specified.
+    #[error("Invalid room alias id: {0}")]
+    InvalidRoomAliasId(#[from] matrix_sdk::ruma::IdParseError),
 
     /// A failure occurred during verification.
     #[error("Verification request error: {0}")]
@@ -1329,6 +1357,9 @@ pub struct ChatStore {
 
     /// Whether to ring the terminal bell on the next redraw.
     pub ring_bell: bool,
+
+    /// Whether the application is currently focused
+    pub focused: bool,
 }
 
 impl ChatStore {
@@ -1351,14 +1382,13 @@ impl ChatStore {
             sync_info: Default::default(),
             draw_curr: None,
             ring_bell: false,
+            focused: true,
         }
     }
 
     /// Get a joined room.
     pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
-        let Some(room) = self.worker.client.get_room(room_id) else {
-            return None;
-        };
+        let room = self.worker.client.get_room(room_id)?;
 
         if room.state() == MatrixRoomState::Joined {
             Some(room)
