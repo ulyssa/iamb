@@ -15,8 +15,9 @@ rust-version = "1.70"
 build = "build.rs"
 
 [features]
-default = ["bundled"]
+default = ["bundled", "desktop"]
 bundled = ["matrix-sdk/bundled-sqlite", "rustls-tls"]
+desktop = ["dep:notify-rust", "modalkit/clipboard"]
 native-tls = ["matrix-sdk/native-tls"]
 rustls-tls = ["matrix-sdk/rustls-tls"]
 
@@ -30,7 +31,6 @@ anyhow = "1.0"
 bitflags = "^2.3"
 chrono = "0.4"
 clap = {version = "~4.3", features = ["derive"]}
-comrak = {version = "0.22.0", features = ["shortcodes"]}
 css-color-parser = "0.1.2"
 dirs = "4.0.0"
 emojis = "0.5"
@@ -43,7 +43,6 @@ markup5ever_rcdom = "0.2.0"
 mime = "^0.3.16"
 mime_guess = "^2.0.4"
 nom = "7.0.0"
-notify-rust = { version = "4.10.0", default-features = false, features = ["zbus", "serde"] }
 open = "3.2.0"
 rand = "0.8.5"
 ratatui = "0.26"
@@ -65,8 +64,20 @@ url = {version = "^2.2.2", features = ["serde"]}
 edit = "0.1.4"
 humansize = "2.0.0"
 
+[dependencies.comrak]
+version = "0.22.0"
+default-features = false
+features = ["shortcodes"]
+
+[dependencies.notify-rust]
+version = "4.10.0"
+default-features = false
+features = ["zbus", "serde"]
+optional = true
+
 [dependencies.modalkit]
 version = "0.0.20"
+default-features = false
 #git = "https://github.com/ulyssa/modalkit"
 #rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
 
