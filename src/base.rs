@@ -12,7 +12,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
-use matrix_sdk::notification_settings::RoomNotificationMode;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -372,7 +371,7 @@ pub enum RoomField {
     Topic,
 
     /// Notification level.
-    NotificicationMode(RoomNotificationMode),
+    NotificationMode,
 }
 
 /// An action that operates on a focused room.
@@ -596,6 +595,10 @@ pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
+    /// An invalid notification level was specified.
+    #[error("Invalid notification level: {0}")]
+    InvalidNotificationLevel(String),
+
     /// An invalid user identifier was specified.
     #[error("Invalid user identifier: {0}")]
     InvalidUserId(String),

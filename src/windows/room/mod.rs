@@ -1,5 +1,6 @@
 //! # Windows for Matrix rooms and spaces
 use matrix_sdk::{
+    notification_settings::RoomNotificationMode,
     room::Room as MatrixRoom,
     ruma::{
         events::{
@@ -64,6 +65,17 @@ macro_rules! delegate {
             RoomState::Space($id) => $e,
         }
     };
+}
+
+fn notification_mode(name: String) -> IambResult<RoomNotificationMode> {
+    let mode = match name.to_lowercase().as_str() {
+        "mute" => RoomNotificationMode::Mute,
+        "mentions" | "keywords" => RoomNotificationMode::MentionsAndKeywordsOnly,
+        "all" => RoomNotificationMode::AllMessages,
+        _ => return Err(IambError::InvalidNotificationLevel(name).into()),
+    };
+
+    Ok(mode)
 }
 
 /// State for a Matrix room or space.
@@ -280,14 +292,12 @@ impl RoomState {
                         let ev = RoomTopicEventContent::new(value);
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                     },
-                    RoomField::NotificicationMode(mode) => {
-                        store
-                            .application
-                            .worker
-                            .client
-                            .clone()
-                            .notification_settings()
-                            .await
+                    RoomField::NotificationMode => {
+                        let mode = notification_mode(value)?;
+                        let client = &store.application.worker.client;
+                        let notifications = client.notification_settings().await;
+
+                        notifications
                             .set_room_notification_mode(self.id(), mode)
                             .await
                             .map_err(IambError::from)?;
@@ -314,7 +324,15 @@ impl RoomState {
                         let ev = RoomTopicEventContent::new("".into());
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                     },
-                    RoomField::NotificicationMode(_) => { /* Do Nothing? Set to default? */ },
+                    RoomField::NotificationMode => {
+                        let client = &store.application.worker.client;
+                        let notifications = client.notification_settings().await;
+
+                        notifications
+                            .delete_user_defined_room_rules(self.id())
+                            .await
+                            .map_err(IambError::from)?;
+                    },
                 }
 
                 Ok(vec![])

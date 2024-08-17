@@ -4,10 +4,7 @@
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
 use std::convert::TryFrom;
 
-use matrix_sdk::{
-    notification_settings::RoomNotificationMode,
-    ruma::{events::tag::TagName, OwnedUserId},
-};
+use matrix_sdk::ruma::{events::tag::TagName, OwnedUserId};
 
 use modalkit::{
     commands::{CommandError, CommandResult, CommandStep},
@@ -57,24 +54,6 @@ fn tag_name(name: String) -> Result<TagName, CommandError> {
     };
 
     Ok(tag)
-}
-
-fn notification_mode(name: String) -> Result<RoomNotificationMode, CommandError> {
-    let mode = match name.to_lowercase().as_str() {
-        "0" | "mute" | "ignore" | "none" => RoomNotificationMode::Mute,
-        "1" |
-        "mentions" |
-        "keywords" |
-        "mentions_and_keywords_only" |
-        "mentions-and-keywords-only" => RoomNotificationMode::MentionsAndKeywordsOnly,
-        "2" | "all" | "any" | "all_messages" | "all-messages" => RoomNotificationMode::AllMessages,
-        _ => {
-            let msg = format!("Invalid user tag name: {name}");
-            return Err(CommandError::Error(msg));
-        },
-    };
-
-    Ok(mode)
 }
 
 fn iamb_invite(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
@@ -472,10 +451,12 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         ("tag", "set", None) => return Result::Err(CommandError::InvalidArgument),
 
         // :room notification set <notification-level>
-        ("notification", "set", Some(s)) => {
-            RoomAction::Set(RoomField::NotificicationMode(notification_mode(s)?), "".into()).into()
-        },
+        ("notification", "set", Some(s)) => RoomAction::Set(RoomField::NotificationMode, s).into(),
         ("notification", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room notification unset <notification-level>
+        ("notification", "unset", None) => RoomAction::Unset(RoomField::NotificationMode).into(),
+        ("notification", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
         // :room tag unset <tag-name>
         ("tag", "unset", Some(s)) => RoomAction::Unset(RoomField::Tag(tag_name(s)?)).into(),
