@@ -369,6 +369,9 @@ impl<'de> Visitor<'de> for SortUserVisitor {
 /// A room property.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomField {
+    /// The room's history visibility.
+    History,
+
     /// The room name.
     Name,
 
@@ -636,6 +639,10 @@ pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
+    /// An invalid history visibility was specified.
+    #[error("Invalid history visibility setting: {0}")]
+    InvalidHistoryVisibility(String),
+
     /// An invalid notification level was specified.
     #[error("Invalid notification level: {0}")]
     InvalidNotificationLevel(String),
