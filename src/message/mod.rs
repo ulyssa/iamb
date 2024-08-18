@@ -4,7 +4,7 @@ use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::hash_set;
 use std::collections::BTreeMap;
-use std::convert::TryFrom;
+use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
@@ -129,6 +129,24 @@ const MIN_MSG_LEN: usize = 30;
 
 const TIME_GUTTER_EMPTY: &str = "            ";
 const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
+
+const USIZE_TOO_SMALL: bool = usize::BITS < u64::BITS;
+
+/// Convert the [u64] hash to [usize] as needed.
+fn hash_finish_usize(hasher: DefaultHasher) -> Option<usize> {
+    if USIZE_TOO_SMALL {
+        (hasher.finish() % usize::MAX as u64).try_into().ok()
+    } else {
+        hasher.finish().try_into().ok()
+    }
+}
+
+/// Hash an [EventId] into a [usize].
+fn hash_event_id(event_id: &EventId) -> Option<usize> {
+    let mut hasher = DefaultHasher::new();
+    event_id.hash(&mut hasher);
+    hash_finish_usize(hasher)
+}
 
 /// Before the image is loaded, already display a placeholder frame of the image size.
 fn placeholder_frame(
@@ -313,17 +331,14 @@ impl MessageCursor {
     }
 
     pub fn from_cursor(cursor: &Cursor, thread: &Messages) -> Option<Self> {
-        let ev_hash = u64::try_from(cursor.get_x()).ok()?;
+        let ev_hash = cursor.get_x();
         let ev_term = OwnedEventId::try_from("$").ok()?;
 
         let ts_start = MessageTimeStamp::try_from(cursor.get_y()).ok()?;
         let start = (ts_start, ev_term);
 
         for ((ts, event_id), _) in thread.range(&start..) {
-            let mut hasher = DefaultHasher::new();
-            event_id.hash(&mut hasher);
-
-            if hasher.finish() == ev_hash {
+            if hash_event_id(event_id)? == ev_hash {
                 return Self::from((*ts, event_id.clone())).into();
             }
 
@@ -342,11 +357,8 @@ impl MessageCursor {
     pub fn to_cursor(&self, thread: &Messages) -> Option<Cursor> {
         let (ts, event_id) = self.to_key(thread)?;
 
-        let y: usize = usize::try_from(ts).ok()?;
-
-        let mut hasher = DefaultHasher::new();
-        event_id.hash(&mut hasher);
-        let x = usize::try_from(hasher.finish()).ok()?;
+        let y = usize::try_from(ts).ok()?;
+        let x = hash_event_id(event_id)?;
 
         Cursor::new(y, x).into()
     }
