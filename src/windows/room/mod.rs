@@ -15,6 +15,7 @@ use matrix_sdk::{
         events::{
             room::{
                 canonical_alias::RoomCanonicalAliasEventContent,
+                history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
                 name::RoomNameEventContent,
                 topic::RoomTopicEventContent,
             },
@@ -93,6 +94,20 @@ fn notification_mode(name: impl Into<String>) -> IambResult<RoomNotificationMode
         "mentions" | "keywords" => RoomNotificationMode::MentionsAndKeywordsOnly,
         "all" => RoomNotificationMode::AllMessages,
         _ => return Err(IambError::InvalidNotificationLevel(name).into()),
+    };
+
+    Ok(mode)
+}
+
+fn hist_visibility_mode(name: impl Into<String>) -> IambResult<HistoryVisibility> {
+    let name = name.into();
+
+    let mode = match name.to_lowercase().as_str() {
+        "invited" => HistoryVisibility::Invited,
+        "joined" => HistoryVisibility::Joined,
+        "shared" => HistoryVisibility::Shared,
+        "world" | "world_readable" => HistoryVisibility::WorldReadable,
+        _ => return Err(IambError::InvalidHistoryVisibility(name).into()),
     };
 
     Ok(mode)
@@ -339,6 +354,11 @@ impl RoomState {
                     .ok_or(UIError::Application(IambError::NotJoined))?;
 
                 match field {
+                    RoomField::History => {
+                        let visibility = hist_visibility_mode(value)?;
+                        let ev = RoomHistoryVisibilityEventContent::new(visibility);
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+                    },
                     RoomField::Name => {
                         let ev = RoomNameEventContent::new(value);
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
@@ -455,6 +475,11 @@ impl RoomState {
                     .ok_or(UIError::Application(IambError::NotJoined))?;
 
                 match field {
+                    RoomField::History => {
+                        let visibility = HistoryVisibility::Joined;
+                        let ev = RoomHistoryVisibilityEventContent::new(visibility);
+                        let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
+                    },
                     RoomField::Name => {
                         let ev = RoomNameEventContent::new("".into());
                         let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
@@ -545,6 +570,10 @@ impl RoomState {
                     .ok_or(UIError::Application(IambError::NotJoined))?;
 
                 let msg = match field {
+                    RoomField::History => {
+                        let visibility = room.history_visibility();
+                        format!("Room history visibility: {visibility}")
+                    },
                     RoomField::Name => {
                         match room.name() {
                             None => "Room has no name".into(),

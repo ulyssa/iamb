@@ -423,6 +423,18 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             RoomAction::MemberUpdate(MemberUpdateAction::Unban, u.into(), r, desc.bang).into()
         },
 
+        // :room history set <visibility>
+        ("history", "set", Some(s)) => RoomAction::Set(RoomField::History, s).into(),
+        ("history", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room history unset
+        ("history", "unset", None) => RoomAction::Unset(RoomField::History).into(),
+        ("history", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room history show
+        ("history", "show", None) => RoomAction::Show(RoomField::History).into(),
+        ("history", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
         // :room name set <room-name>
         ("name", "set", Some(s)) => RoomAction::Set(RoomField::Name, s).into(),
         ("name", "set", None) => return Result::Err(CommandError::InvalidArgument),
