@@ -22,6 +22,7 @@ use matrix_sdk::{
         },
         OwnedEventId,
         OwnedRoomAliasId,
+        OwnedUserId,
         RoomId,
     },
     DisplayName,
@@ -56,6 +57,7 @@ use crate::base::{
     IambId,
     IambInfo,
     IambResult,
+    MemberUpdateAction,
     MessageAction,
     ProgramAction,
     ProgramContext,
@@ -268,6 +270,47 @@ impl RoomState {
                 } else {
                     Err(IambError::NotJoined.into())
                 }
+            },
+            RoomAction::MemberUpdate(mua, user, reason, skip_confirm) => {
+                let Some(room) = store.application.worker.client.get_room(self.id()) else {
+                    return Err(IambError::NotJoined.into());
+                };
+
+                let Ok(user_id) = OwnedUserId::try_from(user.as_str()) else {
+                    let err = IambError::InvalidUserId(user);
+
+                    return Err(err.into());
+                };
+
+                if !skip_confirm {
+                    let msg = format!("Do you really want to {mua} {user} from this room?");
+                    let act = RoomAction::MemberUpdate(mua, user, reason, true);
+                    let act = IambAction::from(act);
+                    let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
+                    let prompt = Box::new(prompt);
+
+                    return Err(UIError::NeedConfirm(prompt));
+                }
+
+                match mua {
+                    MemberUpdateAction::Ban => {
+                        room.ban_user(&user_id, reason.as_deref())
+                            .await
+                            .map_err(IambError::from)?;
+                    },
+                    MemberUpdateAction::Unban => {
+                        room.unban_user(&user_id, reason.as_deref())
+                            .await
+                            .map_err(IambError::from)?;
+                    },
+                    MemberUpdateAction::Kick => {
+                        room.kick_user(&user_id, reason.as_deref())
+                            .await
+                            .map_err(IambError::from)?;
+                    },
+                }
+
+                Ok(vec![])
             },
             RoomAction::Members(mut cmd) => {
                 let width = Count::Exact(30);

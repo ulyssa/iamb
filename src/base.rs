@@ -391,6 +391,24 @@ pub enum RoomField {
     CanonicalAlias,
 }
 
+/// An action that operates on a room member.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum MemberUpdateAction {
+    Ban,
+    Kick,
+    Unban,
+}
+
+impl Display for MemberUpdateAction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MemberUpdateAction::Ban => write!(f, "ban"),
+            MemberUpdateAction::Kick => write!(f, "kick"),
+            MemberUpdateAction::Unban => write!(f, "unban"),
+        }
+    }
+}
+
 /// An action that operates on a focused room.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomAction {
@@ -405,6 +423,9 @@ pub enum RoomAction {
 
     /// Leave this room.
     Leave(bool),
+
+    /// Update a user's membership in this room.
+    MemberUpdate(MemberUpdateAction, String, Option<String>, bool),
 
     /// Open the members window.
     Members(Box<CommandContext>),
