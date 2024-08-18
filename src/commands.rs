@@ -20,6 +20,7 @@ use crate::base::{
     IambAction,
     IambId,
     KeysAction,
+    MemberUpdateAction,
     MessageAction,
     ProgramCommand,
     ProgramCommands,
@@ -410,6 +411,17 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         // :room dm set
         ("dm", "unset", None) => RoomAction::SetDirect(false).into(),
         ("dm", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room [kick|ban|unban] <user>
+        ("kick", u, r) => {
+            RoomAction::MemberUpdate(MemberUpdateAction::Kick, u.into(), r, desc.bang).into()
+        },
+        ("ban", u, r) => {
+            RoomAction::MemberUpdate(MemberUpdateAction::Ban, u.into(), r, desc.bang).into()
+        },
+        ("unban", u, r) => {
+            RoomAction::MemberUpdate(MemberUpdateAction::Unban, u.into(), r, desc.bang).into()
+        },
 
         // :room name set <room-name>
         ("name", "set", Some(s)) => RoomAction::Set(RoomField::Name, s).into(),
@@ -1045,6 +1057,69 @@ mod tests {
 
         let res = cmds.input_cmd("invite @user:example.com", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_room_kick() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let res = cmds.input_cmd("room kick @user:example.com", ctx.clone()).unwrap();
+        let act = IambAction::Room(RoomAction::MemberUpdate(
+            MemberUpdateAction::Kick,
+            "@user:example.com".into(),
+            None,
+            false,
+        ));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room! kick @user:example.com", ctx.clone()).unwrap();
+        let act = IambAction::Room(RoomAction::MemberUpdate(
+            MemberUpdateAction::Kick,
+            "@user:example.com".into(),
+            None,
+            true,
+        ));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds
+            .input_cmd("room! kick @user:example.com \"reason here\"", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(RoomAction::MemberUpdate(
+            MemberUpdateAction::Kick,
+            "@user:example.com".into(),
+            Some("reason here".into()),
+            true,
+        ));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+    }
+
+    #[test]
+    fn test_cmd_room_ban_unban() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let res = cmds
+            .input_cmd("room! ban @user:example.com \"spam\"", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(RoomAction::MemberUpdate(
+            MemberUpdateAction::Ban,
+            "@user:example.com".into(),
+            Some("spam".into()),
+            true,
+        ));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds
+            .input_cmd("room unban @user:example.com \"reconciled\"", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(RoomAction::MemberUpdate(
+            MemberUpdateAction::Unban,
+            "@user:example.com".into(),
+            Some("reconciled".into()),
+            false,
+        ));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
     }
 
     #[test]
