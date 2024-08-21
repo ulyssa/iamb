@@ -315,6 +315,7 @@ macro_rules! delegate {
             IambWindow::VerifyList($id) => $e,
             IambWindow::Welcome($id) => $e,
             IambWindow::ChatList($id) => $e,
+            IambWindow::UnreadList($id) => $e,
         }
     };
 }
@@ -328,6 +329,7 @@ pub enum IambWindow {
     SpaceList(SpaceListState),
     Welcome(WelcomeState),
     ChatList(ChatListState),
+    UnreadList(UnreadListState),
 }
 
 impl IambWindow {
@@ -383,6 +385,7 @@ pub type DirectListState = ListState<DirectItem, IambInfo>;
 pub type MemberListState = ListState<MemberItem, IambInfo>;
 pub type RoomListState = ListState<RoomItem, IambInfo>;
 pub type ChatListState = ListState<GenericChatItem, IambInfo>;
+pub type UnreadListState = ListState<GenericChatItem, IambInfo>;
 pub type SpaceListState = ListState<SpaceItem, IambInfo>;
 pub type VerifyListState = ListState<VerifyItem, IambInfo>;
 
@@ -579,6 +582,39 @@ impl WindowOps<IambInfo> for IambWindow {
                     .focus(focused)
                     .render(area, buf, state);
             },
+            IambWindow::UnreadList(state) => {
+                let mut items = store
+                    .application
+                    .sync_info
+                    .rooms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, false))
+                    .filter(RoomLikeItem::is_unread)
+                    .collect::<Vec<_>>();
+
+                let dms = store
+                    .application
+                    .sync_info
+                    .dms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, true))
+                    .filter(RoomLikeItem::is_unread);
+
+                items.extend(dms);
+
+                let fields = &store.application.settings.tunables.sort.chats;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+
+                state.set(items);
+
+                List::new(store)
+                    .empty_message("You do not have rooms or dms yet")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(area, buf, state);
+            },
             IambWindow::SpaceList(state) => {
                 let mut items = store
                     .application
@@ -630,6 +666,7 @@ impl WindowOps<IambInfo> for IambWindow {
             IambWindow::VerifyList(w) => w.dup(store).into(),
             IambWindow::Welcome(w) => w.dup(store).into(),
             IambWindow::ChatList(w) => w.dup(store).into(),
+            IambWindow::UnreadList(w) => w.dup(store).into(),
         }
     }
 
@@ -670,6 +707,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::VerifyList(_) => IambId::VerifyList,
             IambWindow::Welcome(_) => IambId::Welcome,
             IambWindow::ChatList(_) => IambId::ChatList,
+            IambWindow::UnreadList(_) => IambId::UnreadList,
         }
     }
 
@@ -681,6 +719,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::VerifyList(_) => bold_spans("Verifications"),
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
+            IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
 
             IambWindow::Room(w) => {
                 let title = store.application.get_room_title(w.id());
@@ -708,6 +747,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::VerifyList(_) => bold_spans("Verifications"),
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
+            IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
 
             IambWindow::Room(w) => w.get_title(store),
             IambWindow::MemberList(state, room_id, _) => {
@@ -768,6 +808,11 @@ impl Window<IambInfo> for IambWindow {
                 let list = ChatListState::new(IambBufferId::ChatList, vec![]);
 
                 Ok(list.into())
+            },
+            IambId::UnreadList => {
+                let list = UnreadListState::new(IambBufferId::UnreadList, vec![]);
+
+                Ok(IambWindow::UnreadList(list))
             },
         }
     }

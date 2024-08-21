@@ -510,6 +510,9 @@ pub enum IambAction {
 
     /// Toggle the focus within the focused room.
     ToggleScrollbackFocus,
+
+    /// Clear all unread messages.
+    ClearUnreads,
 }
 
 impl IambAction {
@@ -546,6 +549,7 @@ impl From<SendAction> for IambAction {
 impl ApplicationAction for IambAction {
     fn is_edit_sequence(&self, _: &EditContext) -> SequenceStatus {
         match self {
+            IambAction::ClearUnreads => SequenceStatus::Break,
             IambAction::Homeserver(..) => SequenceStatus::Break,
             IambAction::Keys(..) => SequenceStatus::Break,
             IambAction::Message(..) => SequenceStatus::Break,
@@ -560,6 +564,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_action(&self, _: &EditContext) -> SequenceStatus {
         match self {
+            IambAction::ClearUnreads => SequenceStatus::Atom,
             IambAction::Homeserver(..) => SequenceStatus::Atom,
             IambAction::Keys(..) => SequenceStatus::Atom,
             IambAction::Message(..) => SequenceStatus::Atom,
@@ -574,6 +579,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_selection(&self, _: &EditContext) -> SequenceStatus {
         match self {
+            IambAction::ClearUnreads => SequenceStatus::Ignore,
             IambAction::Homeserver(..) => SequenceStatus::Ignore,
             IambAction::Keys(..) => SequenceStatus::Ignore,
             IambAction::Message(..) => SequenceStatus::Ignore,
@@ -588,6 +594,7 @@ impl ApplicationAction for IambAction {
 
     fn is_switchable(&self, _: &EditContext) -> bool {
         match self {
+            IambAction::ClearUnreads => false,
             IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
             IambAction::Room(..) => false,
@@ -1148,6 +1155,14 @@ impl RoomInfo {
         self.user_receipts.insert(user_id, event_id);
     }
 
+    pub fn fully_read(&mut self, user_id: OwnedUserId) {
+        let Some(((_, event_id), _)) = self.messages.last_key_value() else {
+            return;
+        };
+
+        self.set_receipt(user_id, event_id.clone());
+    }
+
     pub fn get_receipt(&self, user_id: &UserId) -> Option<&OwnedEventId> {
         self.user_receipts.get(user_id)
     }
@@ -1307,6 +1322,20 @@ pub struct SyncInfo {
 
     /// DMs that the user is a member of.
     pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+}
+
+impl SyncInfo {
+    pub fn rooms(&self) -> impl Iterator<Item = &RoomId> {
+        self.rooms.iter().map(|r| r.0.room_id())
+    }
+
+    pub fn dms(&self) -> impl Iterator<Item = &RoomId> {
+        self.dms.iter().map(|r| r.0.room_id())
+    }
+
+    pub fn chats(&self) -> impl Iterator<Item = &RoomId> {
+        self.rooms().chain(self.dms())
+    }
 }
 
 bitflags::bitflags! {
@@ -1480,6 +1509,9 @@ pub enum IambId {
 
     /// The `:chats` window.
     ChatList,
+
+    /// The `:unreads` window.
+    UnreadList,
 }
 
 impl Display for IambId {
@@ -1500,6 +1532,7 @@ impl Display for IambId {
             IambId::VerifyList => f.write_str("iamb://verify"),
             IambId::Welcome => f.write_str("iamb://welcome"),
             IambId::ChatList => f.write_str("iamb://chats"),
+            IambId::UnreadList => f.write_str("iamb://unreads"),
         }
     }
 }
@@ -1631,6 +1664,13 @@ impl<'de> Visitor<'de> for IambIdVisitor {
 
                 Ok(IambId::ChatList)
             },
+            Some("unreads") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://unreads takes no path"));
+                }
+
+                Ok(IambId::UnreadList)
+            },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
         }
@@ -1691,6 +1731,9 @@ pub enum IambBufferId {
 
     /// The `:chats` window.
     ChatList,
+
+    /// The `:unreads` window.
+    UnreadList,
 }
 
 impl IambBufferId {
@@ -1706,6 +1749,7 @@ impl IambBufferId {
             IambBufferId::VerifyList => IambId::VerifyList,
             IambBufferId::Welcome => IambId::Welcome,
             IambBufferId::ChatList => IambId::ChatList,
+            IambBufferId::UnreadList => IambId::UnreadList,
         };
 
         Some(id)
@@ -1740,6 +1784,7 @@ impl ApplicationInfo for IambInfo {
             IambBufferId::VerifyList => vec![],
             IambBufferId::Welcome => vec![],
             IambBufferId::ChatList => vec![],
+            IambBufferId::UnreadList => vec![],
         }
     }
 
