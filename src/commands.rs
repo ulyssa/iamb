@@ -307,6 +307,30 @@ fn iamb_chats(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_unreads(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    match args.pop().as_deref() {
+        Some("clear") => {
+            let clear = IambAction::ClearUnreads;
+            let step = CommandStep::Continue(clear.into(), ctx.context.clone());
+
+            return Ok(step);
+        },
+        Some(_) => return Result::Err(CommandError::InvalidArgument),
+        None => {
+            let open = ctx.switch(OpenTarget::Application(IambId::UnreadList));
+            let step = CommandStep::Continue(open, ctx.context.clone());
+
+            return Ok(step);
+        },
+    }
+}
+
 fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -647,6 +671,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "spaces".into(),
         aliases: vec![],
         f: iamb_spaces,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "unreads".into(),
+        aliases: vec![],
+        f: iamb_unreads,
     });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),

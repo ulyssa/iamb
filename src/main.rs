@@ -529,6 +529,18 @@ impl Application {
         }
 
         let info = match action {
+            IambAction::ClearUnreads => {
+                let user_id = &store.application.settings.profile.user_id;
+
+                for room_id in store.application.sync_info.chats() {
+                    if let Some(room) = store.application.rooms.get_mut(room_id) {
+                        room.fully_read(user_id.clone());
+                    }
+                }
+
+                None
+            },
+
             IambAction::ToggleScrollbackFocus => {
                 self.screen.current_window_mut()?.focus_toggle();
 
