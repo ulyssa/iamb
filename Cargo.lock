@@ -2046,7 +2046,7 @@ dependencies = [
 
 [[package]]
 name = "iamb"
-version = "0.0.10-alpha.1"
+version = "0.0.10"
 dependencies = [
  "anyhow",
  "bitflags 2.5.0",

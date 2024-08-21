@@ -18,6 +18,7 @@
 - Threads, spaces, E2EE, and read receipts
 - Image previews in terminals that support it (sixels, Kitty, and iTerm2), or using pixelated blocks for those that don't
 - Notifications via terminal bell or desktop environment
+- Send Markdown, HTML or plaintext messages
 - Creating, joining, and leaving rooms
 - Sending and accepting room invitations
 - Editing, redacting, and reacting to messages
@@ -31,13 +32,36 @@ _You may want to [see this page as it was when the latest version was published]
 You can find documentation for installing, configuring, and using iamb on its
 website, [iamb.chat].
 
-## Installation
+## Configuration
+
+You can create a basic configuration in `$CONFIG_DIR/iamb/config.toml` that looks like:
+
+```toml
+[profiles."example.com"]
+user_id = "@user:example.com"
+```
+
+If you homeserver is located on a different domain than the server part of the
+`user_id` and you don't have a [`/.well-known`][well_known_entry] entry, then
+you can explicitly specify the homeserver URL to use:
+
+```toml
+[profiles."example.com"]
+url = "https://example.com"
+user_id = "@user:example.com"
+```
+
+## Installation (via `crates.io`)
 
 Install Rust (1.70.0 or above) and Cargo, and then run:
 
 ```
 cargo install --locked iamb
 ```
+
+See [Configuration](#configuration) for getting a profile set up.
+
+## Installation (via package managers)
 
 ### Arch Linux
 
@@ -48,22 +72,12 @@ Arch User Repositories (AUR). To install it simply run with your favorite AUR he
 paru iamb-git
 ```
 
-See [Configuration](#configuration) for getting a profile set up.
-
 ### FreeBSD
 
 On FreeBSD a package is available from the official repositories. To install it simply run:
 
 ```
 pkg install iamb
-```
-
-### NetBSD
-
-On NetBSD a package is available from the official repositories. To install it simply run:
-
-```
-pkgin install iamb
 ```
 
 ### macOS
@@ -73,6 +87,14 @@ repository. To install it simply run:
 
 ```
 brew install iamb
+```
+
+### NetBSD
+
+On NetBSD a package is available from the official repositories. To install it simply run:
+
+```
+pkgin install iamb
 ```
 
 ### Nix / NixOS (flake)
@@ -97,33 +119,11 @@ A snap for Linux distributions which [support](https://snapcraft.io/docs/install
 snap install iamb
 ```
 
-## Configuration
-
-You can create a basic configuration in `$CONFIG_DIR/iamb/config.toml` that looks like:
-
-```toml
-[profiles."example.com"]
-user_id = "@user:example.com"
-```
-
-If you homeserver is located on a different domain than the server part of the
-`user_id` and you don't have a [`/.well-known`][well_known_entry] entry, then
-you can explicitly specify the homeserver URL to use:
-
-```toml
-[profiles."example.com"]
-url = "https://example.com"
-user_id = "@user:example.com"
-```
-
 ## License
 
 iamb is released under the [Apache License, Version 2.0].
 
 [Apache License, Version 2.0]: https://github.com/ulyssa/iamb/blob/master/LICENSE
-[client-comparison-matrix]: https://matrix.org/clients-matrix/
 [crates-io-iamb]: https://crates.io/crates/iamb
 [iamb.chat]: https://iamb.chat
-[gomuks]: https://github.com/tulir/gomuks
-[weechat-matrix]: https://github.com/poljar/weechat-matrix
 [well_known_entry]: https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixclient
