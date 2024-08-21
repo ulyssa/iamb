@@ -8,6 +8,7 @@
 
   <releases>
     <release version="0.0.9" date="2024-03-28"/>
+    <release version="0.0.10" date="2024-08-20"/>
   </releases>
 
   <developer id="dev.ulyssa">
@@ -23,8 +24,8 @@
 
   <screenshots>
     <screenshot type="default">
-      <image>https://iamb.chat/static/images/iamb-demo.gif</image>
-      <caption>Example conversation within iamb</caption>
+      <image>https://iamb.chat/static/images/metainfo-screenshot.png</image>
+      <caption>Example screenshot of room and lists of rooms, spaces and members within iamb</caption>
     </screenshot>
   </screenshots>
 
