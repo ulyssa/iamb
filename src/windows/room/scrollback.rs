@@ -79,14 +79,20 @@ fn nth_key_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageKey {
 }
 
 fn nth_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageCursor {
-    nth_key_before(pos, n, thread).into()
+    let key = nth_key_before(pos, n, thread);
+
+    if matches!(thread.last_key_value(), Some((last, _)) if &key == last) {
+        MessageCursor::latest()
+    } else {
+        MessageCursor::from(key)
+    }
 }
 
-fn nth_key_after(pos: MessageKey, n: usize, thread: &Messages) -> MessageKey {
+fn nth_key_after(pos: MessageKey, n: usize, thread: &Messages) -> Option<MessageKey> {
     let mut end = &pos;
-    let iter = thread.range(&pos..).enumerate();
+    let mut iter = thread.range(&pos..).enumerate();
 
-    for (i, (key, _)) in iter {
+    for (i, (key, _)) in iter.by_ref() {
         end = key;
 
         if i >= n {
@@ -94,11 +100,12 @@ fn nth_key_after(pos: MessageKey, n: usize, thread: &Messages) -> MessageKey {
         }
     }
 
-    end.clone()
+    // Avoid returning the key if it's at the end.
+    iter.next().map(|_| end.clone())
 }
 
 fn nth_after(pos: MessageKey, n: usize, thread: &Messages) -> MessageCursor {
-    nth_key_after(pos, n, thread).into()
+    nth_key_after(pos, n, thread).map(MessageCursor::from).unwrap_or_default()
 }
 
 fn prevmsg<'a>(key: &MessageKey, thread: &'a Messages) -> Option<&'a Message> {
@@ -148,6 +155,10 @@ impl ScrollbackState {
             jumped,
             show_full_on_redraw,
         }
+    }
+
+    pub fn is_latest(&self) -> bool {
+        self.cursor.timestamp.is_none()
     }
 
     pub fn goto_latest(&mut self) {
@@ -1524,8 +1535,9 @@ mod tests {
         scrollback.edit(&EditAction::Motion, &next(1), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG5_KEY.clone().into());
 
+        // And one more becomes "latest" cursor:
         scrollback.edit(&EditAction::Motion, &next(1), &ctx, &mut store).unwrap();
-        assert_eq!(scrollback.cursor, MSG1_KEY.clone().into());
+        assert_eq!(scrollback.cursor, MessageCursor::latest());
     }
 
     #[tokio::test]

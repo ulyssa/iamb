@@ -1766,6 +1766,13 @@ impl RoomFocus {
     pub fn is_msgbar(&self) -> bool {
         matches!(self, RoomFocus::MessageBar)
     }
+
+    pub fn toggle(&mut self) {
+        *self = match self {
+            RoomFocus::MessageBar => RoomFocus::Scrollback,
+            RoomFocus::Scrollback => RoomFocus::MessageBar,
+        };
+    }
 }
 
 /// Identifiers used to track where a mark was placed.
