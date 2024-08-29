@@ -22,8 +22,8 @@ jobs:
       uses: actions/checkout@v3
       with:
         submodules: true
-    - name: Install Rust (1.70 w/ clippy)
-      uses: dtolnay/rust-toolchain@1.70
+    - name: Install Rust (1.74 w/ clippy)
+      uses: dtolnay/rust-toolchain@1.74
       with:
           components: clippy
     - name: Install Rust (nightly w/ rustfmt)

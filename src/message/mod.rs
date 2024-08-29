@@ -9,7 +9,7 @@ use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 
-use chrono::{DateTime, Local as LocalTz, NaiveDateTime, TimeZone};
+use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
@@ -180,9 +180,8 @@ fn placeholder_frame(
 #[inline]
 fn millis_to_datetime(ms: UInt) -> DateTime<LocalTz> {
     let time = i64::from(ms) / 1000;
-    let time = NaiveDateTime::from_timestamp_opt(time, 0).unwrap_or_default();
-
-    LocalTz.from_utc_datetime(&time)
+    let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
+    time.into()
 }
 
 #[derive(thiserror::Error, Debug)]
