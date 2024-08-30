@@ -63,11 +63,7 @@ pub async fn register_notifications(
                             return;
                         }
 
-                        match notify_via {
-                            #[cfg(feature = "desktop")]
-                            NotifyVia::Desktop => send_notification_desktop(summary, body),
-                            NotifyVia::Bell => send_notification_bell(&store).await,
-                        }
+                        send_notification(&notify_via, &store, &summary, body.as_deref()).await;
                     },
                     Err(err) => {
                         tracing::error!("Failed to extract notification data: {err}")
@@ -78,22 +74,42 @@ pub async fn register_notifications(
         .await;
 }
 
+async fn send_notification(
+    via: &NotifyVia,
+    store: &AsyncProgramStore,
+    summary: &str,
+    body: Option<&str>,
+) {
+    #[cfg(feature = "desktop")]
+    if via.desktop {
+        send_notification_desktop(summary, body);
+    }
+    #[cfg(not(feature = "desktop"))]
+    {
+        let _ = (summary, body, IAMB_XDG_NAME);
+    }
+
+    if via.bell {
+        send_notification_bell(store).await;
+    }
+}
+
 async fn send_notification_bell(store: &AsyncProgramStore) {
     let mut locked = store.lock().await;
     locked.application.ring_bell = true;
 }
 
 #[cfg(feature = "desktop")]
-fn send_notification_desktop(summary: String, body: Option<String>) {
+fn send_notification_desktop(summary: &str, body: Option<&str>) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
-        .summary(&summary)
+        .summary(summary)
         .appname(IAMB_XDG_NAME)
         .icon(IAMB_XDG_NAME)
         .action("default", "default");
 
     if let Some(body) = body {
-        desktop_notification.body(&body);
+        desktop_notification.body(body);
     }
 
     if let Err(err) = desktop_notification.show() {

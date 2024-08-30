@@ -398,23 +398,70 @@ pub enum UserDisplayStyle {
     DisplayName,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum NotifyVia {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct NotifyVia {
     /// Deliver notifications via terminal bell.
-    Bell,
+    pub bell: bool,
     /// Deliver notifications via desktop mechanism.
     #[cfg(feature = "desktop")]
-    Desktop,
+    pub desktop: bool,
 }
+pub struct NotifyViaVisitor;
 
 impl Default for NotifyVia {
     fn default() -> Self {
-        #[cfg(not(feature = "desktop"))]
-        return NotifyVia::Bell;
+        Self {
+            bell: cfg!(not(feature = "desktop")),
+            #[cfg(feature = "desktop")]
+            desktop: true,
+        }
+    }
+}
 
-        #[cfg(feature = "desktop")]
-        return NotifyVia::Desktop;
+impl<'de> Visitor<'de> for NotifyViaVisitor {
+    type Value = NotifyVia;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid notify destination (e.g. \"bell\" or \"desktop\")")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        let mut via = NotifyVia {
+            bell: false,
+            #[cfg(feature = "desktop")]
+            desktop: false,
+        };
+
+        for value in value.split('|') {
+            match value.to_ascii_lowercase().as_str() {
+                "bell" => {
+                    via.bell = true;
+                },
+                #[cfg(feature = "desktop")]
+                "desktop" => {
+                    via.desktop = true;
+                },
+                #[cfg(not(feature = "desktop"))]
+                "desktop" => {
+                    return Err(E::custom("desktop notification support was compiled out"))
+                },
+                _ => return Err(E::custom("could not parse into a notify destination")),
+            };
+        }
+
+        Ok(via)
+    }
+}
+
+impl<'de> Deserialize<'de> for NotifyVia {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(NotifyViaVisitor)
     }
 }
 
@@ -1187,6 +1234,29 @@ mod tests {
         let run = mapped.get(&jj).unwrap();
         let exp = Keys(vec![esc], "<Esc>".into());
         assert_eq!(run, &exp);
+    }
+
+    #[test]
+    fn test_parse_notify_via() {
+        assert_eq!(NotifyVia { bell: false, desktop: true }, NotifyVia::default());
+        assert_eq!(
+            NotifyVia { bell: false, desktop: true },
+            serde_json::from_str(r#""desktop""#).unwrap()
+        );
+        assert_eq!(
+            NotifyVia { bell: true, desktop: false },
+            serde_json::from_str(r#""bell""#).unwrap()
+        );
+        assert_eq!(
+            NotifyVia { bell: true, desktop: true },
+            serde_json::from_str(r#""bell|desktop""#).unwrap()
+        );
+        assert_eq!(
+            NotifyVia { bell: true, desktop: true },
+            serde_json::from_str(r#""desktop|bell""#).unwrap()
+        );
+        assert!(serde_json::from_str::<NotifyVia>(r#""other""#).is_err());
+        assert!(serde_json::from_str::<NotifyVia>(r#""""#).is_err());
     }
 
     #[test]
