@@ -847,7 +847,7 @@ async fn check_import_keys(
     let encrypted = match encrypt_room_key_export(&keys, &passphrase, 500000) {
         Ok(encrypted) => encrypted,
         Err(e) => {
-            format!("* Failed to encrypt room keys during export: {e}");
+            println!("* Failed to encrypt room keys during export: {e}");
             process::exit(2);
         },
     };
