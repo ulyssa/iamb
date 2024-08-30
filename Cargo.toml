@@ -1,6 +1,6 @@
 [package]
 name = "iamb"
-version = "0.0.10"
+version = "0.0.11-alpha.1"
 edition = "2018"
 authors = ["Ulyssa <git@ulyssa.dev>"]
 repository = "https://github.com/ulyssa/iamb"
@@ -11,7 +11,7 @@ license = "Apache-2.0"
 exclude = [".github", "CONTRIBUTING.md"]
 keywords = ["matrix", "chat", "tui", "vim"]
 categories = ["command-line-utilities"]
-rust-version = "1.70"
+rust-version = "1.74"
 build = "build.rs"
 
 [features]
@@ -46,7 +46,7 @@ nom = "7.0.0"
 open = "3.2.0"
 rand = "0.8.5"
 ratatui = "0.26"
-ratatui-image = { version = "1.0.0", features = ["serde"] }
+ratatui-image = { version = "=1.0.0", features = ["serde"] }
 regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"
@@ -70,7 +70,7 @@ default-features = false
 features = ["shortcodes"]
 
 [dependencies.notify-rust]
-version = "4.10.0"
+version = "~4.10.0"
 default-features = false
 features = ["zbus", "serde"]
 optional = true
