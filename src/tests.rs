@@ -191,7 +191,7 @@ pub fn mock_tunables() -> TunableValues {
         message_user_color: false,
         notifications: Notifications {
             enabled: false,
-            via: NotifyVia::Desktop,
+            via: NotifyVia::default(),
             show_message: true,
         },
         image_preview: None,
