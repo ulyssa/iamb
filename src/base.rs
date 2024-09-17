@@ -1276,10 +1276,12 @@ fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
         },
     };
 
+    // `guess_protocol` also does tmux detection,
+    // run it always then overwrite the guessed protocol if needed
+    picker.guess_protocol();
+
     if let Some(protocol_type) = protocol_type {
         picker.protocol_type = protocol_type;
-    } else {
-        picker.guess_protocol();
     }
 
     Some(picker)
