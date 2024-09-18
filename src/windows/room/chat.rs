@@ -649,6 +649,80 @@ impl ChatState {
         &self.room_id
     }
 
+    pub fn auto_toggle_focus(
+        &mut self,
+        act: &EditorAction,
+        ctx: &ProgramContext,
+        store: &mut ProgramStore,
+    ) -> Option<EditorAction> {
+        let is_insert = ctx.get_insert_style().is_some();
+
+        match (self.focus, act) {
+            (RoomFocus::Scrollback, _) if is_insert => {
+                // Insert mode commands should switch focus.
+                self.focus = RoomFocus::MessageBar;
+                None
+            },
+            (RoomFocus::Scrollback, EditorAction::InsertText(_)) => {
+                // Pasting or otherwise inserting text should switch.
+                self.focus = RoomFocus::MessageBar;
+                None
+            },
+            (
+                RoomFocus::Scrollback,
+                EditorAction::Edit(
+                    op,
+                    EditTarget::Motion(mov @ MoveType::Line(MoveDir1D::Next), count),
+                ),
+            ) if ctx.resolve(op).is_motion() => {
+                let count = ctx.resolve(count);
+
+                if count > 0 && self.scrollback.is_latest() {
+                    // Trying to move down a line when already at the end of room history should
+                    // switch.
+                    self.focus = RoomFocus::MessageBar;
+
+                    // And decrement the count for the action.
+                    let count = count.saturating_sub(1).into();
+                    let target = EditTarget::Motion(mov.clone(), count);
+                    let dec = EditorAction::Edit(op.clone(), target);
+
+                    Some(dec)
+                } else {
+                    None
+                }
+            },
+            (
+                RoomFocus::MessageBar,
+                EditorAction::Edit(
+                    op,
+                    EditTarget::Motion(mov @ MoveType::Line(MoveDir1D::Previous), count),
+                ),
+            ) if !is_insert && ctx.resolve(op).is_motion() => {
+                let count = ctx.resolve(count);
+
+                if count > 0 && self.tbox.get_cursor().y == 0 {
+                    // Trying to move up a line when already at the top of the msgbar should
+                    // switch as long as we're not in Insert mode.
+                    self.focus = RoomFocus::Scrollback;
+
+                    // And decrement the count for the action.
+                    let count = count.saturating_sub(1).into();
+                    let target = EditTarget::Motion(mov.clone(), count);
+                    let dec = EditorAction::Edit(op.clone(), target);
+
+                    Some(dec)
+                } else {
+                    None
+                }
+            },
+            (RoomFocus::Scrollback, _) | (RoomFocus::MessageBar, _) => {
+                // Do not switch.
+                None
+            },
+        }
+    }
+
     pub fn typing_notice(
         &self,
         act: &EditorAction,
@@ -751,8 +825,16 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
+        // Check whether we should automatically switch between
+        // the message bar or message scrollback, and use an
+        // adjusted action if we do so.
+        let adjusted = self.auto_toggle_focus(act, ctx, store);
+        let act = adjusted.as_ref().unwrap_or(act);
+
+        // Send typing notice if needed.
         self.typing_notice(act, ctx, store);
 
+        // And now we can finally run the editor command.
         match delegate!(self, w => w.editor_command(act, ctx, store)) {
             res @ Ok(_) => res,
             Err(EditError::WrongBuffer(IambBufferId::Room(room_id, thread, focus)))
