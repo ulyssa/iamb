@@ -2115,7 +2115,7 @@ dependencies = [
  "tracing-appender",
  "tracing-subscriber",
  "unicode-segmentation",
- "unicode-width",
+ "unicode-width 0.1.13",
  "url",
  "vergen",
 ]
@@ -2397,12 +2397,11 @@ dependencies = [
 [[package]]
 name = "keybindings"
 version = "0.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "680e4699c91c0622dd70da32c274881aadb1ac86252d738c3641266e90e4ca15"
+source = "git+https://github.com/simnalamburt/modalkit.git?tag=v0.0.20-unicode-width#87d43b069c9f501ebd8ee35892aef43d56fa0abd"
 dependencies = [
  "textwrap",
  "unicode-segmentation",
- "unicode-width",
+ "unicode-width 0.1.13",
 ]
 
 [[package]]
@@ -2957,8 +2956,7 @@ dependencies = [
 [[package]]
 name = "modalkit"
 version = "0.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "24f070af2372cc39349d6415c9a2ae050e1e9dc71dddc9a7a036babe7ad2b192"
+source = "git+https://github.com/simnalamburt/modalkit.git?tag=v0.0.20-unicode-width#87d43b069c9f501ebd8ee35892aef43d56fa0abd"
 dependencies = [
  "anymap2",
  "arboard",
@@ -2973,14 +2971,13 @@ dependencies = [
  "ropey",
  "thiserror",
  "unicode-segmentation",
- "unicode-width",
+ "unicode-width 0.1.13",
 ]
 
 [[package]]
 name = "modalkit-ratatui"
 version = "0.0.20"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df272b6822a22154034a9761ea10235746fefec7623dc1a6ed0cfbaad6f5d070"
+source = "git+https://github.com/simnalamburt/modalkit.git?tag=v0.0.20-unicode-width#87d43b069c9f501ebd8ee35892aef43d56fa0abd"
 dependencies = [
  "crossterm",
  "intervaltree",
@@ -2989,6 +2986,7 @@ dependencies = [
  "ratatui",
  "regex",
  "serde",
+ "unicode-width 0.2.0",
 ]
 
 [[package]]
@@ -3813,7 +3811,7 @@ dependencies = [
  "strum",
  "unicode-segmentation",
  "unicode-truncate",
- "unicode-width",
+ "unicode-width 0.1.13",
 ]
 
 [[package]]
@@ -4766,7 +4764,7 @@ checksum = "23d434d3f8967a09480fb04132ebe0a3e088c173e6d0ee7897abbdf4eab0f8b9"
 dependencies = [
  "smawk",
  "unicode-linebreak",
- "unicode-width",
+ "unicode-width 0.1.13",
 ]
 
 [[package]]
@@ -5201,7 +5199,7 @@ checksum = "b3644627a5af5fa321c95b9b235a72fd24cd29c648c2c379431e6628655627bf"
 dependencies = [
  "itertools 0.13.0",
  "unicode-segmentation",
- "unicode-width",
+ "unicode-width 0.1.13",
 ]
 
 [[package]]
@@ -5209,6 +5207,12 @@ name = "unicode-width"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0336d538f7abc86d282a4189614dfaa90810dfc2c6f6427eaf88e16311dd225d"
+
+[[package]]
+name = "unicode-width"
+version = "0.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fc81956842c57dac11422a97c3b8195a1ff727f06e85c84ed2e8aa277c9a0fd"
 
 [[package]]
 name = "unicode_categories"

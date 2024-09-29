@@ -76,15 +76,13 @@ features = ["zbus", "serde"]
 optional = true
 
 [dependencies.modalkit]
-version = "0.0.20"
+git = "https://github.com/simnalamburt/modalkit.git"
+tag = "v0.0.20-unicode-width"
 default-features = false
-#git = "https://github.com/ulyssa/modalkit"
-#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.20"
-#git = "https://github.com/ulyssa/modalkit"
-#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
+git = "https://github.com/simnalamburt/modalkit.git"
+tag = "v0.0.20-unicode-width"
 
 [dependencies.matrix-sdk]
 version = "0.7.1"
