@@ -712,14 +712,13 @@ impl<'a> MessageFormatter<'a> {
     fn push_in_reply(
         &mut self,
         msg: &'a Message,
+        mut replied: Text<'a>,
         style: Style,
         text: &mut Text<'a>,
         info: &'a RoomInfo,
     ) {
         let width = self.width();
         let w = width.saturating_sub(2);
-        let shortcodes = self.settings.tunables.message_shortcode_display;
-        let (mut replied, _) = msg.show_msg(w, style, true, shortcodes);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -961,13 +960,15 @@ impl Message {
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
-    ) -> (Text<'a>, Option<(&dyn Protocol, u16, u16)>) {
+    ) -> (Text<'a>, [Option<(&'a dyn Protocol, u16, u16)>; 2]) {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected, settings);
         let mut fmt = self.get_render_format(prev, width, info, settings);
         let mut text = Text::default();
         let width = fmt.width();
+        let x_off = fmt.cols.user_gutter_width(settings);
+        let date_flag = fmt.date.is_some();
 
         // Show the message that this one replied to, if any.
         let reply = self
@@ -975,8 +976,25 @@ impl Message {
             .or_else(|| self.thread_root())
             .and_then(|e| info.get_event(&e));
 
+        let mut proto_reply = None;
         if let Some(r) = &reply {
-            fmt.push_in_reply(r, style, &mut text, info);
+            // Get the text and image content of the reply header
+            let (msg, proto) =
+                r.show_msg(width, style, false, settings.tunables.message_shortcode_display);
+
+            // Determine the image offset of the reply header, taking into account the formatting
+            proto_reply = proto.map(|p| {
+                // Adjust y_off by 1 to account for username
+                let y_off = text.lines.len() as u16 + 1;
+                // Adjust x_off by 2 to account for the vertical line and indent
+                let x_off = fmt.cols.user_gutter_width(settings) + 2;
+                // Adjust y_off by 1 if a date was printed before the message to account for the extra line.
+                let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
+                (p, x_off, y_off)
+            });
+
+            // Format the reply header and push it into the `Text` buffer
+            fmt.push_in_reply(r, msg, style, &mut text, info);
         }
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
@@ -988,11 +1006,11 @@ impl Message {
         );
 
         // Given our text so far, determine the image offset.
-        let proto = proto.map(|p| {
+        let proto_main = proto.map(|p| {
             let y_off = text.lines.len() as u16;
             let x_off = fmt.cols.user_gutter_width(settings);
             // Adjust y_off by 1 if a date was printed before the message to account for the extra line.
-            let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
+            let y_off = if date_flag { y_off + 1 } else { y_off };
             (p, x_off, y_off)
         });
 
@@ -1012,7 +1030,7 @@ impl Message {
             fmt.push_thread_reply_count(thread.len(), &mut text);
         }
 
-        (text, proto)
+        (text, [proto_main, proto_reply])
     }
 
     pub fn show<'a>(
@@ -1053,7 +1071,7 @@ impl Message {
                 },
                 ImageStatus::Loaded(backend) => {
                     proto = Some(backend.as_ref());
-                    placeholder_frame(None, width, &backend.rect().into())
+                    placeholder_frame(Some("Loading..."), width, &backend.rect().into())
                 },
                 ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
             };
