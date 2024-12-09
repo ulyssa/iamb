@@ -1096,9 +1096,9 @@ impl Message {
         let padding = user_gutter - 2 - width;
 
         let sender = if align_right {
-            space(padding) + &truncated + "  "
+            format!("{}{}  ", space(padding), truncated)
         } else {
-            truncated.into_owned() + &space(padding) + "  "
+            format!("{}{}  ", truncated, space(padding))
         };
 
         Span::styled(sender, style).into()
