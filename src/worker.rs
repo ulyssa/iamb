@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
-use matrix_sdk::deserialized_responses::{DecryptedRoomEvent, TimelineEventKind};
+use matrix_sdk::ruma::events::AnySyncTimelineEvent;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -60,7 +60,6 @@ use matrix_sdk::{
             typing::SyncTypingEvent,
             AnyInitialStateEvent,
             AnyMessageLikeEvent,
-            AnyTimelineEvent,
             EmptyStateKey,
             InitialStateEvent,
             SyncEphemeralRoomEvent,
@@ -295,25 +294,10 @@ async fn load_older_one(
         let mut msgs = vec![];
 
         for ev in chunk.into_iter() {
-            let msg: AnyMessageLikeEvent = match ev.kind {
-                TimelineEventKind::Decrypted(DecryptedRoomEvent { event, .. }) => match event.deserialize() {
-                    Ok(e) => e,
-                    _ => continue,
-                }
-                TimelineEventKind::PlainText { event } => match event.deserialize() {
-                    Ok(e) => match e.into_full_event(room_id.to_owned()) {
-                        AnyTimelineEvent::MessageLike(e) => e,
-                        _ => continue,
-                    }
-                    _ => continue,
-                }
-                TimelineEventKind::UnableToDecrypt { event, .. } => match event.deserialize() {
-                    Ok(e) => match e.into_full_event(room_id.to_owned()) {
-                        AnyTimelineEvent::MessageLike(e) => e,
-                        _ => continue,
-                    }
-                    _ => continue,
-                }
+            let deserialized = ev.into_raw().deserialize().map_err(|e| IambError::Serde(e))?;
+            let msg: AnyMessageLikeEvent = match deserialized {
+                AnySyncTimelineEvent::MessageLike(e) => e.into_full_event(room_id.to_owned()),
+                AnySyncTimelineEvent::State(_) => continue,
             };
 
             let event_id = msg.event_id();
