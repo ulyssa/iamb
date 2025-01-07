@@ -196,7 +196,7 @@ pub async fn parse_full_notification(
         .and_then(|m| m.display_name())
         .unwrap_or_else(|| sender_id.localpart());
 
-    let summary = if let Ok(room_name) = room.compute_display_name().await {
+    let summary = if let Some(room_name) = room.cached_display_name() {
         format!("{sender_name} in {room_name}")
     } else {
         sender_name.to_string()
