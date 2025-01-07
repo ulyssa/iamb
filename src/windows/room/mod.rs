@@ -26,8 +26,8 @@ use matrix_sdk::{
         OwnedUserId,
         RoomId,
     },
-    RoomState as MatrixRoomState,
     RoomDisplayName,
+    RoomState as MatrixRoomState,
 };
 
 use ratatui::{

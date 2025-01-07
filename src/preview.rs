@@ -157,7 +157,10 @@ async fn download_or_load(
         },
         Err(_) => {
             media
-                .get_media_content(&MediaRequestParameters { source, format: MediaFormat::File }, true)
+                .get_media_content(
+                    &MediaRequestParameters { source, format: MediaFormat::File },
+                    true,
+                )
                 .await
                 .and_then(|buffer| {
                     if let Err(err) =

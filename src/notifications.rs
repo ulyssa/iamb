@@ -55,7 +55,7 @@ pub async fn register_notifications(
                 }
 
                 match notification.event {
-                    RawAnySyncOrStrippedTimelineEvent::Sync(e) =>
+                    RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
                         match parse_full_notification(e, room, show_message).await {
                             Ok((summary, body, server_ts)) => {
                                 if server_ts < startup_ts {
@@ -66,12 +66,14 @@ pub async fn register_notifications(
                                     return;
                                 }
 
-                                send_notification(&notify_via, &store, &summary, body.as_deref()).await;
+                                send_notification(&notify_via, &store, &summary, body.as_deref())
+                                    .await;
                             },
                             Err(err) => {
                                 tracing::error!("Failed to extract notification data: {err}")
-                            }
+                            },
                         }
+                    },
                     // Stripped events may be dropped silently because they're
                     // only relevant if we're not in a room, and we presumably
                     // don't want notifications for rooms we're not in.

@@ -22,10 +22,10 @@ use url::Url;
 
 use matrix_sdk::{
     config::{RequestConfig, SyncSettings},
+    deserialized_responses::DisplayName,
     encryption::verification::{SasVerification, Verification},
     encryption::{BackupDownloadStrategy, EncryptionSettings},
     event_handler::Ctx,
-    deserialized_responses::DisplayName,
     matrix_auth::MatrixSession,
     reqwest,
     room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
@@ -80,8 +80,8 @@ use matrix_sdk::{
     Client,
     ClientBuildError,
     Error as MatrixError,
-    RoomMemberships,
     RoomDisplayName,
+    RoomMemberships,
 };
 
 use modalkit::errors::UIError;
@@ -1077,8 +1077,9 @@ impl ClientWorker {
                     let room_id = room.room_id();
                     let user_id = ev.state_key;
 
-                    let ambiguous_name =
-                        DisplayName::new(ev.content.displayname.as_deref().unwrap_or_else(|| user_id.as_str()));
+                    let ambiguous_name = DisplayName::new(
+                        ev.content.displayname.as_deref().unwrap_or_else(|| user_id.as_str()),
+                    );
                     let ambiguous = client
                         .store()
                         .get_users_with_display_name(room_id, &ambiguous_name)
