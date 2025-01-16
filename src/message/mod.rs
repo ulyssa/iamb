@@ -961,7 +961,7 @@ impl Message {
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
-    ) -> (Text<'a>, Option<(&dyn Protocol, u16, u16)>) {
+    ) -> (Text<'a>, Option<(&'a dyn Protocol, u16, u16)>) {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected, settings);
