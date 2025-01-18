@@ -22,6 +22,7 @@ use std::fs::{create_dir_all, File};
 use std::io::{stdout, BufWriter, Stdout, Write};
 use std::ops::DerefMut;
 use std::process;
+use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -30,6 +31,13 @@ use clap::Parser;
 use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
+use modalkit::crossterm::event::{
+    DisableMouseCapture,
+    EnableMouseCapture,
+    KeyCode,
+    KeyModifiers,
+    MouseEventKind,
+};
 use modalkit::keybindings::InputBindings;
 use rand::{distributions::Alphanumeric, Rng};
 use temp_dir::TempDir;
@@ -364,8 +372,16 @@ impl Application {
 
                     return Ok(ke.into());
                 },
-                Event::Mouse(_) => {
-                    // Do nothing for now.
+                Event::Mouse(me) => {
+                    match me.kind {
+                        MouseEventKind::ScrollUp => {
+                            return Ok(TerminalKey::from_str("<C-u>").unwrap())
+                        },
+                        MouseEventKind::ScrollDown => {
+                            return Ok(TerminalKey::from_str("<C-d>").unwrap())
+                        },
+                        _ => {},
+                    }
                 },
                 Event::FocusGained => {
                     let mut store = self.store.lock().await;
@@ -944,7 +960,13 @@ fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
         )?;
     }
 
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
+    crossterm::execute!(
+        stdout(),
+        EnableBracketedPaste,
+        EnableFocusChange,
+        EnableMouseCapture,
+        SetTitle(title)
+    )
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
@@ -958,6 +980,7 @@ fn restore_tty(enable_enhanced_keys: bool) {
         DisableBracketedPaste,
         DisableFocusChange,
         LeaveAlternateScreen,
+        DisableMouseCapture,
         CursorShow,
     );
 
