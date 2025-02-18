@@ -294,7 +294,7 @@ async fn load_older_one(
         let mut msgs = vec![];
 
         for ev in chunk.into_iter() {
-            let deserialized = ev.into_raw().deserialize().map_err(|e| IambError::Serde(e))?;
+            let deserialized = ev.into_raw().deserialize().map_err(IambError::Serde)?;
             let msg: AnyMessageLikeEvent = match deserialized {
                 AnySyncTimelineEvent::MessageLike(e) => e.into_full_event(room_id.to_owned()),
                 AnySyncTimelineEvent::State(_) => continue,
