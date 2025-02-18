@@ -14,7 +14,7 @@ use url::Url;
 
 use matrix_sdk::{
     attachment::AttachmentConfig,
-    media::{MediaFormat, MediaRequest},
+    media::{MediaFormat, MediaRequestParameters},
     room::Room as MatrixRoom,
     ruma::{
         events::reaction::ReactionEventContent,
@@ -276,7 +276,7 @@ impl ChatState {
                     }
 
                     if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
-                        let req = MediaRequest { source, format: MediaFormat::File };
+                        let req = MediaRequestParameters { source, format: MediaFormat::File };
 
                         let bytes =
                             media.get_media_content(&req, true).await.map_err(IambError::from)?;

@@ -1,11 +1,12 @@
 use std::time::SystemTime;
 
 use matrix_sdk::{
+    deserialized_responses::RawAnySyncOrStrippedTimelineEvent,
     notification_settings::{IsEncrypted, IsOneToOne, NotificationSettings, RoomNotificationMode},
     room::Room as MatrixRoom,
     ruma::{
-        api::client::push::get_notifications::v3::Notification,
         events::{room::message::MessageType, AnyMessageLikeEventContent, AnySyncTimelineEvent},
+        serde::Raw,
         MilliSecondsSinceUnixEpoch,
         RoomId,
     },
@@ -53,21 +54,30 @@ pub async fn register_notifications(
                     return;
                 }
 
-                match parse_notification(notification, room, show_message).await {
-                    Ok((summary, body, server_ts)) => {
-                        if server_ts < startup_ts {
-                            return;
-                        }
+                match notification.event {
+                    RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
+                        match parse_full_notification(e, room, show_message).await {
+                            Ok((summary, body, server_ts)) => {
+                                if server_ts < startup_ts {
+                                    return;
+                                }
 
-                        if is_missing_mention(&body, mode, &client) {
-                            return;
-                        }
+                                if is_missing_mention(&body, mode, &client) {
+                                    return;
+                                }
 
-                        send_notification(&notify_via, &store, &summary, body.as_deref()).await;
+                                send_notification(&notify_via, &store, &summary, body.as_deref())
+                                    .await;
+                            },
+                            Err(err) => {
+                                tracing::error!("Failed to extract notification data: {err}")
+                            },
+                        }
                     },
-                    Err(err) => {
-                        tracing::error!("Failed to extract notification data: {err}")
-                    },
+                    // Stripped events may be dropped silently because they're
+                    // only relevant if we're not in a room, and we presumably
+                    // don't want notifications for rooms we're not in.
+                    RawAnySyncOrStrippedTimelineEvent::Stripped(_) => (),
                 }
             }
         })
@@ -171,12 +181,12 @@ async fn is_visible_room(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
     is_focused(&locked) && is_open(&mut locked, room_id)
 }
 
-pub async fn parse_notification(
-    notification: Notification,
+pub async fn parse_full_notification(
+    event: Raw<AnySyncTimelineEvent>,
     room: MatrixRoom,
     show_body: bool,
 ) -> IambResult<(String, Option<String>, MilliSecondsSinceUnixEpoch)> {
-    let event = notification.event.deserialize().map_err(IambError::from)?;
+    let event = event.deserialize().map_err(IambError::from)?;
 
     let server_ts = event.origin_server_ts();
 
@@ -188,7 +198,7 @@ pub async fn parse_notification(
         .and_then(|m| m.display_name())
         .unwrap_or_else(|| sender_id.localpart());
 
-    let summary = if let Ok(room_name) = room.display_name().await {
+    let summary = if let Some(room_name) = room.cached_display_name() {
         format!("{sender_name} in {room_name}")
     } else {
         sender_name.to_string()
