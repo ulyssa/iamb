@@ -23,6 +23,7 @@ use matrix_sdk::{
         RoomAliasId,
         RoomId,
     },
+    RoomState as MatrixRoomState,
 };
 
 use ratatui::{
@@ -195,6 +196,10 @@ fn room_cmp<T: RoomLikeItem>(a: &T, b: &T, field: &SortFieldRoom) -> Ordering {
             // sort larger timestamps towards the top.
             some_cmp(a.recent_ts(), b.recent_ts(), |a, b| b.cmp(a))
         },
+        SortFieldRoom::Invite => {
+            // sort invites before other rooms.
+            b.is_invite().cmp(&a.is_invite())
+        },
     }
 }
 
@@ -273,6 +278,7 @@ trait RoomLikeItem {
     fn recent_ts(&self) -> Option<&MessageTimeStamp>;
     fn alias(&self) -> Option<&RoomAliasId>;
     fn name(&self) -> &str;
+    fn is_invite(&self) -> bool;
 }
 
 #[inline]
@@ -914,6 +920,10 @@ impl RoomLikeItem for GenericChatItem {
     fn is_unread(&self) -> bool {
         self.unread.is_unread()
     }
+
+    fn is_invite(&self) -> bool {
+        self.room().state() == MatrixRoomState::Invited
+    }
 }
 
 impl Display for GenericChatItem {
@@ -1024,6 +1034,10 @@ impl RoomLikeItem for RoomItem {
     fn is_unread(&self) -> bool {
         self.unread.is_unread()
     }
+
+    fn is_invite(&self) -> bool {
+        self.room().state() == MatrixRoomState::Invited
+    }
 }
 
 impl Display for RoomItem {
@@ -1124,6 +1138,10 @@ impl RoomLikeItem for DirectItem {
     fn is_unread(&self) -> bool {
         self.unread.is_unread()
     }
+
+    fn is_invite(&self) -> bool {
+        self.room().state() == MatrixRoomState::Invited
+    }
 }
 
 impl Display for DirectItem {
@@ -1222,6 +1240,10 @@ impl RoomLikeItem for SpaceItem {
     fn is_unread(&self) -> bool {
         // XXX: this needs to check whether the space contains rooms with unread messages
         false
+    }
+
+    fn is_invite(&self) -> bool {
+        self.room().state() == MatrixRoomState::Invited
     }
 }
 
@@ -1556,6 +1578,7 @@ mod tests {
         alias: Option<OwnedRoomAliasId>,
         name: &'static str,
         unread: UnreadInfo,
+        invite: bool
     }
 
     impl RoomLikeItem for &TestRoomItem {
@@ -1582,6 +1605,10 @@ mod tests {
         fn is_unread(&self) -> bool {
             self.unread.is_unread()
         }
+
+        fn is_invite(&self) -> bool {
+            self.invite
+        }
     }
 
     #[test]
@@ -1594,6 +1621,7 @@ mod tests {
             alias: Some(room_alias_id!("#room1:example.com").to_owned()),
             name: "Z",
             unread: UnreadInfo::default(),
+            invite: false,
         };
 
         let room2 = TestRoomItem {
@@ -1602,6 +1630,7 @@ mod tests {
             alias: Some(room_alias_id!("#a:example.com").to_owned()),
             name: "Unnamed Room",
             unread: UnreadInfo::default(),
+            invite: false,
         };
 
         let room3 = TestRoomItem {
@@ -1610,6 +1639,7 @@ mod tests {
             alias: None,
             name: "Cool Room",
             unread: UnreadInfo::default(),
+            invite: false,
         };
 
         // Sort by Name ascending.
@@ -1655,6 +1685,7 @@ mod tests {
             alias: None,
             name: "Room 1",
             unread: UnreadInfo { unread: false, latest: None },
+            invite: false,
         };
 
         let room2 = TestRoomItem {
@@ -1666,6 +1697,7 @@ mod tests {
                 unread: false,
                 latest: Some(MessageTimeStamp::OriginServer(40u32.into())),
             },
+            invite: false,
         };
 
         let room3 = TestRoomItem {
@@ -1677,6 +1709,7 @@ mod tests {
                 unread: false,
                 latest: Some(MessageTimeStamp::OriginServer(20u32.into())),
             },
+            invite: false,
         };
 
         // Sort by Recent ascending.
@@ -1690,5 +1723,49 @@ mod tests {
         let fields = &[SortColumn(SortFieldRoom::Recent, SortOrder::Descending)];
         rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
         assert_eq!(rooms, vec![&room1, &room3, &room2]);
+    }
+
+    #[test]
+    fn test_sort_room_invites() {
+        let server = server_name!("example.com");
+
+        let room1 = TestRoomItem {
+            room_id: RoomId::new(server).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Old room 1",
+            unread: UnreadInfo::default(),
+            invite: false,
+        };
+
+        let room2 = TestRoomItem {
+            room_id: RoomId::new(server).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Old room 2",
+            unread: UnreadInfo::default(),
+            invite: false,
+        };
+
+        let room3 = TestRoomItem {
+            room_id: RoomId::new(server).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "New Fancy Room",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // Sort invites first
+        let mut rooms = vec![&room1, &room2, &room3];
+        let fields = &[SortColumn(SortFieldRoom::Invite, SortOrder::Ascending)];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        assert_eq!(rooms, vec![&room3, &room1, &room2]);
+
+        // Sort invites after
+        let mut rooms = vec![&room1, &room2, &room3];
+        let fields = &[SortColumn(SortFieldRoom::Invite, SortOrder::Descending)];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        assert_eq!(rooms, vec![&room1, &room2, &room3]);
     }
 }
