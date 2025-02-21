@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::Parser;
-use matrix_sdk::matrix_auth::MatrixSession;
+use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
@@ -321,7 +321,7 @@ pub struct Session {
 impl From<Session> for MatrixSession {
     fn from(session: Session) -> Self {
         MatrixSession {
-            tokens: matrix_sdk::matrix_auth::MatrixSessionTokens {
+            tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
                 access_token: session.access_token,
                 refresh_token: session.refresh_token,
             },
