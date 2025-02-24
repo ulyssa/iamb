@@ -26,7 +26,7 @@ use matrix_sdk::{
     encryption::verification::{SasVerification, Verification},
     encryption::{BackupDownloadStrategy, EncryptionSettings},
     event_handler::Ctx,
-    matrix_auth::MatrixSession,
+    authentication::matrix::MatrixSession,
     reqwest,
     room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
@@ -1391,7 +1391,7 @@ impl ClientWorker {
         req.limit = Some(1000u32.into());
         req.max_depth = Some(1u32.into());
 
-        let resp = self.client.send(req, None).await.map_err(IambError::from)?;
+        let resp = self.client.send(req).await.map_err(IambError::from)?;
 
         let rooms = resp.rooms.into_iter().map(|chunk| chunk.room_id).collect();
 

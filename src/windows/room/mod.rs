@@ -406,7 +406,7 @@ impl RoomState {
                         // Try creating the room alias on the server.
                         let alias_create_req =
                             CreateAliasRequest::new(orai.clone(), room.room_id().into());
-                        if let Err(e) = client.send(alias_create_req, None).await {
+                        if let Err(e) = client.send(alias_create_req).await {
                             if let Some(ClientApiErrorKind::Unknown) = e.client_api_error_kind() {
                                 // Ignore when it already exists.
                             } else {
@@ -447,7 +447,7 @@ impl RoomState {
 
                         // If the room alias does not exist on the server, create it
                         let alias_create_req = CreateAliasRequest::new(orai, room.room_id().into());
-                        if let Err(e) = client.send(alias_create_req, None).await {
+                        if let Err(e) = client.send(alias_create_req).await {
                             if let Some(ClientApiErrorKind::Unknown) = e.client_api_error_kind() {
                                 // Ignore when it already exists.
                             } else {
@@ -519,7 +519,7 @@ impl RoomState {
                             .application
                             .worker
                             .client
-                            .send(del_req, None)
+                            .send(del_req)
                             .await
                             .map_err(IambError::from)?;
                     },
@@ -552,7 +552,7 @@ impl RoomState {
                             .application
                             .worker
                             .client
-                            .send(del_req, None)
+                            .send(del_req)
                             .await
                             .map_err(IambError::from)?;
                     },
@@ -572,7 +572,7 @@ impl RoomState {
                 let msg = match field {
                     RoomField::History => {
                         let visibility = room.history_visibility();
-                        format!("Room history visibility: {visibility}")
+                        format!("Room history visibility: {visibility:?}")
                     },
                     RoomField::Name => {
                         match room.name() {
