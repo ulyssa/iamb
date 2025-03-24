@@ -906,7 +906,7 @@ impl<'a> Chat<'a> {
     }
 }
 
-impl<'a> StatefulWidget for Chat<'a> {
+impl StatefulWidget for Chat<'_> {
     type State = ChatState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {

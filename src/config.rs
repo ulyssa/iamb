@@ -98,7 +98,7 @@ fn validate_profile_name(name: &str) -> bool {
 
     let mut chars = name.chars();
 
-    if !chars.next().map_or(false, |c| c.is_ascii_alphanumeric()) {
+    if !chars.next().is_some_and(|c| c.is_ascii_alphanumeric()) {
         return false;
     }
 
@@ -152,7 +152,7 @@ pub enum ConfigError {
 pub struct Keys(pub Vec<TerminalKey>, pub String);
 pub struct KeysVisitor;
 
-impl<'de> Visitor<'de> for KeysVisitor {
+impl Visitor<'_> for KeysVisitor {
     type Value = Keys;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -183,7 +183,7 @@ impl<'de> Deserialize<'de> for Keys {
 pub struct VimModes(pub Vec<VimMode>);
 pub struct VimModesVisitor;
 
-impl<'de> Visitor<'de> for VimModesVisitor {
+impl Visitor<'_> for VimModesVisitor {
     type Value = VimModes;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -233,7 +233,7 @@ impl From<LogLevel> for Level {
     }
 }
 
-impl<'de> Visitor<'de> for LogLevelVisitor {
+impl Visitor<'_> for LogLevelVisitor {
     type Value = LogLevel;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -268,7 +268,7 @@ impl<'de> Deserialize<'de> for LogLevel {
 pub struct UserColor(pub Color);
 pub struct UserColorVisitor;
 
-impl<'de> Visitor<'de> for UserColorVisitor {
+impl Visitor<'_> for UserColorVisitor {
     type Value = UserColor;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -419,7 +419,7 @@ impl Default for NotifyVia {
     }
 }
 
-impl<'de> Visitor<'de> for NotifyViaVisitor {
+impl Visitor<'_> for NotifyViaVisitor {
     type Value = NotifyVia;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
