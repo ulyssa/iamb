@@ -1056,7 +1056,7 @@ impl RoomLikeItem for RoomItem {
 
 impl Display for RoomItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, ":verify request {}", self.name)
+        write!(f, "{}", self.name)
     }
 }
 
@@ -1263,7 +1263,7 @@ impl RoomLikeItem for SpaceItem {
 
 impl Display for SpaceItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, ":verify request {}", self.name)
+        write!(f, "{}", self.name)
     }
 }
 
