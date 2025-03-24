@@ -1263,7 +1263,7 @@ impl RoomLikeItem for SpaceItem {
 
 impl Display for SpaceItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, ":verify request {}", self.room_id())
+        write!(f, ":verify request {}", self.name)
     }
 }
 
