@@ -80,11 +80,12 @@ use crate::base::{
     UnreadInfo,
 };
 
-use self::{room::RoomState, welcome::WelcomeState};
+use self::{room::RoomState, spacetree::SpaceTreeState, welcome::WelcomeState};
 use crate::message::MessageTimeStamp;
 use feruca::Collator;
 
 pub mod room;
+pub mod spacetree;
 pub mod welcome;
 
 type MatrixRoomInfo = Arc<(MatrixRoom, Option<Tags>)>;
@@ -326,6 +327,7 @@ macro_rules! delegate {
             IambWindow::MemberList($id, _, _) => $e,
             IambWindow::RoomList($id) => $e,
             IambWindow::SpaceList($id) => $e,
+            IambWindow::SpaceTree($id) => $e,
             IambWindow::VerifyList($id) => $e,
             IambWindow::Welcome($id) => $e,
             IambWindow::ChatList($id) => $e,
@@ -341,6 +343,7 @@ pub enum IambWindow {
     VerifyList(VerifyListState),
     RoomList(RoomListState),
     SpaceList(SpaceListState),
+    SpaceTree(SpaceTreeState),
     Welcome(WelcomeState),
     ChatList(ChatListState),
     UnreadList(UnreadListState),
@@ -452,6 +455,12 @@ impl From<SpaceListState> for IambWindow {
     }
 }
 
+impl From<SpaceTreeState> for IambWindow {
+    fn from(tree: SpaceTreeState) -> Self {
+        IambWindow::SpaceTree(tree)
+    }
+}
+
 impl From<WelcomeState> for IambWindow {
     fn from(win: WelcomeState) -> Self {
         IambWindow::Welcome(win)
@@ -513,6 +522,7 @@ impl WindowOps<IambInfo> for IambWindow {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
         match self {
             IambWindow::Room(state) => state.draw(area, buf, focused, store),
+            IambWindow::SpaceTree(state) => state.draw(area, buf, focused, store),
             IambWindow::DirectList(state) => {
                 let mut items = store
                     .application
@@ -695,6 +705,7 @@ impl WindowOps<IambInfo> for IambWindow {
             },
             IambWindow::RoomList(w) => w.dup(store).into(),
             IambWindow::SpaceList(w) => w.dup(store).into(),
+            IambWindow::SpaceTree(w) => w.dup(store).into(),
             IambWindow::VerifyList(w) => w.dup(store).into(),
             IambWindow::Welcome(w) => w.dup(store).into(),
             IambWindow::ChatList(w) => w.dup(store).into(),
@@ -736,6 +747,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::MemberList(_, room_id, _) => IambId::MemberList(room_id.clone()),
             IambWindow::RoomList(_) => IambId::RoomList,
             IambWindow::SpaceList(_) => IambId::SpaceList,
+            IambWindow::SpaceTree(_) => IambId::SpaceTree,
             IambWindow::VerifyList(_) => IambId::VerifyList,
             IambWindow::Welcome(_) => IambId::Welcome,
             IambWindow::ChatList(_) => IambId::ChatList,
@@ -748,6 +760,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
             IambWindow::SpaceList(_) => bold_spans("Spaces"),
+            IambWindow::SpaceTree(_) => bold_spans("Space Tree"),
             IambWindow::VerifyList(_) => bold_spans("Verifications"),
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
@@ -776,6 +789,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
             IambWindow::SpaceList(_) => bold_spans("Spaces"),
+            IambWindow::SpaceTree(_) => bold_spans("Space Tree"),
             IambWindow::VerifyList(_) => bold_spans("Verifications"),
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
@@ -825,6 +839,11 @@ impl Window<IambInfo> for IambWindow {
                 let list = SpaceListState::new(IambBufferId::SpaceList, vec![]);
 
                 return Ok(list.into());
+            },
+            IambId::SpaceTree => {
+                let tree = SpaceTreeState::new();
+
+                return Ok(tree.into());
             },
             IambId::VerifyList => {
                 let list = VerifyListState::new(IambBufferId::VerifyList, vec![]);

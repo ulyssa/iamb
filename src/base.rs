@@ -1574,6 +1574,9 @@ pub enum IambId {
     /// The `:spaces` window.
     SpaceList,
 
+    /// The `:spaces!` window.
+    SpaceTree,
+
     /// The `:verify` window.
     VerifyList,
 
@@ -1602,6 +1605,7 @@ impl Display for IambId {
             IambId::DirectList => f.write_str("iamb://dms"),
             IambId::RoomList => f.write_str("iamb://rooms"),
             IambId::SpaceList => f.write_str("iamb://spaces"),
+            IambId::SpaceTree => f.write_str("iamb://spacetree"),
             IambId::VerifyList => f.write_str("iamb://verify"),
             IambId::Welcome => f.write_str("iamb://welcome"),
             IambId::ChatList => f.write_str("iamb://chats"),
@@ -1803,6 +1807,9 @@ pub enum IambBufferId {
     /// The `:spaces` window.
     SpaceList,
 
+    /// The `:spaces!` window.
+    SpaceTree,
+
     /// The `:verify` window.
     VerifyList,
 
@@ -1826,6 +1833,7 @@ impl IambBufferId {
             IambBufferId::MemberList(room) => IambId::MemberList(room.clone()),
             IambBufferId::RoomList => IambId::RoomList,
             IambBufferId::SpaceList => IambId::SpaceList,
+            IambBufferId::SpaceTree => IambId::SpaceTree,
             IambBufferId::VerifyList => IambId::VerifyList,
             IambBufferId::Welcome => IambId::Welcome,
             IambBufferId::ChatList => IambId::ChatList,
@@ -1861,6 +1869,7 @@ impl ApplicationInfo for IambInfo {
             IambBufferId::MemberList(_) => vec![],
             IambBufferId::RoomList => vec![],
             IambBufferId::SpaceList => vec![],
+            IambBufferId::SpaceTree => vec![],
             IambBufferId::VerifyList => vec![],
             IambBufferId::Welcome => vec![],
             IambBufferId::ChatList => vec![],
