@@ -464,6 +464,9 @@ impl RoomState {
                     RoomField::Aliases => {
                         // This never happens, aliases is only used for showing
                     },
+                    RoomField::Id => {
+                        // This never happens, id is only used for showing
+                    },
                 }
 
                 Ok(vec![])
@@ -559,6 +562,9 @@ impl RoomState {
                     RoomField::Aliases => {
                         // This will not happen, you cannot unset all aliases
                     },
+                    RoomField::Id => {
+                        // This never happens, id is only used for showing
+                    },
                 }
 
                 Ok(vec![])
@@ -573,6 +579,10 @@ impl RoomState {
                     RoomField::History => {
                         let visibility = room.history_visibility();
                         format!("Room history visibility: {visibility}")
+                    },
+                    RoomField::Id => {
+                        let id = room.room_id();
+                        format!("Room id: {id}")
                     },
                     RoomField::Name => {
                         match room.name() {

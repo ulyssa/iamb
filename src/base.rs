@@ -375,6 +375,9 @@ pub enum RoomField {
     /// The room name.
     Name,
 
+    /// The room id.
+    Id,
+
     /// A room tag.
     Tag(TagName),
 

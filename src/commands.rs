@@ -531,6 +531,10 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             return Result::Err(CommandError::InvalidArgument)
         },
 
+        // :room id show
+        ("id", "show", None) => RoomAction::Show(RoomField::Id).into(),
+        ("", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
         _ => return Result::Err(CommandError::InvalidArgument),
     };
 
