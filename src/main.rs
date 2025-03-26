@@ -557,6 +557,9 @@ impl Application {
             IambAction::Message(act) => {
                 self.screen.current_window_mut()?.message_command(act, ctx, store).await?
             },
+            IambAction::Space(act) => {
+                self.screen.current_window_mut()?.space_command(act, ctx, store).await?
+            },
             IambAction::Room(act) => {
                 let acts = self.screen.current_window_mut()?.room_command(act, ctx, store).await?;
                 self.action_prepend(acts);

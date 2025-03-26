@@ -2,9 +2,9 @@
 //!
 //! The command-bar commands are set up here, and iamb-specific commands are defined here. See
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
-use std::convert::TryFrom;
+use std::{convert::TryFrom, str::FromStr as _};
 
-use matrix_sdk::ruma::{events::tag::TagName, OwnedUserId};
+use matrix_sdk::ruma::{events::tag::TagName, OwnedRoomId, OwnedUserId};
 
 use modalkit::{
     commands::{CommandError, CommandResult, CommandStep},
@@ -27,6 +27,7 @@ use crate::base::{
     RoomAction,
     RoomField,
     SendAction,
+    SpaceAction,
     VerifyAction,
 };
 
@@ -543,6 +544,90 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.options()?;
+
+    if args.len() < 2 {
+        return Err(CommandError::InvalidArgument);
+    }
+
+    let field = if let OptionType::Positional(field) = args.remove(0) {
+        field
+    } else {
+        return Err(CommandError::InvalidArgument);
+    };
+    let action = if let OptionType::Positional(action) = args.remove(0) {
+        action
+    } else {
+        return Err(CommandError::InvalidArgument);
+    };
+
+    let act: IambAction = match (field.as_str(), action.as_str()) {
+        ("child", "remove") => {
+            if !(args.is_empty()) {
+                return Err(CommandError::InvalidArgument);
+            }
+            SpaceAction::RemoveChild.into()
+        },
+        // :space child set
+        ("child", "set") => {
+            let mut order = None;
+            let mut suggested = false;
+            let mut raw_child = None;
+
+            for arg in args {
+                match arg {
+                    OptionType::Flag(name, Some(arg)) => {
+                        match name.as_str() {
+                            "order" => {
+                                if order.is_some() {
+                                    let msg = "Multiple ++order arguments are not allowed";
+                                    let err = CommandError::Error(msg.into());
+
+                                    return Err(err);
+                                } else {
+                                    order = Some(arg);
+                                }
+                            },
+                            _ => return Err(CommandError::InvalidArgument),
+                        }
+                    },
+                    OptionType::Flag(name, None) => {
+                        match name.as_str() {
+                            "suggested" => suggested = true,
+                            _ => return Err(CommandError::InvalidArgument),
+                        }
+                    },
+                    OptionType::Positional(arg) => {
+                        if raw_child.is_some() {
+                            let msg = "Multiple room arguments are not allowed";
+                            let err = CommandError::Error(msg.into());
+
+                            return Err(err);
+                        }
+                        raw_child = Some(arg);
+                    },
+                }
+            }
+
+            let child = if let Some(child) = raw_child {
+                OwnedRoomId::from_str(&child)
+                    .map_err(|_| CommandError::Error("Invalid room id specified".into()))?
+            } else {
+                let msg = "Must specify a room to add";
+                return Err(CommandError::Error(msg.into()));
+            };
+
+            SpaceAction::SetChild(child, order, suggested).into()
+        },
+        _ => return Result::Err(CommandError::InvalidArgument),
+    };
+
+    let step = CommandStep::Continue(act.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut args = desc.arg.strings()?;
 
@@ -671,6 +756,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_rooms,
     });
     cmds.add_command(ProgramCommand { name: "room".into(), aliases: vec![], f: iamb_room });
+    cmds.add_command(ProgramCommand {
+        name: "space".into(),
+        aliases: vec![],
+        f: iamb_space,
+    });
     cmds.add_command(ProgramCommand {
         name: "spaces".into(),
         aliases: vec![],

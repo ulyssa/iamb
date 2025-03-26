@@ -66,6 +66,7 @@ use crate::base::{
     RoomAction,
     RoomField,
     SendAction,
+    SpaceAction,
 };
 
 use self::chat::ChatState;
@@ -211,6 +212,18 @@ impl RoomState {
         match self {
             RoomState::Chat(chat) => chat.message_command(act, ctx, store).await,
             RoomState::Space(_) => Err(IambError::NoSelectedMessage.into()),
+        }
+    }
+
+    pub async fn space_command(
+        &mut self,
+        act: SpaceAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        match self {
+            RoomState::Space(space) => space.space_command(act, ctx, store).await,
+            RoomState::Chat(_) => Err(IambError::NoSelectedSpace.into()),
         }
     }
 
