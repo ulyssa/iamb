@@ -182,8 +182,8 @@ pub enum MessageAction {
 pub enum SpaceAction {
     /// Add a room or update metadata.
     ///
-    /// The [Option<String>] argument is the order parameter.
-    /// The [bool] argument indicates whether the room is suggested.
+    /// The [`Option<String>`] argument is the order parameter.
+    /// The [`bool`] argument indicates whether the room is suggested.
     SetChild(OwnedRoomId, Option<String>, bool),
 
     /// Remove the selected room.
