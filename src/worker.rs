@@ -1311,7 +1311,7 @@ impl ClientWorker {
         // Remove the session.json file.
         std::fs::remove_file(&self.settings.session_json)?;
 
-        Ok(Some(InfoMessage::from("Sucessfully logged out")))
+        Ok(Some(InfoMessage::from("Successfully logged out")))
     }
 
     async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<OwnedRoomId> {
