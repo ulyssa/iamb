@@ -111,10 +111,10 @@ impl SpaceState {
                     .await
                     .map_err(IambError::from)?;
 
-                Ok(InfoMessage::from("Room added").into())
+                Ok(InfoMessage::from("Space updated").into())
             },
             SpaceAction::RemoveChild => {
-                let space = self.list.get().ok_or(IambError::NoSelectedMessage)?;
+                let space = self.list.get().ok_or(IambError::NoSelectedRoomOrSpaceItem)?;
                 if !self
                     .room
                     .can_user_send_state(

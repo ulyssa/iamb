@@ -538,7 +538,7 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
         // :room id show
         ("id", "show", None) => RoomAction::Show(RoomField::Id).into(),
-        ("", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+        ("id", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
         _ => return Result::Err(CommandError::InvalidArgument),
     };
@@ -555,14 +555,10 @@ fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Err(CommandError::InvalidArgument);
     }
 
-    let field = if let OptionType::Positional(field) = args.remove(0) {
-        field
-    } else {
+    let OptionType::Positional(field) = args.remove(0) else {
         return Err(CommandError::InvalidArgument);
     };
-    let action = if let OptionType::Positional(action) = args.remove(0) {
-        action
-    } else {
+    let OptionType::Positional(action) = args.remove(0) else {
         return Err(CommandError::InvalidArgument);
     };
 

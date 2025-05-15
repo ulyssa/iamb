@@ -595,7 +595,7 @@ impl RoomState {
                     },
                     RoomField::Id => {
                         let id = room.room_id();
-                        format!("Room id: {id}")
+                        format!("Room identifier: {id}")
                     },
                     RoomField::Name => {
                         match room.name() {

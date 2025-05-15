@@ -748,6 +748,10 @@ pub enum IambError {
     #[error("Current window is not a room or space")]
     NoSelectedRoomOrSpace,
 
+    /// A failure due to not having a room or space item selected in a list.
+    #[error("No room or space currently selected in list")]
+    NoSelectedRoomOrSpaceItem,
+
     /// A failure due to not having a room selected.
     #[error("Current window is not a room")]
     NoSelectedRoom,
