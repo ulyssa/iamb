@@ -1578,7 +1578,7 @@ mod tests {
         alias: Option<OwnedRoomAliasId>,
         name: &'static str,
         unread: UnreadInfo,
-        invite: bool
+        invite: bool,
     }
 
     impl RoomLikeItem for &TestRoomItem {
