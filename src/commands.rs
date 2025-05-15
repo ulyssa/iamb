@@ -475,6 +475,10 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         ("topic", "unset", None) => RoomAction::Unset(RoomField::Topic).into(),
         ("topic", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
+        // :room topic show
+        ("topic", "show", None) => RoomAction::Show(RoomField::Topic).into(),
+        ("topic", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
         // :room tag set <tag-name>
         ("tag", "set", Some(s)) => RoomAction::Set(RoomField::Tag(tag_name(s)?), "".into()).into(),
         ("tag", "set", None) => return Result::Err(CommandError::InvalidArgument),
