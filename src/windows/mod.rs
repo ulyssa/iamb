@@ -1758,13 +1758,19 @@ mod tests {
 
         // Sort invites first
         let mut rooms = vec![&room1, &room2, &room3];
-        let fields = &[SortColumn(SortFieldRoom::Invite, SortOrder::Ascending)];
+        let fields = &[
+            SortColumn(SortFieldRoom::Invite, SortOrder::Ascending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
         rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
         assert_eq!(rooms, vec![&room3, &room1, &room2]);
 
         // Sort invites after
         let mut rooms = vec![&room1, &room2, &room3];
-        let fields = &[SortColumn(SortFieldRoom::Invite, SortOrder::Descending)];
+        let fields = &[
+            SortColumn(SortFieldRoom::Invite, SortOrder::Descending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
         rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
         assert_eq!(rooms, vec![&room1, &room2, &room3]);
     }
