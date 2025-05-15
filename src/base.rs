@@ -256,6 +256,9 @@ pub enum SortFieldRoom {
 
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
+
+    /// Sort rooms by whether they are invites.
+    Invite,
 }
 
 /// Fields that users can be sorted by.
@@ -320,6 +323,7 @@ impl<'de> Visitor<'de> for SortRoomVisitor {
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
             "id" => SortFieldRoom::RoomId,
+            "invite" => SortFieldRoom::Invite,
             _ => {
                 let msg = format!("Unknown sort field: {value:?}");
                 return Err(E::custom(msg));
@@ -876,7 +880,7 @@ pub struct RoomInfo {
 
     /// A map of the most recent read marker for each user.
     ///
-    /// Every receipt in this map should also have an entry in [`event_receipts`],
+    /// Every receipt in this map should also have an entry in [`event_receipts`](`Self::event_receipts`),
     /// however not every user has an entry. If a user's most recent receipt is
     /// older than the oldest loaded event, that user will not be included.
     pub user_receipts: HashMap<OwnedUserId, OwnedEventId>,

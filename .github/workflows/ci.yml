@@ -34,7 +34,7 @@ jobs:
         path: ~/.cargo/registry
         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
     - name: Run sccache-cache
-      uses: mozilla-actions/sccache-action@v0.0.3
+      uses: mozilla-actions/sccache-action@v0.0.9
     - name: Check formatting
       run: cargo +nightly fmt --all -- --check
     - name: Check Clippy
