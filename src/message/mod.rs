@@ -70,6 +70,8 @@ mod printer;
 
 pub use self::compose::text_to_message;
 
+type ProtocolPreview<'a> = (&'a dyn Protocol, u16, u16);
+
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 
 #[derive(Default)]
@@ -712,13 +714,15 @@ impl<'a> MessageFormatter<'a> {
     fn push_in_reply(
         &mut self,
         msg: &'a Message,
-        mut replied: Text<'a>,
         style: Style,
         text: &mut Text<'a>,
         info: &'a RoomInfo,
-    ) {
+        settings: &'a ApplicationSettings,
+    ) -> Option<ProtocolPreview<'a>> {
         let width = self.width();
         let w = width.saturating_sub(2);
+        let shortcodes = self.settings.tunables.message_shortcode_display;
+        let (mut replied, proto) = msg.show_msg(w, style, true, shortcodes);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -737,12 +741,22 @@ impl<'a> MessageFormatter<'a> {
             text,
         );
 
+        // Determine the image offset of the reply header, taking into account the formatting
+        let proto = proto.map(|p| {
+            let y_off = text.lines.len() as u16;
+            // Adjust x_off by 2 to account for the vertical line and indent
+            let x_off = self.cols.user_gutter_width(settings) + 2;
+            (p, x_off, y_off)
+        });
+
         for line in replied.lines.iter_mut() {
             line.spans.insert(0, Span::styled(THICK_VERTICAL, style));
             line.spans.insert(0, Span::styled(" ", style));
         }
 
         self.push_text(replied, style, text);
+
+        proto
     }
 
     fn push_reactions(&mut self, counts: Vec<(&'a str, usize)>, style: Style, text: &mut Text<'a>) {
@@ -960,42 +974,23 @@ impl Message {
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
-    ) -> (Text<'a>, [Option<(&'a dyn Protocol, u16, u16)>; 2]) {
+    ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected, settings);
         let mut fmt = self.get_render_format(prev, width, info, settings);
         let mut text = Text::default();
         let width = fmt.width();
-        let x_off = fmt.cols.user_gutter_width(settings);
-        let date_flag = fmt.date.is_some();
 
         // Show the message that this one replied to, if any.
         let reply = self
             .reply_to()
             .or_else(|| self.thread_root())
             .and_then(|e| info.get_event(&e));
-
-        let mut proto_reply = None;
-        if let Some(r) = &reply {
-            // Get the text and image content of the reply header
-            let (msg, proto) =
-                r.show_msg(width, style, false, settings.tunables.message_shortcode_display);
-
-            // Determine the image offset of the reply header, taking into account the formatting
-            proto_reply = proto.map(|p| {
-                // Adjust y_off by 1 to account for username
-                let y_off = text.lines.len() as u16 + 1;
-                // Adjust x_off by 2 to account for the vertical line and indent
-                let x_off = fmt.cols.user_gutter_width(settings) + 2;
-                // Adjust y_off by 1 if a date was printed before the message to account for the extra line.
-                let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
-                (p, x_off, y_off)
-            });
-
-            // Format the reply header and push it into the `Text` buffer
-            fmt.push_in_reply(r, msg, style, &mut text, info);
-        }
+        let proto_reply = reply.as_ref().and_then(|r| {
+            // Format the reply header, push it into the `Text` buffer, and get any image.
+            fmt.push_in_reply(r, style, &mut text, info, settings)
+        });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
         let (msg, proto) = self.show_msg(
@@ -1009,8 +1004,9 @@ impl Message {
         let proto_main = proto.map(|p| {
             let y_off = text.lines.len() as u16;
             let x_off = fmt.cols.user_gutter_width(settings);
-            // Adjust y_off by 1 if a date was printed before the message to account for the extra line.
-            let y_off = if date_flag { y_off + 1 } else { y_off };
+            // Adjust y_off by 1 if a date was printed before the message to account for
+            // the extra line we're going to print.
+            let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
             (p, x_off, y_off)
         });
 
