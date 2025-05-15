@@ -337,7 +337,13 @@ fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let open = ctx.switch(OpenTarget::Application(IambId::SpaceList));
+    let target = if desc.bang {
+        IambId::SpaceTree
+    } else {
+        IambId::SpaceList
+    };
+
+    let open = ctx.switch(OpenTarget::Application(target));
     let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
