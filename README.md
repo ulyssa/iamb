@@ -80,6 +80,24 @@ On FreeBSD a package is available from the official repositories. To install it 
 pkg install iamb
 ```
 
+### Gentoo
+
+On Gentoo, an ebuild is available from the community-managed
+[GURU overlay](https://wiki.gentoo.org/wiki/Project:GURU).
+
+You can enable the GURU overlay with:
+
+```
+eselect repository enable guru
+emerge --sync guru
+```
+
+And then install `iamb` with:
+
+```
+emerge --ask iamb
+```
+
 ### macOS
 
 On macOS a [package](https://formulae.brew.sh/formula/iamb#default) is available in Homebrew's
