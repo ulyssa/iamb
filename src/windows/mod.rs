@@ -5,7 +5,7 @@
 //!
 //! Additionally, some of the iamb commands delegate behaviour to the current UI element. For
 //! example, [sending messages][crate::base::SendAction] delegate to the [room window][RoomState],
-//! where we have the message bar and room ID easily accesible and resetable.
+//! where we have the message bar and room ID easily accessible and resettable.
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::fmt::{self, Display};
 use std::ops::Deref;

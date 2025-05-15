@@ -82,7 +82,7 @@ pkg install iamb
 
 ### macOS
 
-On macOS a [package](https://formulae.brew.sh/formula/iamb#default) is availabe in Homebrew's
+On macOS a [package](https://formulae.brew.sh/formula/iamb#default) is available in Homebrew's
 repository. To install it simply run:
 
 ```
