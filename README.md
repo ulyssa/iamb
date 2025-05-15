@@ -79,20 +79,21 @@ On FreeBSD a package is available from the official repositories. To install it 
 ```
 pkg install iamb
 ```
-### Gentoo
-On gentoo, an ebuild is available on the [GURU overlay](https://wiki.gentoo.org/wiki/Project:GURU)
 
-To install it, you may use eselect-repository to enable the GURU overlay:
+### Gentoo
+
+On Gentoo, an ebuild is available from the community-managed
+[GURU overlay](https://wiki.gentoo.org/wiki/Project:GURU).
+
+You can enable the GURU overlay with:
+
 ```
 eselect repository enable guru
-```
-
-Once you have it enabled, sync the repository with emerge:
-```
 emerge --sync guru
 ```
 
-Then simply install iamb:
+And then install `iamb` with:
+
 ```
 emerge --ask iamb
 ```
