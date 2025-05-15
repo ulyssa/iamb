@@ -76,6 +76,7 @@ use crate::base::{
     SortFieldRoom,
     SortFieldUser,
     SortOrder,
+    SpaceAction,
     UnreadInfo,
 };
 
@@ -355,6 +356,19 @@ impl IambWindow {
     ) -> IambResult<EditInfo> {
         if let IambWindow::Room(w) = self {
             w.message_command(act, ctx, store).await
+        } else {
+            return Err(IambError::NoSelectedRoom.into());
+        }
+    }
+
+    pub async fn space_command(
+        &mut self,
+        act: SpaceAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        if let IambWindow::Room(w) = self {
+            w.space_command(act, ctx, store).await
         } else {
             return Err(IambError::NoSelectedRoom.into());
         }

@@ -2,9 +2,9 @@
 //!
 //! The command-bar commands are set up here, and iamb-specific commands are defined here. See
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
-use std::convert::TryFrom;
+use std::{convert::TryFrom, str::FromStr as _};
 
-use matrix_sdk::ruma::{events::tag::TagName, OwnedUserId};
+use matrix_sdk::ruma::{events::tag::TagName, OwnedRoomId, OwnedUserId};
 
 use modalkit::{
     commands::{CommandError, CommandResult, CommandStep},
@@ -27,6 +27,7 @@ use crate::base::{
     RoomAction,
     RoomField,
     SendAction,
+    SpaceAction,
     VerifyAction,
 };
 
@@ -535,6 +536,90 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             return Result::Err(CommandError::InvalidArgument)
         },
 
+        // :room id show
+        ("id", "show", None) => RoomAction::Show(RoomField::Id).into(),
+        ("id", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        _ => return Result::Err(CommandError::InvalidArgument),
+    };
+
+    let step = CommandStep::Continue(act.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.options()?;
+
+    if args.len() < 2 {
+        return Err(CommandError::InvalidArgument);
+    }
+
+    let OptionType::Positional(field) = args.remove(0) else {
+        return Err(CommandError::InvalidArgument);
+    };
+    let OptionType::Positional(action) = args.remove(0) else {
+        return Err(CommandError::InvalidArgument);
+    };
+
+    let act: IambAction = match (field.as_str(), action.as_str()) {
+        ("child", "remove") => {
+            if !(args.is_empty()) {
+                return Err(CommandError::InvalidArgument);
+            }
+            SpaceAction::RemoveChild.into()
+        },
+        // :space child set
+        ("child", "set") => {
+            let mut order = None;
+            let mut suggested = false;
+            let mut raw_child = None;
+
+            for arg in args {
+                match arg {
+                    OptionType::Flag(name, Some(arg)) => {
+                        match name.as_str() {
+                            "order" => {
+                                if order.is_some() {
+                                    let msg = "Multiple ++order arguments are not allowed";
+                                    let err = CommandError::Error(msg.into());
+
+                                    return Err(err);
+                                } else {
+                                    order = Some(arg);
+                                }
+                            },
+                            _ => return Err(CommandError::InvalidArgument),
+                        }
+                    },
+                    OptionType::Flag(name, None) => {
+                        match name.as_str() {
+                            "suggested" => suggested = true,
+                            _ => return Err(CommandError::InvalidArgument),
+                        }
+                    },
+                    OptionType::Positional(arg) => {
+                        if raw_child.is_some() {
+                            let msg = "Multiple room arguments are not allowed";
+                            let err = CommandError::Error(msg.into());
+
+                            return Err(err);
+                        }
+                        raw_child = Some(arg);
+                    },
+                }
+            }
+
+            let child = if let Some(child) = raw_child {
+                OwnedRoomId::from_str(&child)
+                    .map_err(|_| CommandError::Error("Invalid room id specified".into()))?
+            } else {
+                let msg = "Must specify a room to add";
+                return Err(CommandError::Error(msg.into()));
+            };
+
+            SpaceAction::SetChild(child, order, suggested).into()
+        },
         _ => return Result::Err(CommandError::InvalidArgument),
     };
 
@@ -672,6 +757,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand { name: "room".into(), aliases: vec![], f: iamb_room });
     cmds.add_command(ProgramCommand {
+        name: "space".into(),
+        aliases: vec![],
+        f: iamb_space,
+    });
+    cmds.add_command(ProgramCommand {
         name: "spaces".into(),
         aliases: vec![],
         f: iamb_spaces,
@@ -725,7 +815,7 @@ pub fn setup_commands() -> ProgramCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matrix_sdk::ruma::user_id;
+    use matrix_sdk::ruma::{room_id, user_id};
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
 
@@ -1065,6 +1155,103 @@ mod tests {
         let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
         let act = RoomAction::Show(RoomField::NotificationMode);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
+    }
+
+    #[test]
+    fn test_cmd_room_id_show() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let res = cmds.input_cmd("room id show", ctx.clone()).unwrap();
+        let act = RoomAction::Show(RoomField::Id);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room id show foo", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_space_child() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let cmd = "space";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let cmd = "space ++foo bar baz";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let cmd = "space child foo";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_space_child_set() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let cmd = "space child set !roomid:example.org";
+        let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
+        let act = SpaceAction::SetChild(room_id!("!roomid:example.org").to_owned(), None, false);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let cmd = "space child set ++order=abcd ++suggested !roomid:example.org";
+        let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
+        let act = SpaceAction::SetChild(
+            room_id!("!roomid:example.org").to_owned(),
+            Some("abcd".into()),
+            true,
+        );
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let cmd = "space child set ++order=abcd ++order=1234 !roomid:example.org";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(
+            res,
+            Err(CommandError::Error("Multiple ++order arguments are not allowed".into()))
+        );
+
+        let cmd = "space child set !roomid:example.org !otherroom:example.org";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::Error("Multiple room arguments are not allowed".into())));
+
+        let cmd = "space child set ++foo=abcd !roomid:example.org";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let cmd = "space child set ++foo !roomid:example.org";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let cmd = "space child ++order=abcd ++suggested set !roomid:example.org";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let cmd = "space child set foo";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::Error("Invalid room id specified".into())));
+
+        let cmd = "space child set";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::Error("Must specify a room to add".into())));
+    }
+
+    #[test]
+    fn test_cmd_space_child_remove() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let cmd = "space child remove";
+        let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
+        let act = SpaceAction::RemoveChild;
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let cmd = "space child remove foo";
+        let res = cmds.input_cmd(cmd, ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
     }
 
     #[test]

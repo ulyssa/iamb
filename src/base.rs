@@ -177,6 +177,19 @@ pub enum MessageAction {
     Unreact(Option<String>, bool),
 }
 
+/// An action taken in the currently selected space.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SpaceAction {
+    /// Add a room or update metadata.
+    ///
+    /// The [`Option<String>`] argument is the order parameter.
+    /// The [`bool`] argument indicates whether the room is suggested.
+    SetChild(OwnedRoomId, Option<String>, bool),
+
+    /// Remove the selected room.
+    RemoveChild,
+}
+
 /// The type of room being created.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CreateRoomType {
@@ -379,6 +392,9 @@ pub enum RoomField {
     /// The room name.
     Name,
 
+    /// The room id.
+    Id,
+
     /// A room tag.
     Tag(TagName),
 
@@ -497,6 +513,9 @@ pub enum IambAction {
     /// Perform an action on the currently selected message.
     Message(MessageAction),
 
+    /// Perform an action on the current space.
+    Space(SpaceAction),
+
     /// Open a URL.
     OpenLink(String),
 
@@ -538,6 +557,12 @@ impl From<MessageAction> for IambAction {
     }
 }
 
+impl From<SpaceAction> for IambAction {
+    fn from(act: SpaceAction) -> Self {
+        IambAction::Space(act)
+    }
+}
+
 impl From<RoomAction> for IambAction {
     fn from(act: RoomAction) -> Self {
         IambAction::Room(act)
@@ -557,6 +582,7 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => SequenceStatus::Break,
             IambAction::Keys(..) => SequenceStatus::Break,
             IambAction::Message(..) => SequenceStatus::Break,
+            IambAction::Space(..) => SequenceStatus::Break,
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
@@ -572,6 +598,7 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => SequenceStatus::Atom,
             IambAction::Keys(..) => SequenceStatus::Atom,
             IambAction::Message(..) => SequenceStatus::Atom,
+            IambAction::Space(..) => SequenceStatus::Atom,
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
@@ -587,6 +614,7 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => SequenceStatus::Ignore,
             IambAction::Keys(..) => SequenceStatus::Ignore,
             IambAction::Message(..) => SequenceStatus::Ignore,
+            IambAction::Space(..) => SequenceStatus::Ignore,
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
@@ -601,6 +629,7 @@ impl ApplicationAction for IambAction {
             IambAction::ClearUnreads => false,
             IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
+            IambAction::Space(..) => false,
             IambAction::Room(..) => false,
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
@@ -614,6 +643,12 @@ impl ApplicationAction for IambAction {
 
 impl From<RoomAction> for ProgramAction {
     fn from(act: RoomAction) -> Self {
+        IambAction::from(act).into()
+    }
+}
+
+impl From<SpaceAction> for ProgramAction {
+    fn from(act: SpaceAction) -> Self {
         IambAction::from(act).into()
     }
 }
@@ -713,9 +748,21 @@ pub enum IambError {
     #[error("Current window is not a room or space")]
     NoSelectedRoomOrSpace,
 
+    /// A failure due to not having a room or space item selected in a list.
+    #[error("No room or space currently selected in list")]
+    NoSelectedRoomOrSpaceItem,
+
     /// A failure due to not having a room selected.
     #[error("Current window is not a room")]
     NoSelectedRoom,
+
+    /// A failure due to not having a space selected.
+    #[error("Current window is not a space")]
+    NoSelectedSpace,
+
+    /// A failure due to not having sufficient permission to perform an action in a room.
+    #[error("You do not have the permission to do that")]
+    InsufficientPermission,
 
     /// A failure due to not having an outstanding room invitation.
     #[error("You do not have a current invitation to this room")]
