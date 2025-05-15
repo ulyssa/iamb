@@ -1340,7 +1340,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
 
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
-            let (txt, mut msg_preview) =
+            let (txt, [mut msg_preview, mut reply_preview]) =
                 item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings);
 
             let incomplete_ok = !full || !sel;
@@ -1357,11 +1357,17 @@ impl<'a> StatefulWidget for Scrollback<'a> {
                     continue;
                 }
 
+                // Only take the preview into the matching row number.
+                // `reply` and `msg` previews are on rows,
+                // so an `or` works to pick the one that matches (if any)
                 let line_preview = match msg_preview {
-                    // Only take the preview into the matching row number.
                     Some((_, _, y)) if y as usize == row => msg_preview.take(),
                     _ => None,
-                };
+                }
+                .or(match reply_preview {
+                    Some((_, _, y)) if y as usize == row => reply_preview.take(),
+                    _ => None,
+                });
 
                 lines.push((key, row, line, line_preview));
                 sawit |= sel;
