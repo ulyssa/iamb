@@ -159,6 +159,8 @@ Create and point the given alias to the room.
 Delete the provided alias from the room's alternative alias list.
 .It Sy ":room alias show"
 Show alternative aliases to the room, if any are set.
+.It Sy ":room id show"
+Show the Matrix identifier for the room.
 .It Sy ":room canon set [alias]"
 Set the room's canonical alias to the one provided, and make the previous one an alternative alias.
 .It Sy ":room canon unset [alias]"
@@ -171,6 +173,14 @@ Ban a user from this room with an optional reason.
 Unban a user from this room with an optional reason.
 .It Sy ":room kick [user] [reason]"
 Kick a user from this room with an optional reason.
+.El
+
+.Sh "SPACE COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":space child set [room_id]"
+Add a room to the currently focused space.
+.It Sy ":space child remove"
+Remove the selected room from the currently focused space.
 .El
 
 .Sh "WINDOW COMMANDS"

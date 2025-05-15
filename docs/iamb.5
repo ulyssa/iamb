@@ -334,9 +334,29 @@ window.
 Defaults to
 .Sy ["power",\ "id"] .
 .El
+
+The available values are:
+.Bl -tag -width Ds
+.It Sy favorite
+Put favorite rooms before other rooms.
+.It Sy lowpriority
+Put lowpriority rooms after other rooms.
+.It Sy name
+Sort rooms by alphabetically ascending room name.
+.It Sy alias
+Sort rooms by alphabetically ascending canonical room alias.
+.It Sy id
+Sort rooms by alphabetically ascending Matrix room identifier.
+.It Sy unread
+Put unread rooms before other rooms.
+.It Sy recent
+Sort rooms by most recent message timestamp.
+.It Sy invite
+Put invites before other rooms.
+.El
 .El
 
-.Ss Example 1: Group room members by ther server first
+.Ss Example 1: Group room members by their server first
 .Bd -literal -offset indent
 [settings.sort]
 members = ["server", "localpart"]

@@ -2,11 +2,14 @@
 use std::ops::{Deref, DerefMut};
 use std::time::{Duration, Instant};
 
+use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
+use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::{
     room::Room as MatrixRoom,
     ruma::{OwnedRoomId, RoomId},
 };
 
+use modalkit::prelude::{EditInfo, InfoMessage};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -22,9 +25,18 @@ use modalkit_ratatui::{
     WindowOps,
 };
 
-use crate::base::{IambBufferId, IambInfo, ProgramStore, RoomFocus};
+use crate::base::{
+    IambBufferId,
+    IambError,
+    IambInfo,
+    IambResult,
+    ProgramContext,
+    ProgramStore,
+    RoomFocus,
+    SpaceAction,
+};
 
-use crate::windows::{room_fields_cmp, RoomItem};
+use crate::windows::{room_fields_cmp, RoomItem, RoomLikeItem};
 
 const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -66,6 +78,71 @@ impl SpaceState {
             room: self.room.clone(),
             list: self.list.dup(store),
             last_fetch: self.last_fetch,
+        }
+    }
+
+    pub async fn space_command(
+        &mut self,
+        act: SpaceAction,
+        _: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        match act {
+            SpaceAction::SetChild(child_id, order, suggested) => {
+                if !self
+                    .room
+                    .can_user_send_state(
+                        &store.application.settings.profile.user_id,
+                        StateEventType::SpaceChild,
+                    )
+                    .await
+                    .map_err(IambError::from)?
+                {
+                    return Err(IambError::InsufficientPermission.into());
+                }
+
+                let via = self.room.route().await.map_err(IambError::from)?;
+                let mut ev = SpaceChildEventContent::new(via);
+                ev.order = order;
+                ev.suggested = suggested;
+                let _ = self
+                    .room
+                    .send_state_event_for_key(&child_id, ev)
+                    .await
+                    .map_err(IambError::from)?;
+
+                Ok(InfoMessage::from("Space updated").into())
+            },
+            SpaceAction::RemoveChild => {
+                let space = self.list.get().ok_or(IambError::NoSelectedRoomOrSpaceItem)?;
+                if !self
+                    .room
+                    .can_user_send_state(
+                        &store.application.settings.profile.user_id,
+                        StateEventType::SpaceChild,
+                    )
+                    .await
+                    .map_err(IambError::from)?
+                {
+                    return Err(IambError::InsufficientPermission.into());
+                }
+
+                let ev = SpaceChildEventContent::new(vec![]);
+                let event_id = self
+                    .room
+                    .send_state_event_for_key(&space.room_id().to_owned(), ev)
+                    .await
+                    .map_err(IambError::from)?;
+
+                // Fix for element (see https://github.com/element-hq/element-web/issues/29606)
+                let _ = self
+                    .room
+                    .redact(&event_id.event_id, Some("workaround for element bug"), None)
+                    .await
+                    .map_err(IambError::from)?;
+
+                Ok(InfoMessage::from("Room removed").into())
+            },
         }
     }
 }

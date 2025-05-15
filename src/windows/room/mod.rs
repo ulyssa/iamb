@@ -26,7 +26,7 @@ use matrix_sdk::{
         OwnedUserId,
         RoomId,
     },
-    DisplayName,
+    RoomDisplayName,
     RoomState as MatrixRoomState,
 };
 
@@ -66,6 +66,7 @@ use crate::base::{
     RoomAction,
     RoomField,
     SendAction,
+    SpaceAction,
 };
 
 use self::chat::ChatState;
@@ -139,7 +140,7 @@ impl RoomState {
     pub fn new(
         room: MatrixRoom,
         thread: Option<OwnedEventId>,
-        name: DisplayName,
+        name: RoomDisplayName,
         tags: Option<Tags>,
         store: &mut ProgramStore,
     ) -> Self {
@@ -211,6 +212,18 @@ impl RoomState {
         match self {
             RoomState::Chat(chat) => chat.message_command(act, ctx, store).await,
             RoomState::Space(_) => Err(IambError::NoSelectedMessage.into()),
+        }
+    }
+
+    pub async fn space_command(
+        &mut self,
+        act: SpaceAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        match self {
+            RoomState::Space(space) => space.space_command(act, ctx, store).await,
+            RoomState::Chat(_) => Err(IambError::NoSelectedSpace.into()),
         }
     }
 
@@ -464,6 +477,9 @@ impl RoomState {
                     RoomField::Aliases => {
                         // This never happens, aliases is only used for showing
                     },
+                    RoomField::Id => {
+                        // This never happens, id is only used for showing
+                    },
                 }
 
                 Ok(vec![])
@@ -559,6 +575,9 @@ impl RoomState {
                     RoomField::Aliases => {
                         // This will not happen, you cannot unset all aliases
                     },
+                    RoomField::Id => {
+                        // This never happens, id is only used for showing
+                    },
                 }
 
                 Ok(vec![])
@@ -573,6 +592,10 @@ impl RoomState {
                     RoomField::History => {
                         let visibility = room.history_visibility();
                         format!("Room history visibility: {visibility}")
+                    },
+                    RoomField::Id => {
+                        let id = room.room_id();
+                        format!("Room identifier: {id}")
                     },
                     RoomField::Name => {
                         match room.name() {
