@@ -26,7 +26,7 @@ use matrix_sdk::{
         OwnedUserId,
         RoomId,
     },
-    DisplayName,
+    RoomDisplayName,
     RoomState as MatrixRoomState,
 };
 
@@ -139,7 +139,7 @@ impl RoomState {
     pub fn new(
         room: MatrixRoom,
         thread: Option<OwnedEventId>,
-        name: DisplayName,
+        name: RoomDisplayName,
         tags: Option<Tags>,
         store: &mut ProgramStore,
     ) -> Self {

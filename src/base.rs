@@ -833,7 +833,7 @@ pub struct RoomInfo {
 
     /// A map of the most recent read marker for each user.
     ///
-    /// Every receipt in this map should also have an entry in [`event_receipts`],
+    /// Every receipt in this map should also have an entry in [`event_receipts`](`Self::event_receipts`),
     /// however not every user has an entry. If a user's most recent receipt is
     /// older than the oldest loaded event, that user will not be included.
     pub user_receipts: HashMap<OwnedUserId, OwnedEventId>,
