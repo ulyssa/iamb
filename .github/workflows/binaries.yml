@@ -60,7 +60,7 @@ jobs:
         path: ~/.cargo/registry
         key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
     - name: Run sccache-cache
-      uses: mozilla-actions/sccache-action@v0.0.3
+      uses: mozilla-actions/sccache-action@v0.0.9
     - name: 'Build: binary'
       run: cargo build --release --locked --target ${{ env.TARGET }}
     - name: 'Upload: binary'
