@@ -53,7 +53,7 @@ user_id = "@user:example.com"
 
 ## Installation (via `crates.io`)
 
-Install Rust (1.76.0 or above) and Cargo, and then run:
+Install Rust (1.83.0 or above) and Cargo, and then run:
 
 ```
 cargo install --locked iamb
