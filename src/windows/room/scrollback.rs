@@ -1402,7 +1402,7 @@ impl<'a> StatefulWidget for Scrollback<'a> {
         // line.
         for (x, y, backend) in image_previews {
             let image_widget = Image::new(backend);
-            let mut rect = backend.rect();
+            let mut rect = backend.area();
             rect.x = x;
             rect.y = y;
             // Don't render outside of scrollback area

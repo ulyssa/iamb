@@ -1319,7 +1319,7 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
 
 #[cfg(unix)]
 fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
-    let mut picker = match Picker::from_termios() {
+    let mut picker = match Picker::from_query_stdio() {
         Ok(picker) => picker,
         Err(e) => {
             tracing::error!("Failed to setup image previews: {e}");
@@ -1327,12 +1327,8 @@ fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
         },
     };
 
-    // `guess_protocol` also does tmux detection,
-    // run it always then overwrite the guessed protocol if needed
-    picker.guess_protocol();
-
     if let Some(protocol_type) = protocol_type {
-        picker.protocol_type = protocol_type;
+        picker.set_protocol_type(protocol_type);
     }
 
     Some(picker)
@@ -1355,8 +1351,8 @@ fn picker_from_settings(settings: &ApplicationSettings) -> Option<Picker> {
     }) = image_preview_protocol
     {
         // User forced type and font_size: use that.
-        let mut picker = Picker::new(font_size);
-        picker.protocol_type = protocol_type;
+        let mut picker = Picker::from_fontsize(font_size);
+        picker.set_protocol_type(protocol_type);
         Some(picker)
     } else {
         // Guess, but use type if forced.
