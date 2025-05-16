@@ -606,7 +606,7 @@ impl ChatState {
                 let config = AttachmentConfig::new();
 
                 let resp = room
-                    .send_attachment(name.as_ref(), &mime, bytes, config)
+                    .send_attachment(name, &mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
 
