@@ -21,12 +21,12 @@ use tracing::{error, warn};
 use url::Url;
 
 use matrix_sdk::{
+    authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
     deserialized_responses::DisplayName,
     encryption::verification::{SasVerification, Verification},
     encryption::{BackupDownloadStrategy, EncryptionSettings},
     event_handler::Ctx,
-    authentication::matrix::MatrixSession,
     reqwest,
     room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
