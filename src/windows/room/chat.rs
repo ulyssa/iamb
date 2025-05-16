@@ -596,7 +596,7 @@ impl ChatState {
                             let dynimage = image::DynamicImage::ImageRgba8(imagebuf);
                             let bytes = Vec::<u8>::new();
                             let mut buff = std::io::Cursor::new(bytes);
-                            dynimage.write_to(&mut buff, image::ImageOutputFormat::Png)?;
+                            dynimage.write_to(&mut buff, image::ImageFormat::Png)?;
                             Ok(buff.into_inner())
                         })
                         .map_err(IambError::from)?;

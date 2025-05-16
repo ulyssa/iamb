@@ -37,7 +37,7 @@ emojis = "0.5"
 futures = "0.3"
 gethostname = "0.4.1"
 html5ever = "0.26.0"
-image = "0.24.5"
+image = "0.25.2"
 libc = "0.2"
 markup5ever_rcdom = "0.2.0"
 mime = "^0.3.16"
@@ -45,8 +45,8 @@ mime_guess = "^2.0.4"
 nom = "7.0.0"
 open = "3.2.0"
 rand = "0.8.5"
-ratatui = "0.26"
-ratatui-image = { version = "=1.0.0", features = ["serde"] }
+ratatui = "0.28.1"
+ratatui-image = { version = "=1.0.5", features = ["serde"] }
 regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"
@@ -76,15 +76,13 @@ features = ["zbus", "serde"]
 optional = true
 
 [dependencies.modalkit]
-version = "0.0.20"
 default-features = false
-#git = "https://github.com/ulyssa/modalkit"
-#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
+git = "https://github.com/ulyssa/modalkit"
+rev = "45855daeeb7081eec626a8f9cf657f0fc2ff0a7a"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.20"
-#git = "https://github.com/ulyssa/modalkit"
-#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
+git = "https://github.com/ulyssa/modalkit"
+rev = "45855daeeb7081eec626a8f9cf657f0fc2ff0a7a"
 
 [dependencies.matrix-sdk]
 version = "0.10.0"

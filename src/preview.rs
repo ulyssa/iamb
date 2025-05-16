@@ -63,7 +63,7 @@ pub fn spawn_insert_preview(
         let img = download_or_load(event_id.to_owned(), source, media, cache_dir)
             .await
             .map(std::io::Cursor::new)
-            .map(image::io::Reader::new)
+            .map(image::ImageReader::new)
             .map_err(IambError::Matrix)
             .and_then(|reader| reader.with_guessed_format().map_err(IambError::IOError))
             .and_then(|reader| reader.decode().map_err(IambError::Image));

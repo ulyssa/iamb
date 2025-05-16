@@ -310,7 +310,7 @@ impl Application {
         }
 
         term.draw(|f| {
-            let area = f.size();
+            let area = f.area();
 
             let modestr = bindings.show_mode();
             let cursor = bindings.get_cursor_indicator();
@@ -339,7 +339,7 @@ impl Application {
                     let inner = Rect::new(cx, cy, 1, 1);
                     f.render_widget(para, inner)
                 }
-                f.set_cursor(cx, cy);
+                f.set_cursor_position((cx, cy));
             }
         })?;
 
