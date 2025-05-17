@@ -70,7 +70,7 @@ mod printer;
 
 pub use self::compose::text_to_message;
 
-type ProtocolPreview<'a> = (&'a dyn Protocol, u16, u16);
+type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 
@@ -826,7 +826,7 @@ impl<'a> MessageFormatter<'a> {
 pub enum ImageStatus {
     None,
     Downloading(ImagePreviewSize),
-    Loaded(Box<dyn Protocol>),
+    Loaded(Protocol),
     Error(String),
 }
 
@@ -1046,7 +1046,7 @@ impl Message {
         style: Style,
         hide_reply: bool,
         emoji_shortcodes: bool,
-    ) -> (Text, Option<&dyn Protocol>) {
+    ) -> (Text, Option<&Protocol>) {
         if let Some(html) = &self.html {
             (html.to_text(width, style, hide_reply, emoji_shortcodes), None)
         } else {
@@ -1066,8 +1066,8 @@ impl Message {
                     placeholder_frame(Some("Downloading..."), width, image_preview_size)
                 },
                 ImageStatus::Loaded(backend) => {
-                    proto = Some(backend.as_ref());
-                    placeholder_frame(Some("Loading..."), width, &backend.rect().into())
+                    proto = Some(backend);
+                    placeholder_frame(Some("Loading..."), width, &backend.area().into())
                 },
                 ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
             };
