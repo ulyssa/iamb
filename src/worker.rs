@@ -708,7 +708,7 @@ async fn create_client_inner(
         .build()
         .unwrap();
 
-    let req_config = RequestConfig::new().timeout(req_timeout).retry_timeout(req_timeout);
+    let req_config = RequestConfig::new().timeout(req_timeout).max_retry_time(req_timeout);
 
     // Set up the Matrix client for the selected profile.
     let builder = Client::builder()
@@ -1106,7 +1106,7 @@ impl ClientWorker {
                         ev.content.displayname.as_deref().unwrap_or_else(|| user_id.as_str()),
                     );
                     let ambiguous = client
-                        .store()
+                        .state_store()
                         .get_users_with_display_name(room_id, &ambiguous_name)
                         .await
                         .map(|users| users.len() > 1)
@@ -1244,7 +1244,7 @@ impl ClientWorker {
             let settings = self.settings.clone();
 
             async move {
-                while !client.logged_in() {
+                while !client.is_active() {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
 

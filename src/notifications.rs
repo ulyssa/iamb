@@ -12,6 +12,7 @@ use matrix_sdk::{
         RoomId,
     },
     Client,
+    EncryptionState,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -182,8 +183,8 @@ async fn global_or_room_mode(
         Ok(true) => IsOneToOne::Yes,
         _ => IsOneToOne::No,
     };
-    let is_encrypted = match room.is_encrypted().await {
-        Ok(true) => IsEncrypted::Yes,
+    let is_encrypted = match room.latest_encryption_state().await {
+        Ok(EncryptionState::Encrypted) => IsEncrypted::Yes,
         _ => IsEncrypted::No,
     };
     settings
