@@ -8,6 +8,7 @@ use matrix_sdk::{
         events::{room::message::MessageType, AnyMessageLikeEventContent, AnySyncTimelineEvent},
         serde::Raw,
         MilliSecondsSinceUnixEpoch,
+        OwnedRoomId,
         RoomId,
     },
     Client,
@@ -23,6 +24,19 @@ const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
     None => "iamb",
     Some(iamb) => iamb,
 };
+
+/// Handle for an open notification that should be closed when the user views it.
+pub struct NotificationHandle(
+    #[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
+    notify_rust::NotificationHandle,
+);
+
+impl NotificationHandle {
+    pub fn close(self) {
+        #[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
+        self.0.close();
+    }
+}
 
 pub async fn register_notifications(
     client: &Client,
@@ -54,6 +68,7 @@ pub async fn register_notifications(
                     return;
                 }
 
+                let room_id = room.room_id().to_owned();
                 match notification.event {
                     RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
                         match parse_full_notification(e, room, show_message).await {
@@ -66,8 +81,14 @@ pub async fn register_notifications(
                                     return;
                                 }
 
-                                send_notification(&notify_via, &store, &summary, body.as_deref())
-                                    .await;
+                                send_notification(
+                                    &notify_via,
+                                    &store,
+                                    &summary,
+                                    body.as_deref(),
+                                    room_id,
+                                )
+                                .await;
                             },
                             Err(err) => {
                                 tracing::error!("Failed to extract notification data: {err}")
@@ -89,10 +110,11 @@ async fn send_notification(
     store: &AsyncProgramStore,
     summary: &str,
     body: Option<&str>,
+    room_id: OwnedRoomId,
 ) {
     #[cfg(feature = "desktop")]
     if via.desktop {
-        send_notification_desktop(summary, body);
+        send_notification_desktop(store, summary, body, room_id).await;
     }
     #[cfg(not(feature = "desktop"))]
     {
@@ -110,7 +132,12 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
 }
 
 #[cfg(feature = "desktop")]
-fn send_notification_desktop(summary: &str, body: Option<&str>) {
+async fn send_notification_desktop(
+    store: &AsyncProgramStore,
+    summary: &str,
+    body: Option<&str>,
+    room_id: OwnedRoomId,
+) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
         .summary(summary)
@@ -125,8 +152,18 @@ fn send_notification_desktop(summary: &str, body: Option<&str>) {
         desktop_notification.body(body);
     }
 
-    if let Err(err) = desktop_notification.show() {
-        tracing::error!("Failed to send notification: {err}")
+    match desktop_notification.show() {
+        Err(err) => tracing::error!("Failed to send notification: {err}"),
+        Ok(handle) => {
+            let mut locked = store.lock().await;
+            #[cfg(all(unix, not(target_os = "macos")))]
+            locked
+                .application
+                .open_notifications
+                .entry(room_id)
+                .or_default()
+                .push(NotificationHandle(handle));
+        },
     }
 }
 
