@@ -90,6 +90,7 @@ use modalkit::{
 
 use crate::config::ImagePreviewProtocolValues;
 use crate::message::ImageStatus;
+use crate::notifications::NotificationHandle;
 use crate::preview::{source_from_event, spawn_insert_preview};
 use crate::{
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
@@ -1466,6 +1467,9 @@ pub struct ChatStore {
 
     /// Whether the application is currently focused
     pub focused: bool,
+
+    /// Notifications that should be dismissed when the user opens the room.
+    pub open_notifications: HashMap<OwnedRoomId, Vec<NotificationHandle>>,
 }
 
 impl ChatStore {
@@ -1489,6 +1493,7 @@ impl ChatStore {
             draw_curr: None,
             ring_bell: false,
             focused: true,
+            open_notifications: Default::default(),
         }
     }
 
