@@ -199,7 +199,12 @@ pub async fn parse_full_notification(
         .unwrap_or_else(|| sender_id.localpart());
 
     let summary = if let Some(room_name) = room.cached_display_name() {
-        format!("{sender_name} in {room_name}")
+        if room.is_direct().await.map_err(IambError::from)? && sender_name == room_name.to_string()
+        {
+            sender_name.to_string()
+        } else {
+            format!("{sender_name} in {room_name}")
+        }
     } else {
         sender_name.to_string()
     };
