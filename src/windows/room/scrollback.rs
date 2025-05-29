@@ -1284,7 +1284,7 @@ impl<'a> Scrollback<'a> {
     }
 }
 
-impl<'a> StatefulWidget for Scrollback<'a> {
+impl StatefulWidget for Scrollback<'_> {
     type State = ScrollbackState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {

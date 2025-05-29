@@ -293,7 +293,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldRoom> {
 /// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
 struct SortRoomVisitor;
 
-impl<'de> Visitor<'de> for SortRoomVisitor {
+impl Visitor<'_> for SortRoomVisitor {
     type Value = SortColumn<SortFieldRoom>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -346,7 +346,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldUser> {
 /// [serde] visitor for deserializing [SortColumn] for users.
 struct SortUserVisitor;
 
-impl<'de> Visitor<'de> for SortUserVisitor {
+impl Visitor<'_> for SortUserVisitor {
     type Value = SortColumn<SortFieldUser>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -1182,7 +1182,7 @@ impl RoomInfo {
 
     /// Indicates whether we've recently fetched scrollback for this room.
     pub fn recently_fetched(&self) -> bool {
-        self.fetch_last.map_or(false, |i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
+        self.fetch_last.is_some_and(|i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
     }
 
     fn clear_receipt(&mut self, user_id: &OwnedUserId) -> Option<()> {
@@ -1609,7 +1609,7 @@ impl<'de> Deserialize<'de> for IambId {
 /// [serde] visitor for deserializing [IambId].
 struct IambIdVisitor;
 
-impl<'de> Visitor<'de> for IambIdVisitor {
+impl Visitor<'_> for IambIdVisitor {
     type Value = IambId;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

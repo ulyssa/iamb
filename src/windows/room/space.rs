@@ -184,7 +184,7 @@ impl<'a> Space<'a> {
     }
 }
 
-impl<'a> StatefulWidget for Space<'a> {
+impl StatefulWidget for Space<'_> {
     type State = SpaceState;
 
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
