@@ -118,6 +118,9 @@ fn send_notification_desktop(summary: &str, body: Option<&str>) {
         .icon(IAMB_XDG_NAME)
         .action("default", "default");
 
+    #[cfg(all(unix, not(target_os = "macos")))]
+    desktop_notification.urgency(notify_rust::Urgency::Normal);
+
     if let Some(body) = body {
         desktop_notification.body(body);
     }
