@@ -44,11 +44,14 @@ use modalkit::crossterm::{
         read,
         DisableBracketedPaste,
         DisableFocusChange,
+        DisableMouseCapture,
         EnableBracketedPaste,
         EnableFocusChange,
+        EnableMouseCapture,
         Event,
         KeyEventKind,
         KeyboardEnhancementFlags,
+        MouseEventKind,
         PopKeyboardEnhancementFlags,
         PushKeyboardEnhancementFlags,
     },
@@ -364,8 +367,30 @@ impl Application {
 
                     return Ok(ke.into());
                 },
-                Event::Mouse(_) => {
-                    // Do nothing for now.
+                Event::Mouse(me) => {
+                    let dir = match me.kind {
+                        MouseEventKind::ScrollUp => MoveDir2D::Up,
+                        MouseEventKind::ScrollDown => MoveDir2D::Down,
+                        MouseEventKind::ScrollLeft => MoveDir2D::Left,
+                        MouseEventKind::ScrollRight => MoveDir2D::Right,
+                        _ => continue,
+                    };
+
+                    let size = ScrollSize::Cell;
+                    let style = ScrollStyle::Direction2D(dir, size, 1.into());
+                    let ctx = ProgramContext::default();
+                    let mut store = self.store.lock().await;
+
+                    match self.screen.scroll(&style, &ctx, store.deref_mut()) {
+                        Ok(None) => {},
+                        Ok(Some(info)) => {
+                            drop(store);
+                            self.handle_info(info);
+                        },
+                        Err(e) => {
+                            self.screen.push_error(e);
+                        },
+                    }
                 },
                 Event::FocusGained => {
                     let mut store = self.store.lock().await;
@@ -932,8 +957,8 @@ async fn login_normal(
 }
 
 /// Set up the terminal for drawing the TUI, and getting additional info.
-fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
-    let title = format!("iamb ({})", title);
+fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std::io::Result<()> {
+    let title = format!("iamb ({})", settings.profile.user_id.as_str());
 
     // Enable raw mode and enter the alternate screen.
     crossterm::terminal::enable_raw_mode()?;
@@ -947,13 +972,21 @@ fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
         )?;
     }
 
+    if settings.tunables.mouse.enabled {
+        crossterm::execute!(stdout(), EnableMouseCapture)?;
+    }
+
     crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
-fn restore_tty(enable_enhanced_keys: bool) {
+fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
     if enable_enhanced_keys {
         let _ = crossterm::queue!(stdout(), PopKeyboardEnhancementFlags);
+    }
+
+    if enable_mouse {
+        let _ = crossterm::queue!(stdout(), DisableMouseCapture);
     }
 
     let _ = crossterm::execute!(
@@ -1009,11 +1042,12 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
             false
         },
     };
-    setup_tty(settings.profile.user_id.as_str(), enable_enhanced_keys)?;
+    setup_tty(&settings, enable_enhanced_keys)?;
 
     let orig_hook = std::panic::take_hook();
+    let enable_mouse = settings.tunables.mouse.enabled;
     std::panic::set_hook(Box::new(move |panic_info| {
-        restore_tty(enable_enhanced_keys);
+        restore_tty(enable_enhanced_keys, enable_mouse);
         orig_hook(panic_info);
         process::exit(1);
     }));
@@ -1023,7 +1057,7 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     application.run().await?;
 
     // Clean up the terminal on exit.
-    restore_tty(enable_enhanced_keys);
+    restore_tty(enable_enhanced_keys, enable_mouse);
 
     Ok(())
 }
