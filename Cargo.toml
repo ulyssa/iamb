@@ -11,7 +11,7 @@ license = "Apache-2.0"
 exclude = [".github", "CONTRIBUTING.md"]
 keywords = ["matrix", "chat", "tui", "vim"]
 categories = ["command-line-utilities"]
-rust-version = "1.74"
+rust-version = "1.83"
 build = "build.rs"
 
 [features]
@@ -37,7 +37,7 @@ emojis = "0.5"
 futures = "0.3"
 gethostname = "0.4.1"
 html5ever = "0.26.0"
-image = "0.24.5"
+image = "^0.25.6"
 libc = "0.2"
 markup5ever_rcdom = "0.2.0"
 mime = "^0.3.16"
@@ -45,8 +45,8 @@ mime_guess = "^2.0.4"
 nom = "7.0.0"
 open = "3.2.0"
 rand = "0.8.5"
-ratatui = "0.26"
-ratatui-image = { version = "=1.0.0", features = ["serde"] }
+ratatui = "0.29.0"
+ratatui-image = { version = "~6.0.0", features = ["serde"] }
 regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"
@@ -76,18 +76,18 @@ features = ["zbus", "serde"]
 optional = true
 
 [dependencies.modalkit]
-version = "0.0.20"
+version = "0.0.21"
 default-features = false
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
+#rev = "e40dbb0bfeabe4cfd08facd2acb446080a330d75"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.20"
+version = "0.0.21"
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "24f3ec11c7f634005a27b26878d0fbbdcc08f272"
+#rev = "e40dbb0bfeabe4cfd08facd2acb446080a330d75"
 
 [dependencies.matrix-sdk]
-version = "0.7.1"
+version = "0.10.0"
 default-features = false
 features = ["e2e-encryption", "sqlite", "sso-login"]
 

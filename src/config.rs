@@ -10,7 +10,7 @@ use std::path::{Path, PathBuf};
 use std::process;
 
 use clap::Parser;
-use matrix_sdk::matrix_auth::MatrixSession;
+use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
@@ -45,8 +45,9 @@ const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 2] = [
     SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
 ];
 
-const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 4] = [
+const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
     SortColumn(SortFieldRoom::Favorite, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Invite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::LowPriority, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Unread, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
@@ -97,7 +98,7 @@ fn validate_profile_name(name: &str) -> bool {
 
     let mut chars = name.chars();
 
-    if !chars.next().map_or(false, |c| c.is_ascii_alphanumeric()) {
+    if !chars.next().is_some_and(|c| c.is_ascii_alphanumeric()) {
         return false;
     }
 
@@ -151,7 +152,7 @@ pub enum ConfigError {
 pub struct Keys(pub Vec<TerminalKey>, pub String);
 pub struct KeysVisitor;
 
-impl<'de> Visitor<'de> for KeysVisitor {
+impl Visitor<'_> for KeysVisitor {
     type Value = Keys;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -182,7 +183,7 @@ impl<'de> Deserialize<'de> for Keys {
 pub struct VimModes(pub Vec<VimMode>);
 pub struct VimModesVisitor;
 
-impl<'de> Visitor<'de> for VimModesVisitor {
+impl Visitor<'_> for VimModesVisitor {
     type Value = VimModes;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -232,7 +233,7 @@ impl From<LogLevel> for Level {
     }
 }
 
-impl<'de> Visitor<'de> for LogLevelVisitor {
+impl Visitor<'_> for LogLevelVisitor {
     type Value = LogLevel;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -267,7 +268,7 @@ impl<'de> Deserialize<'de> for LogLevel {
 pub struct UserColor(pub Color);
 pub struct UserColorVisitor;
 
-impl<'de> Visitor<'de> for UserColorVisitor {
+impl Visitor<'_> for UserColorVisitor {
     type Value = UserColor;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -321,7 +322,7 @@ pub struct Session {
 impl From<Session> for MatrixSession {
     fn from(session: Session) -> Self {
         MatrixSession {
-            tokens: matrix_sdk::matrix_auth::MatrixSessionTokens {
+            tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
                 access_token: session.access_token,
                 refresh_token: session.refresh_token,
             },
@@ -418,7 +419,7 @@ impl Default for NotifyVia {
     }
 }
 
-impl<'de> Visitor<'de> for NotifyViaVisitor {
+impl Visitor<'_> for NotifyViaVisitor {
     type Value = NotifyVia;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {

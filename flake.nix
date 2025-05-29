@@ -14,7 +14,7 @@
         # We only need the nightly overlay in the devShell because .rs files are formatted with nightly.
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        rustNightly = pkgs.rust-bin.nightly."2024-03-08".default;
+        rustNightly = pkgs.rust-bin.nightly."2024-12-12".default;
       in
       with pkgs;
       {
@@ -27,7 +27,7 @@
           };
           nativeBuildInputs = [ pkg-config ];
           buildInputs = [ openssl ] ++ lib.optionals stdenv.isDarwin
-            (with darwin.apple_sdk.frameworks; [ AppKit Security Cocoa]);
+            (with darwin.apple_sdk.frameworks; [ AppKit Security Cocoa ]);
         };
 
         devShell = mkShell {
@@ -38,6 +38,7 @@
             pkg-config
             cargo-tarpaulin
             cargo-watch
+            sqlite
           ];
         };
       });

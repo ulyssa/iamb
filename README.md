@@ -53,7 +53,7 @@ user_id = "@user:example.com"
 
 ## Installation (via `crates.io`)
 
-Install Rust (1.74.0 or above) and Cargo, and then run:
+Install Rust (1.83.0 or above) and Cargo, and then run:
 
 ```
 cargo install --locked iamb
@@ -80,9 +80,27 @@ On FreeBSD a package is available from the official repositories. To install it 
 pkg install iamb
 ```
 
+### Gentoo
+
+On Gentoo, an ebuild is available from the community-managed
+[GURU overlay](https://wiki.gentoo.org/wiki/Project:GURU).
+
+You can enable the GURU overlay with:
+
+```
+eselect repository enable guru
+emerge --sync guru
+```
+
+And then install `iamb` with:
+
+```
+emerge --ask iamb
+```
+
 ### macOS
 
-On macOS a [package](https://formulae.brew.sh/formula/iamb#default) is availabe in Homebrew's
+On macOS a [package](https://formulae.brew.sh/formula/iamb#default) is available in Homebrew's
 repository. To install it simply run:
 
 ```

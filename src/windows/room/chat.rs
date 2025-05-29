@@ -14,7 +14,7 @@ use url::Url;
 
 use matrix_sdk::{
     attachment::AttachmentConfig,
-    media::{MediaFormat, MediaRequest},
+    media::{MediaFormat, MediaRequestParameters},
     room::Room as MatrixRoom,
     ruma::{
         events::reaction::ReactionEventContent,
@@ -276,7 +276,7 @@ impl ChatState {
                     }
 
                     if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
-                        let req = MediaRequest { source, format: MediaFormat::File };
+                        let req = MediaRequestParameters { source, format: MediaFormat::File };
 
                         let bytes =
                             media.get_media_content(&req, true).await.map_err(IambError::from)?;
@@ -596,7 +596,7 @@ impl ChatState {
                             let dynimage = image::DynamicImage::ImageRgba8(imagebuf);
                             let bytes = Vec::<u8>::new();
                             let mut buff = std::io::Cursor::new(bytes);
-                            dynimage.write_to(&mut buff, image::ImageOutputFormat::Png)?;
+                            dynimage.write_to(&mut buff, image::ImageFormat::Png)?;
                             Ok(buff.into_inner())
                         })
                         .map_err(IambError::from)?;
@@ -606,7 +606,7 @@ impl ChatState {
                 let config = AttachmentConfig::new();
 
                 let resp = room
-                    .send_attachment(name.as_ref(), &mime, bytes, config)
+                    .send_attachment(name, &mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
 
@@ -906,7 +906,7 @@ impl<'a> Chat<'a> {
     }
 }
 
-impl<'a> StatefulWidget for Chat<'a> {
+impl StatefulWidget for Chat<'_> {
     type State = ChatState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {

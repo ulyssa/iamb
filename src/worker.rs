@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
+use matrix_sdk::ruma::events::AnySyncTimelineEvent;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -20,11 +21,12 @@ use tracing::{error, warn};
 use url::Url;
 
 use matrix_sdk::{
+    authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
+    deserialized_responses::DisplayName,
     encryption::verification::{SasVerification, Verification},
     encryption::{BackupDownloadStrategy, EncryptionSettings},
     event_handler::Ctx,
-    matrix_auth::MatrixSession,
     reqwest,
     room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
@@ -58,7 +60,6 @@ use matrix_sdk::{
             typing::SyncTypingEvent,
             AnyInitialStateEvent,
             AnyMessageLikeEvent,
-            AnyTimelineEvent,
             EmptyStateKey,
             InitialStateEvent,
             SyncEphemeralRoomEvent,
@@ -78,8 +79,8 @@ use matrix_sdk::{
     },
     Client,
     ClientBuildError,
-    DisplayName,
     Error as MatrixError,
+    RoomDisplayName,
     RoomMemberships,
 };
 
@@ -293,10 +294,10 @@ async fn load_older_one(
         let mut msgs = vec![];
 
         for ev in chunk.into_iter() {
-            let msg = match ev.event.deserialize() {
-                Ok(AnyTimelineEvent::MessageLike(msg)) => msg,
-                Ok(AnyTimelineEvent::State(_)) => continue,
-                Err(_) => continue,
+            let deserialized = ev.into_raw().deserialize().map_err(IambError::Serde)?;
+            let msg: AnyMessageLikeEvent = match deserialized {
+                AnySyncTimelineEvent::MessageLike(e) => e.into_full_event(room_id.to_owned()),
+                AnySyncTimelineEvent::State(_) => continue,
             };
 
             let event_id = msg.event_id();
@@ -440,7 +441,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     let mut dms = vec![];
 
     for room in client.invited_rooms().into_iter() {
-        let name = room.display_name().await.unwrap_or(DisplayName::Empty).to_string();
+        let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
         let tags = room.tags().await.unwrap_or_default();
 
         names.push((room.room_id().to_owned(), name));
@@ -455,7 +456,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     }
 
     for room in client.joined_rooms().into_iter() {
-        let name = room.display_name().await.unwrap_or(DisplayName::Empty).to_string();
+        let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
         let tags = room.tags().await.unwrap_or_default();
 
         names.push((room.room_id().to_owned(), name));
@@ -603,7 +604,7 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
     return (reply, response);
 }
 
-pub type FetchedRoom = (MatrixRoom, DisplayName, Option<Tags>);
+pub type FetchedRoom = (MatrixRoom, RoomDisplayName, Option<Tags>);
 
 pub enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
@@ -1076,11 +1077,12 @@ impl ClientWorker {
                     let room_id = room.room_id();
                     let user_id = ev.state_key;
 
-                    let ambiguous_name =
-                        ev.content.displayname.as_deref().unwrap_or_else(|| user_id.localpart());
+                    let ambiguous_name = DisplayName::new(
+                        ev.content.displayname.as_deref().unwrap_or_else(|| user_id.as_str()),
+                    );
                     let ambiguous = client
                         .store()
-                        .get_users_with_display_name(room_id, ambiguous_name)
+                        .get_users_with_display_name(room_id, &ambiguous_name)
                         .await
                         .map(|users| users.len() > 1)
                         .unwrap_or_default();
@@ -1309,7 +1311,7 @@ impl ClientWorker {
         // Remove the session.json file.
         std::fs::remove_file(&self.settings.session_json)?;
 
-        Ok(Some(InfoMessage::from("Sucessfully logged out")))
+        Ok(Some(InfoMessage::from("Successfully logged out")))
     }
 
     async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<OwnedRoomId> {
@@ -1346,7 +1348,7 @@ impl ClientWorker {
 
     async fn get_room(&mut self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
         if let Some(room) = self.client.get_room(&room_id) {
-            let name = room.display_name().await.map_err(IambError::from)?;
+            let name = room.cached_display_name().ok_or_else(|| IambError::UnknownRoom(room_id))?;
             let tags = room.tags().await.map_err(IambError::from)?;
 
             Ok((room, name, tags))
@@ -1389,7 +1391,7 @@ impl ClientWorker {
         req.limit = Some(1000u32.into());
         req.max_depth = Some(1u32.into());
 
-        let resp = self.client.send(req, None).await.map_err(IambError::from)?;
+        let resp = self.client.send(req).await.map_err(IambError::from)?;
 
         let rooms = resp.rooms.into_iter().map(|chunk| chunk.room_id).collect();
 

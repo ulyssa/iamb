@@ -70,6 +70,8 @@ mod printer;
 
 pub use self::compose::text_to_message;
 
+type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
+
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 
 #[derive(Default)]
@@ -715,11 +717,12 @@ impl<'a> MessageFormatter<'a> {
         style: Style,
         text: &mut Text<'a>,
         info: &'a RoomInfo,
-    ) {
+        settings: &'a ApplicationSettings,
+    ) -> Option<ProtocolPreview<'a>> {
         let width = self.width();
         let w = width.saturating_sub(2);
         let shortcodes = self.settings.tunables.message_shortcode_display;
-        let (mut replied, _) = msg.show_msg(w, style, true, shortcodes);
+        let (mut replied, proto) = msg.show_msg(w, style, true, shortcodes);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -738,12 +741,22 @@ impl<'a> MessageFormatter<'a> {
             text,
         );
 
+        // Determine the image offset of the reply header, taking into account the formatting
+        let proto = proto.map(|p| {
+            let y_off = text.lines.len() as u16;
+            // Adjust x_off by 2 to account for the vertical line and indent
+            let x_off = self.cols.user_gutter_width(settings) + 2;
+            (p, x_off, y_off)
+        });
+
         for line in replied.lines.iter_mut() {
             line.spans.insert(0, Span::styled(THICK_VERTICAL, style));
             line.spans.insert(0, Span::styled(" ", style));
         }
 
         self.push_text(replied, style, text);
+
+        proto
     }
 
     fn push_reactions(&mut self, counts: Vec<(&'a str, usize)>, style: Style, text: &mut Text<'a>) {
@@ -813,7 +826,7 @@ impl<'a> MessageFormatter<'a> {
 pub enum ImageStatus {
     None,
     Downloading(ImagePreviewSize),
-    Loaded(Box<dyn Protocol>),
+    Loaded(Protocol),
     Error(String),
 }
 
@@ -961,7 +974,7 @@ impl Message {
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
-    ) -> (Text<'a>, Option<(&dyn Protocol, u16, u16)>) {
+    ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected, settings);
@@ -974,10 +987,10 @@ impl Message {
             .reply_to()
             .or_else(|| self.thread_root())
             .and_then(|e| info.get_event(&e));
-
-        if let Some(r) = &reply {
-            fmt.push_in_reply(r, style, &mut text, info);
-        }
+        let proto_reply = reply.as_ref().and_then(|r| {
+            // Format the reply header, push it into the `Text` buffer, and get any image.
+            fmt.push_in_reply(r, style, &mut text, info, settings)
+        });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
         let (msg, proto) = self.show_msg(
@@ -988,10 +1001,11 @@ impl Message {
         );
 
         // Given our text so far, determine the image offset.
-        let proto = proto.map(|p| {
+        let proto_main = proto.map(|p| {
             let y_off = text.lines.len() as u16;
             let x_off = fmt.cols.user_gutter_width(settings);
-            // Adjust y_off by 1 if a date was printed before the message to account for the extra line.
+            // Adjust y_off by 1 if a date was printed before the message to account for
+            // the extra line we're going to print.
             let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
             (p, x_off, y_off)
         });
@@ -1012,7 +1026,7 @@ impl Message {
             fmt.push_thread_reply_count(thread.len(), &mut text);
         }
 
-        (text, proto)
+        (text, [proto_main, proto_reply])
     }
 
     pub fn show<'a>(
@@ -1032,7 +1046,7 @@ impl Message {
         style: Style,
         hide_reply: bool,
         emoji_shortcodes: bool,
-    ) -> (Text, Option<&dyn Protocol>) {
+    ) -> (Text, Option<&Protocol>) {
         if let Some(html) = &self.html {
             (html.to_text(width, style, hide_reply, emoji_shortcodes), None)
         } else {
@@ -1052,8 +1066,8 @@ impl Message {
                     placeholder_frame(Some("Downloading..."), width, image_preview_size)
                 },
                 ImageStatus::Loaded(backend) => {
-                    proto = Some(backend.as_ref());
-                    placeholder_frame(None, width, &backend.rect().into())
+                    proto = Some(backend);
+                    placeholder_frame(Some("Loading..."), width, &backend.area().into())
                 },
                 ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
             };
@@ -1096,9 +1110,9 @@ impl Message {
         let padding = user_gutter - 2 - width;
 
         let sender = if align_right {
-            space(padding) + &truncated + "  "
+            format!("{}{}  ", space(padding), truncated)
         } else {
-            truncated.into_owned() + &space(padding) + "  "
+            format!("{}{}  ", truncated, space(padding))
         };
 
         Span::styled(sender, style).into()

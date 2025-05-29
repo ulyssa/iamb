@@ -315,7 +315,7 @@ impl Application {
         }
 
         term.draw(|f| {
-            let area = f.size();
+            let area = f.area();
 
             let modestr = bindings.show_mode();
             let cursor = bindings.get_cursor_indicator();
@@ -344,7 +344,7 @@ impl Application {
                     let inner = Rect::new(cx, cy, 1, 1);
                     f.render_widget(para, inner)
                 }
-                f.set_cursor(cx, cy);
+                f.set_cursor_position((cx, cy));
             }
         })?;
 
@@ -583,6 +583,9 @@ impl Application {
             IambAction::Keys(act) => self.keys_command(act, ctx, store).await?,
             IambAction::Message(act) => {
                 self.screen.current_window_mut()?.message_command(act, ctx, store).await?
+            },
+            IambAction::Space(act) => {
+                self.screen.current_window_mut()?.space_command(act, ctx, store).await?
             },
             IambAction::Room(act) => {
                 let acts = self.screen.current_window_mut()?.room_command(act, ctx, store).await?;

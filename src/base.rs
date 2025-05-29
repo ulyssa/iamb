@@ -177,6 +177,19 @@ pub enum MessageAction {
     Unreact(Option<String>, bool),
 }
 
+/// An action taken in the currently selected space.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SpaceAction {
+    /// Add a room or update metadata.
+    ///
+    /// The [`Option<String>`] argument is the order parameter.
+    /// The [`bool`] argument indicates whether the room is suggested.
+    SetChild(OwnedRoomId, Option<String>, bool),
+
+    /// Remove the selected room.
+    RemoveChild,
+}
+
 /// The type of room being created.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CreateRoomType {
@@ -243,6 +256,9 @@ pub enum SortFieldRoom {
 
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
+
+    /// Sort rooms by whether they are invites.
+    Invite,
 }
 
 /// Fields that users can be sorted by.
@@ -277,7 +293,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldRoom> {
 /// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
 struct SortRoomVisitor;
 
-impl<'de> Visitor<'de> for SortRoomVisitor {
+impl Visitor<'_> for SortRoomVisitor {
     type Value = SortColumn<SortFieldRoom>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -307,6 +323,7 @@ impl<'de> Visitor<'de> for SortRoomVisitor {
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
             "id" => SortFieldRoom::RoomId,
+            "invite" => SortFieldRoom::Invite,
             _ => {
                 let msg = format!("Unknown sort field: {value:?}");
                 return Err(E::custom(msg));
@@ -329,7 +346,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldUser> {
 /// [serde] visitor for deserializing [SortColumn] for users.
 struct SortUserVisitor;
 
-impl<'de> Visitor<'de> for SortUserVisitor {
+impl Visitor<'_> for SortUserVisitor {
     type Value = SortColumn<SortFieldUser>;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
@@ -374,6 +391,9 @@ pub enum RoomField {
 
     /// The room name.
     Name,
+
+    /// The room id.
+    Id,
 
     /// A room tag.
     Tag(TagName),
@@ -493,6 +513,9 @@ pub enum IambAction {
     /// Perform an action on the currently selected message.
     Message(MessageAction),
 
+    /// Perform an action on the current space.
+    Space(SpaceAction),
+
     /// Open a URL.
     OpenLink(String),
 
@@ -534,6 +557,12 @@ impl From<MessageAction> for IambAction {
     }
 }
 
+impl From<SpaceAction> for IambAction {
+    fn from(act: SpaceAction) -> Self {
+        IambAction::Space(act)
+    }
+}
+
 impl From<RoomAction> for IambAction {
     fn from(act: RoomAction) -> Self {
         IambAction::Room(act)
@@ -553,6 +582,7 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => SequenceStatus::Break,
             IambAction::Keys(..) => SequenceStatus::Break,
             IambAction::Message(..) => SequenceStatus::Break,
+            IambAction::Space(..) => SequenceStatus::Break,
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
@@ -568,6 +598,7 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => SequenceStatus::Atom,
             IambAction::Keys(..) => SequenceStatus::Atom,
             IambAction::Message(..) => SequenceStatus::Atom,
+            IambAction::Space(..) => SequenceStatus::Atom,
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
@@ -583,6 +614,7 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => SequenceStatus::Ignore,
             IambAction::Keys(..) => SequenceStatus::Ignore,
             IambAction::Message(..) => SequenceStatus::Ignore,
+            IambAction::Space(..) => SequenceStatus::Ignore,
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
@@ -597,6 +629,7 @@ impl ApplicationAction for IambAction {
             IambAction::ClearUnreads => false,
             IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
+            IambAction::Space(..) => false,
             IambAction::Room(..) => false,
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
@@ -610,6 +643,12 @@ impl ApplicationAction for IambAction {
 
 impl From<RoomAction> for ProgramAction {
     fn from(act: RoomAction) -> Self {
+        IambAction::from(act).into()
+    }
+}
+
+impl From<SpaceAction> for ProgramAction {
+    fn from(act: SpaceAction) -> Self {
         IambAction::from(act).into()
     }
 }
@@ -709,9 +748,21 @@ pub enum IambError {
     #[error("Current window is not a room or space")]
     NoSelectedRoomOrSpace,
 
+    /// A failure due to not having a room or space item selected in a list.
+    #[error("No room or space currently selected in list")]
+    NoSelectedRoomOrSpaceItem,
+
     /// A failure due to not having a room selected.
     #[error("Current window is not a room")]
     NoSelectedRoom,
+
+    /// A failure due to not having a space selected.
+    #[error("Current window is not a space")]
+    NoSelectedSpace,
+
+    /// A failure due to not having sufficient permission to perform an action in a room.
+    #[error("You do not have the permission to do that")]
+    InsufficientPermission,
 
     /// A failure due to not having an outstanding room invitation.
     #[error("You do not have a current invitation to this room")]
@@ -833,7 +884,7 @@ pub struct RoomInfo {
 
     /// A map of the most recent read marker for each user.
     ///
-    /// Every receipt in this map should also have an entry in [`event_receipts`],
+    /// Every receipt in this map should also have an entry in [`event_receipts`](`Self::event_receipts`),
     /// however not every user has an entry. If a user's most recent receipt is
     /// older than the oldest loaded event, that user will not be included.
     pub user_receipts: HashMap<OwnedUserId, OwnedEventId>,
@@ -1131,7 +1182,7 @@ impl RoomInfo {
 
     /// Indicates whether we've recently fetched scrollback for this room.
     pub fn recently_fetched(&self) -> bool {
-        self.fetch_last.map_or(false, |i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
+        self.fetch_last.is_some_and(|i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
     }
 
     fn clear_receipt(&mut self, user_id: &OwnedUserId) -> Option<()> {
@@ -1268,7 +1319,7 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
 
 #[cfg(unix)]
 fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
-    let mut picker = match Picker::from_termios() {
+    let mut picker = match Picker::from_query_stdio() {
         Ok(picker) => picker,
         Err(e) => {
             tracing::error!("Failed to setup image previews: {e}");
@@ -1276,12 +1327,8 @@ fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
         },
     };
 
-    // `guess_protocol` also does tmux detection,
-    // run it always then overwrite the guessed protocol if needed
-    picker.guess_protocol();
-
     if let Some(protocol_type) = protocol_type {
-        picker.protocol_type = protocol_type;
+        picker.set_protocol_type(protocol_type);
     }
 
     Some(picker)
@@ -1304,8 +1351,8 @@ fn picker_from_settings(settings: &ApplicationSettings) -> Option<Picker> {
     }) = image_preview_protocol
     {
         // User forced type and font_size: use that.
-        let mut picker = Picker::new(font_size);
-        picker.protocol_type = protocol_type;
+        let mut picker = Picker::from_fontsize(font_size);
+        picker.set_protocol_type(protocol_type);
         Some(picker)
     } else {
         // Guess, but use type if forced.
@@ -1562,7 +1609,7 @@ impl<'de> Deserialize<'de> for IambId {
 /// [serde] visitor for deserializing [IambId].
 struct IambIdVisitor;
 
-impl<'de> Visitor<'de> for IambIdVisitor {
+impl Visitor<'_> for IambIdVisitor {
     type Value = IambId;
 
     fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
