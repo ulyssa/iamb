@@ -957,8 +957,8 @@ async fn login_normal(
 }
 
 /// Set up the terminal for drawing the TUI, and getting additional info.
-fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
-    let title = format!("iamb ({})", title);
+fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std::io::Result<()> {
+    let title = format!("iamb ({})", settings.profile.user_id.as_str());
 
     // Enable raw mode and enter the alternate screen.
     crossterm::terminal::enable_raw_mode()?;
@@ -972,19 +972,21 @@ fn setup_tty(title: &str, enable_enhanced_keys: bool) -> std::io::Result<()> {
         )?;
     }
 
-    crossterm::execute!(
-        stdout(),
-        EnableBracketedPaste,
-        EnableFocusChange,
-        EnableMouseCapture,
-        SetTitle(title)
-    )
+    if settings.tunables.mouse.enabled {
+        crossterm::execute!(stdout(), EnableMouseCapture)?;
+    }
+
+    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
-fn restore_tty(enable_enhanced_keys: bool) {
+fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
     if enable_enhanced_keys {
         let _ = crossterm::queue!(stdout(), PopKeyboardEnhancementFlags);
+    }
+
+    if enable_mouse {
+        let _ = crossterm::queue!(stdout(), DisableMouseCapture);
     }
 
     let _ = crossterm::execute!(
@@ -992,7 +994,6 @@ fn restore_tty(enable_enhanced_keys: bool) {
         DisableBracketedPaste,
         DisableFocusChange,
         LeaveAlternateScreen,
-        DisableMouseCapture,
         CursorShow,
     );
 
@@ -1041,11 +1042,12 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
             false
         },
     };
-    setup_tty(settings.profile.user_id.as_str(), enable_enhanced_keys)?;
+    setup_tty(&settings, enable_enhanced_keys)?;
 
     let orig_hook = std::panic::take_hook();
+    let enable_mouse = settings.tunables.mouse.enabled;
     std::panic::set_hook(Box::new(move |panic_info| {
-        restore_tty(enable_enhanced_keys);
+        restore_tty(enable_enhanced_keys, enable_mouse);
         orig_hook(panic_info);
         process::exit(1);
     }));
@@ -1055,7 +1057,7 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     application.run().await?;
 
     // Clean up the terminal on exit.
-    restore_tty(enable_enhanced_keys);
+    restore_tty(enable_enhanced_keys, enable_mouse);
 
     Ok(())
 }
