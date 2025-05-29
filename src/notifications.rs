@@ -263,7 +263,7 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
 }
 
 fn truncate(s: String) -> String {
-    static MAX_LENGTH: usize = 100;
+    static MAX_LENGTH: usize = 5000;
     if s.graphemes(true).count() > MAX_LENGTH {
         let truncated: String = s.graphemes(true).take(MAX_LENGTH).collect();
         truncated + "..."
