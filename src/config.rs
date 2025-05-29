@@ -5,7 +5,7 @@ use std::collections::HashMap;
 use std::fmt;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::{BufReader, BufWriter};
+use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process;
 
@@ -874,11 +874,33 @@ impl ApplicationSettings {
         } else if profiles.len() == 1 {
             profiles.into_iter().next().unwrap()
         } else {
-            usage!(
-                "No profile specified. \
-                Please use -P or add \"default_profile\" to your configuration.\n\n\
-                For more information try '--help'",
-            );
+            loop {
+                println!("\nNo profile specified. Available profiles:");
+                profiles
+                    .keys()
+                    .enumerate()
+                    .for_each(|(i, name)| println!("{}: {}", i, name));
+
+                print!("Select a number or 'q' to quit: ");
+                let _ = std::io::stdout().flush();
+
+                let mut input = String::new();
+                let _ = std::io::stdin().read_line(&mut input);
+
+                if input.trim() == "q" {
+                    usage!(
+                        "No profile specified. \
+                        Please use -P or add \"default_profile\" to your configuration.\n\n\
+                        For more information try '--help'",
+                    );
+                }
+                if let Ok(i) = input.trim().parse::<usize>() {
+                    if i < profiles.len() {
+                        break profiles.into_iter().nth(i).unwrap();
+                    }
+                }
+                println!("\nInvalid index.");
+            }
         };
 
         let macros = merge_maps(macros, profile.macros.take()).unwrap_or_default();
