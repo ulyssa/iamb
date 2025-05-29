@@ -22,7 +22,6 @@ use std::fs::{create_dir_all, File};
 use std::io::{stdout, BufWriter, Stdout, Write};
 use std::ops::DerefMut;
 use std::process;
-use std::str::FromStr;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -34,8 +33,6 @@ use matrix_sdk::ruma::OwnedUserId;
 use modalkit::crossterm::event::{
     DisableMouseCapture,
     EnableMouseCapture,
-    KeyCode,
-    KeyModifiers,
     MouseEventKind,
 };
 use modalkit::keybindings::InputBindings;
@@ -373,14 +370,28 @@ impl Application {
                     return Ok(ke.into());
                 },
                 Event::Mouse(me) => {
-                    match me.kind {
-                        MouseEventKind::ScrollUp => {
-                            return Ok(TerminalKey::from_str("<C-u>").unwrap())
+                    let dir = match me.kind {
+                        MouseEventKind::ScrollUp => MoveDir2D::Up,
+                        MouseEventKind::ScrollDown => MoveDir2D::Down,
+                        MouseEventKind::ScrollLeft => MoveDir2D::Left,
+                        MouseEventKind::ScrollRight => MoveDir2D::Right,
+                        _ => continue,
+                    };
+
+                    let size = ScrollSize::Cell;
+                    let style = ScrollStyle::Direction2D(dir, size, 1.into());
+                    let ctx = ProgramContext::default();
+                    let mut store = self.store.lock().await;
+
+                    match self.screen.scroll(&style, &ctx, store.deref_mut()) {
+                        Ok(None) => {},
+                        Ok(Some(info)) => {
+                            drop(store);
+                            self.handle_info(info);
                         },
-                        MouseEventKind::ScrollDown => {
-                            return Ok(TerminalKey::from_str("<C-d>").unwrap())
+                        Err(e) => {
+                            self.screen.push_error(e);
                         },
-                        _ => {},
                     }
                 },
                 Event::FocusGained => {
