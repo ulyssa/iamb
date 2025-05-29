@@ -199,18 +199,18 @@ pub async fn parse_full_notification(
         .unwrap_or_else(|| sender_id.localpart());
 
     let summary = if let Some(room_name) = room.cached_display_name() {
-        format!("{sender_name} in {room_name}")
+        if room.is_direct().await.map_err(IambError::from)? && sender_name == room_name.to_string()
+        {
+            sender_name.to_string()
+        } else {
+            format!("{sender_name} in {room_name}")
+        }
     } else {
         sender_name.to_string()
     };
 
     let body = if show_body {
-        event_notification_body(
-            &event,
-            sender_name,
-            room.is_direct().await.map_err(IambError::from)?,
-        )
-        .map(truncate)
+        event_notification_body(&event, sender_name).map(truncate)
     } else {
         None
     };
@@ -218,11 +218,7 @@ pub async fn parse_full_notification(
     return Ok((summary, body, server_ts));
 }
 
-pub fn event_notification_body(
-    event: &AnySyncTimelineEvent,
-    sender_name: &str,
-    is_direct: bool,
-) -> Option<String> {
+pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) -> Option<String> {
     let AnySyncTimelineEvent::MessageLike(event) = event else {
         return None;
     };
@@ -233,10 +229,7 @@ pub fn event_notification_body(
                 MessageType::Audio(_) => {
                     format!("{sender_name} sent an audio file.")
                 },
-                MessageType::Emote(content) => {
-                    let message = &content.body;
-                    format!("{sender_name}: {message}")
-                },
+                MessageType::Emote(content) => content.body,
                 MessageType::File(_) => {
                     format!("{sender_name} sent a file.")
                 },
@@ -246,22 +239,9 @@ pub fn event_notification_body(
                 MessageType::Location(_) => {
                     format!("{sender_name} sent their location.")
                 },
-                MessageType::Notice(content) => {
-                    let message = &content.body;
-                    format!("{sender_name}: {message}")
-                },
-                MessageType::ServerNotice(content) => {
-                    let message = &content.body;
-                    format!("{sender_name}: {message}")
-                },
-                MessageType::Text(content) => {
-                    if is_direct {
-                        content.body
-                    } else {
-                        let message = &content.body;
-                        format!("{sender_name}: {message}")
-                    }
-                },
+                MessageType::Notice(content) => content.body,
+                MessageType::ServerNotice(content) => content.body,
+                MessageType::Text(content) => content.body,
                 MessageType::Video(_) => {
                     format!("{sender_name} sent a video.")
                 },
