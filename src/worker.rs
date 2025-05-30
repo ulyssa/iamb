@@ -302,7 +302,7 @@ async fn load_older_one(
 
             let event_id = msg.event_id();
             let receipts = match room
-                .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
+                .load_event_receipts(ReceiptType::Read, ReceiptThread::Unthreaded, event_id)
                 .await
             {
                 Ok(receipts) => receipts.into_iter().map(|(u, _)| u).collect(),
@@ -1044,7 +1044,10 @@ impl ClientWorker {
                         let Some(receipts) = receipts.get(&ReceiptType::Read) else {
                             continue;
                         };
-                        for user_id in receipts.keys() {
+                        for (user_id, _) in receipts
+                            .iter()
+                            .filter(|(_, rcpt)| rcpt.thread == ReceiptThread::Unthreaded)
+                        {
                             info.set_receipt(user_id.to_owned(), event_id.clone());
                         }
                     }
