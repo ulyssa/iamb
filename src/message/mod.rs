@@ -2,7 +2,6 @@
 use std::borrow::Cow;
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::hash_set;
 use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
@@ -11,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
+use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
@@ -77,8 +77,7 @@ type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 
-#[derive(Default)]
-pub struct Messages(BTreeMap<MessageKey, Message>);
+pub struct Messages(BTreeMap<MessageKey, Message>, pub ReceiptThread);
 
 impl Deref for Messages {
     type Target = BTreeMap<MessageKey, Message>;
@@ -95,6 +94,9 @@ impl DerefMut for Messages {
 }
 
 impl Messages {
+    pub fn new(thread: ReceiptThread) -> Self {
+        Self(Default::default(), thread)
+    }
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
         let event_id = key.1.clone();
         let msg = msg.into();
@@ -633,8 +635,8 @@ struct MessageFormatter<'a> {
     /// The date the message was sent.
     date: Option<Span<'a>>,
 
-    /// Iterator over the users who have read up to this message.
-    read: Option<hash_set::Iter<'a, OwnedUserId>>,
+    /// The users who have read up to this message.
+    read: Vec<OwnedUserId>,
 }
 
 impl<'a> MessageFormatter<'a> {
@@ -667,13 +669,11 @@ impl<'a> MessageFormatter<'a> {
                 line.push(time);
 
                 // Show read receipts.
-                let user_char =
-                    |user: &'a OwnedUserId| -> Span<'a> { settings.get_user_char_span(user) };
-                let mut read = self.read.iter_mut().flatten();
+                let user_char = |user: OwnedUserId| -> Span { settings.get_user_char_span(&user) };
 
-                let a = read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
-                let b = read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
-                let c = read.next().map(user_char).unwrap_or_else(|| Span::raw(" "));
+                let a = self.read.pop().map(user_char).unwrap_or_else(|| Span::raw(" "));
+                let b = self.read.pop().map(user_char).unwrap_or_else(|| Span::raw(" "));
+                let c = self.read.pop().map(user_char).unwrap_or_else(|| Span::raw(" "));
 
                 line.push(Span::raw(" "));
                 line.push(c);
@@ -944,7 +944,13 @@ impl Message {
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
             let time = self.timestamp.show_time();
-            let read = info.event_receipts.get(self.event.event_id()).map(|read| read.iter());
+            let read = info
+                .event_receipts
+                .values()
+                .filter_map(|receipts| receipts.get(self.event.event_id()))
+                .flat_map(|read| read.iter())
+                .map(|user_id| user_id.to_owned())
+                .collect();
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
@@ -952,7 +958,7 @@ impl Message {
             let fill = width - user_gutter - TIME_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
             let time = self.timestamp.show_time();
-            let read = None;
+            let read = Vec::new();
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         } else if user_gutter + MIN_MSG_LEN <= width {
@@ -960,7 +966,7 @@ impl Message {
             let fill = width - user_gutter;
             let user = self.show_sender(prev, true, info, settings);
             let time = None;
-            let read = None;
+            let read = Vec::new();
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         } else {
@@ -968,7 +974,7 @@ impl Message {
             let fill = width.saturating_sub(2);
             let user = self.show_sender(prev, false, info, settings);
             let time = None;
-            let read = None;
+            let read = Vec::new();
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
         }
@@ -1279,7 +1285,7 @@ pub mod tests {
         assert_eq!(k6, &MSG1_KEY.clone());
 
         // MessageCursor::latest() fails to convert for a room w/o messages.
-        let messages_empty = Messages::default();
+        let messages_empty = Messages::new(ReceiptThread::Main);
         assert_eq!(mc6.to_key(&messages_empty), None);
     }
 

@@ -210,7 +210,7 @@ async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id:
     };
 
     for (user_id, _) in receipts {
-        info.set_receipt(user_id, event_id.to_owned());
+        info.set_receipt(ReceiptThread::Main, user_id, event_id.to_owned());
     }
 }
 
@@ -300,7 +300,7 @@ async fn load_older_one(
 
             let event_id = msg.event_id();
             let receipts = match room
-                .load_event_receipts(ReceiptType::Read, ReceiptThread::Unthreaded, event_id)
+                .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
                 .await
             {
                 Ok(receipts) => receipts.into_iter().map(|(u, _)| u).collect(),
@@ -338,7 +338,7 @@ fn load_insert(
                 let _ = presences.get_or_default(sender);
 
                 for user_id in receipts {
-                    info.set_receipt(user_id, msg.event_id().to_owned());
+                    info.set_receipt(ReceiptThread::Main, user_id, msg.event_id().to_owned());
                 }
 
                 match msg {
@@ -495,31 +495,38 @@ async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
 
 async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
     let mut interval = tokio::time::interval(Duration::from_secs(2));
-    let mut sent = HashMap::<OwnedRoomId, OwnedEventId>::default();
+    let mut sent = HashMap::<(OwnedRoomId, ReceiptThread), OwnedEventId>::default();
 
     loop {
         interval.tick().await;
 
         let locked = store.lock().await;
         let user_id = &locked.application.settings.profile.user_id;
-        let updates = client
-            .joined_rooms()
-            .into_iter()
-            .filter_map(|room| {
-                let room_id = room.room_id().to_owned();
-                let info = locked.application.rooms.get(&room_id)?;
-                let new_receipt = info.get_receipt(user_id)?;
-                let old_receipt = sent.get(&room_id);
-                if Some(new_receipt) != old_receipt {
-                    Some((room_id, new_receipt.clone()))
-                } else {
-                    None
-                }
-            })
-            .collect::<Vec<_>>();
+
+        let mut updates = Vec::new();
+        for room in client.joined_rooms() {
+            let room_id = room.room_id();
+            let Some(info) = locked.application.rooms.get(&room_id) else {
+                continue;
+            };
+
+            updates.extend(
+                info.user_receipts
+                    .iter()
+                    .filter_map(|(thread, info)| info.get(user_id).map(|receipt| (thread, receipt)))
+                    .filter_map(|(thread, new_receipt)| {
+                        let old_receipt = sent.get(&(room_id.to_owned(), thread.to_owned()));
+                        if Some(new_receipt) != old_receipt {
+                            Some((room_id.to_owned(), thread.to_owned(), new_receipt.to_owned()))
+                        } else {
+                            None
+                        }
+                    }),
+            );
+        }
         drop(locked);
 
-        for (room_id, new_receipt) in updates {
+        for (room_id, thread, new_receipt) in updates {
             use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
 
             let Some(room) = client.get_room(&room_id) else {
@@ -527,15 +534,11 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
             };
 
             match room
-                .send_single_receipt(
-                    ReceiptType::Read,
-                    ReceiptThread::Unthreaded,
-                    new_receipt.clone(),
-                )
+                .send_single_receipt(ReceiptType::Read, thread.to_owned(), new_receipt.clone())
                 .await
             {
                 Ok(()) => {
-                    sent.insert(room_id, new_receipt);
+                    sent.insert((room_id, thread), new_receipt);
                 },
                 Err(e) => tracing::warn!(?room_id, "Failed to set read receipt: {e}"),
             }
@@ -1048,11 +1051,12 @@ impl ClientWorker {
                         let Some(receipts) = receipts.get(&ReceiptType::Read) else {
                             continue;
                         };
-                        for (user_id, _) in receipts
-                            .iter()
-                            .filter(|(_, rcpt)| rcpt.thread == ReceiptThread::Unthreaded)
-                        {
-                            info.set_receipt(user_id.to_owned(), event_id.clone());
+                        for (user_id, rcpt) in receipts.iter() {
+                            info.set_receipt(
+                                rcpt.thread.clone(),
+                                user_id.to_owned(),
+                                event_id.clone(),
+                            );
                         }
                     }
                 }
