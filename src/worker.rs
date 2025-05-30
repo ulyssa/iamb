@@ -70,7 +70,6 @@ use matrix_sdk::{
         room::RoomType,
         serde::Raw,
         EventEncryptionAlgorithm,
-        EventId,
         OwnedEventId,
         OwnedRoomId,
         OwnedRoomOrAliasId,
@@ -100,7 +99,6 @@ use crate::{
         IambResult,
         ProgramStore,
         RoomFetchStatus,
-        RoomInfo,
         VerifyAction,
     },
     ApplicationSettings,
@@ -116,7 +114,7 @@ const IAMB_DEVICE_NAME: &str = "iamb";
 const IAMB_USER_AGENT: &str = "iamb";
 const MIN_MSG_LOAD: u32 = 50;
 
-type MessageFetchResult = IambResult<(Option<String>, Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>)>;
+type MessageFetchResult = IambResult<(Option<String>, Vec<AnyTimelineEvent>)>;
 
 fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
@@ -195,23 +193,6 @@ pub async fn create_room(
     }
 
     return Ok(resp.room_id().to_owned());
-}
-
-async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id: &EventId) {
-    let receipts = match room
-        .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
-        .await
-    {
-        Ok(receipts) => receipts,
-        Err(e) => {
-            tracing::warn!(?event_id, "failed to get event receipts: {e}");
-            return;
-        },
-    };
-
-    for (user_id, _) in receipts {
-        info.set_receipt(user_id, event_id.to_owned());
-    }
 }
 
 #[derive(Debug)]
@@ -298,20 +279,8 @@ async fn load_older_one(
                 continue;
             };
 
-            let event_id = msg.event_id();
-            let receipts = match room
-                .load_event_receipts(ReceiptType::Read, ReceiptThread::Unthreaded, event_id)
-                .await
-            {
-                Ok(receipts) => receipts.into_iter().map(|(u, _)| u).collect(),
-                Err(e) => {
-                    tracing::warn!(?event_id, "failed to get event receipts: {e}");
-                    vec![]
-                },
-            };
-
             let msg = msg.into_full_event(room_id.to_owned());
-            msgs.push((msg, receipts));
+            msgs.push(msg);
         }
 
         Ok((end, msgs))
@@ -333,13 +302,9 @@ fn load_insert(
 
     match res {
         Ok((fetch_id, msgs)) => {
-            for (msg, receipts) in msgs.into_iter() {
+            for msg in msgs.into_iter() {
                 let sender = msg.sender().to_owned();
                 let _ = presences.get_or_default(sender);
-
-                for user_id in receipts {
-                    info.set_receipt(user_id, msg.event_id().to_owned());
-                }
 
                 match msg {
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
@@ -1000,8 +965,6 @@ impl ClientWorker {
                     let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
                     let info = rooms.get_or_default(room_id.to_owned());
 
-                    update_event_receipts(info, &room, ev.event_id()).await;
-
                     let full_ev = ev.into_full_event(room_id.to_owned());
                     info.insert_with_preview(
                         room_id.to_owned(),
@@ -1028,7 +991,6 @@ impl ClientWorker {
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let info = locked.application.get_room_info(room_id.to_owned());
-                    update_event_receipts(info, &room, ev.event_id()).await;
                     info.insert_reaction(ev.into_full_event(room_id.to_owned()));
                 }
             },
