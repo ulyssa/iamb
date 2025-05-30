@@ -350,7 +350,7 @@ fn load_insert(
                         info.insert_with_preview(
                             room_id.clone(),
                             store.clone(),
-                            *picker,
+                            picker.clone(),
                             msg,
                             settings,
                             client.media(),
@@ -1002,7 +1002,7 @@ impl ClientWorker {
                     info.insert_with_preview(
                         room_id.to_owned(),
                         store.clone(),
-                        *picker,
+                        picker.clone(),
                         full_ev,
                         settings,
                         client.media(),

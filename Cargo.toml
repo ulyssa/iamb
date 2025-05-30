@@ -46,7 +46,7 @@ nom = "7.0.0"
 open = "3.2.0"
 rand = "0.8.5"
 ratatui = "0.29.0"
-ratatui-image = { version = "~6.0.0", features = ["serde"] }
+ratatui-image = { version = "~8.0.1", features = ["serde"] }
 regex = "^1.5"
 rpassword = "^7.2"
 serde = "^1.0"
