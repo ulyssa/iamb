@@ -47,6 +47,7 @@ use matrix_sdk::{
             },
             room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
             tag::{TagName, Tags},
+            AnySyncStateEvent,
             MessageLikeEvent,
         },
         presence::PresenceState,
@@ -836,6 +837,9 @@ pub enum EventLocation {
 
     /// The [EventId] belongs to a reaction to the given event.
     Reaction(OwnedEventId),
+
+    /// The [EventId] belongs to a state event in the main timeline of the room.
+    State(MessageKey),
 }
 
 impl EventLocation {
@@ -1003,6 +1007,12 @@ impl RoomInfo {
 
         match self.keys.get(redacts) {
             None => return,
+            Some(EventLocation::State(key)) => {
+                if let Some(msg) = self.messages.get_mut(key) {
+                    let ev = SyncRoomRedactionEvent::Original(ev);
+                    msg.redact(ev, room_version);
+                }
+            },
             Some(EventLocation::Message(None, key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
@@ -1076,6 +1086,7 @@ impl RoomInfo {
                 content.apply_replacement(new_msgtype);
             },
             MessageEvent::Redacted(_) |
+            MessageEvent::State(_) |
             MessageEvent::EncryptedOriginal(_) |
             MessageEvent::EncryptedRedacted(_) => {
                 return;
@@ -1083,6 +1094,15 @@ impl RoomInfo {
         }
 
         msg.html = msg.event.html();
+    }
+
+    pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
+        let event_id = msg.event_id().to_owned();
+        let key = (msg.origin_server_ts().into(), event_id.clone());
+
+        let loc = EventLocation::State(key.clone());
+        self.keys.insert(event_id, loc);
+        self.messages.insert_message(key, msg);
     }
 
     /// Indicates whether this room has unread messages.

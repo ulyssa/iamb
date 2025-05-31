@@ -35,6 +35,7 @@ use matrix_sdk::ruma::{
             },
             redaction::SyncRoomRedactionEvent,
         },
+        AnySyncStateEvent,
         RedactContent,
         RedactedUnsigned,
     },
@@ -67,8 +68,10 @@ use crate::{
 mod compose;
 mod html;
 mod printer;
+mod state;
 
 pub use self::compose::text_to_message;
+use self::state::{body_cow_state, html_state};
 
 type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
@@ -427,6 +430,7 @@ pub enum MessageEvent {
     EncryptedRedacted(Box<RedactedRoomEncryptedEvent>),
     Original(Box<OriginalRoomMessageEvent>),
     Redacted(Box<RedactedRoomMessageEvent>),
+    State(Box<AnySyncStateEvent>),
     Local(OwnedEventId, Box<RoomMessageEventContent>),
 }
 
@@ -437,6 +441,7 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
             MessageEvent::Original(ev) => ev.event_id.as_ref(),
             MessageEvent::Redacted(ev) => ev.event_id.as_ref(),
+            MessageEvent::State(ev) => ev.event_id(),
             MessageEvent::Local(event_id, _) => event_id.as_ref(),
         }
     }
@@ -447,6 +452,7 @@ impl MessageEvent {
             MessageEvent::Original(ev) => Some(&ev.content),
             MessageEvent::EncryptedRedacted(_) => None,
             MessageEvent::Redacted(_) => None,
+            MessageEvent::State(_) => None,
             MessageEvent::Local(_, content) => Some(content),
         }
     }
@@ -464,6 +470,7 @@ impl MessageEvent {
             MessageEvent::Original(ev) => body_cow_content(&ev.content),
             MessageEvent::EncryptedRedacted(ev) => body_cow_reason(&ev.unsigned),
             MessageEvent::Redacted(ev) => body_cow_reason(&ev.unsigned),
+            MessageEvent::State(ev) => body_cow_state(ev),
             MessageEvent::Local(_, content) => body_cow_content(content),
         }
     }
@@ -474,6 +481,7 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(_) => return None,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
+            MessageEvent::State(ev) => return Some(html_state(ev)),
             MessageEvent::Local(_, content) => content,
         };
 
@@ -493,6 +501,7 @@ impl MessageEvent {
             MessageEvent::EncryptedOriginal(_) => return,
             MessageEvent::EncryptedRedacted(_) => return,
             MessageEvent::Redacted(_) => return,
+            MessageEvent::State(_) => return,
             MessageEvent::Local(_, _) => return,
             MessageEvent::Original(ev) => {
                 let redacted = RedactedRoomMessageEvent {
@@ -721,8 +730,7 @@ impl<'a> MessageFormatter<'a> {
     ) -> Option<ProtocolPreview<'a>> {
         let width = self.width();
         let w = width.saturating_sub(2);
-        let shortcodes = self.settings.tunables.message_shortcode_display;
-        let (mut replied, proto) = msg.show_msg(w, style, true, shortcodes);
+        let (mut replied, proto) = msg.show_msg(w, style, true, settings);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -760,7 +768,7 @@ impl<'a> MessageFormatter<'a> {
     }
 
     fn push_reactions(&mut self, counts: Vec<(&'a str, usize)>, style: Style, text: &mut Text<'a>) {
-        let mut emojis = printer::TextPrinter::new(self.width(), style, false, false);
+        let mut emojis = printer::TextPrinter::new(self.width(), style, false, self.settings);
         let mut reactions = 0;
 
         for (key, count) in counts {
@@ -809,7 +817,7 @@ impl<'a> MessageFormatter<'a> {
         let plural = len != 1;
         let style = Style::default();
         let mut threaded =
-            printer::TextPrinter::new(self.width(), style, false, false).literal(true);
+            printer::TextPrinter::new(self.width(), style, false, self.settings).literal(true);
         let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
         threaded.push_str(" \u{2937} ", style);
         threaded.push_span_nobreak(len);
@@ -861,6 +869,7 @@ impl Message {
             MessageEvent::Local(_, content) => content,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
+            MessageEvent::State(_) => return None,
         };
 
         match &content.relates_to {
@@ -881,6 +890,7 @@ impl Message {
             MessageEvent::Local(_, content) => content,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
+            MessageEvent::State(_) => return None,
         };
 
         match &content.relates_to {
@@ -993,12 +1003,7 @@ impl Message {
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(
-            width,
-            style,
-            reply.is_some(),
-            settings.tunables.message_shortcode_display,
-        );
+        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
@@ -1040,18 +1045,18 @@ impl Message {
         self.show_with_preview(prev, selected, vwctx, info, settings).0
     }
 
-    fn show_msg(
-        &self,
+    fn show_msg<'a>(
+        &'a self,
         width: usize,
         style: Style,
         hide_reply: bool,
-        emoji_shortcodes: bool,
-    ) -> (Text, Option<&Protocol>) {
+        settings: &'a ApplicationSettings,
+    ) -> (Text<'a>, Option<&'a Protocol>) {
         if let Some(html) = &self.html {
-            (html.to_text(width, style, hide_reply, emoji_shortcodes), None)
+            (html.to_text(width, style, hide_reply, settings), None)
         } else {
             let mut msg = self.event.body();
-            if emoji_shortcodes {
+            if settings.tunables.message_shortcode_display {
                 msg = Cow::Owned(replace_emojis_in_str(msg.as_ref()));
             }
 
@@ -1163,6 +1168,16 @@ impl From<RoomMessageEvent> for Message {
             RoomMessageEvent::Original(ev) => ev.into(),
             RoomMessageEvent::Redacted(ev) => ev.into(),
         }
+    }
+}
+
+impl From<AnySyncStateEvent> for Message {
+    fn from(event: AnySyncStateEvent) -> Self {
+        let timestamp = event.origin_server_ts().into();
+        let user_id = event.sender().to_owned();
+        let event = MessageEvent::State(event.into());
+
+        Message::new(event, user_id, timestamp)
     }
 }
 

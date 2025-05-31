@@ -11,6 +11,7 @@ use ratatui::text::{Line, Span, Text};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use crate::config::{ApplicationSettings, TunableValues};
 use crate::util::{
     replace_emojis_in_line,
     replace_emojis_in_span,
@@ -25,28 +26,34 @@ pub struct TextPrinter<'a> {
     width: usize,
     base_style: Style,
     hide_reply: bool,
-    emoji_shortcodes: bool,
 
     alignment: Alignment,
     curr_spans: Vec<Span<'a>>,
     curr_width: usize,
     literal: bool,
+
+    pub(super) settings: &'a ApplicationSettings,
 }
 
 impl<'a> TextPrinter<'a> {
     /// Create a new printer.
-    pub fn new(width: usize, base_style: Style, hide_reply: bool, emoji_shortcodes: bool) -> Self {
+    pub fn new(
+        width: usize,
+        base_style: Style,
+        hide_reply: bool,
+        settings: &'a ApplicationSettings,
+    ) -> Self {
         TextPrinter {
             text: Text::default(),
             width,
             base_style,
             hide_reply,
-            emoji_shortcodes,
 
             alignment: Alignment::Left,
             curr_spans: vec![],
             curr_width: 0,
             literal: false,
+            settings,
         }
     }
 
@@ -69,7 +76,15 @@ impl<'a> TextPrinter<'a> {
 
     /// Indicates whether emojis should be replaced by shortcodes
     pub fn emoji_shortcodes(&self) -> bool {
-        self.emoji_shortcodes
+        self.tunables().message_shortcode_display
+    }
+
+    pub fn settings(&self) -> &ApplicationSettings {
+        self.settings
+    }
+
+    pub fn tunables(&self) -> &TunableValues {
+        &self.settings.tunables
     }
 
     /// Indicates the current printer's width.
@@ -84,12 +99,12 @@ impl<'a> TextPrinter<'a> {
             width: self.width.saturating_sub(indent),
             base_style: self.base_style,
             hide_reply: self.hide_reply,
-            emoji_shortcodes: self.emoji_shortcodes,
 
             alignment: self.alignment,
             curr_spans: vec![],
             curr_width: 0,
             literal: self.literal,
+            settings: self.settings,
         }
     }
 
@@ -179,7 +194,7 @@ impl<'a> TextPrinter<'a> {
 
     /// Push a [Span] that isn't allowed to break across lines.
     pub fn push_span_nobreak(&mut self, mut span: Span<'a>) {
-        if self.emoji_shortcodes {
+        if self.emoji_shortcodes() {
             replace_emojis_in_span(&mut span);
         }
         let sw = UnicodeWidthStr::width(span.content.as_ref());
@@ -217,7 +232,7 @@ impl<'a> TextPrinter<'a> {
                 continue;
             }
 
-            let cow = if self.emoji_shortcodes {
+            let cow = if self.emoji_shortcodes() {
                 Cow::Owned(replace_emojis_in_str(word))
             } else {
                 Cow::Borrowed(word)
@@ -253,7 +268,7 @@ impl<'a> TextPrinter<'a> {
     /// Push a [Line] into the printer.
     pub fn push_line(&mut self, mut line: Line<'a>) {
         self.commit();
-        if self.emoji_shortcodes {
+        if self.emoji_shortcodes() {
             replace_emojis_in_line(&mut line);
         }
         self.text.lines.push(line);
@@ -262,7 +277,7 @@ impl<'a> TextPrinter<'a> {
     /// Push multiline [Text] into the printer.
     pub fn push_text(&mut self, mut text: Text<'a>) {
         self.commit();
-        if self.emoji_shortcodes {
+        if self.emoji_shortcodes() {
             for line in &mut text.lines {
                 replace_emojis_in_line(line);
             }
@@ -280,10 +295,12 @@ impl<'a> TextPrinter<'a> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+    use crate::tests::mock_settings;
 
     #[test]
     fn test_push_nobreak() {
-        let mut printer = TextPrinter::new(5, Style::default(), false, false);
+        let settings = mock_settings();
+        let mut printer = TextPrinter::new(5, Style::default(), false, &settings);
         printer.push_span_nobreak("hello world".into());
         let text = printer.finish();
         assert_eq!(text.lines.len(), 1);
