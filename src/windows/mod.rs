@@ -82,6 +82,7 @@ use crate::base::{
 
 use self::{room::RoomState, welcome::WelcomeState};
 use crate::message::MessageTimeStamp;
+use feruca::Collator;
 
 pub mod room;
 pub mod welcome;
@@ -170,7 +171,12 @@ fn user_cmp(a: &MemberItem, b: &MemberItem, field: &SortFieldUser) -> Ordering {
     }
 }
 
-fn room_cmp<T: RoomLikeItem>(a: &T, b: &T, field: &SortFieldRoom) -> Ordering {
+fn room_cmp<T: RoomLikeItem>(
+    a: &T,
+    b: &T,
+    field: &SortFieldRoom,
+    collator: &mut Collator,
+) -> Ordering {
     match field {
         SortFieldRoom::Favorite => {
             let fava = a.has_tag(TagName::Favorite);
@@ -186,7 +192,7 @@ fn room_cmp<T: RoomLikeItem>(a: &T, b: &T, field: &SortFieldRoom) -> Ordering {
             // If a has LowPriority and b doesn't, it should sort later in room list.
             lowa.cmp(&lowb)
         },
-        SortFieldRoom::Name => a.name().cmp(b.name()),
+        SortFieldRoom::Name => collator.collate(a.name(), b.name()),
         SortFieldRoom::Alias => some_cmp(a.alias(), b.alias(), Ord::cmp),
         SortFieldRoom::RoomId => a.room_id().cmp(b.room_id()),
         SortFieldRoom::Unread => {
@@ -209,9 +215,10 @@ fn room_fields_cmp<T: RoomLikeItem>(
     a: &T,
     b: &T,
     fields: &[SortColumn<SortFieldRoom>],
+    collator: &mut Collator,
 ) -> Ordering {
     for SortColumn(field, order) in fields {
-        match (room_cmp(a, b, field), order) {
+        match (room_cmp(a, b, field, collator), order) {
             (Ordering::Equal, _) => continue,
             (o, SortOrder::Ascending) => return o,
             (o, SortOrder::Descending) => return o.reverse(),
@@ -219,7 +226,7 @@ fn room_fields_cmp<T: RoomLikeItem>(
     }
 
     // Break ties on ascending room id.
-    room_cmp(a, b, &SortFieldRoom::RoomId)
+    room_cmp(a, b, &SortFieldRoom::RoomId, collator)
 }
 
 fn user_fields_cmp(
@@ -516,7 +523,8 @@ impl WindowOps<IambInfo> for IambWindow {
                     .map(|room_info| DirectItem::new(room_info, store))
                     .collect::<Vec<_>>();
                 let fields = &store.application.settings.tunables.sort.dms;
-                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+                let collator = &mut store.application.collator;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
 
@@ -561,7 +569,8 @@ impl WindowOps<IambInfo> for IambWindow {
                     .map(|room_info| RoomItem::new(room_info, store))
                     .collect::<Vec<_>>();
                 let fields = &store.application.settings.tunables.sort.rooms;
-                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+                let collator = &mut store.application.collator;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
 
@@ -592,7 +601,8 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.extend(dms);
 
                 let fields = &store.application.settings.tunables.sort.chats;
-                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+                let collator = &mut store.application.collator;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
 
@@ -625,7 +635,8 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.extend(dms);
 
                 let fields = &store.application.settings.tunables.sort.chats;
-                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+                let collator = &mut store.application.collator;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
 
@@ -645,7 +656,8 @@ impl WindowOps<IambInfo> for IambWindow {
                     .map(|room| SpaceItem::new(room, store))
                     .collect::<Vec<_>>();
                 let fields = &store.application.settings.tunables.sort.spaces;
-                items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+                let collator = &mut store.application.collator;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
 
@@ -1627,6 +1639,8 @@ mod tests {
 
     #[test]
     fn test_sort_rooms() {
+        let mut collator = Collator::default();
+        let collator = &mut collator;
         let server = server_name!("example.com");
 
         let room1 = TestRoomItem {
@@ -1659,13 +1673,13 @@ mod tests {
         // Sort by Name ascending.
         let mut rooms = vec![&room1, &room2, &room3];
         let fields = &[SortColumn(SortFieldRoom::Name, SortOrder::Ascending)];
-        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room3, &room2, &room1]);
 
         // Sort by Name descending.
         let mut rooms = vec![&room1, &room2, &room3];
         let fields = &[SortColumn(SortFieldRoom::Name, SortOrder::Descending)];
-        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room1, &room2, &room3]);
 
         // Sort by Favorite and Alias before Name to show order matters.
@@ -1675,7 +1689,7 @@ mod tests {
             SortColumn(SortFieldRoom::Alias, SortOrder::Ascending),
             SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
         ];
-        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room1, &room2, &room3]);
 
         // Now flip order of Favorite with Descending
@@ -1685,12 +1699,14 @@ mod tests {
             SortColumn(SortFieldRoom::Alias, SortOrder::Ascending),
             SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
         ];
-        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room2, &room3, &room1]);
     }
 
     #[test]
     fn test_sort_room_recents() {
+        let mut collator = Collator::default();
+        let collator = &mut collator;
         let server = server_name!("example.com");
 
         let room1 = TestRoomItem {
@@ -1729,18 +1745,20 @@ mod tests {
         // Sort by Recent ascending.
         let mut rooms = vec![&room1, &room2, &room3];
         let fields = &[SortColumn(SortFieldRoom::Recent, SortOrder::Ascending)];
-        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room2, &room3, &room1]);
 
         // Sort by Recent descending.
         let mut rooms = vec![&room1, &room2, &room3];
         let fields = &[SortColumn(SortFieldRoom::Recent, SortOrder::Descending)];
-        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room1, &room3, &room2]);
     }
 
     #[test]
     fn test_sort_room_invites() {
+        let mut collator = Collator::default();
+        let collator = &mut collator;
         let server = server_name!("example.com");
 
         let room1 = TestRoomItem {
@@ -1776,7 +1794,7 @@ mod tests {
             SortColumn(SortFieldRoom::Invite, SortOrder::Ascending),
             SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
         ];
-        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room3, &room1, &room2]);
 
         // Sort invites after
@@ -1785,7 +1803,7 @@ mod tests {
             SortColumn(SortFieldRoom::Invite, SortOrder::Descending),
             SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
         ];
-        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields));
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room1, &room2, &room3]);
     }
 }

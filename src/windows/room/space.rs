@@ -214,7 +214,8 @@ impl StatefulWidget for Space<'_> {
                         })
                         .collect::<Vec<_>>();
                     let fields = &self.store.application.settings.tunables.sort.rooms;
-                    items.sort_by(|a, b| room_fields_cmp(a, b, fields));
+                    let collator = &mut self.store.application.collator;
+                    items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                     state.list.set(items);
                     state.last_fetch = Some(Instant::now());

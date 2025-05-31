@@ -1486,6 +1486,9 @@ pub struct ChatStore {
 
     /// Whether the application is currently focused
     pub focused: bool,
+
+    /// Collator for locale-aware text sorting.
+    pub collator: feruca::Collator,
 }
 
 impl ChatStore {
@@ -1500,6 +1503,7 @@ impl ChatStore {
             cmds: crate::commands::setup_commands(),
             emojis: emoji_map(),
 
+            collator: Default::default(),
             names: Default::default(),
             rooms: Default::default(),
             presences: Default::default(),

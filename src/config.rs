@@ -1,7 +1,7 @@
 //! # Logic for loading and validating application configuration
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
@@ -105,7 +105,7 @@ fn validate_profile_name(name: &str) -> bool {
     name.chars().all(is_profile_char)
 }
 
-fn validate_profile_names(names: &HashMap<String, ProfileConfig>) {
+fn validate_profile_names(names: &BTreeMap<String, ProfileConfig>) {
     for name in names.keys() {
         if validate_profile_name(name.as_str()) {
             continue;
@@ -787,7 +787,7 @@ pub struct ProfileConfig {
 
 #[derive(Clone, Deserialize)]
 pub struct IambConfig {
-    pub profiles: HashMap<String, ProfileConfig>,
+    pub profiles: BTreeMap<String, ProfileConfig>,
     pub default_profile: Option<String>,
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
