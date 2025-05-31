@@ -638,10 +638,7 @@ impl ChatState {
     }
 
     pub fn focus_toggle(&mut self) {
-        self.focus = match self.focus {
-            RoomFocus::Scrollback => RoomFocus::MessageBar,
-            RoomFocus::MessageBar => RoomFocus::Scrollback,
-        };
+        self.focus.toggle();
     }
 
     pub fn room(&self) -> &MatrixRoom {
@@ -650,6 +647,14 @@ impl ChatState {
 
     pub fn id(&self) -> &RoomId {
         &self.room_id
+    }
+
+    pub fn auto_toggle_focus(
+        &mut self,
+        act: &EditorAction,
+        ctx: &ProgramContext,
+    ) -> Option<EditorAction> {
+        auto_toggle_focus(&mut self.focus, act, ctx, &self.scrollback, &mut self.tbox)
     }
 
     pub fn typing_notice(
@@ -754,8 +759,15 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
+        // Check whether we should automatically switch between the message bar
+        // or message scrollback, and use an adjusted action if we do so.
+        let adjusted = self.auto_toggle_focus(act, ctx);
+        let act = adjusted.as_ref().unwrap_or(act);
+
+        // Send typing notice if needed.
         self.typing_notice(act, ctx, store);
 
+        // And now we can finally run the editor command.
         match delegate!(self, w => w.editor_command(act, ctx, store)) {
             res @ Ok(_) => res,
             Err(EditError::WrongBuffer(IambBufferId::Room(room_id, thread, focus)))
@@ -992,4 +1004,159 @@ fn cmd(open_command: &Vec<String>) -> Option<Command> {
         return Some(cmd);
     }
     None
+}
+
+pub fn auto_toggle_focus(
+    focus: &mut RoomFocus,
+    act: &EditorAction,
+    ctx: &ProgramContext,
+    scrollback: &ScrollbackState,
+    tbox: &mut TextBoxState<IambInfo>,
+) -> Option<EditorAction> {
+    let is_insert = ctx.get_insert_style().is_some();
+
+    match (focus, act) {
+        (f @ RoomFocus::Scrollback, _) if is_insert => {
+            // Insert mode commands should switch focus.
+            f.toggle();
+            None
+        },
+        (f @ RoomFocus::Scrollback, EditorAction::InsertText(_)) => {
+            // Pasting or otherwise inserting text should switch.
+            f.toggle();
+            None
+        },
+        (
+            f @ RoomFocus::Scrollback,
+            EditorAction::Edit(
+                op,
+                EditTarget::Motion(mov @ MoveType::Line(MoveDir1D::Next), count),
+            ),
+        ) if ctx.resolve(op).is_motion() => {
+            let count = ctx.resolve(count);
+
+            if count > 0 && scrollback.is_latest() {
+                // Trying to move down a line when already at the end of room history should
+                // switch.
+                f.toggle();
+
+                // And decrement the count for the action.
+                let count = count.saturating_sub(1).into();
+                let target = EditTarget::Motion(mov.clone(), count);
+                let dec = EditorAction::Edit(op.clone(), target);
+
+                Some(dec)
+            } else {
+                None
+            }
+        },
+        (
+            f @ RoomFocus::MessageBar,
+            EditorAction::Edit(
+                op,
+                EditTarget::Motion(mov @ MoveType::Line(MoveDir1D::Previous), count),
+            ),
+        ) if !is_insert && ctx.resolve(op).is_motion() => {
+            let count = ctx.resolve(count);
+
+            if count > 0 && tbox.get_cursor().y == 0 {
+                // Trying to move up a line when already at the top of the msgbar should
+                // switch as long as we're not in Insert mode.
+                f.toggle();
+
+                // And decrement the count for the action.
+                let count = count.saturating_sub(1).into();
+                let target = EditTarget::Motion(mov.clone(), count);
+                let dec = EditorAction::Edit(op.clone(), target);
+
+                Some(dec)
+            } else {
+                None
+            }
+        },
+        (RoomFocus::Scrollback, _) | (RoomFocus::MessageBar, _) => {
+            // Do not switch.
+            None
+        },
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use modalkit::actions::{EditAction, InsertTextAction};
+
+    use crate::tests::{mock_store, TEST_ROOM1_ID};
+
+    macro_rules! move_line {
+        ($dir: expr, $count: expr) => {
+            EditorAction::Edit(
+                EditAction::Motion.into(),
+                EditTarget::Motion(MoveType::Line($dir), $count.into()),
+            )
+        };
+    }
+
+    #[tokio::test]
+    async fn test_auto_focus() {
+        let mut store = mock_store().await;
+        let ctx = ProgramContext::default();
+
+        let room_id = TEST_ROOM1_ID.clone();
+        let scrollback = ScrollbackState::new(room_id.clone(), None);
+
+        let id = IambBufferId::Room(room_id, None, RoomFocus::MessageBar);
+        let ebuf = store.load_buffer(id);
+        let mut tbox = TextBoxState::new(ebuf);
+
+        // Start out focused on the scrollback.
+        let mut focused = RoomFocus::Scrollback;
+
+        // Inserting text toggles:
+        let act = EditorAction::InsertText(InsertTextAction::Type(
+            Char::from('a').into(),
+            MoveDir1D::Next,
+            1.into(),
+        ));
+        let res = auto_toggle_focus(&mut focused, &act, &ctx, &scrollback, &mut tbox);
+        assert_eq!(focused, RoomFocus::MessageBar);
+        assert!(res.is_none());
+
+        // Going down in message bar doesn't toggle:
+        let act = move_line!(MoveDir1D::Next, 1);
+        let res = auto_toggle_focus(&mut focused, &act, &ctx, &scrollback, &mut tbox);
+        assert_eq!(focused, RoomFocus::MessageBar);
+        assert!(res.is_none());
+
+        // But going up will:
+        let act = move_line!(MoveDir1D::Previous, 1);
+        let res = auto_toggle_focus(&mut focused, &act, &ctx, &scrollback, &mut tbox);
+        assert_eq!(focused, RoomFocus::Scrollback);
+        assert_eq!(res, Some(move_line!(MoveDir1D::Previous, 0)));
+
+        // Going up in scrollback doesn't toggle:
+        let act = move_line!(MoveDir1D::Previous, 1);
+        let res = auto_toggle_focus(&mut focused, &act, &ctx, &scrollback, &mut tbox);
+        assert_eq!(focused, RoomFocus::Scrollback);
+        assert_eq!(res, None);
+
+        // And then go back down:
+        let act = move_line!(MoveDir1D::Next, 1);
+        let res = auto_toggle_focus(&mut focused, &act, &ctx, &scrollback, &mut tbox);
+        assert_eq!(focused, RoomFocus::MessageBar);
+        assert_eq!(res, Some(move_line!(MoveDir1D::Next, 0)));
+
+        // Go up 2 will go up 1 in scrollback:
+        let act = move_line!(MoveDir1D::Previous, 2);
+        let res = auto_toggle_focus(&mut focused, &act, &ctx, &scrollback, &mut tbox);
+        assert_eq!(focused, RoomFocus::Scrollback);
+        assert_eq!(res, Some(move_line!(MoveDir1D::Previous, 1)));
+
+        // Go down 3 will go down 2 in messagebar:
+        let act = move_line!(MoveDir1D::Next, 3);
+        let res = auto_toggle_focus(&mut focused, &act, &ctx, &scrollback, &mut tbox);
+        assert_eq!(focused, RoomFocus::MessageBar);
+        assert_eq!(res, Some(move_line!(MoveDir1D::Next, 2)));
+    }
 }

@@ -1141,18 +1141,18 @@ mod tests {
         let mut cmds = setup_commands();
         let ctx = EditContext::default();
 
-        let cmd = format!("room notify set mute");
-        let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+        let cmd = "room notify set mute";
+        let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
         let act = RoomAction::Set(RoomField::NotificationMode, "mute".into());
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
-        let cmd = format!("room notify unset");
-        let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+        let cmd = "room notify unset";
+        let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
         let act = RoomAction::Unset(RoomField::NotificationMode);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
-        let cmd = format!("room notify show");
-        let res = cmds.input_cmd(&cmd, ctx.clone()).unwrap();
+        let cmd = "room notify show";
+        let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
         let act = RoomAction::Show(RoomField::NotificationMode);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
     }
