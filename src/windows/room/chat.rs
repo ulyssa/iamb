@@ -1072,6 +1072,30 @@ pub fn auto_toggle_focus(
             f @ RoomFocus::MessageBar,
             EditorAction::Edit(
                 op,
+                EditTarget::Motion(mov @ MoveType::Line(MoveDir1D::Next), count),
+            ),
+        ) if !is_insert && ctx.resolve(op).is_motion() => {
+            let count = ctx.resolve(count);
+
+            if count > 0 && tbox.get_cursor().y == tbox.get_lines() - 1 && !scrollback.is_latest() {
+                // Trying to move down a line in msgbar when scrollback is not at the bottom should
+                // switch as long as we're not in Insert mode.
+                f.toggle();
+
+                // And decrement the count for the action.
+                let count = count.saturating_sub(1).into();
+                let target = EditTarget::Motion(mov.clone(), count);
+                let dec = EditorAction::Edit(op.clone(), target);
+
+                Some(dec)
+            } else {
+                None
+            }
+        },
+        (
+            f @ RoomFocus::MessageBar,
+            EditorAction::Edit(
+                op,
                 EditTarget::Motion(mov @ MoveType::Line(MoveDir1D::Previous), count),
             ),
         ) if !is_insert && ctx.resolve(op).is_motion() => {
