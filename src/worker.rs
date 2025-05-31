@@ -89,7 +89,7 @@ use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
 use crate::base::Need;
-use crate::notifications::register_notifications;
+use crate::notifications::{register_notifications, NotificationHandle};
 use crate::{
     base::{
         AsyncProgramStore,
@@ -500,18 +500,22 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
     loop {
         interval.tick().await;
 
-        let locked = store.lock().await;
-        let user_id = &locked.application.settings.profile.user_id;
+        let mut locked = store.lock().await;
+
+        let ChatStore { settings, open_notifications, rooms, .. } = &mut locked.application;
+        let user_id = &settings.profile.user_id;
+
         let updates = client
             .joined_rooms()
             .into_iter()
             .filter_map(|room| {
                 let room_id = room.room_id().to_owned();
-                let info = locked.application.rooms.get(&room_id)?;
+                let info = rooms.get(&room_id)?;
                 let new_receipt = info.get_receipt(user_id)?;
                 let old_receipt = sent.get(&room_id);
                 if Some(new_receipt) != old_receipt {
-                    Some((room_id, new_receipt.clone()))
+                    let notifications = open_notifications.remove(&room_id);
+                    Some((room_id, new_receipt.clone(), notifications))
                 } else {
                     None
                 }
@@ -519,8 +523,12 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
             .collect::<Vec<_>>();
         drop(locked);
 
-        for (room_id, new_receipt) in updates {
+        for (room_id, new_receipt, notifications) in updates {
             use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
+
+            if let Some(notifications) = notifications {
+                notifications.into_iter().for_each(NotificationHandle::close)
+            }
 
             let Some(room) = client.get_room(&room_id) else {
                 continue;
