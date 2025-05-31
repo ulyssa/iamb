@@ -484,6 +484,10 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         ("tag", "set", Some(s)) => RoomAction::Set(RoomField::Tag(tag_name(s)?), "".into()).into(),
         ("tag", "set", None) => return Result::Err(CommandError::InvalidArgument),
 
+        // :room tag unset <tag-name>
+        ("tag", "unset", Some(s)) => RoomAction::Unset(RoomField::Tag(tag_name(s)?)).into(),
+        ("tag", "unset", None) => return Result::Err(CommandError::InvalidArgument),
+
         // :room notify set <notification-level>
         ("notify", "set", Some(s)) => RoomAction::Set(RoomField::NotificationMode, s).into(),
         ("notify", "set", None) => return Result::Err(CommandError::InvalidArgument),
@@ -495,10 +499,6 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         // :room notify show
         ("notify", "show", None) => RoomAction::Show(RoomField::NotificationMode).into(),
         ("notify", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
-
-        // :room tag unset <tag-name>
-        ("tag", "unset", Some(s)) => RoomAction::Unset(RoomField::Tag(tag_name(s)?)).into(),
-        ("tag", "unset", None) => return Result::Err(CommandError::InvalidArgument),
 
         // :room aliases show
         ("alias", "show", None) => RoomAction::Show(RoomField::Aliases).into(),
@@ -563,13 +563,14 @@ fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     };
 
     let act: IambAction = match (field.as_str(), action.as_str()) {
+        // :space child remove
         ("child", "remove") => {
             if !(args.is_empty()) {
                 return Err(CommandError::InvalidArgument);
             }
             SpaceAction::RemoveChild.into()
         },
-        // :space child set
+        // :space child set <child>
         ("child", "set") => {
             let mut order = None;
             let mut suggested = false;
