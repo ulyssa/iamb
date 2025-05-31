@@ -170,7 +170,7 @@ impl ScrollbackState {
         self.viewctx.dimensions = (area.width as usize, area.height as usize);
     }
 
-    pub fn get_key(&self, info: &mut RoomInfo) -> Option<MessageKey> {
+    pub fn get_key(&self, info: &RoomInfo) -> Option<MessageKey> {
         self.cursor
             .timestamp
             .clone()
