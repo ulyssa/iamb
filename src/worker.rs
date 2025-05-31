@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
-use matrix_sdk::ruma::events::AnySyncTimelineEvent;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -60,6 +59,8 @@ use matrix_sdk::{
             typing::SyncTypingEvent,
             AnyInitialStateEvent,
             AnyMessageLikeEvent,
+            AnySyncStateEvent,
+            AnyTimelineEvent,
             EmptyStateKey,
             InitialStateEvent,
             SyncEphemeralRoomEvent,
@@ -115,8 +116,7 @@ const IAMB_DEVICE_NAME: &str = "iamb";
 const IAMB_USER_AGENT: &str = "iamb";
 const MIN_MSG_LOAD: u32 = 50;
 
-type MessageFetchResult =
-    IambResult<(Option<String>, Vec<(AnyMessageLikeEvent, Vec<OwnedUserId>)>)>;
+type MessageFetchResult = IambResult<(Option<String>, Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>)>;
 
 fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
@@ -294,10 +294,8 @@ async fn load_older_one(
         let mut msgs = vec![];
 
         for ev in chunk.into_iter() {
-            let deserialized = ev.into_raw().deserialize().map_err(IambError::Serde)?;
-            let msg: AnyMessageLikeEvent = match deserialized {
-                AnySyncTimelineEvent::MessageLike(e) => e.into_full_event(room_id.to_owned()),
-                AnySyncTimelineEvent::State(_) => continue,
+            let Ok(msg) = ev.into_raw().deserialize() else {
+                continue;
             };
 
             let event_id = msg.event_id();
@@ -312,6 +310,7 @@ async fn load_older_one(
                 },
             };
 
+            let msg = msg.into_full_event(room_id.to_owned());
             msgs.push((msg, receipts));
         }
 
@@ -343,10 +342,10 @@ fn load_insert(
                 }
 
                 match msg {
-                    AnyMessageLikeEvent::RoomEncrypted(msg) => {
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
                         info.insert_encrypted(msg);
                     },
-                    AnyMessageLikeEvent::RoomMessage(msg) => {
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
                         info.insert_with_preview(
                             room_id.clone(),
                             store.clone(),
@@ -356,10 +355,15 @@ fn load_insert(
                             client.media(),
                         );
                     },
-                    AnyMessageLikeEvent::Reaction(ev) => {
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
                         info.insert_reaction(ev);
                     },
-                    _ => continue,
+                    AnyTimelineEvent::MessageLike(_) => {
+                        continue;
+                    },
+                    AnyTimelineEvent::State(msg) => {
+                        info.insert_any_state(msg.into());
+                    },
                 }
             }
 
@@ -1051,6 +1055,18 @@ impl ClientWorker {
                             info.set_receipt(user_id.to_owned(), event_id.clone());
                         }
                     }
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |ev: AnySyncStateEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+                    let mut locked = store.lock().await;
+
+                    let info = locked.application.get_room_info(room_id.to_owned());
+                    info.insert_any_state(ev);
                 }
             },
         );
