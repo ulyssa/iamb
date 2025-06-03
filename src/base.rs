@@ -3,7 +3,7 @@
 //! The types defined here get used throughout iamb.
 use std::borrow::Cow;
 use std::collections::hash_map::{Entry, IntoIter};
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::hash::Hash;
@@ -704,6 +704,8 @@ pub type IambResult<T> = UIResult<T, IambInfo>;
 /// it's reacting to.
 pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
 
+pub type MessageEdits = BTreeMap<MessageKey, RoomMessageEventContentWithoutRelation>;
+
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
@@ -857,6 +859,7 @@ pub enum RoomFetchStatus {
 }
 
 /// Indicates where an [EventId] lives in the [ChatStore].
+#[derive(Clone)]
 pub enum EventLocation {
     /// The [EventId] belongs to a message.
     ///
@@ -872,6 +875,9 @@ pub enum EventLocation {
 
     /// The [EventId] belongs to a sticker event in the main scrollback
     Sticker(MessageKey),
+
+    /// The [EventId] belongs to an edit for the given event and has key [MessageKey].
+    Edit(OwnedEventId, MessageKey),
 }
 
 impl EventLocation {
@@ -1030,6 +1036,8 @@ pub struct RoomInfo {
     pub user_receipts: HashMap<ReceiptThread, HashMap<OwnedUserId, OwnedEventId>>,
     /// A map of message identifiers to a map of reaction events.
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
+    /// A map of message identifiers to a list of edit events for message that are not yet cached.
+    pub unloaded_edits: HashMap<OwnedEventId, MessageEdits>,
 
     /// A map of message identifiers to thread replies.
     threads: HashMap<OwnedEventId, Messages>,
@@ -1072,6 +1080,7 @@ impl Default for RoomInfo {
             users_typing: Default::default(),
             display_names: Default::default(),
             draw_last: Default::default(),
+            unloaded_edits: Default::default(),
         }
     }
 }
@@ -1098,6 +1107,8 @@ impl RoomInfo {
     /// Get the event for the last message in a thread (or the thread root if there are no
     /// in-thread replies yet).
     ///
+    /// This does not apply edits to the returned event.
+    ///
     /// This returns `None` if the event identifier isn't in the room.
     pub fn get_thread_last<'a>(
         &'a self,
@@ -1114,7 +1125,7 @@ impl RoomInfo {
             return None;
         };
 
-        if let MessageEvent::Original(ev) = &msg {
+        if let MessageEvent::Original(ev, _) = &msg {
             Some(ev)
         } else {
             None
@@ -1167,6 +1178,24 @@ impl RoomInfo {
 
         match self.keys.get(redacts) {
             None => return,
+            Some(EventLocation::Edit(msg_event_id, edit_key)) => {
+                let edit_key = edit_key.clone();
+                let msg_loc = self.keys.get(msg_event_id).cloned();
+                if let Some(EventLocation::Message(thread, msg_key)) = msg_loc {
+                    if let Some(msg) = self.get_thread_mut(thread).get_mut(&msg_key) {
+                        msg.remove_edit(&edit_key);
+                    }
+                } else {
+                    self.unloaded_edits
+                        .get_mut(msg_event_id)
+                        .and_then(|edits| edits.remove(&edit_key));
+                }
+
+                if let Some(msg) = self.messages.get_mut(&edit_key) {
+                    let ev = SyncRoomRedactionEvent::Original(ev);
+                    msg.redact(ev);
+                }
+            },
             Some(EventLocation::State(key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
@@ -1266,44 +1295,34 @@ impl RoomInfo {
     }
 
     /// Insert an edit.
-    pub fn insert_edit(&mut self, msg: Replacement<RoomMessageEventContentWithoutRelation>) {
-        let event_id = msg.event_id;
-        let new_msgtype = msg.new_content;
-
-        let Some(EventLocation::Message(thread, key)) = self.keys.get(&event_id) else {
+    fn insert_edit(
+        &mut self,
+        edit_msg: RoomMessageEvent,
+        replacement: Replacement<RoomMessageEventContentWithoutRelation>,
+    ) {
+        let RoomMessageEvent::Original(edit_msg) = edit_msg else {
             return;
         };
-
-        let source = if let Some(thread) = thread {
-            self.threads
-                .entry(thread.clone())
-                .or_insert_with(|| Messages::thread(thread.clone()))
-        } else {
-            &mut self.messages
+        let edit_key = MessageKey {
+            ts: edit_msg.origin_server_ts.into(),
+            id: edit_msg.event_id.clone().into(),
         };
+        let msg_loc = self.keys.get(&replacement.event_id).cloned();
 
-        let Some(msg) = source.get_mut(key) else {
-            return;
-        };
-
-        match &mut msg.event {
-            MessageEvent::Original(orig) => {
-                orig.content.apply_replacement(new_msgtype);
-            },
-            MessageEvent::Local(_, _, content) => {
-                content.apply_replacement(new_msgtype);
-            },
-            MessageEvent::Redacted(_, _) |
-            MessageEvent::State(_) |
-            MessageEvent::Sticker(_) |
-            MessageEvent::EncryptedOriginal(_) |
-            MessageEvent::EncryptedRedacted(_) => {
+        if let Some(EventLocation::Message(thread, key)) = msg_loc {
+            // The edited message is already loaded in cache
+            let Some(msg) = self.get_thread_mut(thread).get_mut(&key) else {
                 return;
-            },
+            };
+            msg.insert_edit(edit_key.clone(), replacement.new_content);
+        } else {
+            // The edited message is not yet loaded
+            let entry = self.unloaded_edits.entry(replacement.event_id.clone());
+            entry.or_default().insert(edit_key.clone(), replacement.new_content);
         }
 
-        msg.html = msg.event.html();
-        msg.event.strip_reply_fallback();
+        let loc = EventLocation::Edit(replacement.event_id.clone(), edit_key.clone());
+        self.keys.insert(edit_msg.event_id.clone(), loc);
     }
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
@@ -1356,8 +1375,12 @@ impl RoomInfo {
         };
 
         let loc = EventLocation::Message(None, key.clone());
+        let mut message: Message = msg.into();
+        if let Some(edits) = self.unloaded_edits.remove(&event_id) {
+            message.set_edits(edits);
+        }
         self.keys.insert(event_id, loc);
-        self.messages.insert_message(key, msg);
+        self.messages.insert_message(key, message);
     }
 
     fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
@@ -1372,8 +1395,12 @@ impl RoomInfo {
             .entry(thread_root.clone())
             .or_insert_with(|| Messages::thread(thread_root.clone()));
         let loc = EventLocation::Message(Some(thread_root), key.clone());
+        let mut message: Message = msg.into();
+        if let Some(edits) = self.unloaded_edits.remove(&event_id) {
+            message.set_edits(edits);
+        }
         self.keys.insert(event_id, loc);
-        replies.insert_message(key, msg);
+        replies.insert_message(key, message);
     }
 
     /// Insert a new message event.
@@ -1384,7 +1411,10 @@ impl RoomInfo {
                 ..
             }) => {
                 match relates_to {
-                    Relation::Replacement(repl) => self.insert_edit(repl.clone()),
+                    Relation::Replacement(repl) => {
+                        let repl = repl.clone();
+                        self.insert_edit(msg, repl)
+                    },
                     Relation::Thread(Thread { event_id, .. }) => {
                         let event_id = event_id.clone();
                         self.insert_thread(msg, event_id);
