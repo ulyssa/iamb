@@ -362,7 +362,9 @@ fn load_insert(
                         continue;
                     },
                     AnyTimelineEvent::State(msg) => {
-                        info.insert_any_state(msg.into());
+                        if settings.tunables.state_event_display {
+                            info.insert_any_state(msg.into());
+                        }
                     },
                 }
             }
@@ -1059,17 +1061,19 @@ impl ClientWorker {
             },
         );
 
-        let _ = self.client.add_event_handler(
-            |ev: AnySyncStateEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let room_id = room.room_id();
-                    let mut locked = store.lock().await;
+        if self.settings.tunables.state_event_display {
+            let _ = self.client.add_event_handler(
+                |ev: AnySyncStateEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
+                    async move {
+                        let room_id = room.room_id();
+                        let mut locked = store.lock().await;
 
-                    let info = locked.application.get_room_info(room_id.to_owned());
-                    info.insert_any_state(ev);
-                }
-            },
-        );
+                        let info = locked.application.get_room_info(room_id.to_owned());
+                        info.insert_any_state(ev);
+                    }
+                },
+            );
+        }
 
         let _ = self.client.add_event_handler(
             |ev: OriginalSyncRoomRedactionEvent,
