@@ -94,7 +94,7 @@ Request a new verification with the specified user.
 .Sh "MESSAGE COMMANDS"
 .Bl -tag -width Ds
 .It Sy ":download [path]"
-Download an attachment from the selected message and save it to the optinal path.
+Download an attachment from the selected message and save it to the optional path.
 .It Sy ":open [path]"
 Download and then open an attachment, or open a link in a message.
 .It Sy ":edit"
@@ -124,7 +124,7 @@ Upload an attachment and send it to the currently selected room.
 .Bl -tag -width Ds
 .It Sy ":create [arguments]"
 Create a new room. Arguments can be
-.Dq ++alias [alias] ,
+.Dq ++alias=[alias] ,
 .Dq ++public ,
 .Dq ++space ,
 and
@@ -148,7 +148,7 @@ Unset the name of the currently focused room.
 .It Sy ":room dm set"
 Mark the currently focused room as a direct message.
 .It Sy ":room dm unset"
-Mark the currently focused room as normal room.
+Mark the currently focused room as a normal room.
 .It Sy ":room notify set [level]"
 Set a notification level for the currently focused room.
 Valid levels are
@@ -206,8 +206,8 @@ Kick a user from this room with an optional reason.
 Add a room to the currently focused space.
 .Dq ++suggested
 marks the room as a suggested child.
-.Dq ++order [string]
-specifies a string by which hildren are lexicographically ordered.
+.Dq ++order=[string]
+specifies a string by which children are lexicographically ordered.
 .It Sy ":space child remove"
 Remove the selected room from the currently focused space.
 .El
