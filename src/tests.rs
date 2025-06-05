@@ -177,6 +177,7 @@ pub fn mock_tunables() -> TunableValues {
         read_receipt_display: true,
         request_timeout: 120,
         sort: SortOverrides::default().values(),
+        state_event_display: true,
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
