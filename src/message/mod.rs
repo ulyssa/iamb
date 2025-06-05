@@ -1126,6 +1126,8 @@ impl Message {
     pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, version: &RoomVersionId) {
         self.event.redact(redaction, version);
         self.html = None;
+        self.downloaded = false;
+        self.image_preview = ImageStatus::None;
     }
 }
 
