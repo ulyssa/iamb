@@ -54,7 +54,7 @@ version and quit.
 View a list of joined rooms and direct messages.
 .It Sy ":dms"
 View a list of direct messages.
-.It Sy ":logout"
+.It Sy ":logout [user id]"
 Log out of
 .Nm .
 .It Sy ":rooms"
@@ -63,6 +63,8 @@ View a list of joined rooms.
 View a list of joined spaces.
 .It Sy ":unreads"
 View a list of unread rooms.
+.It Sy ":unreads clear"
+Mark all rooms as read.
 .It Sy ":welcome"
 View the startup Welcome window.
 .El
@@ -77,39 +79,56 @@ Import and decrypt keys from
 .Pa path .
 .It Sy ":verify"
 View a list of ongoing E2EE verifications.
+.It Sy ":verify accept [key]"
+Accept a verification request.
+.It Sy ":verify cancel [key]"
+Cancel an in-progress verification.
+.It Sy ":verify confirm [key]"
+Confirm an in-progress verification.
+.It Sy ":verify mismatch [key]"
+Reject an in-progress verification due to mismatched Emoji.
+.It Sy ":verify request [user id]"
+Request a new verification with the specified user.
 .El
 
 .Sh "MESSAGE COMMANDS"
 .Bl -tag -width Ds
-.It Sy ":download"
-Download an attachment from the selected message.
+.It Sy ":download [path]"
+Download an attachment from the selected message and save it to the optional path.
+.It Sy ":open [path]"
+Download and then open an attachment, or open a link in a message.
 .It Sy ":edit"
 Edit the selected message.
 .It Sy ":editor"
 Open an external
 .Ev $EDITOR
 to compose a message.
-.It Sy ":open"
-Download and then open an attachment, or open a link in a message.
 .It Sy ":react [shortcode]"
 React to the selected message with an Emoji.
-.It Sy ":redact [reason]"
-Redact the selected message.
-.It Sy ":reply"
-Reply to the selected message.
-.It Sy ":unreads clear"
-Mark all unread rooms as read.
 .It Sy ":unreact [shortcode]"
 Remove your reaction from the selected message.
 When no arguments are given, remove all of your reactions from the message.
-.It Sy ":upload"
+.It Sy ":redact [reason]"
+Redact the selected message with the optional reason.
+.It Sy ":reply"
+Reply to the selected message.
+.It Sy ":cancel"
+Cancel the currently drafted message including replies.
+.It Sy ":unreads clear"
+Mark all unread rooms as read.
+.It Sy ":upload [path]"
 Upload an attachment and send it to the currently selected room.
 .El
 
 .Sh "ROOM COMMANDS"
 .Bl -tag -width Ds
-.It Sy ":create"
-Create a new room.
+.It Sy ":create [arguments]"
+Create a new room. Arguments can be
+.Dq ++alias=[alias] ,
+.Dq ++public ,
+.Dq ++space ,
+and
+.Dq ++encrypted .
 .It Sy ":invite accept"
 Accept an invitation to the currently focused room.
 .It Sy ":invite reject"
@@ -117,7 +136,7 @@ Reject an invitation to the currently focused room.
 .It Sy ":invite send [user]"
 Send an invitation to a user to join the currently focused room.
 .It Sy ":join [room]"
-Join a room.
+Join a room or open it if you are already joined.
 .It Sy ":leave"
 Leave the currently focused room.
 .It Sy ":members"
@@ -126,6 +145,10 @@ View a list of members of the currently focused room.
 Set the name of the currently focused room.
 .It Sy ":room name unset"
 Unset the name of the currently focused room.
+.It Sy ":room dm set"
+Mark the currently focused room as a direct message.
+.It Sy ":room dm unset"
+Mark the currently focused room as a normal room.
 .It Sy ":room notify set [level]"
 Set a notification level for the currently focused room.
 Valid levels are
@@ -153,6 +176,8 @@ Remove a tag from the currently focused room.
 Set the topic of the currently focused room.
 .It Sy ":room topic unset"
 Unset the topic of the currently focused room.
+.It Sy ":room topic show"
+Show the topic of the currently focused room.
 .It Sy ":room alias set [alias]"
 Create and point the given alias to the room.
 .It Sy ":room alias unset [alias]"
@@ -177,8 +202,12 @@ Kick a user from this room with an optional reason.
 
 .Sh "SPACE COMMANDS"
 .Bl -tag -width Ds
-.It Sy ":space child set [room_id]"
+.It Sy ":space child set [room_id] [arguments]"
 Add a room to the currently focused space.
+.Dq ++suggested
+marks the room as a suggested child.
+.Dq ++order=[string]
+specifies a string by which children are lexicographically ordered.
 .It Sy ":space child remove"
 Remove the selected room from the currently focused space.
 .El
