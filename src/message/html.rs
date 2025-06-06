@@ -284,6 +284,7 @@ pub enum StyleTreeNode {
     RoomAlias(OwnedRoomAliasId),
     RoomId(OwnedRoomId),
     UserId(OwnedUserId),
+    DisplayName(String, OwnedUserId),
 }
 
 impl StyleTreeNode {
@@ -333,6 +334,7 @@ impl StyleTreeNode {
             StyleTreeNode::UserId(_) => {},
             StyleTreeNode::RoomId(_) => {},
             StyleTreeNode::RoomAlias(_) => {},
+            StyleTreeNode::DisplayName(_, _) => {},
         }
     }
 
@@ -471,6 +473,10 @@ impl StyleTreeNode {
             StyleTreeNode::UserId(user_id) => {
                 let style = printer.settings().get_user_style(user_id);
                 printer.push_str(user_id.as_str(), style);
+            },
+            StyleTreeNode::DisplayName(display_name, user_id) => {
+                let style = printer.settings().get_user_style(user_id);
+                printer.push_str(display_name.as_str(), style);
             },
             StyleTreeNode::RoomId(room_id) => {
                 let bold = style.add_modifier(StyleModifier::BOLD);

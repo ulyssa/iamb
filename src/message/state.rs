@@ -242,10 +242,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                                     format!("* set their display name to {:?}", new)
                                 },
                                 (Some(old), Some(new)) => {
-                                    format!(
-                                        "* changed their display name from {:?} to {:?}",
-                                        old, new
-                                    )
+                                    format!("* changed their display name from {old} to {new}")
                                 },
                                 (Some(_), None) => "* unset their display name".to_string(),
                                 (None, None) => {
@@ -600,7 +597,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             let prev_details = prev_content.as_ref().map(|p| p.details());
             let change = content.membership_change(prev_details, ev.sender(), &state_key);
-            let user_id = StyleTreeNode::UserId(state_key);
+            let user_id = StyleTreeNode::UserId(state_key.clone());
 
             match change {
                 MembershipChange::None => {
@@ -673,44 +670,59 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                     vec![prefix, user_id]
                 },
                 MembershipChange::ProfileChanged { displayname_change, avatar_url_change } => {
-                    let m = match (displayname_change, avatar_url_change) {
+                    match (displayname_change, avatar_url_change) {
                         (Some(change), avatar_change) => {
                             let mut m = match (change.old, change.new) {
                                 (None, Some(new)) => {
-                                    format!("* set their display name to {:?}", new)
+                                    vec![
+                                        StyleTreeNode::Text("* set their display name to ".into()),
+                                        StyleTreeNode::DisplayName(new.into(), state_key),
+                                    ]
                                 },
                                 (Some(old), Some(new)) => {
-                                    format!(
-                                        "* changed their display name from {:?} to {:?}",
-                                        old, new
-                                    )
+                                    vec![
+                                        StyleTreeNode::Text(
+                                            "* changed their display name from ".into(),
+                                        ),
+                                        StyleTreeNode::DisplayName(old.into(), state_key.clone()),
+                                        StyleTreeNode::Text(" to ".into()),
+                                        StyleTreeNode::DisplayName(new.into(), state_key),
+                                    ]
                                 },
-                                (Some(_), None) => "* unset their display name".to_string(),
+                                (Some(_), None) => {
+                                    vec![StyleTreeNode::Text("* unset their display name".into())]
+                                },
                                 (None, None) => {
-                                    "* made an unknown change to their display name".to_string()
+                                    vec![StyleTreeNode::Text(
+                                        "* made an unknown change to their display name".into(),
+                                    )]
                                 },
                             };
 
                             if avatar_change.is_some() {
-                                m.push_str(" and changed their user avatar");
+                                m.push(StyleTreeNode::Text(
+                                    " and changed their user avatar".into(),
+                                ));
                             }
 
-                            Cow::Owned(m)
+                            m
                         },
                         (None, Some(change)) => {
-                            match (change.old, change.new) {
+                            let m = match (change.old, change.new) {
                                 (None, Some(_)) => Cow::Borrowed("* added a user avatar"),
                                 (Some(_), Some(_)) => Cow::Borrowed("* changed their user avatar"),
                                 (Some(_), None) => Cow::Borrowed("* removed their user avatar"),
                                 (None, None) => {
                                     Cow::Borrowed("* made an unknown change to their user avatar")
                                 },
-                            }
-                        },
-                        (None, None) => Cow::Borrowed("* changed their user profile"),
-                    };
+                            };
 
-                    vec![StyleTreeNode::Text(m)]
+                            vec![StyleTreeNode::Text(m)]
+                        },
+                        (None, None) => {
+                            vec![StyleTreeNode::Text("* changed their user profile".into())]
+                        },
+                    }
                 },
                 ev => {
                     let prefix =
