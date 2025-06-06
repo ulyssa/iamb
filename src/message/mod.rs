@@ -97,6 +97,15 @@ impl Messages {
     pub fn new(thread: ReceiptThread) -> Self {
         Self(Default::default(), thread)
     }
+
+    pub fn main() -> Self {
+        Self::new(ReceiptThread::Main)
+    }
+
+    pub fn thread(root: OwnedEventId) -> Self {
+        Self::new(ReceiptThread::Thread(root))
+    }
+
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
         let event_id = key.1.clone();
         let msg = msg.into();

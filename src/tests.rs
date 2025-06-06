@@ -137,7 +137,7 @@ pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
 }
 
 pub fn mock_messages() -> Messages {
-    let mut messages = Messages::new(matrix_sdk::ruma::events::receipt::ReceiptThread::Main);
+    let mut messages = Messages::main();
 
     messages.insert(MSG1_KEY.clone(), mock_message1());
     messages.insert(MSG2_KEY.clone(), mock_message2());

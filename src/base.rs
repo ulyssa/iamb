@@ -951,7 +951,7 @@ impl RoomInfo {
         if let Some(thread_root) = root {
             self.threads
                 .entry(thread_root.clone())
-                .or_insert_with(|| Messages::new(ReceiptThread::Thread(thread_root)))
+                .or_insert_with(|| Messages::thread(thread_root))
         } else {
             &mut self.messages
         }
@@ -1093,7 +1093,7 @@ impl RoomInfo {
         let source = if let Some(thread) = thread {
             self.threads
                 .entry(thread.clone())
-                .or_insert_with(|| Messages::new(ReceiptThread::Thread(thread.clone())))
+                .or_insert_with(|| Messages::thread(thread.clone()))
         } else {
             &mut self.messages
         };
@@ -1141,7 +1141,11 @@ impl RoomInfo {
             (Some(((ts, recent), _)), Some(last_read)) => {
                 UnreadInfo { unread: last_read != recent, latest: Some(*ts) }
             },
-            (Some(((ts, _), _)), None) => UnreadInfo { unread: true, latest: Some(*ts) },
+            (Some(((ts, _), _)), None) => {
+                // If we've never loaded/generated a room's receipt (example,
+                // a newly joined but never viewed room), show it as unread.
+                UnreadInfo { unread: true, latest: Some(*ts) }
+            },
             (None, _) => UnreadInfo::default(),
         }
     }
@@ -1172,7 +1176,7 @@ impl RoomInfo {
         let replies = self
             .threads
             .entry(thread_root.clone())
-            .or_insert_with(|| Messages::new(ReceiptThread::Thread(thread_root.clone())));
+            .or_insert_with(|| Messages::thread(thread_root.clone()));
         let loc = EventLocation::Message(Some(thread_root), key.clone());
         self.keys.insert(event_id, loc);
         replies.insert_message(key, msg);
@@ -1290,6 +1294,15 @@ impl RoomInfo {
         for (thread, event_id) in newest.into_iter() {
             self.set_receipt(thread, user_id.to_owned(), event_id.clone());
         }
+    }
+
+    pub fn receipts<'a>(
+        &'a self,
+        user_id: &'a UserId,
+    ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
+        self.user_receipts
+            .iter()
+            .filter_map(move |(t, rs)| rs.get(user_id).map(|r| (t, r)))
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {

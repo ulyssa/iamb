@@ -495,7 +495,7 @@ async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
 
 async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
     let mut interval = tokio::time::interval(Duration::from_secs(2));
-    let mut sent = HashMap::<(OwnedRoomId, ReceiptThread), OwnedEventId>::default();
+    let mut sent: HashMap<OwnedRoomId, HashMap<ReceiptThread, OwnedEventId>> = Default::default();
 
     loop {
         interval.tick().await;
@@ -510,19 +510,13 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
                 continue;
             };
 
-            updates.extend(
-                info.user_receipts
-                    .iter()
-                    .filter_map(|(thread, info)| info.get(user_id).map(|receipt| (thread, receipt)))
-                    .filter_map(|(thread, new_receipt)| {
-                        let old_receipt = sent.get(&(room_id.to_owned(), thread.to_owned()));
-                        if Some(new_receipt) != old_receipt {
-                            Some((room_id.to_owned(), thread.to_owned(), new_receipt.to_owned()))
-                        } else {
-                            None
-                        }
-                    }),
-            );
+            let changed = info.receipts(user_id).filter_map(|(thread, new_receipt)| {
+                let old_receipt = sent.get(room_id).and_then(|ts| ts.get(thread));
+                let changed = Some(new_receipt) != old_receipt;
+                changed.then(|| (room_id.to_owned(), thread.to_owned(), new_receipt.to_owned()))
+            });
+
+            updates.extend(changed);
         }
         drop(locked);
 
@@ -538,7 +532,7 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
                 .await
             {
                 Ok(()) => {
-                    sent.insert((room_id, thread), new_receipt);
+                    sent.entry(room_id).or_default().insert(thread, new_receipt);
                 },
                 Err(e) => tracing::warn!(?room_id, "Failed to set read receipt: {e}"),
             }
