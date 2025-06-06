@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
+use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -869,7 +870,6 @@ impl UnreadInfo {
 }
 
 /// Information about room's the user's joined.
-#[derive(Default)]
 pub struct RoomInfo {
     /// The display name for this room.
     pub name: Option<String>,
@@ -884,15 +884,13 @@ pub struct RoomInfo {
     messages: Messages,
 
     /// A map of read markers to display on different events.
-    pub event_receipts: HashMap<OwnedEventId, HashSet<OwnedUserId>>,
-
+    pub event_receipts: HashMap<ReceiptThread, HashMap<OwnedEventId, HashSet<OwnedUserId>>>,
     /// A map of the most recent read marker for each user.
     ///
     /// Every receipt in this map should also have an entry in [`event_receipts`](`Self::event_receipts`),
     /// however not every user has an entry. If a user's most recent receipt is
     /// older than the oldest loaded event, that user will not be included.
-    pub user_receipts: HashMap<OwnedUserId, OwnedEventId>,
-
+    pub user_receipts: HashMap<ReceiptThread, HashMap<OwnedUserId, OwnedEventId>>,
     /// A map of message identifiers to a map of reaction events.
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
 
@@ -918,6 +916,28 @@ pub struct RoomInfo {
     pub draw_last: Option<Instant>,
 }
 
+impl Default for RoomInfo {
+    fn default() -> Self {
+        Self {
+            messages: Messages::new(ReceiptThread::Main),
+
+            name: Default::default(),
+            tags: Default::default(),
+            keys: Default::default(),
+            event_receipts: Default::default(),
+            user_receipts: Default::default(),
+            reactions: Default::default(),
+            threads: Default::default(),
+            fetching: Default::default(),
+            fetch_id: Default::default(),
+            fetch_last: Default::default(),
+            users_typing: Default::default(),
+            display_names: Default::default(),
+            draw_last: Default::default(),
+        }
+    }
+}
+
 impl RoomInfo {
     pub fn get_thread(&self, root: Option<&EventId>) -> Option<&Messages> {
         if let Some(thread_root) = root {
@@ -929,7 +949,9 @@ impl RoomInfo {
 
     pub fn get_thread_mut(&mut self, root: Option<OwnedEventId>) -> &mut Messages {
         if let Some(thread_root) = root {
-            self.threads.entry(thread_root).or_default()
+            self.threads
+                .entry(thread_root.clone())
+                .or_insert_with(|| Messages::thread(thread_root))
         } else {
             &mut self.messages
         }
@@ -1069,7 +1091,9 @@ impl RoomInfo {
         };
 
         let source = if let Some(thread) = thread {
-            self.threads.entry(thread.clone()).or_default()
+            self.threads
+                .entry(thread.clone())
+                .or_insert_with(|| Messages::thread(thread.clone()))
         } else {
             &mut self.messages
         };
@@ -1108,13 +1132,20 @@ impl RoomInfo {
     /// Indicates whether this room has unread messages.
     pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
         let last_message = self.messages.last_key_value();
-        let last_receipt = self.get_receipt(&settings.profile.user_id);
+        let last_receipt = self
+            .user_receipts
+            .get(&ReceiptThread::Main)
+            .and_then(|receipts| receipts.get(&settings.profile.user_id));
 
         match (last_message, last_receipt) {
             (Some(((ts, recent), _)), Some(last_read)) => {
                 UnreadInfo { unread: last_read != recent, latest: Some(*ts) }
             },
-            (Some(((ts, _), _)), None) => UnreadInfo { unread: false, latest: Some(*ts) },
+            (Some(((ts, _), _)), None) => {
+                // If we've never loaded/generated a room's receipt (example,
+                // a newly joined but never viewed room), show it as unread.
+                UnreadInfo { unread: true, latest: Some(*ts) }
+            },
             (None, _) => UnreadInfo::default(),
         }
     }
@@ -1142,7 +1173,10 @@ impl RoomInfo {
         let event_id = msg.event_id().to_owned();
         let key = (msg.origin_server_ts().into(), event_id.clone());
 
-        let replies = self.threads.entry(thread_root.clone()).or_default();
+        let replies = self
+            .threads
+            .entry(thread_root.clone())
+            .or_insert_with(|| Messages::thread(thread_root.clone()));
         let loc = EventLocation::Message(Some(thread_root), key.clone());
         self.keys.insert(event_id, loc);
         replies.insert_message(key, msg);
@@ -1205,37 +1239,70 @@ impl RoomInfo {
         self.fetch_last.is_some_and(|i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
     }
 
-    fn clear_receipt(&mut self, user_id: &OwnedUserId) -> Option<()> {
-        let old_event_id = self.user_receipts.get(user_id)?;
-        let old_receipts = self.event_receipts.get_mut(old_event_id)?;
+    fn clear_receipt(&mut self, thread: &ReceiptThread, user_id: &OwnedUserId) -> Option<()> {
+        let old_event_id =
+            self.user_receipts.get(thread).and_then(|receipts| receipts.get(user_id))?;
+        let old_thread = self.event_receipts.get_mut(thread)?;
+        let old_receipts = old_thread.get_mut(old_event_id)?;
         old_receipts.remove(user_id);
 
         if old_receipts.is_empty() {
-            self.event_receipts.remove(old_event_id);
+            old_thread.remove(old_event_id);
+        }
+        if old_thread.is_empty() {
+            self.event_receipts.remove(thread);
         }
 
         None
     }
 
-    pub fn set_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
-        self.clear_receipt(&user_id);
+    pub fn set_receipt(
+        &mut self,
+        thread: ReceiptThread,
+        user_id: OwnedUserId,
+        event_id: OwnedEventId,
+    ) {
+        self.clear_receipt(&thread, &user_id);
         self.event_receipts
+            .entry(thread.clone())
+            .or_default()
             .entry(event_id.clone())
             .or_default()
             .insert(user_id.clone());
-        self.user_receipts.insert(user_id, event_id);
+        self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
     }
 
-    pub fn fully_read(&mut self, user_id: OwnedUserId) {
+    pub fn fully_read(&mut self, user_id: &UserId) {
         let Some(((_, event_id), _)) = self.messages.last_key_value() else {
             return;
         };
 
-        self.set_receipt(user_id, event_id.clone());
+        self.set_receipt(ReceiptThread::Main, user_id.to_owned(), event_id.clone());
+
+        let newest = self
+            .threads
+            .iter()
+            .filter_map(|(thread_id, messages)| {
+                let thread = ReceiptThread::Thread(thread_id.to_owned());
+
+                messages
+                    .last_key_value()
+                    .map(|((_, event_id), _)| (thread, event_id.to_owned()))
+            })
+            .collect::<Vec<_>>();
+
+        for (thread, event_id) in newest.into_iter() {
+            self.set_receipt(thread, user_id.to_owned(), event_id.clone());
+        }
     }
 
-    pub fn get_receipt(&self, user_id: &UserId) -> Option<&OwnedEventId> {
-        self.user_receipts.get(user_id)
+    pub fn receipts<'a>(
+        &'a self,
+        user_id: &'a UserId,
+    ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
+        self.user_receipts
+            .iter()
+            .filter_map(move |(t, rs)| rs.get(user_id).map(|r| (t, r)))
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {

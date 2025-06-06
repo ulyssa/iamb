@@ -1428,7 +1428,7 @@ impl StatefulWidget for Scrollback<'_> {
         {
             // If the cursor is at the last message, then update the read marker.
             if let Some((k, _)) = thread.last_key_value() {
-                info.set_receipt(settings.profile.user_id.clone(), k.1.clone());
+                info.set_receipt(thread.1.clone(), settings.profile.user_id.clone(), k.1.clone());
             }
         }
 

@@ -982,7 +982,7 @@ impl ApplicationSettings {
         Ok(())
     }
 
-    pub fn get_user_char_span<'a>(&self, user_id: &'a UserId) -> Span<'a> {
+    pub fn get_user_char_span(&self, user_id: &UserId) -> Span {
         let (color, c) = self
             .tunables
             .users

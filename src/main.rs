@@ -559,7 +559,7 @@ impl Application {
 
                 for room_id in store.application.sync_info.chats() {
                     if let Some(room) = store.application.rooms.get_mut(room_id) {
-                        room.fully_read(user_id.clone());
+                        room.fully_read(user_id);
                     }
                 }
 
