@@ -95,7 +95,7 @@ pub fn mock_room1_message(
 
 pub fn mock_message1() -> Message {
     let content = RoomMessageEventContent::text_plain("writhe");
-    let content = MessageEvent::Local(MSG1_EVID.clone(), content.into());
+    let content = MessageEvent::Local(MSG1_EVID.clone(), content.into(), Default::default());
 
     Message::new(content, TEST_USER1.clone(), MSG1_KEY.0)
 }
