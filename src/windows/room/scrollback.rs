@@ -1486,7 +1486,7 @@ mod tests {
             std::mem::take(&mut store.application.need_load)
                 .into_iter()
                 .collect::<Vec<(OwnedRoomId, Need)>>(),
-            vec![(room_id.clone(), Need { messages: true, members: false })]
+            vec![(room_id.clone(), Need { messages: Some(Vec::new()), members: false })]
         );
 
         // Search forward twice to MSG1.

@@ -1477,10 +1477,18 @@ impl SyncInfo {
     }
 }
 
+static MESSAGE_NEED_TTL: u8 = 10;
+#[derive(Debug, PartialEq)]
+/// Load messages until the event is loaded or `ttl` loads are exceeded
+pub struct MessageNeed {
+    pub event_id: OwnedEventId,
+    pub ttl: u8,
+}
+
 #[derive(Default, Debug, PartialEq)]
 pub struct Need {
     pub members: bool,
-    pub messages: bool,
+    pub messages: Option<Vec<MessageNeed>>,
 }
 
 /// Things that need loading for different rooms.
@@ -1497,7 +1505,24 @@ impl RoomNeeds {
 
     /// Mark a room for needing to load messages.
     pub fn need_messages(&mut self, room_id: OwnedRoomId) {
-        self.needs.entry(room_id).or_default().messages = true;
+        self.needs.entry(room_id).or_default().messages.get_or_insert_default();
+    }
+
+    /// Mark a room for needing to load messages until the given message is loaded or a retry limit
+    /// is exceeded.
+    pub fn need_message(&mut self, room_id: OwnedRoomId, event_id: OwnedEventId) {
+        let messages = &mut self.needs.entry(room_id).or_default().messages.get_or_insert_default();
+
+        messages.push(MessageNeed { event_id, ttl: MESSAGE_NEED_TTL });
+    }
+
+    pub fn need_messages_all(&mut self, room_id: OwnedRoomId, message_needs: Vec<MessageNeed>) {
+        self.needs
+            .entry(room_id)
+            .or_default()
+            .messages
+            .get_or_insert_default()
+            .extend(message_needs);
     }
 
     pub fn rooms(&self) -> usize {
@@ -2284,7 +2309,7 @@ pub mod tests {
 
         assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
             room_id,
-            Need { members: true, messages: true }
+            Need { members: true, messages: Some(Vec::new()) }
         )],);
     }
 
