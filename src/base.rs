@@ -168,6 +168,9 @@ pub enum MessageAction {
     /// Reply to a message.
     Reply,
 
+    /// Go to the message the hovered message replied to.
+    Replied,
+
     /// Unreact to a message.
     ///
     /// If no specific Emoji to remove to is specified, then all reactions from the user on the

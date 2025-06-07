@@ -165,6 +165,12 @@ impl ScrollbackState {
         self.cursor = MessageCursor::latest();
     }
 
+    pub fn goto_message(&mut self, target: MessageKey) {
+        let mut cursor = MessageCursor::new(target, 0);
+        std::mem::swap(&mut cursor, &mut self.cursor);
+        self.jumped.push(cursor);
+    }
+
     /// Set the dimensions and placement within the terminal window for this list.
     pub fn set_term_info(&mut self, area: Rect) {
         self.viewctx.dimensions = (area.width as usize, area.height as usize);
