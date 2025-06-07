@@ -88,7 +88,6 @@ use matrix_sdk::{
 use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
-use crate::base::Need;
 use crate::notifications::register_notifications;
 use crate::{
     base::{
@@ -225,8 +224,8 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
     let ChatStore { need_load, rooms, .. } = &mut locked.application;
     let mut plan = Vec::with_capacity(need_load.rooms() * 2);
 
-    for (room_id, mut need) in std::mem::take(need_load).into_iter() {
-        if need.contains(Need::MESSAGES) {
+    for (room_id, need) in std::mem::take(need_load).into_iter() {
+        if need.messages {
             let info = rooms.get_or_default(room_id.clone());
 
             if !info.recently_fetched() && !info.fetching {
@@ -240,15 +239,10 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
                 };
 
                 plan.push(Plan::Messages(room_id.to_owned(), fetch_id));
-                need.remove(Need::MESSAGES);
             }
         }
-        if need.contains(Need::MEMBERS) {
+        if need.members {
             plan.push(Plan::Members(room_id.to_owned()));
-            need.remove(Need::MEMBERS);
-        }
-        if !need.is_empty() {
-            need_load.insert(room_id, need);
         }
     }
 
@@ -375,7 +369,7 @@ fn load_insert(
             warn!(room_id = room_id.as_str(), err = e.to_string(), "Failed to load older messages");
 
             // Wait and try again.
-            locked.application.need_load.insert(room_id, Need::MESSAGES);
+            locked.application.need_load.need_messages(room_id);
         },
     }
 }
@@ -566,12 +560,12 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
 
     for room in sync_info.rooms.iter() {
         let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.insert(room_id, Need::MESSAGES);
+        need_load.need_messages(room_id);
     }
 
     for room in sync_info.dms.iter() {
         let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.insert(room_id, Need::MESSAGES);
+        need_load.need_messages(room_id);
     }
 
     Ok(())

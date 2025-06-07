@@ -47,7 +47,6 @@ use crate::{
         IambId,
         IambInfo,
         IambResult,
-        Need,
         ProgramContext,
         ProgramStore,
         RoomFetchStatus,
@@ -695,10 +694,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
-                            store
-                                .application
-                                .need_load
-                                .insert(self.room_id.clone(), Need::MESSAGES);
+                            store.application.need_load.need_messages(self.room_id.clone());
                         }
                         mc
                     },
@@ -774,10 +770,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
-                            store
-                                .application
-                                .need_load
-                                .insert(self.room_id.to_owned(), Need::MESSAGES);
+                            store.application.need_load.need_messages(self.room_id.to_owned());
                         }
 
                         mc.map(|c| self._range_to(c))
@@ -1334,10 +1327,7 @@ impl StatefulWidget for Scrollback<'_> {
             k
         } else {
             if state.need_more_messages(info) {
-                self.store
-                    .application
-                    .need_load
-                    .insert(state.room_id.to_owned(), Need::MESSAGES);
+                self.store.application.need_load.need_messages(state.room_id.to_owned());
             }
             return;
         };
@@ -1441,10 +1431,7 @@ impl StatefulWidget for Scrollback<'_> {
         // Check whether we should load older messages for this room.
         if state.need_more_messages(info) {
             // If the top of the screen is the older message, load more.
-            self.store
-                .application
-                .need_load
-                .insert(state.room_id.to_owned(), Need::MESSAGES);
+            self.store.application.need_load.need_messages(state.room_id.to_owned());
         }
 
         info.draw_last = self.store.application.draw_curr;
@@ -1454,7 +1441,7 @@ impl StatefulWidget for Scrollback<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::*;
+    use crate::{base::Need, tests::*};
 
     #[tokio::test]
     async fn test_search_messages() {
@@ -1499,7 +1486,7 @@ mod tests {
             std::mem::take(&mut store.application.need_load)
                 .into_iter()
                 .collect::<Vec<(OwnedRoomId, Need)>>(),
-            vec![(room_id.clone(), Need::MESSAGES)]
+            vec![(room_id.clone(), Need { messages: true, members: false })]
         );
 
         // Search forward twice to MSG1.

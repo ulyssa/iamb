@@ -78,7 +78,6 @@ use crate::base::{
     IambInfo,
     IambResult,
     MessageAction,
-    Need,
     ProgramAction,
     ProgramContext,
     ProgramStore,
@@ -447,7 +446,7 @@ impl ChatState {
                 };
 
                 let Some(key) = info.get_message_key(&reply) else {
-                    store.application.need_load.insert(self.room_id.clone(), Need::MESSAGES);
+                    store.application.need_load.need_messages(self.room_id.clone());
                     let msg = "Replied to message not loaded";
                     return Err(UIError::Failure(msg.into()));
                 };
