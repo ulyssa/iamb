@@ -1089,7 +1089,7 @@ impl Message {
                 },
                 ImageStatus::Loaded(backend) => {
                     proto = Some(backend);
-                    placeholder_frame(Some("Loading..."), width, &backend.area().into())
+                    placeholder_frame(Some("Cut off..."), width, &backend.area().into())
                 },
                 ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
             };
