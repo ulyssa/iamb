@@ -46,6 +46,7 @@ use modalkit::actions::{
     PromptAction,
     Promptable,
     Scrollable,
+    WindowAction,
 };
 use modalkit::errors::{EditResult, UIError};
 use modalkit::prelude::*;
@@ -340,13 +341,10 @@ impl RoomState {
 
                 Ok(vec![])
             },
-            RoomAction::Members(mut cmd) => {
-                let width = Count::Exact(30);
-                let act =
-                    cmd.default_axis(Axis::Vertical).default_relation(MoveDir1D::Next).window(
-                        OpenTarget::Application(IambId::MemberList(self.id().to_owned())),
-                        width.into(),
-                    );
+            RoomAction::Members(cmd) => {
+                let act = Action::Window(WindowAction::Switch(OpenTarget::Application(
+                    IambId::MemberList(self.id().to_owned()),
+                )));
 
                 Ok(vec![(act, cmd.context.clone())])
             },
