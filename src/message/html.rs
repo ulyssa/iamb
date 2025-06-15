@@ -366,7 +366,9 @@ impl StyleTreeNode {
             },
             StyleTreeNode::Code(child, _) => {
                 let style = style.bg(Color::Indexed(236));
+                let old = printer.set_base_style(style);
                 child.print(printer, style);
+                printer.set_base_style(old);
             },
             StyleTreeNode::Header(child, level) => {
                 let style = style.add_modifier(StyleModifier::BOLD);
