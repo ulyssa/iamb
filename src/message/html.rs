@@ -365,6 +365,7 @@ impl StyleTreeNode {
                 }
             },
             StyleTreeNode::Code(child, _) => {
+                let style = style.bg(Color::Indexed(236));
                 child.print(printer, style);
             },
             StyleTreeNode::Header(child, level) => {
