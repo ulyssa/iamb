@@ -92,6 +92,11 @@ impl<'a> TextPrinter<'a> {
         self.width
     }
 
+    /// Sets the base style and returns the old style
+    pub fn set_base_style(&mut self, new: Style) -> Style {
+        std::mem::replace(&mut self.base_style, new)
+    }
+
     /// Create a new printer with a smaller width.
     pub fn sub(&self, indent: usize) -> Self {
         TextPrinter {
