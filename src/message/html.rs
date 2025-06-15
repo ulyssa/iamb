@@ -41,6 +41,7 @@ use crate::{
     util::{join_cell_text, space_text},
 };
 
+const CODE_BACKGROUND: Color = Color::Indexed(236);
 const QUOTE_COLOR: Color = Color::Indexed(236);
 
 /// Generate bullet points from a [ListStyle].
@@ -370,7 +371,7 @@ impl StyleTreeNode {
                 }
             },
             StyleTreeNode::Code(child, _) => {
-                let style = style.bg(Color::Indexed(236));
+                let style = style.bg(CODE_BACKGROUND);
                 let old = printer.set_base_style(style);
                 child.print(printer, style);
                 printer.set_base_style(old);
@@ -1450,6 +1451,7 @@ pub mod tests {
         );
         let tree = parse_matrix_html(s);
         let text = tree.to_text(25, Style::default(), true, &settings);
+        let code_style = Style::new().bg(CODE_BACKGROUND);
         assert_eq!(text.lines.len(), 6);
         assert_eq!(
             text.lines[0],
@@ -1463,19 +1465,19 @@ pub mod tests {
             text.lines[1],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("fn"),
-                Span::raw(" "),
-                Span::raw("hello"),
-                Span::raw("("),
-                Span::raw(")"),
-                Span::raw(" "),
-                Span::raw("-"),
-                Span::raw(">"),
-                Span::raw(" "),
-                Span::raw("usize"),
-                Span::raw(" "),
-                Span::raw("{"),
-                Span::raw("  "),
+                Span::styled("fn", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("hello", code_style),
+                Span::styled("(", code_style),
+                Span::styled(")", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("-", code_style),
+                Span::styled(">", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("usize", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("{", code_style),
+                Span::styled("  ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1483,13 +1485,13 @@ pub mod tests {
             text.lines[2],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw(" "),
-                Span::raw("   "),
-                Span::raw("/"),
-                Span::raw("/"),
-                Span::raw(" "),
-                Span::raw("weired"),
-                Span::raw("          "),
+                Span::styled(" ", code_style),
+                Span::styled("   ", code_style),
+                Span::styled("/", code_style),
+                Span::styled("/", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("weired", code_style),
+                Span::styled("          ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1497,12 +1499,12 @@ pub mod tests {
             text.lines[3],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("    "),
-                Span::raw("return"),
-                Span::raw(" "),
-                Span::raw("5"),
-                Span::raw(";"),
-                Span::raw("          "),
+                Span::styled("    ", code_style),
+                Span::styled("return", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("5", code_style),
+                Span::styled(";", code_style),
+                Span::styled("          ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1510,8 +1512,8 @@ pub mod tests {
             text.lines[4],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("}"),
-                Span::raw(" ".repeat(22)),
+                Span::styled("}", code_style),
+                Span::styled(" ".repeat(22), code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
