@@ -95,12 +95,14 @@ impl ListStyle {
 pub type StyleTreeChildren = Vec<StyleTreeNode>;
 
 /// Type of contents in a table cell.
+#[derive(Debug)]
 pub enum CellType {
     Data,
     Header,
 }
 
 /// A collection of cells for a single row in a table.
+#[derive(Debug)]
 pub struct TableRow {
     cells: Vec<(CellType, StyleTreeNode)>,
 }
@@ -118,6 +120,7 @@ impl TableRow {
 }
 
 /// A collection of rows in a table.
+#[derive(Debug)]
 pub struct TableSection {
     rows: Vec<TableRow>,
 }
@@ -135,6 +138,7 @@ impl TableSection {
 }
 
 /// A table.
+#[derive(Debug)]
 pub struct Table {
     caption: Option<Box<StyleTreeNode>>,
     sections: Vec<TableSection>,
@@ -264,6 +268,7 @@ impl Table {
 }
 
 /// A processed HTML element that we can render to the terminal.
+#[derive(Debug)]
 pub enum StyleTreeNode {
     Anchor(Box<StyleTreeNode>, char, Url),
     Blockquote(Box<StyleTreeNode>),
