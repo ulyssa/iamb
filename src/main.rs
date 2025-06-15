@@ -592,6 +592,7 @@ impl Application {
                 None
             },
             IambAction::Send(act) => {
+                self.bindings.reset_mode();
                 self.screen.current_window_mut()?.send_command(act, ctx, store).await?
             },
 
