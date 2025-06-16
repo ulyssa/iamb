@@ -10,6 +10,7 @@ use std::ops::{Deref, DerefMut};
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
+use image::DynamicImage;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use unicode_width::UnicodeWidthStr;
 
@@ -825,6 +826,7 @@ impl<'a> MessageFormatter<'a> {
 pub enum ImageStatus {
     None,
     Downloading(ImagePreviewSize),
+    Loading(Option<DynamicImage>, ImagePreviewSize),
     Loaded(Protocol),
     Error(String),
 }
@@ -1066,6 +1068,9 @@ impl Message {
                 ImageStatus::None => None,
                 ImageStatus::Downloading(image_preview_size) => {
                     placeholder_frame(Some("Downloading..."), width, image_preview_size)
+                },
+                ImageStatus::Loading(_, image_preview_size) => {
+                    placeholder_frame(Some("Loading..."), width, image_preview_size)
                 },
                 ImageStatus::Loaded(backend) => {
                     proto = Some(backend);

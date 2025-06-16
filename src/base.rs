@@ -1238,7 +1238,7 @@ impl RoomInfo {
         &mut self,
         room_id: OwnedRoomId,
         store: AsyncProgramStore,
-        picker: Option<Picker>,
+        picker: Option<Arc<Picker>>,
         ev: RoomMessageEvent,
         settings: &mut ApplicationSettings,
         media: matrix_sdk::Media,
@@ -1258,6 +1258,7 @@ impl RoomInfo {
                     source,
                     media,
                     settings.dirs.image_previews.clone(),
+                    image_preview.size.clone(),
                 )
             }
         }
@@ -1601,7 +1602,7 @@ pub struct ChatStore {
     pub sync_info: SyncInfo,
 
     /// Image preview "protocol" picker.
-    pub picker: Option<Picker>,
+    pub picker: Option<Arc<Picker>>,
 
     /// Last draw time, used to match with RoomInfo's draw_last.
     pub draw_curr: Option<Instant>,
@@ -1627,7 +1628,7 @@ impl ChatStore {
         ChatStore {
             worker,
             settings,
-            picker,
+            picker: picker.map(Into::into),
             cmds: crate::commands::setup_commands(),
             emojis: emoji_map(),
 
