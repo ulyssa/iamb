@@ -54,7 +54,7 @@ use crate::{
         RoomInfo,
     },
     config::ApplicationSettings,
-    message::{Message, MessageCursor, MessageKey, Messages},
+    message::{ImageStatus, Message, MessageCursor, MessageKey, Messages},
 };
 
 fn no_msgs() -> EditError<IambInfo> {
@@ -1347,6 +1347,14 @@ impl StatefulWidget for Scrollback<'_> {
 
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
+
+            if let ImageStatus::Loading(_, _) = &item.image_preview {
+                self.store
+                    .application
+                    .worker
+                    .render_image(state.room_id.clone(), item.event.event_id().to_owned());
+            }
+
             let (txt, [mut msg_preview, mut reply_preview]) =
                 item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings);
 
