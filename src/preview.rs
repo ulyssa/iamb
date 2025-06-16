@@ -66,8 +66,7 @@ pub fn spawn_insert_preview(
             .map(std::io::Cursor::new)
             .map(image::ImageReader::new)
             .map_err(IambError::Matrix)
-            .and_then(|reader| reader.with_guessed_format().map_err(IambError::IOError))
-            .and_then(|reader| reader.decode().map_err(IambError::Image));
+            .and_then(|reader| reader.with_guessed_format().map_err(IambError::IOError));
 
         match img {
             Err(err) => {
@@ -113,8 +112,8 @@ pub async fn render_preview(
         .get_event_mut(&event_id)
         .ok_or_else(|| IambError::Preview("Picker is empty".to_string()))
         .map(|msg| {
-            if let ImageStatus::Loading(image, size) = &mut msg.image_preview {
-                image.take().map(|image| (image, size.clone()))
+            if let ImageStatus::Loading(reader, size) = &mut msg.image_preview {
+                reader.take().map(|reader| (reader, size.clone()))
             } else {
                 None
             }
@@ -131,7 +130,11 @@ pub async fn render_preview(
     let image = picker
         .ok_or_else(|| IambError::Preview("Picker is empty".to_string()))
         .and_then(|picker| {
-            let (image, size) = img?;
+            let (reader, size) = img?;
+            Ok((picker, reader, size))
+        })
+        .and_then(|(picker, reader, size)| {
+            let image = reader.decode().map_err(IambError::Image)?;
             Ok((picker, image, size))
         })
         .and_then(|(picker, image, size)| {

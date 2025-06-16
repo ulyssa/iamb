@@ -10,7 +10,7 @@ use std::ops::{Deref, DerefMut};
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
-use image::DynamicImage;
+use image::ImageReader;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::room_version_rules::RedactionRules;
 use serde_json::json;
@@ -845,7 +845,7 @@ impl<'a> MessageFormatter<'a> {
 pub enum ImageStatus {
     None,
     Downloading(ImagePreviewSize),
-    Loading(Option<DynamicImage>, ImagePreviewSize),
+    Loading(Option<ImageReader<std::io::Cursor<Vec<u8>>>>, ImagePreviewSize),
     Loaded(Protocol),
     Error(String),
 }
