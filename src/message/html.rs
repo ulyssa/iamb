@@ -1415,13 +1415,14 @@ pub mod tests {
         let s = concat!(
             "<pre><code class=\"language-rust\">",
             "fn hello() -&gt; usize {\n",
+            " \t// weired\n",
             "    return 5;\n",
             "}\n",
             "</code></pre>\n"
         );
         let tree = parse_matrix_html(s);
         let text = tree.to_text(25, Style::default(), true, &settings);
-        assert_eq!(text.lines.len(), 5);
+        assert_eq!(text.lines.len(), 6);
         assert_eq!(
             text.lines[0],
             Line::from(vec![
@@ -1454,6 +1455,20 @@ pub mod tests {
             text.lines[2],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
+                Span::raw(" "),
+                Span::raw("   "),
+                Span::raw("/"),
+                Span::raw("/"),
+                Span::raw(" "),
+                Span::raw("weired"),
+                Span::raw("          "),
+                Span::raw(line::VERTICAL)
+            ])
+        );
+        assert_eq!(
+            text.lines[3],
+            Line::from(vec![
+                Span::raw(line::VERTICAL),
                 Span::raw("    "),
                 Span::raw("return"),
                 Span::raw(" "),
@@ -1464,7 +1479,7 @@ pub mod tests {
             ])
         );
         assert_eq!(
-            text.lines[3],
+            text.lines[4],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
                 Span::raw("}"),
@@ -1473,7 +1488,7 @@ pub mod tests {
             ])
         );
         assert_eq!(
-            text.lines[4],
+            text.lines[5],
             Line::from(vec![
                 Span::raw(line::BOTTOM_LEFT),
                 Span::raw(line::HORIZONTAL.repeat(23)),
