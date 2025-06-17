@@ -216,6 +216,8 @@ impl<'a> TextPrinter<'a> {
             return;
         }
 
+        let tabstop = self.settings().tunables.tabstop;
+
         for mut word in UnicodeSegmentation::split_word_bounds(s) {
             if let "\n" | "\r\n" = word {
                 if self.literal {
@@ -232,11 +234,17 @@ impl<'a> TextPrinter<'a> {
                 continue;
             }
 
-            let cow = if self.emoji_shortcodes() {
+            let mut cow = if self.emoji_shortcodes() {
                 Cow::Owned(replace_emojis_in_str(word))
             } else {
                 Cow::Borrowed(word)
             };
+
+            if cow == "\t" {
+                let tablen = tabstop - (self.curr_width % tabstop);
+                cow = Cow::Owned(" ".repeat(tablen));
+            }
+
             let sw = UnicodeWidthStr::width(cow.as_ref());
 
             if sw > self.width {

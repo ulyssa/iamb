@@ -574,6 +574,7 @@ pub struct TunableValues {
     pub image_preview: Option<ImagePreviewValues>,
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
+    pub tabstop: usize,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -600,6 +601,7 @@ pub struct Tunables {
     pub image_preview: Option<ImagePreview>,
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
+    pub tabstop: Option<usize>,
 }
 
 impl Tunables {
@@ -632,6 +634,7 @@ impl Tunables {
             external_edit_file_suffix: self
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
+            tabstop: self.tabstop.or(other.tabstop),
         }
     }
 
@@ -660,6 +663,7 @@ impl Tunables {
             external_edit_file_suffix: self
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
+            tabstop: self.tabstop.unwrap_or(4),
         }
     }
 }
