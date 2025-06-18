@@ -748,7 +748,7 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
 
                     StyleTreeNode::Style(c, s)
                 },
-                "del" | "strike" => {
+                "del" | "s" | "strike" => {
                     let c = c2t(&node.children.borrow(), state);
                     let s = Style::default().add_modifier(StyleModifier::CROSSED_OUT);
 
