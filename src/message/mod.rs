@@ -1125,15 +1125,21 @@ impl Message {
 
     pub fn message_column_width(
         viewctx: &ViewportContext<MessageCursor>,
-        settings: &ApplicationSettings,
+        tunables: &TunableValues,
     ) -> usize {
         let width = viewctx.get_width();
-        let user_gutter = settings.tunables.user_gutter_width;
+        let user_gutter = tunables.user_gutter_width;
 
         if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
-            settings.tunables.read_receipt_display
+            tunables.read_receipt_display &&
+            tunables.message_time_display
         {
             width - user_gutter - TIME_GUTTER - READ_GUTTER
+        } else if user_gutter + READ_GUTTER + MIN_MSG_LEN <= width &&
+            tunables.read_receipt_display &&
+            !tunables.message_time_display
+        {
+            width - user_gutter - READ_GUTTER
         } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
             width - user_gutter - TIME_GUTTER
         } else if user_gutter + MIN_MSG_LEN <= width {
@@ -1156,7 +1162,8 @@ impl Message {
         let user_gutter = settings.tunables.user_gutter_width;
 
         if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
-            settings.tunables.read_receipt_display
+            settings.tunables.read_receipt_display &&
+            settings.tunables.message_time_display
         {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
@@ -1190,7 +1197,37 @@ impl Message {
                 read,
                 info,
             }
-        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
+        } else if user_gutter + READ_GUTTER + MIN_MSG_LEN <= width &&
+            settings.tunables.read_receipt_display &&
+            !settings.tunables.message_time_display
+        {
+            let cols = MessageColumns::Three;
+            let fill = width - user_gutter - READ_GUTTER;
+            let user = self.show_sender(prev, true, info, settings, width);
+            let time = None;
+            let read = info
+                .event_receipts
+                .values()
+                .filter_map(|receipts| self.event.event_id().and_then(|id| receipts.get(id)))
+                .flat_map(|read| read.iter())
+                .map(|user_id| user_id.to_owned())
+                .collect();
+
+            MessageFormatter {
+                settings,
+                cols,
+                orig,
+                fill,
+                user,
+                date,
+                trackbar,
+                time,
+                read,
+                info,
+            }
+        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width &&
+            settings.tunables.message_time_display
+        {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
             let user = self.show_sender(prev, true, info, settings, width);

@@ -1466,7 +1466,7 @@ impl StatefulWidget for Scrollback<'_> {
             }
         }
 
-        let msg_width = Message::message_column_width(&state.viewctx, settings);
+        let msg_width = Message::message_column_width(&state.viewctx, &settings.tunables);
 
         // Render image previews after all text lines have been drawn, as the render might draw below the current
         // line.

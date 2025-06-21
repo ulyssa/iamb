@@ -9,7 +9,7 @@ use modalkit::env::vim::keybindings::{InputStep, VimBindings};
 use modalkit::keybindings::{EdgeEvent, EdgeRepeat, InputBindings};
 
 use crate::base::{Keybindings, MATRIX_ID_WORD};
-use crate::config::{Keys, SplitDirection, TunableValues};
+use crate::config::{Keys, SplitDirection};
 use crate::prelude::*;
 
 pub type IambStep = InputStep<IambInfo>;
