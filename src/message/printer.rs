@@ -11,7 +11,7 @@ use ratatui::text::{Line, Span, Text};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
-use crate::config::{ApplicationSettings, TunableValues};
+use crate::config::TunableValues;
 use crate::util::{
     replace_emojis_in_line,
     replace_emojis_in_span,
@@ -31,12 +31,12 @@ pub struct TextPrinter<'a> {
     curr_width: usize,
     literal: bool,
 
-    pub(super) settings: &'a ApplicationSettings,
+    pub(super) tunables: &'a TunableValues,
 }
 
 impl<'a> TextPrinter<'a> {
     /// Create a new printer.
-    pub fn new(width: usize, base_style: Style, settings: &'a ApplicationSettings) -> Self {
+    pub fn new(width: usize, base_style: Style, tunables: &'a TunableValues) -> Self {
         TextPrinter {
             text: Text::default(),
             width,
@@ -46,7 +46,7 @@ impl<'a> TextPrinter<'a> {
             curr_spans: vec![],
             curr_width: 0,
             literal: false,
-            settings,
+            tunables,
         }
     }
 
@@ -72,12 +72,8 @@ impl<'a> TextPrinter<'a> {
         self.tunables().message_shortcode_display
     }
 
-    pub fn settings(&self) -> &ApplicationSettings {
-        self.settings
-    }
-
     pub fn tunables(&self) -> &TunableValues {
-        &self.settings.tunables
+        self.tunables
     }
 
     /// Indicates the current printer's width.
@@ -96,7 +92,7 @@ impl<'a> TextPrinter<'a> {
             curr_spans: vec![],
             curr_width: 0,
             literal: self.literal,
-            settings: self.settings,
+            tunables: self.tunables,
         }
     }
 
@@ -208,7 +204,7 @@ impl<'a> TextPrinter<'a> {
             return;
         }
 
-        let tabstop = self.settings().tunables.tabstop;
+        let tabstop = self.tunables().tabstop;
 
         for mut word in UnicodeSegmentation::split_word_bounds(s) {
             if let "\n" | "\r\n" = word {
@@ -295,12 +291,12 @@ impl<'a> TextPrinter<'a> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::tests::mock_settings;
+    use crate::tests::mock_tunables;
 
     #[test]
     fn test_push_nobreak() {
-        let settings = mock_settings();
-        let mut printer = TextPrinter::new(5, Style::default(), &settings);
+        let tunables = mock_tunables();
+        let mut printer = TextPrinter::new(5, Style::default(), &tunables);
         printer.push_span_nobreak("hello world".into());
         let text = printer.finish();
         assert_eq!(text.lines.len(), 1);
