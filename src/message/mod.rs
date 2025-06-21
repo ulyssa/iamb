@@ -926,7 +926,8 @@ impl Message {
         let user_gutter = tunables.user_gutter_width;
 
         if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
-            tunables.read_receipt_display
+            tunables.read_receipt_display &&
+            tunables.message_time_display
         {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
@@ -941,7 +942,25 @@ impl Message {
                 .collect();
 
             MessageFormatter { tunables, cols, orig, fill, user, date, time, read }
-        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
+        } else if user_gutter + READ_GUTTER + MIN_MSG_LEN <= width &&
+            tunables.read_receipt_display &&
+            !tunables.message_time_display
+        {
+            let cols = MessageColumns::Three;
+            let fill = width - user_gutter - READ_GUTTER;
+            let user = self.show_sender(prev, true, info, tunables);
+            let time = None;
+            let read = info
+                .event_receipts
+                .values()
+                .filter_map(|receipts| receipts.get(self.event.event_id()))
+                .flat_map(|read| read.iter())
+                .map(|user_id| user_id.to_owned())
+                .collect();
+
+            MessageFormatter { tunables, cols, orig, fill, user, date, time, read }
+        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width && tunables.message_time_display
+        {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
             let user = self.show_sender(prev, true, info, tunables);
