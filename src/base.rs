@@ -1361,7 +1361,9 @@ impl RoomInfo {
         }
 
         if !settings.tunables.typing_notice_display {
-            return area;
+            // still keep one line blank, so `render_jump_to_recent` doesn't immediately hide the
+            // last line in scrollback
+            return Rect::new(area.x, area.y, area.width, area.height - 1);
         }
 
         let top = Rect::new(area.x, area.y, area.width, area.height - 1);
