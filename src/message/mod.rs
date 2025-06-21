@@ -176,7 +176,9 @@ fn placeholder_frame(
     }
     let mut placeholder = "\u{230c}".to_string();
     placeholder.push_str(&" ".repeat(width - 2));
-    placeholder.push_str("\u{230d}\n");
+    placeholder.push('\u{230d}');
+    placeholder.push_str(&"\n".repeat((height - 1) / 2));
+
     if *height > 2 {
         if let Some(text) = text {
             if text.width() <= width - 2 {
@@ -186,7 +188,7 @@ fn placeholder_frame(
         }
     }
 
-    placeholder.push_str(&"\n".repeat(height - 2));
+    placeholder.push_str(&"\n".repeat(height / 2));
     placeholder.push('\u{230e}');
     placeholder.push_str(&" ".repeat(width - 2));
     placeholder.push_str("\u{230f}\n");
@@ -1087,7 +1089,7 @@ impl Message {
                 },
                 ImageStatus::Loaded(backend) => {
                     proto = Some(backend);
-                    placeholder_frame(Some("Loading..."), width, &backend.area().into())
+                    placeholder_frame(Some("Cut off..."), width, &backend.area().into())
                 },
                 ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
             };
@@ -1358,6 +1360,33 @@ pub mod tests {
  OK
 
 ⌎  ⌏
+"#
+            )
+        );
+        assert_eq!(
+            placeholder_frame(Some("OK"), 6, &ImagePreviewSize { width: 6, height: 6 }),
+            pretty_frame_test(
+                r#"
+⌌    ⌍
+
+ OK
+
+
+⌎    ⌏
+"#
+            )
+        );
+        assert_eq!(
+            placeholder_frame(Some("OK"), 6, &ImagePreviewSize { width: 6, height: 7 }),
+            pretty_frame_test(
+                r#"
+⌌    ⌍
+
+
+ OK
+
+
+⌎    ⌏
 "#
             )
         );
