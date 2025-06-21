@@ -100,7 +100,7 @@ use modalkit::{
 
 use crate::preview::PreviewKind;
 use crate::{
-    config::ApplicationSettings,
+    config::{ApplicationSettings, TunableValues},
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     notifications::NotificationHandle,
     preview::PreviewManager,
@@ -1641,20 +1641,20 @@ impl RoomInfo {
         }
     }
 
-    fn get_typing_spans<'a>(&'a self, settings: &'a ApplicationSettings) -> Line<'a> {
+    fn get_typing_spans<'a>(&'a self, tunables: &'a TunableValues) -> Line<'a> {
         let typers = self.get_typers();
         let n = typers.len();
 
         match n {
             0 => Line::from(vec![]),
             1 => {
-                let user = settings.get_user_span(typers[0].as_ref(), self);
+                let user = tunables.get_user_span(typers[0].as_ref(), self);
 
                 Line::from(vec![user, Span::from(" is typing...")])
             },
             2 => {
-                let user1 = settings.get_user_span(typers[0].as_ref(), self);
-                let user2 = settings.get_user_span(typers[1].as_ref(), self);
+                let user1 = tunables.get_user_span(typers[0].as_ref(), self);
+                let user2 = tunables.get_user_span(typers[1].as_ref(), self);
 
                 Line::from(vec![
                     user1,
@@ -1678,13 +1678,13 @@ impl RoomInfo {
         &mut self,
         area: Rect,
         buf: &mut Buffer,
-        settings: &ApplicationSettings,
+        tunables: &TunableValues,
     ) -> Rect {
         if area.height <= 2 || area.width <= 20 {
             return area;
         }
 
-        if !settings.tunables.typing_notice_display {
+        if !tunables.typing_notice_display {
             // still keep one line blank, so `render_jump_to_recent` doesn't immediately hide the
             // last line in scrollback
             return Rect::new(area.x, area.y, area.width, area.height - 1);
@@ -1693,7 +1693,7 @@ impl RoomInfo {
         let top = Rect::new(area.x, area.y, area.width, area.height - 1);
         let bar = Rect::new(area.x, area.y + top.height, area.width, 1);
 
-        Paragraph::new(self.get_typing_spans(settings))
+        Paragraph::new(self.get_typing_spans(tunables))
             .alignment(Alignment::Center)
             .render(bar, buf);
 
@@ -2515,7 +2515,7 @@ pub mod tests {
     #[test]
     fn test_typing_spans() {
         let mut info = RoomInfo::default();
-        let settings = mock_settings();
+        let tunables = mock_tunables();
 
         let users0 = vec![];
         let users1 = vec![TEST_USER1.clone()];
@@ -2536,18 +2536,18 @@ pub mod tests {
 
         // Nothing set.
         assert_eq!(info.users_typing, None);
-        assert_eq!(info.get_typing_spans(&settings), Line::from(vec![]));
+        assert_eq!(info.get_typing_spans(&tunables), Line::from(vec![]));
 
         // Empty typing list.
         info.set_typing(users0);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Line::from(vec![]));
+        assert_eq!(info.get_typing_spans(&tunables), Line::from(vec![]));
 
         // Single user typing.
         info.set_typing(users1);
         assert!(info.users_typing.is_some());
         assert_eq!(
-            info.get_typing_spans(&settings),
+            info.get_typing_spans(&tunables),
             Line::from(vec![
                 Span::styled("@user1:example.com", user_style("@user1:example.com")),
                 Span::from(" is typing...")
@@ -2558,7 +2558,7 @@ pub mod tests {
         info.set_typing(users2);
         assert!(info.users_typing.is_some());
         assert_eq!(
-            info.get_typing_spans(&settings),
+            info.get_typing_spans(&tunables),
             Line::from(vec![
                 Span::styled("@user1:example.com", user_style("@user1:example.com")),
                 Span::raw(" and "),
@@ -2570,18 +2570,18 @@ pub mod tests {
         // Four users typing.
         info.set_typing(users4);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Line::from("Several people are typing..."));
+        assert_eq!(info.get_typing_spans(&tunables), Line::from("Several people are typing..."));
 
         // Five users typing.
         info.set_typing(users5);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Line::from("Many people are typing..."));
+        assert_eq!(info.get_typing_spans(&tunables), Line::from("Many people are typing..."));
 
         // Test that USER5 gets rendered using the configured color and name.
         info.set_typing(vec![TEST_USER5.clone()]);
         assert!(info.users_typing.is_some());
         assert_eq!(
-            info.get_typing_spans(&settings),
+            info.get_typing_spans(&tunables),
             Line::from(vec![
                 Span::styled("USER 5", user_style_from_color(Color::Black)),
                 Span::from(" is typing...")
