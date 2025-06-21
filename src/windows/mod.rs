@@ -1549,7 +1549,11 @@ impl ListItem<IambInfo> for MemberItem {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let user_id = self.member.user_id();
 
-        let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
+        let (color, name) = store
+            .application
+            .settings
+            .tunables
+            .get_user_overrides(self.member.user_id());
         let color = color.unwrap_or_else(|| super::config::user_color(user_id.as_str()));
         let mut style = super::config::user_style_from_color(color);
 
