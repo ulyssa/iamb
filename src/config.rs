@@ -876,6 +876,70 @@ pub struct TunableValues {
     pub cache_policy: MediaRetentionPolicy,
 }
 
+impl TunableValues {
+    pub fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
+        let (color, c) = self
+            .users
+            .get(user_id)
+            .map(|user| {
+                (
+                    user.color.as_ref().map(|c| c.0),
+                    user.name.as_ref().and_then(|s| s.chars().next()),
+                )
+            })
+            .unwrap_or_default();
+
+        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
+        let style = user_style_from_color(color);
+
+        let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
+
+        Span::styled(String::from(c), style)
+    }
+
+    pub fn get_user_overrides(
+        &self,
+        user_id: &UserId,
+    ) -> (Option<Color>, Option<Cow<'static, str>>) {
+        self.users
+            .get(user_id)
+            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
+            .unwrap_or_default()
+    }
+
+    pub fn get_user_color(&self, user_id: &UserId) -> Color {
+        self.users
+            .get(user_id)
+            .and_then(|user| user.color.as_ref().map(|c| c.0))
+            .unwrap_or_else(|| user_color(user_id.as_str()))
+    }
+
+    pub fn get_user_style(&self, user_id: &UserId) -> Style {
+        user_style_from_color(self.get_user_color(user_id))
+    }
+
+    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
+        let (color, name) = self.get_user_overrides(user_id);
+
+        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
+        let style = user_style_from_color(color);
+        let name = match (name, &self.username_display) {
+            (Some(name), _) => name,
+            (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
+            (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
+            (None, UserDisplayStyle::DisplayName) => {
+                if let Some(name) = info.display_names.get(user_id) {
+                    name
+                } else {
+                    Cow::Borrowed(user_id.as_str())
+                }
+            },
+        };
+
+        Span::styled(name, style)
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Tunables {
     /// Subsection for overriding encryption-related settings.
@@ -1434,71 +1498,6 @@ impl ApplicationSettings {
         serde_json::to_writer(writer, &session).map_err(IambError::from)?;
         Ok(())
     }
-
-    pub fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
-        let (color, c) = self
-            .tunables
-            .users
-            .get(user_id)
-            .map(|user| {
-                (
-                    user.color.as_ref().map(|c| c.0),
-                    user.name.as_ref().and_then(|s| s.chars().next()),
-                )
-            })
-            .unwrap_or_default();
-
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
-
-        let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
-
-        Span::styled(String::from(c), style)
-    }
-
-    pub fn get_user_overrides(
-        &self,
-        user_id: &UserId,
-    ) -> (Option<Color>, Option<Cow<'static, str>>) {
-        self.tunables
-            .users
-            .get(user_id)
-            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
-            .unwrap_or_default()
-    }
-
-    pub fn get_user_color(&self, user_id: &UserId) -> Color {
-        self.tunables
-            .users
-            .get(user_id)
-            .and_then(|user| user.color.as_ref().map(|c| c.0))
-            .unwrap_or_else(|| user_color(user_id.as_str()))
-    }
-
-    pub fn get_user_style(&self, user_id: &UserId) -> Style {
-        user_style_from_color(self.get_user_color(user_id))
-    }
-
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
-        let (color, name) = self.get_user_overrides(user_id);
-
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
-        let name = match (name, &self.tunables.username_display) {
-            (Some(name), _) => name,
-            (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
-            (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
-            (None, UserDisplayStyle::DisplayName) => {
-                if let Some(name) = info.display_names.get(user_id) {
-                    name
-                } else {
-                    Cow::Borrowed(user_id.as_str())
-                }
-            },
-        };
-
-        Span::styled(name, style)
-    }
 }
 
 #[cfg(test)]
@@ -1509,14 +1508,14 @@ mod tests {
 
     use matrix_sdk::ruma::user_id;
 
-    use crate::tests::{TEST_USER1, mock_room, mock_settings};
+    use crate::tests::{TEST_USER1, mock_room, mock_tunables};
 
     #[test]
     fn test_get_user_span_borrowed() {
         // fix `StyleTreeNode::print` for `StyleTreeNode::UserId` if this breaks
         let info = mock_room();
-        let settings = mock_settings();
-        let span = settings.get_user_span(&TEST_USER1, &info);
+        let tunables = mock_tunables();
+        let span = tunables.get_user_span(&TEST_USER1, &info);
 
         assert!(matches!(span.content, Cow::Borrowed(_)));
     }

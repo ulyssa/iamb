@@ -5,7 +5,6 @@
 //! contents).
 
 use crate::base::RoomInfo;
-use crate::config::TunableValues;
 use crate::prelude::*;
 use crate::util::{
     replace_emojis_in_line,
@@ -26,7 +25,7 @@ pub struct TextPrinter<'a> {
     curr_width: usize,
     literal: bool,
 
-    pub(super) settings: &'a ApplicationSettings,
+    pub(super) tunables: &'a TunableValues,
     pub(super) info: &'a RoomInfo,
 }
 
@@ -35,7 +34,7 @@ impl<'a> TextPrinter<'a> {
     pub fn new(
         width: usize,
         base_style: Style,
-        settings: &'a ApplicationSettings,
+        tunables: &'a TunableValues,
         info: &'a RoomInfo,
     ) -> Self {
         TextPrinter {
@@ -47,7 +46,7 @@ impl<'a> TextPrinter<'a> {
             curr_spans: vec![],
             curr_width: 0,
             literal: false,
-            settings,
+            tunables,
             info,
         }
     }
@@ -74,12 +73,8 @@ impl<'a> TextPrinter<'a> {
         self.tunables().message_shortcode_display
     }
 
-    pub fn settings(&self) -> &ApplicationSettings {
-        self.settings
-    }
-
     pub fn tunables(&self) -> &TunableValues {
-        &self.settings.tunables
+        self.tunables
     }
 
     /// Indicates the current printer's width.
@@ -98,7 +93,7 @@ impl<'a> TextPrinter<'a> {
             curr_spans: vec![],
             curr_width: 0,
             literal: self.literal,
-            settings: self.settings,
+            tunables: self.tunables,
             info: self.info,
         }
     }
@@ -211,7 +206,7 @@ impl<'a> TextPrinter<'a> {
             return;
         }
 
-        let tabstop = self.settings().tunables.tabstop;
+        let tabstop = self.tunables().tabstop;
 
         for mut word in UnicodeSegmentation::split_word_bounds(s) {
             if let "\n" | "\r\n" = word {
@@ -299,13 +294,13 @@ impl<'a> TextPrinter<'a> {
 pub mod tests {
     use super::*;
 
-    use crate::tests::{mock_room, mock_settings};
+    use crate::tests::{mock_room, mock_tunables};
 
     #[test]
     fn test_push_nobreak() {
-        let settings = mock_settings();
+        let tunables = mock_tunables();
         let info = mock_room();
-        let mut printer = TextPrinter::new(5, Style::default(), &settings, &info);
+        let mut printer = TextPrinter::new(5, Style::default(), &tunables, &info);
         printer.push_span_nobreak("hello world".into());
         let text = printer.finish();
         assert_eq!(text.lines.len(), 1);
