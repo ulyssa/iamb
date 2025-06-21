@@ -1571,7 +1571,7 @@ mod tests {
         // MSG1: |                   XXXday, Month NN 20XX                    |
         //       |           @user1:example.com  writhe                       |
         //       |------------------------------------------------------------|
-        let area = Rect::new(0, 0, 60, 4);
+        let area = Rect::new(0, 0, 60, 5);
         let mut buffer = Buffer::empty(area);
         scrollback.draw(area, &mut buffer, true, &mut store);
 
