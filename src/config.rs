@@ -353,29 +353,31 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
-fn merge_sorts(a: SortOverrides, b: SortOverrides) -> SortOverrides {
+fn merge_sorts(profile: SortOverrides, global: SortOverrides) -> SortOverrides {
     SortOverrides {
-        chats: b.chats.or(a.chats),
-        dms: b.dms.or(a.dms),
-        rooms: b.rooms.or(a.rooms),
-        spaces: b.spaces.or(a.spaces),
-        members: b.members.or(a.members),
+        chats: profile.chats.or(global.chats),
+        dms: profile.dms.or(global.dms),
+        rooms: profile.rooms.or(global.rooms),
+        spaces: profile.spaces.or(global.spaces),
+        members: profile.members.or(global.members),
     }
 }
 
-fn merge_maps<K, V>(a: Option<HashMap<K, V>>, b: Option<HashMap<K, V>>) -> Option<HashMap<K, V>>
+fn merge_maps<K, V>(
+    profile: Option<HashMap<K, V>>,
+    global: Option<HashMap<K, V>>,
+) -> Option<HashMap<K, V>>
 where
     K: Eq + Hash,
 {
-    match (a, b) {
-        (Some(a), None) => Some(a),
-        (None, Some(b)) => Some(b),
-        (Some(mut a), Some(b)) => {
-            for (k, v) in b {
-                a.insert(k, v);
+    match (global, profile) {
+        (Some(m), None) | (None, Some(m)) => Some(m),
+        (Some(mut global), Some(profile)) => {
+            for (k, v) in profile {
+                global.insert(k, v);
             }
 
-            Some(a)
+            Some(global)
         },
         (None, None) => None,
     }
@@ -911,7 +913,7 @@ impl ApplicationSettings {
             }
         };
 
-        let macros = merge_maps(macros, profile.macros.take()).unwrap_or_default();
+        let macros = merge_maps(profile.macros.take(), macros).unwrap_or_default();
         let layout = profile.layout.take().or(layout).unwrap_or_default();
 
         let tunables = global.unwrap_or_default();
@@ -1110,10 +1112,10 @@ mod tests {
         assert_eq!(res, Some(b.clone()));
 
         let res = merge_maps(Some(b.clone()), Some(c.clone()));
-        assert_eq!(res, Some(c.clone()));
+        assert_eq!(res, Some(b.clone()));
 
         let res = merge_maps(Some(c.clone()), Some(b.clone()));
-        assert_eq!(res, Some(b.clone()));
+        assert_eq!(res, Some(c.clone()));
     }
 
     #[test]
