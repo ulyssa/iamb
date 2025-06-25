@@ -730,6 +730,64 @@ pub struct ImagePreviewProtocolValues {
     pub font_size: Option<(u16, u16)>,
 }
 
+#[derive(Clone, Deserialize, Default, Debug)]
+pub struct Colorscheme {
+    pub border: Option<Color>,
+    pub border_unfocused: Option<Color>,
+    pub window_title: Option<Color>,
+    pub tab_title: Option<Color>,
+    pub tab_title_unfocused: Option<Color>,
+    pub room_list: Option<Color>,
+    pub room_list_unread: Option<Color>,
+}
+
+impl Colorscheme {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            border: self.border.or(other.border),
+            border_unfocused: self.border_unfocused.or(other.border_unfocused),
+            window_title: self.window_title.or(other.window_title),
+            tab_title: self.tab_title.or(other.tab_title),
+            tab_title_unfocused: self.tab_title_unfocused.or(other.tab_title_unfocused),
+            room_list: self.room_list.or(other.room_list),
+            room_list_unread: self.room_list_unread.or(other.room_list_unread),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+pub struct ColorschemeValues {
+    pub border: Style,
+    pub border_unfocused: Style,
+    pub window_title: Style,
+    pub tab_title: Style,
+    pub tab_title_unfocused: Style,
+    pub room_list: Style,
+    pub room_list_unread: Style,
+}
+
+impl Colorscheme {
+    pub fn values(self) -> ColorschemeValues {
+        let border = self.border.map(Into::into).unwrap_or_default();
+        let border_unfocused = self.border_unfocused.map(Into::into).unwrap_or(border);
+        let window_title = self.window_title.map(Into::into).unwrap_or_default();
+        let tab_title = self.tab_title.map(Into::into).unwrap_or_default();
+        let tab_title_unfocused = self.tab_title_unfocused.map(Into::into).unwrap_or(tab_title);
+        let room_list = self.room_list.map(Into::into).unwrap_or_default();
+        let room_list_unread = self.room_list_unread.map(Into::into).unwrap_or(room_list);
+
+        ColorschemeValues {
+            border,
+            border_unfocused,
+            window_title,
+            tab_title,
+            tab_title_unfocused,
+            room_list,
+            room_list_unread,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SortValues {
     pub chats: Vec<SortColumn<SortFieldRoom>>,
@@ -839,6 +897,7 @@ pub struct TunableValues {
     pub default_split: SplitDirection,
     pub ssl_verify: bool,
     pub cache_policy: MediaRetentionPolicy,
+    pub colors: ColorschemeValues,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -888,6 +947,8 @@ pub struct Tunables {
     pub members_split: Option<SplitDirection>,
     pub default_split: Option<SplitDirection>,
     pub ssl_verify: Option<bool>,
+    #[serde(default)]
+    pub colors: Colorscheme,
     pub cache_policy: Option<MediaRetentionPolicy>,
 }
 
@@ -938,6 +999,7 @@ impl Tunables {
             default_split: self.default_split.or(other.default_split),
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
             cache_policy: self.cache_policy.or(other.cache_policy),
+            colors: self.colors.merge(other.colors),
         }
     }
 
@@ -979,6 +1041,7 @@ impl Tunables {
             default_split: self.default_split.unwrap_or_default(),
             ssl_verify: self.ssl_verify.unwrap_or(true),
             cache_policy: self.cache_policy.unwrap_or_default(),
+            colors: self.colors.values(),
         }
     }
 }
