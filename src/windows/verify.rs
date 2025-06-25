@@ -14,7 +14,7 @@ use modalkit::actions::{PromptAction, Promptable};
 use modalkit::errors::{EditError, EditResult};
 use modalkit::prelude::ViewportContext;
 use modalkit_ratatui::list::{ListCursor, ListItem};
-use ratatui::style::{Color, Modifier as StyleModifier, Style};
+use ratatui::style::{Color, Style};
 use ratatui::text::{Line, Span, Text};
 
 use crate::base::{IambInfo, ProgramAction, ProgramContext, ProgramStore};
@@ -153,9 +153,8 @@ impl ListItem<IambInfo> for VerifyItem {
         store: &mut ProgramStore,
     ) -> Text<'_> {
         let mut lines = vec![];
-        let bold = Style::default().add_modifier(StyleModifier::BOLD);
-        let selected_bold = super::selected_style(selected).add_modifier(StyleModifier::BOLD);
-        let selected = super::selected_style(selected);
+        let bold = Style::default().bold();
+        let selected = super::selected_style(selected, Default::default());
 
         let mut other_device = None;
         let state = match self.request.state() {
@@ -290,13 +289,13 @@ impl ListItem<IambInfo> for VerifyItem {
                 if let Some(display_name) = device.display_name() {
                     vec![
                         Span::styled("Device verification with ", selected),
-                        Span::styled(display_name.to_owned(), selected_bold),
+                        Span::styled(display_name.to_owned(), selected.bold()),
                         Span::styled(format!(" ({state})"), selected),
                     ]
                 } else {
                     vec![
                         Span::styled("Device verification with ", selected),
-                        Span::styled(device.device_id().to_string(), selected_bold),
+                        Span::styled(device.device_id().to_string(), selected.bold()),
                         Span::styled(format!(" ({state})"), selected),
                     ]
                 }
@@ -310,7 +309,7 @@ impl ListItem<IambInfo> for VerifyItem {
             let color = store.application.settings.get_user_color(self.request.other_user_id());
             vec![
                 Span::styled("User verification with ", selected),
-                Span::styled(self.request.other_user_id().as_str(), selected_bold.patch(color)),
+                Span::styled(self.request.other_user_id().as_str(), selected.bold().patch(color)),
                 Span::styled(format!(" ({state})"), selected),
             ]
         };
