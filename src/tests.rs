@@ -201,6 +201,7 @@ pub fn mock_tunables() -> TunableValues {
         default_split: Default::default(),
         ssl_verify: true,
         cache_policy: Default::default(),
+        colors: Colorscheme::default().values(),
     }
 }
 
