@@ -304,6 +304,7 @@ impl Application {
         let focused = self.focused;
         let sstate = &mut self.screen;
         let term = &mut self.terminal;
+        let colors = store.application.settings.tunables.colors.clone();
 
         if store.application.ring_bell {
             store.application.ring_bell = term.backend_mut().write_all(&[7]).is_err();
@@ -328,9 +329,10 @@ impl Application {
                 .show_dialog(dialogstr)
                 .show_mode(modestr)
                 .borders(true)
-                .border_style(Style::default().add_modifier(Modifier::DIM))
-                .tab_style(Style::default().add_modifier(Modifier::DIM))
-                .tab_style_focused(Style::default().remove_modifier(Modifier::DIM))
+                .border_style(colors.border_unfocused.add_modifier(Modifier::DIM))
+                .border_style_focused(colors.border.remove_modifier(Modifier::DIM))
+                .tab_style(colors.tab_title_unfocused.add_modifier(Modifier::DIM))
+                .tab_style_focused(colors.tab_title.remove_modifier(Modifier::DIM))
                 .focus(focused);
             f.render_stateful_widget(screen, area, sstate);
 

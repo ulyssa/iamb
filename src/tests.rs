@@ -26,6 +26,7 @@ use crate::{
         user_color,
         user_style_from_color,
         ApplicationSettings,
+        Colorscheme,
         DirectoryValues,
         Notifications,
         NotifyVia,
@@ -201,6 +202,7 @@ pub fn mock_tunables() -> TunableValues {
         image_preview: None,
         user_gutter_width: 30,
         tabstop: 4,
+        colors: Colorscheme::default().values(),
     }
 }
 
