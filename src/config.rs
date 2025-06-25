@@ -484,6 +484,64 @@ pub struct ImagePreviewProtocolValues {
     pub font_size: Option<(u16, u16)>,
 }
 
+#[derive(Clone, Deserialize, Default)]
+pub struct Colorscheme {
+    pub border: Option<Color>,
+    pub border_unfocused: Option<Color>,
+    pub window_title: Option<Color>,
+    pub tab_title: Option<Color>,
+    pub tab_title_unfocused: Option<Color>,
+    pub room_list: Option<Color>,
+    pub room_list_unread: Option<Color>,
+}
+
+impl Colorscheme {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            border: self.border.or(other.border),
+            border_unfocused: self.border_unfocused.or(other.border_unfocused),
+            window_title: self.window_title.or(other.window_title),
+            tab_title: self.tab_title.or(other.tab_title),
+            tab_title_unfocused: self.tab_title_unfocused.or(other.tab_title_unfocused),
+            room_list: self.room_list.or(other.room_list),
+            room_list_unread: self.room_list_unread.or(other.room_list_unread),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+pub struct ColorschemeValues {
+    pub border: Style,
+    pub border_unfocused: Style,
+    pub window_title: Style,
+    pub tab_title: Style,
+    pub tab_title_unfocused: Style,
+    pub room_list: Style,
+    pub room_list_unread: Style,
+}
+
+impl Colorscheme {
+    pub fn values(self) -> ColorschemeValues {
+        let border = self.border.map(Into::into).unwrap_or_default();
+        let border_unfocused = self.border_unfocused.map(Into::into).unwrap_or(border);
+        let window_title = self.window_title.map(Into::into).unwrap_or_default();
+        let tab_title = self.tab_title.map(Into::into).unwrap_or_default();
+        let tab_title_unfocused = self.tab_title_unfocused.map(Into::into).unwrap_or(tab_title);
+        let room_list = self.room_list.map(Into::into).unwrap_or_default();
+        let room_list_unread = self.room_list_unread.map(Into::into).unwrap_or(room_list);
+
+        ColorschemeValues {
+            border,
+            border_unfocused,
+            window_title,
+            tab_title,
+            tab_title_unfocused,
+            room_list,
+            room_list_unread,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SortValues {
     pub chats: Vec<SortColumn<SortFieldRoom>>,
@@ -540,6 +598,7 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub colors: ColorschemeValues,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -569,6 +628,8 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    #[serde(default)]
+    pub colors: Colorscheme,
 }
 
 impl Tunables {
@@ -604,6 +665,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            colors: self.colors.merge(other.colors),
         }
     }
 
@@ -635,6 +697,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            colors: self.colors.values(),
         }
     }
 }
