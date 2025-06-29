@@ -58,6 +58,7 @@ pub fn spawn_insert_preview(
     source: MediaSource,
     media: Media,
     cache_dir: PathBuf,
+    preview: ImagePreviewSize,
 ) {
     tokio::spawn(async move {
         let img = download_or_load(event_id.to_owned(), source, media, cache_dir)
@@ -65,8 +66,7 @@ pub fn spawn_insert_preview(
             .map(std::io::Cursor::new)
             .map(image::ImageReader::new)
             .map_err(IambError::Matrix)
-            .and_then(|reader| reader.with_guessed_format().map_err(IambError::IOError))
-            .and_then(|reader| reader.decode().map_err(IambError::Image));
+            .and_then(|reader| reader.with_guessed_format().map_err(IambError::IOError));
 
         match img {
             Err(err) => {
@@ -79,41 +79,86 @@ pub fn spawn_insert_preview(
             },
             Ok(img) => {
                 let mut locked = store.lock().await;
-                let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
 
-                match picker
-                    .as_mut()
-                    .ok_or_else(|| IambError::Preview("Picker is empty".to_string()))
-                    .and_then(|picker| {
-                        Ok((
-                            picker,
-                            rooms
-                                .get_or_default(room_id.clone())
-                                .get_event_mut(&event_id)
-                                .ok_or_else(|| {
-                                    IambError::Preview("Message not found".to_string())
-                                })?,
-                            settings.tunables.image_preview.clone().ok_or_else(|| {
-                                IambError::Preview("image_preview settings not found".to_string())
-                            })?,
-                        ))
-                    })
-                    .and_then(|(picker, msg, image_preview)| {
-                        picker
-                            .new_protocol(img, image_preview.size.into(), Resize::Fit(None))
-                            .map_err(|err| IambError::Preview(format!("{err:?}")))
-                            .map(|backend| (backend, msg))
-                    }) {
+                match locked
+                    .application
+                    .rooms
+                    .get_or_default(room_id.clone())
+                    .get_event_mut(&event_id)
+                    .ok_or_else(|| IambError::Preview("Message not found".to_string()))
+                {
                     Err(err) => {
                         try_set_msg_preview_error(&mut locked.application, room_id, event_id, err);
                     },
-                    Ok((backend, msg)) => {
-                        msg.image_preview = ImageStatus::Loaded(backend);
-                    },
+                    Ok(msg) => msg.image_preview = ImageStatus::Loading(Some(img), preview),
                 }
             },
         }
     });
+}
+
+pub async fn render_preview(
+    store: AsyncProgramStore,
+    room_id: OwnedRoomId,
+    event_id: OwnedEventId,
+) {
+    let mut locked = store.lock().await;
+
+    let picker = locked.application.picker.clone();
+    let Some(img) = locked
+        .application
+        .rooms
+        .get_or_default(room_id.clone())
+        .get_event_mut(&event_id)
+        .ok_or_else(|| IambError::Preview("Picker is empty".to_string()))
+        .map(|msg| {
+            if let ImageStatus::Loading(reader, size) = &mut msg.image_preview {
+                reader.take().map(|reader| (reader, size.clone()))
+            } else {
+                None
+            }
+        })
+        .transpose()
+    else {
+        // ignore if image is already being loaded
+        return;
+    };
+
+    // make shure to unlock store while computing `new_protocol`
+    drop(locked);
+
+    let image = picker
+        .ok_or_else(|| IambError::Preview("Picker is empty".to_string()))
+        .and_then(|picker| {
+            let (reader, size) = img?;
+            Ok((picker, reader, size))
+        })
+        .and_then(|(picker, reader, size)| {
+            let image = reader.decode().map_err(IambError::Image)?;
+            Ok((picker, image, size))
+        })
+        .and_then(|(picker, image, size)| {
+            picker
+                .new_protocol(image, size.into(), Resize::Fit(None))
+                .map_err(|err| IambError::Preview(format!("{err}")))
+        });
+
+    let mut locked = store.lock().await;
+
+    match image {
+        Err(err) => {
+            try_set_msg_preview_error(&mut locked.application, room_id, event_id, err);
+        },
+        Ok(backend) => {
+            locked
+                .application
+                .rooms
+                .get_or_default(room_id)
+                .get_event_mut(&event_id)
+                .unwrap()
+                .image_preview = ImageStatus::Loaded(backend);
+        },
+    }
 }
 
 fn try_set_msg_preview_error(
