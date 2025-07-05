@@ -1443,6 +1443,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "editor-types"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a9e9e99679670f67825fcd24a23cb4eb655a0f92c82bd4d1c1a1357c0cd71e87"
+dependencies = [
+ "bitflags 2.9.1",
+ "editor-types-macros",
+ "keybindings",
+ "regex",
+]
+
+[[package]]
+name = "editor-types-macros"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "42680de76cf91f231abd90cc623750d39077f7d2fadb7962325fb082871f4c66"
+dependencies = [
+ "editor-types-parser",
+ "nom",
+ "proc-macro2",
+ "quote",
+ "syn 2.0.101",
+]
+
+[[package]]
+name = "editor-types-parser"
+version = "0.0.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "cac4b91fe830fbbe0a60c37ba0264b6e9ffc70e3664c028234dac59e79299ad4"
+dependencies = [
+ "nom",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2706,9 +2741,9 @@ dependencies = [
 
 [[package]]
 name = "keybindings"
-version = "0.0.1"
+version = "0.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "680e4699c91c0622dd70da32c274881aadb1ac86252d738c3641266e90e4ca15"
+checksum = "19a726307ed87e05155c31329676130e6a237e62dda80211f7e1ed811e47630f"
 dependencies = [
  "textwrap",
  "unicode-segmentation",
@@ -3292,15 +3327,16 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.21"
+version = "0.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc7599fc1bcd2f0a0b4598f23433b45613345a46419ab27d3a9adecb57acd648"
+checksum = "6ed06f32b03a7504acadcb0d95d06f3d55258934c34b620ed95e3dae24f081a5"
 dependencies = [
  "anymap2",
  "arboard",
  "bitflags 2.9.1",
  "crossterm",
  "derive_more",
+ "editor-types",
  "intervaltree",
  "keybindings",
  "nom",
@@ -3314,9 +3350,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit-ratatui"
-version = "0.0.21"
+version = "0.0.23"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dd3d88c86435d4b1fb22c7c0f978b09cb888338cafc10336715aa5070e92b6f6"
+checksum = "a33bd64f6dd0011ee88f4f12b28108d3e63df0a5c86fe595d24561be9522f6ea"
 dependencies = [
  "crossterm",
  "intervaltree",

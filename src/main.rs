@@ -89,6 +89,7 @@ use crate::{
         ChatStore,
         HomeserverAction,
         IambAction,
+        IambCompleter,
         IambError,
         IambId,
         IambInfo,
@@ -529,7 +530,7 @@ impl Application {
             },
 
             // Unimplemented.
-            Action::KeywordLookup => {
+            Action::KeywordLookup(_) => {
                 // XXX: implement
                 None
             },
@@ -1011,7 +1012,9 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     // Set up the async worker thread and global store.
     let worker = ClientWorker::spawn(client.clone(), settings.clone()).await;
     let store = ChatStore::new(worker.clone(), settings.clone());
-    let store = Store::new(store);
+    let mut store = Store::new(store);
+    store.completer = Box::new(IambCompleter);
+
     let store = Arc::new(AsyncMutex::new(store));
     worker.init(store.clone());
 
