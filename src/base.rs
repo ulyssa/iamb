@@ -74,7 +74,7 @@ use modalkit::{
             ApplicationStore,
             ApplicationWindowId,
         },
-        completion::{complete_path, CompletionMap},
+        completion::{complete_path, Completer, CompletionMap},
         context::EditContext,
         cursor::Cursor,
         rope::EditRope,
@@ -1914,11 +1914,20 @@ impl ApplicationInfo for IambInfo {
     type WindowId = IambId;
     type ContentId = IambBufferId;
 
+    fn content_of_command(ct: CommandType) -> IambBufferId {
+        IambBufferId::Command(ct)
+    }
+}
+
+pub struct IambCompleter;
+
+impl Completer<IambInfo> for IambCompleter {
     fn complete(
+        &mut self,
         text: &EditRope,
         cursor: &mut Cursor,
         content: &IambBufferId,
-        store: &mut ProgramStore,
+        store: &mut ChatStore,
     ) -> Vec<String> {
         match content {
             IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
@@ -1936,21 +1945,16 @@ impl ApplicationInfo for IambInfo {
             IambBufferId::UnreadList => vec![],
         }
     }
-
-    fn content_of_command(ct: CommandType) -> IambBufferId {
-        IambBufferId::Command(ct)
-    }
 }
 
 /// Tab completion for user IDs.
-fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
+fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
     let id = text
         .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
         .unwrap_or_else(EditRope::empty);
     let id = Cow::from(&id);
 
     store
-        .application
         .presences
         .complete(id.as_ref())
         .into_iter()
@@ -1959,7 +1963,7 @@ fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) ->
 }
 
 /// Tab completion within the message bar.
-fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
+fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
     let id = text
         .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
         .unwrap_or_else(EditRope::empty);
@@ -1968,13 +1972,12 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -
     match id.chars().next() {
         // Complete room aliases.
         Some('#') => {
-            return store.application.names.complete(id.as_ref());
+            return store.names.complete(id.as_ref());
         },
 
         // Complete room identifiers.
         Some('!') => {
             return store
-                .application
                 .rooms
                 .complete(id.as_ref())
                 .into_iter()
@@ -1984,7 +1987,7 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -
 
         // Complete Emoji shortcodes.
         Some(':') => {
-            let list = store.application.emojis.complete(&id[1..]);
+            let list = store.emojis.complete(&id[1..]);
             let iter = list.into_iter().take(200).map(|s| format!(":{}:", s));
 
             return iter.collect();
@@ -1993,7 +1996,6 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -
         // Complete usernames for @ and empty strings.
         Some('@') | None => {
             return store
-                .application
                 .presences
                 .complete(id.as_ref())
                 .into_iter()
@@ -2007,28 +2009,23 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -
 }
 
 /// Tab completion for Matrix identifiers (usernames, room aliases, etc.)
-fn complete_matrix_names(
-    text: &EditRope,
-    cursor: &mut Cursor,
-    store: &ProgramStore,
-) -> Vec<String> {
+fn complete_matrix_names(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
     let id = text
         .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
         .unwrap_or_else(EditRope::empty);
     let id = Cow::from(&id);
 
-    let list = store.application.names.complete(id.as_ref());
+    let list = store.names.complete(id.as_ref());
     if !list.is_empty() {
         return list;
     }
 
-    let list = store.application.presences.complete(id.as_ref());
+    let list = store.presences.complete(id.as_ref());
     if !list.is_empty() {
         return list.into_iter().map(|i| i.to_string()).collect();
     }
 
     store
-        .application
         .rooms
         .complete(id.as_ref())
         .into_iter()
@@ -2037,12 +2034,12 @@ fn complete_matrix_names(
 }
 
 /// Tab completion for Emoji shortcode names.
-fn complete_emoji(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
+fn complete_emoji(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
     let sc = text.get_prefix_word_mut(cursor, &WordStyle::Little);
     let sc = sc.unwrap_or_else(EditRope::empty);
     let sc = Cow::from(&sc);
 
-    store.application.emojis.complete(sc.as_ref())
+    store.emojis.complete(sc.as_ref())
 }
 
 /// Tab completion for command names.
@@ -2050,11 +2047,11 @@ fn complete_cmdname(
     desc: CommandDescription,
     text: &EditRope,
     cursor: &mut Cursor,
-    store: &ProgramStore,
+    store: &ChatStore,
 ) -> Vec<String> {
     // Complete command name and set cursor position.
     let _ = text.get_prefix_word_mut(cursor, &WordStyle::Little);
-    store.application.cmds.complete_name(desc.command.as_str())
+    store.cmds.complete_name(desc.command.as_str())
 }
 
 /// Tab completion for command arguments.
@@ -2062,9 +2059,9 @@ fn complete_cmdarg(
     desc: CommandDescription,
     text: &EditRope,
     cursor: &mut Cursor,
-    store: &ProgramStore,
+    store: &ChatStore,
 ) -> Vec<String> {
-    let cmd = match store.application.cmds.get(desc.command.as_str()) {
+    let cmd = match store.cmds.get(desc.command.as_str()) {
         Ok(cmd) => cmd,
         Err(_) => return vec![],
     };
@@ -2087,12 +2084,7 @@ fn complete_cmdarg(
 }
 
 /// Tab completion for commands.
-fn complete_cmd(
-    cmd: &str,
-    text: &EditRope,
-    cursor: &mut Cursor,
-    store: &ProgramStore,
-) -> Vec<String> {
+fn complete_cmd(cmd: &str, text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
     match CommandDescription::from_str(cmd) {
         Ok(desc) => {
             if desc.arg.untrimmed.is_empty() {
@@ -2109,7 +2101,7 @@ fn complete_cmd(
 }
 
 /// Tab completion for the command bar.
-fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ProgramStore) -> Vec<String> {
+fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
     let eo = text.cursor_to_offset(cursor);
     let slice = text.slice(..eo);
     let cow = Cow::from(&slice);
@@ -2289,6 +2281,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_complete_msgbar() {
         let store = mock_store().await;
+        let store = store.application;
 
         let text = EditRope::from("going for a walk :walk ");
         let mut cursor = Cursor::new(0, 22);
@@ -2312,6 +2305,7 @@ pub mod tests {
     #[tokio::test]
     async fn test_complete_cmdbar() {
         let store = mock_store().await;
+        let store = store.application;
         let users = vec![
             "@user1:example.com",
             "@user2:example.com",
