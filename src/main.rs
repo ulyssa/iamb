@@ -62,7 +62,7 @@ use modalkit::crossterm::{
 use ratatui::{
     backend::CrosstermBackend,
     layout::Rect,
-    style::{Color, Style},
+    style::{Color, Modifier, Style},
     text::Span,
     widgets::Paragraph,
     Terminal,
@@ -328,6 +328,9 @@ impl Application {
                 .show_dialog(dialogstr)
                 .show_mode(modestr)
                 .borders(true)
+                .border_style(Style::default().add_modifier(Modifier::DIM))
+                .tab_style(Style::default().add_modifier(Modifier::DIM))
+                .tab_style_focused(Style::default().remove_modifier(Modifier::DIM))
                 .focus(focused);
             f.render_stateful_widget(screen, area, sstate);
 
