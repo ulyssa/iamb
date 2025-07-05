@@ -1010,17 +1010,28 @@ impl Message {
         let width = fmt.width();
 
         // Show the message that this one replied to, if any.
-        let reply = self
-            .reply_to()
-            .or_else(|| self.thread_root())
-            .and_then(|e| info.get_event(&e));
+        let reply = self.reply_to().or_else(|| self.thread_root()).map(|e| info.get_event(&e));
         let proto_reply = reply.as_ref().and_then(|r| {
-            // Format the reply header, push it into the `Text` buffer, and get any image.
-            fmt.push_in_reply(r, style, &mut text, info, settings)
+            if let Some(r) = r {
+                // Format the reply header, push it into the `Text` buffer, and get any image.
+                fmt.push_in_reply(r, style, &mut text, info, settings)
+            } else {
+                fmt.push_spans(
+                    Line::from(vec![
+                        Span::styled(" ", style),
+                        Span::styled(THICK_VERTICAL, style),
+                        Span::styled("Original message not loaded", style),
+                        space_span(width.saturating_sub(29), style),
+                    ]),
+                    style,
+                    &mut text,
+                );
+                None
+            }
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings);
+        let (msg, proto) = self.show_msg(width, style, true, settings);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
