@@ -840,8 +840,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
     fn complete(
         &mut self,
+        _: &CompletionStyle,
         _: &CompletionType,
-        _: &CompletionSelection,
         _: &CompletionDisplay,
         _: &ProgramContext,
         _: &mut ProgramStore,

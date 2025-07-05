@@ -864,16 +864,16 @@ impl PromptActions<ProgramContext, ProgramStore, IambInfo> for ChatState {
 
     fn recall(
         &mut self,
+        filter: &RecallFilter,
         dir: &MoveDir1D,
         count: &Count,
-        prefixed: bool,
         ctx: &ProgramContext,
         _: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
         let count = ctx.resolve(count);
         let rope = self.tbox.get();
 
-        let text = self.sent.recall(&rope, &mut self.sent_scrollback, *dir, prefixed, count);
+        let text = self.sent.recall(&rope, &mut self.sent_scrollback, filter, *dir, count);
 
         if let Some(text) = text {
             self.tbox.set_text(text);
@@ -897,9 +897,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ChatState {
         match act {
             PromptAction::Submit => self.submit(ctx, store),
             PromptAction::Abort(empty) => self.abort(*empty, ctx, store),
-            PromptAction::Recall(dir, count, prefixed) => {
-                self.recall(dir, count, *prefixed, ctx, store)
-            },
+            PromptAction::Recall(filter, dir, count) => self.recall(filter, dir, count, ctx, store),
         }
     }
 }
