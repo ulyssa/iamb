@@ -524,11 +524,11 @@ impl StyleTree {
 }
 
 pub struct TreeGenState {
-    link_num: u8,
+    pub link_num: u8,
 }
 
 impl TreeGenState {
-    fn next_link_char(&mut self) -> Option<char> {
+    pub fn next_link_char(&mut self) -> Option<char> {
         let num = self.link_num;
 
         if num < 62 {

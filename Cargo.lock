@@ -2274,6 +2274,7 @@ dependencies = [
  "image",
  "lazy_static 1.5.0",
  "libc",
+ "linkify",
  "markup5ever_rcdom",
  "matrix-sdk",
  "mime",
@@ -2829,6 +2830,15 @@ dependencies = [
  "cc",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "linkify"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f1dfa36d52c581e9ec783a7ce2a5e0143da6237be5811a0b3153fedfdbe9f780"
+dependencies = [
+ "memchr",
 ]
 
 [[package]]

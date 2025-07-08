@@ -86,7 +86,14 @@ use crate::base::{
     SendAction,
 };
 
-use crate::message::{text_to_message, Message, MessageEvent, MessageKey, MessageTimeStamp};
+use crate::message::{
+    text_to_message,
+    Message,
+    MessageEvent,
+    MessageKey,
+    MessageTimeStamp,
+    TreeGenState,
+};
 use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
@@ -226,10 +233,14 @@ impl ChatState {
 
                             let links = if let Some(html) = &msg.html {
                                 html.get_links()
-                            } else if let Ok(url) = Url::parse(&msg.event.body()) {
-                                vec![('0', url)]
                             } else {
-                                vec![]
+                                linkify::LinkFinder::new()
+                                    .links(&msg.event.body())
+                                    .filter_map(|u| Url::parse(u.as_str()).ok())
+                                    .scan(TreeGenState { link_num: 0 }, |state, u| {
+                                        state.next_link_char().map(|c| (c, u))
+                                    })
+                                    .collect()
                             };
 
                             if links.is_empty() {
