@@ -1097,11 +1097,7 @@ impl Message {
 
         if self.event.is_edited() {
             fmt.push_spans(
-                Span::styled(
-                    "(edited)",
-                    style.fg(Color::Gray).remove_modifier(StyleModifier::REVERSED),
-                )
-                .into(),
+                Span::styled("(edited)", style.fg(Color::Gray)).into(),
                 style,
                 &mut text,
             );
