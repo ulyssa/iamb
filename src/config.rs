@@ -2,6 +2,7 @@
 use std::borrow::Cow;
 use std::collections::hash_map::DefaultHasher;
 use std::collections::{BTreeMap, HashMap};
+use std::env;
 use std::fmt;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
@@ -837,14 +838,22 @@ pub struct ApplicationSettings {
 }
 
 impl ApplicationSettings {
+    fn get_xdg_config_home() -> Option<PathBuf> {
+      env::var("XDG_CONFIG_HOME").ok().map(PathBuf::from)
+    }
+
     pub fn load(cli: Iamb) -> Result<Self, Box<dyn std::error::Error>> {
-        let mut config_dir = cli.config_directory.or_else(dirs::config_dir).unwrap_or_else(|| {
-            usage!(
-                "No user configuration directory found;\
-                please specify one via -C.\n\n
-                For more information try '--help'"
-            );
-        });
+        let mut config_dir = cli
+            .config_directory
+            .or_else(Self::get_xdg_config_home)
+            .or_else(dirs::config_dir)
+            .unwrap_or_else(|| {
+                usage!(
+                    "No user configuration directory found;\
+                    please specify one via -C.\n\n
+                    For more information try '--help'"
+                );
+            });
 
         config_dir.push("iamb");
         let config_json = config_dir.join("config.json");
