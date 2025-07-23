@@ -90,6 +90,7 @@ use modalkit::prelude::{EditInfo, InfoMessage};
 
 use crate::base::Need;
 use crate::notifications::register_notifications;
+use crate::preview::render_preview;
 use crate::{
     base::{
         AsyncProgramStore,
@@ -625,6 +626,7 @@ pub enum WorkerTask {
     TypingNotice(OwnedRoomId),
     Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
     VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
+    RenderImage(OwnedRoomId, OwnedEventId),
 }
 
 impl Debug for WorkerTask {
@@ -686,6 +688,12 @@ impl Debug for WorkerTask {
                 f.debug_tuple("WorkerTask::VerifyRequest")
                     .field(user_id)
                     .field(&format_args!("_"))
+                    .finish()
+            },
+            WorkerTask::RenderImage(room_id, message_id) => {
+                f.debug_tuple("WorkerTask::RenderImage")
+                    .field(room_id)
+                    .field(message_id)
                     .finish()
             },
         }
@@ -833,6 +841,10 @@ impl Requester {
 
         return response.recv();
     }
+
+    pub fn render_image(&self, room_id: OwnedRoomId, message_id: OwnedEventId) {
+        self.tx.send(WorkerTask::RenderImage(room_id, message_id)).unwrap();
+    }
 }
 
 pub struct ClientWorker {
@@ -841,6 +853,9 @@ pub struct ClientWorker {
     client: Client,
     load_handle: Option<JoinHandle<()>>,
     sync_handle: Option<JoinHandle<()>>,
+
+    /// Take care when locking since worker commands are sent with the lock already hold
+    store: Option<AsyncProgramStore>,
 }
 
 impl ClientWorker {
@@ -853,6 +868,7 @@ impl ClientWorker {
             client: client.clone(),
             load_handle: None,
             sync_handle: None,
+            store: None,
         };
 
         tokio::spawn(async move {
@@ -925,6 +941,10 @@ impl ClientWorker {
             WorkerTask::VerifyRequest(user_id, reply) => {
                 assert!(self.initialized);
                 reply.send(self.verify_request(user_id).await);
+            },
+            WorkerTask::RenderImage(room_id, message_id) => {
+                assert!(self.initialized);
+                tokio::spawn(render_preview(self.store.clone().unwrap(), room_id, message_id));
             },
         }
     }
@@ -1238,6 +1258,8 @@ impl ClientWorker {
                 }
             },
         );
+
+        self.store = Some(store.clone());
 
         self.load_handle = tokio::spawn({
             let client = self.client.clone();
