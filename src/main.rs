@@ -596,6 +596,9 @@ impl Application {
                 None
             },
             IambAction::Send(act) => {
+                if store.application.settings.tunables.normal_after_send {
+                    self.bindings.reset_mode();
+                }
                 self.screen.current_window_mut()?.send_command(act, ctx, store).await?
             },
 
