@@ -72,6 +72,7 @@ mod state;
 
 pub use self::compose::text_to_message;
 use self::state::{body_cow_state, html_state};
+pub use html::TreeGenState;
 
 type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
