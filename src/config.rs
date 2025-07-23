@@ -557,6 +557,7 @@ impl SortOverrides {
 pub struct TunableValues {
     pub log_level: Level,
     pub message_shortcode_display: bool,
+    pub normal_after_send: bool,
     pub reaction_display: bool,
     pub reaction_shortcode_display: bool,
     pub read_receipt_send: bool,
@@ -583,6 +584,7 @@ pub struct TunableValues {
 pub struct Tunables {
     pub log_level: Option<LogLevel>,
     pub message_shortcode_display: Option<bool>,
+    pub normal_after_send: Option<bool>,
     pub reaction_display: Option<bool>,
     pub reaction_shortcode_display: Option<bool>,
     pub read_receipt_send: Option<bool>,
@@ -613,6 +615,7 @@ impl Tunables {
             message_shortcode_display: self
                 .message_shortcode_display
                 .or(other.message_shortcode_display),
+            normal_after_send: self.normal_after_send.or(other.normal_after_send),
             reaction_display: self.reaction_display.or(other.reaction_display),
             reaction_shortcode_display: self
                 .reaction_shortcode_display
@@ -644,6 +647,7 @@ impl Tunables {
         TunableValues {
             log_level: self.log_level.map(Level::from).unwrap_or(Level::INFO),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
+            normal_after_send: self.normal_after_send.unwrap_or(false),
             reaction_display: self.reaction_display.unwrap_or(true),
             reaction_shortcode_display: self.reaction_shortcode_display.unwrap_or(false),
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
