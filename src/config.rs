@@ -839,7 +839,7 @@ pub struct ApplicationSettings {
 
 impl ApplicationSettings {
     fn get_xdg_config_home() -> Option<PathBuf> {
-      env::var("XDG_CONFIG_HOME").ok().map(PathBuf::from)
+        env::var("XDG_CONFIG_HOME").ok().map(PathBuf::from)
     }
 
     pub fn load(cli: Iamb) -> Result<Self, Box<dyn std::error::Error>> {
