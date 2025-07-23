@@ -28,13 +28,15 @@ const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
 /// Handle for an open notification that should be closed when the user views it.
 pub struct NotificationHandle(
     #[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
-    notify_rust::NotificationHandle,
+    Option<notify_rust::NotificationHandle>,
 );
 
-impl NotificationHandle {
-    pub fn close(self) {
+impl Drop for NotificationHandle {
+    fn drop(&mut self) {
         #[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
-        self.0.close();
+        if let Some(handle) = self.0.take() {
+            handle.close();
+        }
     }
 }
 
@@ -83,10 +85,10 @@ pub async fn register_notifications(
 
                                 send_notification(
                                     &notify_via,
-                                    &store,
                                     &summary,
                                     body.as_deref(),
                                     room_id,
+                                    &store,
                                 )
                                 .await;
                             },
@@ -107,14 +109,14 @@ pub async fn register_notifications(
 
 async fn send_notification(
     via: &NotifyVia,
-    store: &AsyncProgramStore,
     summary: &str,
     body: Option<&str>,
     room_id: OwnedRoomId,
+    store: &AsyncProgramStore,
 ) {
     #[cfg(feature = "desktop")]
     if via.desktop {
-        send_notification_desktop(store, summary, body, room_id).await;
+        send_notification_desktop(summary, body, room_id, store).await;
     }
     #[cfg(not(feature = "desktop"))]
     {
@@ -133,10 +135,10 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
 
 #[cfg(feature = "desktop")]
 async fn send_notification_desktop(
-    store: &AsyncProgramStore,
     summary: &str,
     body: Option<&str>,
     room_id: OwnedRoomId,
+    _store: &AsyncProgramStore,
 ) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
@@ -155,14 +157,15 @@ async fn send_notification_desktop(
     match desktop_notification.show() {
         Err(err) => tracing::error!("Failed to send notification: {err}"),
         Ok(handle) => {
-            let mut locked = store.lock().await;
             #[cfg(all(unix, not(target_os = "macos")))]
-            locked
+            _store
+                .lock()
+                .await
                 .application
                 .open_notifications
                 .entry(room_id)
                 .or_default()
-                .push(NotificationHandle(handle));
+                .push(NotificationHandle(Some(handle)));
         },
     }
 }

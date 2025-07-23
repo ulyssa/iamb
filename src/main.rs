@@ -557,6 +557,9 @@ impl Application {
             IambAction::ClearUnreads => {
                 let user_id = &store.application.settings.profile.user_id;
 
+                // Clear any notifications we displayed:
+                store.application.open_notifications.clear();
+
                 for room_id in store.application.sync_info.chats() {
                     if let Some(room) = store.application.rooms.get_mut(room_id) {
                         room.fully_read(user_id);

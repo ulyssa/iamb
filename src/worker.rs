@@ -507,20 +507,17 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
         let user_id = &settings.profile.user_id;
 
         let mut updates = Vec::new();
-        let mut notifications = Vec::new();
         for room in client.joined_rooms() {
-            let room_id = room.room_id().to_owned();
-            let Some(info) = rooms.get(&room_id) else {
+            let room_id = room.room_id();
+            let Some(info) = rooms.get(room_id) else {
                 continue;
             };
 
             let changed = info.receipts(user_id).filter_map(|(thread, new_receipt)| {
-                let old_receipt = sent.get(&room_id).and_then(|ts| ts.get(thread));
+                let old_receipt = sent.get(room_id).and_then(|ts| ts.get(thread));
                 let changed = Some(new_receipt) != old_receipt;
                 if changed {
-                    if let Some(notification) = open_notifications.remove(&room_id) {
-                        notifications.extend(notification);
-                    }
+                    open_notifications.remove(room_id);
                 }
                 changed.then(|| (room_id.to_owned(), thread.to_owned(), new_receipt.to_owned()))
             });
@@ -528,10 +525,6 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
             updates.extend(changed);
         }
         drop(locked);
-
-        for notification in notifications {
-            notification.close();
-        }
 
         for (room_id, thread, new_receipt) in updates {
             use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
