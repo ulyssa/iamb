@@ -502,19 +502,23 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
     loop {
         interval.tick().await;
 
-        let locked = store.lock().await;
-        let user_id = &locked.application.settings.profile.user_id;
+        let mut locked = store.lock().await;
+        let ChatStore { settings, open_notifications, rooms, .. } = &mut locked.application;
+        let user_id = &settings.profile.user_id;
 
         let mut updates = Vec::new();
         for room in client.joined_rooms() {
             let room_id = room.room_id();
-            let Some(info) = locked.application.rooms.get(&room_id) else {
+            let Some(info) = rooms.get(room_id) else {
                 continue;
             };
 
             let changed = info.receipts(user_id).filter_map(|(thread, new_receipt)| {
                 let old_receipt = sent.get(room_id).and_then(|ts| ts.get(thread));
                 let changed = Some(new_receipt) != old_receipt;
+                if changed {
+                    open_notifications.remove(room_id);
+                }
                 changed.then(|| (room_id.to_owned(), thread.to_owned(), new_receipt.to_owned()))
             });
 
