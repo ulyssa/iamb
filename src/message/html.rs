@@ -41,6 +41,8 @@ use crate::{
     util::{join_cell_text, space_text},
 };
 
+const QUOTE_COLOR: Color = Color::Indexed(236);
+
 /// Generate bullet points from a [ListStyle].
 pub struct BulletIterator {
     style: ListStyle,
@@ -351,11 +353,14 @@ impl StyleTreeNode {
                 printer.push_span_nobreak(span);
             },
             StyleTreeNode::Blockquote(child) => {
-                let mut subp = printer.sub(4);
+                let mut subp = printer.sub(3);
                 child.print(&mut subp, style);
 
                 for mut line in subp.finish() {
-                    line.spans.insert(0, Span::styled("    ", style));
+                    line.spans.insert(0, Span::styled(" ", style));
+                    line.spans
+                        .insert(0, Span::styled(line::THICK_VERTICAL, style.fg(QUOTE_COLOR)));
+                    line.spans.insert(0, Span::styled(" ", style));
                     printer.push_line(line);
                 }
             },
@@ -1075,14 +1080,29 @@ pub mod tests {
         let s = "<blockquote>Hello world!</blockquote>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(10, Style::default(), false, &settings);
+        let style = Style::new().fg(QUOTE_COLOR);
         assert_eq!(text.lines.len(), 2);
         assert_eq!(
             text.lines[0],
-            Line::from(vec![Span::raw("    "), Span::raw("Hello"), Span::raw(" ")])
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled(line::THICK_VERTICAL, style),
+                Span::raw(" "),
+                Span::raw("Hello"),
+                Span::raw(" "),
+                Span::raw(" "),
+            ])
         );
         assert_eq!(
             text.lines[1],
-            Line::from(vec![Span::raw("    "), Span::raw("world"), Span::raw("!")])
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled(line::THICK_VERTICAL, style),
+                Span::raw(" "),
+                Span::raw("world"),
+                Span::raw("!"),
+                Span::raw(" "),
+            ])
         );
     }
 
