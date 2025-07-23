@@ -88,7 +88,7 @@ use matrix_sdk::{
 use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
-use crate::base::Need;
+use crate::base::MessageNeed;
 use crate::notifications::register_notifications;
 use crate::{
     base::{
@@ -216,7 +216,7 @@ async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id:
 
 #[derive(Debug)]
 enum Plan {
-    Messages(OwnedRoomId, Option<String>),
+    Messages(OwnedRoomId, Option<String>, Vec<MessageNeed>),
     Members(OwnedRoomId),
 }
 
@@ -225,8 +225,8 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
     let ChatStore { need_load, rooms, .. } = &mut locked.application;
     let mut plan = Vec::with_capacity(need_load.rooms() * 2);
 
-    for (room_id, mut need) in std::mem::take(need_load).into_iter() {
-        if need.contains(Need::MESSAGES) {
+    for (room_id, need) in std::mem::take(need_load).into_iter() {
+        if let Some(message_need) = need.messages {
             let info = rooms.get_or_default(room_id.clone());
 
             if !info.recently_fetched() && !info.fetching {
@@ -239,16 +239,11 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
                     RoomFetchStatus::NotStarted => None,
                 };
 
-                plan.push(Plan::Messages(room_id.to_owned(), fetch_id));
-                need.remove(Need::MESSAGES);
+                plan.push(Plan::Messages(room_id.to_owned(), fetch_id, message_need));
             }
         }
-        if need.contains(Need::MEMBERS) {
+        if need.members {
             plan.push(Plan::Members(room_id.to_owned()));
-            need.remove(Need::MEMBERS);
-        }
-        if !need.is_empty() {
-            need_load.insert(room_id, need);
         }
     }
 
@@ -258,14 +253,14 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
 async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permits: &Semaphore) {
     let permit = permits.acquire().await;
     match plan {
-        Plan::Messages(room_id, fetch_id) => {
+        Plan::Messages(room_id, fetch_id, message_need) => {
             let limit = MIN_MSG_LOAD;
             let client = client.clone();
             let store_clone = store.clone();
 
             let res = load_older_one(&client, &room_id, fetch_id, limit).await;
             let mut locked = store.lock().await;
-            load_insert(room_id, res, locked.deref_mut(), store_clone);
+            load_insert(room_id, res, locked.deref_mut(), store_clone, message_need);
         },
         Plan::Members(room_id) => {
             let res = members_load(client, &room_id).await;
@@ -325,6 +320,7 @@ fn load_insert(
     res: MessageFetchResult,
     locked: &mut ProgramStore,
     store: AsyncProgramStore,
+    message_needs: Vec<MessageNeed>,
 ) {
     let ChatStore { presences, rooms, worker, picker, settings, .. } = &mut locked.application;
     let info = rooms.get_or_default(room_id.clone());
@@ -370,12 +366,25 @@ fn load_insert(
             }
 
             info.fetch_id = fetch_id.map_or(RoomFetchStatus::Done, RoomFetchStatus::HaveMore);
+
+            // check if more are needed
+            let needs: Vec<_> = message_needs
+                .into_iter()
+                .filter(|need| !info.keys.contains_key(&need.event_id) && need.ttl > 0)
+                .map(|mut need| {
+                    need.ttl -= 1;
+                    need
+                })
+                .collect();
+            if !needs.is_empty() {
+                locked.application.need_load.need_messages_all(room_id, needs);
+            }
         },
         Err(e) => {
             warn!(room_id = room_id.as_str(), err = e.to_string(), "Failed to load older messages");
 
             // Wait and try again.
-            locked.application.need_load.insert(room_id, Need::MESSAGES);
+            locked.application.need_load.need_messages_all(room_id, message_needs);
         },
     }
 }
@@ -570,12 +579,12 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
 
     for room in sync_info.rooms.iter() {
         let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.insert(room_id, Need::MESSAGES);
+        need_load.need_messages(room_id);
     }
 
     for room in sync_info.dms.iter() {
         let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.insert(room_id, Need::MESSAGES);
+        need_load.need_messages(room_id);
     }
 
     Ok(())

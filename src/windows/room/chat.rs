@@ -450,6 +450,21 @@ impl ChatState {
 
                 Ok(None)
             },
+            MessageAction::Replied => {
+                let Some(reply) = msg.reply_to() else {
+                    let msg = "Selected message is not a reply";
+                    return Err(UIError::Failure(msg.into()));
+                };
+
+                let Some(key) = info.get_message_key(&reply) else {
+                    store.application.need_load.need_message(self.room_id.clone(), reply);
+                    let msg = "Replied to message will be loaded in the background";
+                    return Err(UIError::Failure(msg.into()));
+                };
+
+                self.scrollback.goto_message(key.clone());
+                Ok(None)
+            },
             MessageAction::Unreact(reaction, literal) => {
                 let emoji = match reaction {
                     reaction if literal => reaction,
