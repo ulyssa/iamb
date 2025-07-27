@@ -1098,7 +1098,10 @@ impl Message {
 
         if self.event.is_edited() {
             fmt.push_spans(
-                Span::styled("(edited)", style.fg(Color::Gray)).into(),
+                Line::from(vec![
+                    Span::styled("(edited)", style.fg(Color::Gray)),
+                    space_span(fmt.width() - 8, style),
+                ]),
                 style,
                 &mut text,
             );
