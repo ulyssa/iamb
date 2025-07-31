@@ -50,6 +50,7 @@ pub async fn register_notifications(
     }
     let notify_via = settings.tunables.notifications.via;
     let show_message = settings.tunables.notifications.show_message;
+    let play_sound = settings.tunables.notifications.play_sound;
     let server_settings = client.notification_settings().await;
     let Some(startup_ts) = MilliSecondsSinceUnixEpoch::from_system_time(SystemTime::now()) else {
         return;
@@ -89,6 +90,7 @@ pub async fn register_notifications(
                                     body.as_deref(),
                                     room_id,
                                     &store,
+                                    play_sound,
                                 )
                                 .await;
                             },
@@ -113,10 +115,11 @@ async fn send_notification(
     body: Option<&str>,
     room_id: OwnedRoomId,
     store: &AsyncProgramStore,
+    play_sound: bool,
 ) {
     #[cfg(feature = "desktop")]
     if via.desktop {
-        send_notification_desktop(summary, body, room_id, store).await;
+        send_notification_desktop(summary, body, room_id, store, play_sound).await;
     }
     #[cfg(not(feature = "desktop"))]
     {
@@ -139,6 +142,7 @@ async fn send_notification_desktop(
     body: Option<&str>,
     room_id: OwnedRoomId,
     _store: &AsyncProgramStore,
+    play_sound: bool,
 ) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
@@ -146,6 +150,10 @@ async fn send_notification_desktop(
         .appname(IAMB_XDG_NAME)
         .icon(IAMB_XDG_NAME)
         .action("default", "default");
+
+    if play_sound {
+        desktop_notification.sound_name("message-new-instant");
+    }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     desktop_notification.urgency(notify_rust::Urgency::Normal);
