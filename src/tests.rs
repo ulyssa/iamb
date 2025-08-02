@@ -196,7 +196,7 @@ pub fn mock_tunables() -> TunableValues {
             enabled: false,
             via: NotifyVia::default(),
             show_message: true,
-            play_sound: false,
+            sound_hint: String::from(""),
         },
         image_preview: None,
         user_gutter_width: 30,
