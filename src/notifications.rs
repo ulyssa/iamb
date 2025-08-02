@@ -91,7 +91,7 @@ pub async fn register_notifications(
                                     body.as_deref(),
                                     room_id,
                                     &store,
-                                    sound_hint,
+                                    sound_hint.as_deref(),
                                 )
                                 .await;
                             },
@@ -116,7 +116,7 @@ async fn send_notification(
     body: Option<&str>,
     room_id: OwnedRoomId,
     store: &AsyncProgramStore,
-    sound_hint: String,
+    sound_hint: Option<&str>,
 ) {
     #[cfg(feature = "desktop")]
     if via.desktop {
@@ -143,7 +143,7 @@ async fn send_notification_desktop(
     body: Option<&str>,
     room_id: OwnedRoomId,
     _store: &AsyncProgramStore,
-    sound_hint: String,
+    sound_hint: Option<&str>,
 ) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
@@ -152,8 +152,8 @@ async fn send_notification_desktop(
         .icon(IAMB_XDG_NAME)
         .action("default", "default");
 
-    if !sound_hint.is_empty() {
-        desktop_notification.sound_name(sound_hint.as_str());
+    if let Some(sound_hint) = sound_hint {
+        desktop_notification.sound_name(sound_hint);
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
