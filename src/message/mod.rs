@@ -1348,10 +1348,19 @@ pub mod tests {
             )
         );
 
-        assert_eq!(placeholder_frame(None, 2, &ImagePreviewSize { width: 4, height: 4 }), None);
-        assert_eq!(placeholder_frame(None, 4, &ImagePreviewSize { width: 1, height: 4 }), None);
+        assert_eq!(
+            placeholder_frame(None, 2, &ImagePreviewSize { width: 4, height: 4 }),
+            None
+        );
+        assert_eq!(
+            placeholder_frame(None, 4, &ImagePreviewSize { width: 1, height: 4 }),
+            None
+        );
 
-        assert_eq!(placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 1 }), None);
+        assert_eq!(
+            placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 1 }),
+            None
+        );
 
         assert_eq!(
             placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 4 }),
@@ -1392,7 +1401,10 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("idontfit"), 4, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(Some("idontfit"), 4, &ImagePreviewSize {
+                width: 4,
+                height: 4
+            }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍

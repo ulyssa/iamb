@@ -1052,8 +1052,10 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("room tag set u.irc", ctx.clone()).unwrap();
-        let act =
-            RoomAction::Set(RoomField::Tag(TagName::User("u.irc".parse().unwrap())), "".into());
+        let act = RoomAction::Set(
+            RoomField::Tag(TagName::User("u.irc".parse().unwrap())),
+            "".into(),
+        );
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("room tag", ctx.clone());
@@ -1063,12 +1065,17 @@ mod tests {
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
         let res = cmds.input_cmd("room tag set unknown", ctx.clone());
-        assert_eq!(res, Err(CommandError::Error("Invalid user tag name: unknown".into())));
+        assert_eq!(
+            res,
+            Err(CommandError::Error("Invalid user tag name: unknown".into()))
+        );
 
         let res = cmds.input_cmd("room tag set needs-leading-u-dot", ctx.clone());
         assert_eq!(
             res,
-            Err(CommandError::Error("Invalid user tag name: needs-leading-u-dot".into()))
+            Err(CommandError::Error(
+                "Invalid user tag name: needs-leading-u-dot".into()
+            ))
         );
     }
 
@@ -1114,7 +1121,9 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("room tag unset u.custom-tag", ctx.clone()).unwrap();
-        let act = RoomAction::Unset(RoomField::Tag(TagName::User("u.custom-tag".parse().unwrap())));
+        let act = RoomAction::Unset(RoomField::Tag(TagName::User(
+            "u.custom-tag".parse().unwrap(),
+        )));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("room tag unset u.irc", ctx.clone()).unwrap();
@@ -1128,12 +1137,17 @@ mod tests {
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
         let res = cmds.input_cmd("room tag unset unknown", ctx.clone());
-        assert_eq!(res, Err(CommandError::Error("Invalid user tag name: unknown".into())));
+        assert_eq!(
+            res,
+            Err(CommandError::Error("Invalid user tag name: unknown".into()))
+        );
 
         let res = cmds.input_cmd("room tag unset needs-leading-u-dot", ctx.clone());
         assert_eq!(
             res,
-            Err(CommandError::Error("Invalid user tag name: needs-leading-u-dot".into()))
+            Err(CommandError::Error(
+                "Invalid user tag name: needs-leading-u-dot".into()
+            ))
         );
     }
 
@@ -1212,12 +1226,19 @@ mod tests {
         let res = cmds.input_cmd(cmd, ctx.clone());
         assert_eq!(
             res,
-            Err(CommandError::Error("Multiple ++order arguments are not allowed".into()))
+            Err(CommandError::Error(
+                "Multiple ++order arguments are not allowed".into()
+            ))
         );
 
         let cmd = "space child set !roomid:example.org !otherroom:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone());
-        assert_eq!(res, Err(CommandError::Error("Multiple room arguments are not allowed".into())));
+        assert_eq!(
+            res,
+            Err(CommandError::Error(
+                "Multiple room arguments are not allowed".into()
+            ))
+        );
 
         let cmd = "space child set ++foo=abcd !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone());
@@ -1233,11 +1254,17 @@ mod tests {
 
         let cmd = "space child set foo";
         let res = cmds.input_cmd(cmd, ctx.clone());
-        assert_eq!(res, Err(CommandError::Error("Invalid room id specified".into())));
+        assert_eq!(
+            res,
+            Err(CommandError::Error("Invalid room id specified".into()))
+        );
 
         let cmd = "space child set";
         let res = cmds.input_cmd(cmd, ctx.clone());
-        assert_eq!(res, Err(CommandError::Error("Must specify a room to add".into())));
+        assert_eq!(
+            res,
+            Err(CommandError::Error("Must specify a room to add".into()))
+        );
     }
 
     #[test]
@@ -1269,8 +1296,9 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("invite send @user:example.com", ctx.clone()).unwrap();
-        let act =
-            IambAction::Room(RoomAction::InviteSend(user_id!("@user:example.com").to_owned()));
+        let act = IambAction::Room(RoomAction::InviteSend(
+            user_id!("@user:example.com").to_owned(),
+        ));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("invite", ctx.clone());

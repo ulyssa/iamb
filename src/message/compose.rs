@@ -83,10 +83,18 @@ impl SlashCommand {
                 MessageType::new("io.element.effect.hearts", input.into(), Default::default())?
             },
             SlashCommand::Rainfall => {
-                MessageType::new("io.element.effect.rainfall", input.into(), Default::default())?
+                MessageType::new(
+                    "io.element.effect.rainfall",
+                    input.into(),
+                    Default::default(),
+                )?
             },
             SlashCommand::Snowfall => {
-                MessageType::new("io.element.effect.snowfall", input.into(), Default::default())?
+                MessageType::new(
+                    "io.element.effect.snowfall",
+                    input.into(),
+                    Default::default(),
+                )?
             },
             SlashCommand::SpaceInvaders => {
                 MessageType::new(
@@ -214,17 +222,26 @@ pub mod tests {
         let input = "**bold**\n";
         let content = text_to_message_content(input.into());
         assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p><strong>bold</strong></p>\n");
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p><strong>bold</strong></p>\n"
+        );
 
         let input = "*emphasis*\n";
         let content = text_to_message_content(input.into());
         assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p><em>emphasis</em></p>\n");
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p><em>emphasis</em></p>\n"
+        );
 
         let input = "`code`\n";
         let content = text_to_message_content(input.into());
         assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p><code>code</code></p>\n");
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p><code>code</code></p>\n"
+        );
 
         let input = "```rust\nconst A: usize = 1;\n```\n";
         let content = text_to_message_content(input.into());
@@ -250,7 +267,10 @@ pub mod tests {
         let input = "line 1\nline ~~2~~\n";
         let content = text_to_message_content(input.into());
         assert_eq!(content.body, input);
-        assert_eq!(content.formatted.unwrap().body, "<p>line 1<br />\nline <del>2</del></p>\n");
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p>line 1<br />\nline <del>2</del></p>\n"
+        );
 
         let input = "# Heading\n## Subheading\n\ntext\n";
         let content = text_to_message_content(input.into());

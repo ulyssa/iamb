@@ -1032,7 +1032,12 @@ impl ApplicationSettings {
         self.tunables
             .users
             .get(user_id)
-            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
+            .map(|user| {
+                (
+                    user.color.as_ref().map(|c| c.0),
+                    user.name.clone().map(Cow::Owned),
+                )
+            })
             .unwrap_or_default()
     }
 
@@ -1297,7 +1302,10 @@ mod tests {
 
     #[test]
     fn test_parse_notify_via() {
-        assert_eq!(NotifyVia { bell: false, desktop: true }, NotifyVia::default());
+        assert_eq!(
+            NotifyVia { bell: false, desktop: true },
+            NotifyVia::default()
+        );
         assert_eq!(
             NotifyVia { bell: false, desktop: true },
             serde_json::from_str(r#""desktop""#).unwrap()

@@ -119,7 +119,11 @@ const MIN_MSG_LOAD: u32 = 50;
 type MessageFetchResult = IambResult<(Option<String>, Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>)>;
 
 fn initial_devname() -> String {
-    format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
+    format!(
+        "{} on {}",
+        IAMB_DEVICE_NAME,
+        gethostname().to_string_lossy()
+    )
 }
 
 async fn is_direct(room: &MatrixRoom) -> bool {
@@ -372,7 +376,11 @@ fn load_insert(
             info.fetch_id = fetch_id.map_or(RoomFetchStatus::Done, RoomFetchStatus::HaveMore);
         },
         Err(e) => {
-            warn!(room_id = room_id.as_str(), err = e.to_string(), "Failed to load older messages");
+            warn!(
+                room_id = room_id.as_str(),
+                err = e.to_string(),
+                "Failed to load older messages"
+            );
 
             // Wait and try again.
             locked.application.need_load.insert(room_id, Need::MESSAGES);
@@ -519,7 +527,13 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
                 if changed {
                     open_notifications.remove(room_id);
                 }
-                changed.then(|| (room_id.to_owned(), thread.to_owned(), new_receipt.to_owned()))
+                changed.then(|| {
+                    (
+                        room_id.to_owned(),
+                        thread.to_owned(),
+                        new_receipt.to_owned(),
+                    )
+                })
             });
 
             updates.extend(changed);
@@ -623,7 +637,11 @@ pub enum WorkerTask {
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     TypingNotice(OwnedRoomId),
-    Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
+    Verify(
+        VerifyAction,
+        SasVerification,
+        ClientReply<IambResult<EditInfo>>,
+    ),
     VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
 }
 

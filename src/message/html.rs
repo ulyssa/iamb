@@ -1062,7 +1062,10 @@ pub mod tests {
             Line::from(vec![Span::raw("world"), Span::raw("!"), Span::raw("    ")])
         );
         assert_eq!(text.lines[2], Line::from(vec![Span::raw("          ")]));
-        assert_eq!(text.lines[3], Line::from(vec![Span::raw("Content"), Span::raw("   ")]));
+        assert_eq!(
+            text.lines[3],
+            Line::from(vec![Span::raw("Content"), Span::raw("   ")])
+        );
         assert_eq!(text.lines[4], Line::from(vec![Span::raw("          ")]));
         assert_eq!(
             text.lines[5],
@@ -1406,8 +1409,14 @@ pub mod tests {
         let tree = parse_matrix_html(s);
         let text = tree.to_text(7, Style::default(), true, &settings);
         assert_eq!(text.lines.len(), 3);
-        assert_eq!(text.lines[0], Line::from(vec![Span::raw("Hello"), Span::raw("  "),]));
-        assert_eq!(text.lines[1], Line::from(vec![Span::raw("World"), Span::raw("  "),]));
+        assert_eq!(
+            text.lines[0],
+            Line::from(vec![Span::raw("Hello"), Span::raw("  "),])
+        );
+        assert_eq!(
+            text.lines[1],
+            Line::from(vec![Span::raw("World"), Span::raw("  "),])
+        );
         assert_eq!(text.lines[2], Line::from(vec![Span::raw("Goodbye")]),);
     }
 

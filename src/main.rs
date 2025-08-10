@@ -689,7 +689,10 @@ impl Application {
                     .await
                     .map_err(IambError::from)?;
 
-                let msg = format!("Imported {} of {} keys", res.imported_count, res.total_count);
+                let msg = format!(
+                    "Imported {} of {} keys",
+                    res.imported_count, res.total_count
+                );
 
                 Ok(Some(msg.into()))
             },
@@ -880,7 +883,10 @@ async fn check_import_keys(
     let keys = sled_export::export_room_keys(&settings.sled_dir).await?;
     let passphrase = gen_passphrase();
 
-    println!("* Encrypting {} room keys with the passphrase {passphrase:?}...", keys.len());
+    println!(
+        "* Encrypting {} room keys with the passphrase {passphrase:?}...",
+        keys.len()
+    );
 
     let encrypted = match encrypt_room_key_export(&keys, &passphrase, 500000) {
         Ok(encrypted) => encrypted,
@@ -986,7 +992,12 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
         crossterm::execute!(stdout(), EnableMouseCapture)?;
     }
 
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
+    crossterm::execute!(
+        stdout(),
+        EnableBracketedPaste,
+        EnableFocusChange,
+        SetTitle(title)
+    )
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.

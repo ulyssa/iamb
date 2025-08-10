@@ -177,7 +177,10 @@ pub mod tests {
 
         let mut iter = wrap(s, 100);
         assert_eq!(iter.next(), Some((Cow::Borrowed("hello world!"), 12)));
-        assert_eq!(iter.next(), Some((Cow::Borrowed("abcdefghijklmnopqrstuvwxyz"), 26)));
+        assert_eq!(
+            iter.next(),
+            Some((Cow::Borrowed("abcdefghijklmnopqrstuvwxyz"), 26))
+        );
         assert_eq!(iter.next(), Some((Cow::Borrowed("goodbye"), 7)));
         assert_eq!(iter.next(), None);
 

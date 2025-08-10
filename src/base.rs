@@ -1219,9 +1219,10 @@ impl RoomInfo {
         self.insert(ev);
 
         if let Some((event_id, source)) = source {
-            if let (Some(msg), Some(image_preview)) =
-                (self.get_event_mut(&event_id), &settings.tunables.image_preview)
-            {
+            if let (Some(msg), Some(image_preview)) = (
+                self.get_event_mut(&event_id),
+                &settings.tunables.image_preview,
+            ) {
                 msg.image_preview = ImageStatus::Downloading(image_preview.size.clone());
                 spawn_insert_preview(
                     store,
@@ -2249,12 +2250,18 @@ pub mod tests {
         // Four users typing.
         info.set_typing(users4);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Line::from("Several people are typing..."));
+        assert_eq!(
+            info.get_typing_spans(&settings),
+            Line::from("Several people are typing...")
+        );
 
         // Five users typing.
         info.set_typing(users5);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Line::from("Many people are typing..."));
+        assert_eq!(
+            info.get_typing_spans(&settings),
+            Line::from("Many people are typing...")
+        );
 
         // Test that USER5 gets rendered using the configured color and name.
         info.set_typing(vec![TEST_USER5.clone()]);
@@ -2277,10 +2284,10 @@ pub mod tests {
         need_load.insert(room_id.clone(), Need::MESSAGES);
         need_load.insert(room_id.clone(), Need::MEMBERS);
 
-        assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
-            room_id,
-            Need::MESSAGES | Need::MEMBERS,
-        )],);
+        assert_eq!(
+            need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(),
+            vec![(room_id, Need::MESSAGES | Need::MEMBERS,)],
+        );
     }
 
     #[tokio::test]
