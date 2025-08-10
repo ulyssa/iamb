@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
@@ -1077,6 +1077,11 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
 fn main() -> IambResult<()> {
     // Parse command-line flags.
     let iamb = Iamb::parse();
+
+    if let Some(shell) = iamb.completions {
+        clap_complete::generate(shell, &mut Iamb::command(), "iamb", &mut std::io::stdout());
+        return Ok(());
+    }
 
     // Load configuration and set up the Matrix SDK.
     let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);

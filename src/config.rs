@@ -130,6 +130,9 @@ const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
 #[clap(version = VERSION, about, long_about = None)]
 #[clap(propagate_version = true)]
 pub struct Iamb {
+    #[clap(long, value_parser)]
+    pub completions: Option<clap_complete::Shell>,
+
     #[clap(short = 'P', long, value_parser)]
     pub profile: Option<String>,
 
