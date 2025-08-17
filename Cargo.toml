@@ -31,6 +31,7 @@ anyhow = "1.0"
 bitflags = "^2.3"
 chrono = "0.4"
 clap = {version = "~4.3", features = ["derive"]}
+clap_complete = "~4.3"
 css-color-parser = "0.1.2"
 dirs = "4.0.0"
 emojis = "0.5"

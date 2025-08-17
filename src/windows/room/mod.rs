@@ -592,7 +592,10 @@ impl RoomState {
                     RoomField::History => {
                         let visibility = room.history_visibility();
                         let visibility = visibility.as_ref().map(|v| v.as_str());
-                        format!("Room history visibility: {}", visibility.unwrap_or("<unknown>"))
+                        format!(
+                            "Room history visibility: {}",
+                            visibility.unwrap_or("<unknown>")
+                        )
                     },
                     RoomField::Id => {
                         let id = room.room_id();

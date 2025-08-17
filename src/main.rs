@@ -26,7 +26,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use clap::Parser;
+use clap::{CommandFactory, Parser};
 use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
@@ -689,7 +689,10 @@ impl Application {
                     .await
                     .map_err(IambError::from)?;
 
-                let msg = format!("Imported {} of {} keys", res.imported_count, res.total_count);
+                let msg = format!(
+                    "Imported {} of {} keys",
+                    res.imported_count, res.total_count
+                );
 
                 Ok(Some(msg.into()))
             },
@@ -880,7 +883,10 @@ async fn check_import_keys(
     let keys = sled_export::export_room_keys(&settings.sled_dir).await?;
     let passphrase = gen_passphrase();
 
-    println!("* Encrypting {} room keys with the passphrase {passphrase:?}...", keys.len());
+    println!(
+        "* Encrypting {} room keys with the passphrase {passphrase:?}...",
+        keys.len()
+    );
 
     let encrypted = match encrypt_room_key_export(&keys, &passphrase, 500000) {
         Ok(encrypted) => encrypted,
@@ -986,7 +992,12 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
         crossterm::execute!(stdout(), EnableMouseCapture)?;
     }
 
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
+    crossterm::execute!(
+        stdout(),
+        EnableBracketedPaste,
+        EnableFocusChange,
+        SetTitle(title)
+    )
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
@@ -1077,6 +1088,11 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
 fn main() -> IambResult<()> {
     // Parse command-line flags.
     let iamb = Iamb::parse();
+
+    if let Some(shell) = iamb.completions {
+        clap_complete::generate(shell, &mut Iamb::command(), "iamb", &mut std::io::stdout());
+        return Ok(());
+    }
 
     // Load configuration and set up the Matrix SDK.
     let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);

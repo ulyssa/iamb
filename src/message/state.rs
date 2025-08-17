@@ -154,7 +154,10 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
             content,
             ..
         }) => {
-            format!("* set guest access for the room to {:?}", content.guest_access.as_str())
+            format!(
+                "* set guest access for the room to {:?}",
+                content.guest_access.as_str()
+            )
         },
         AnyFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Original {
             content,
@@ -169,7 +172,10 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
             content,
             ..
         }) => {
-            format!("* update the join rules for the room to {:?}", content.join_rule.as_str())
+            format!(
+                "* update the join rules for the room to {:?}",
+                content.join_rule.as_str()
+            )
         },
         AnyFullStateEventContent::RoomMember(FullStateEventContent::Original {
             content,
@@ -280,7 +286,10 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                     }
                 },
                 ev => {
-                    format!("* made an unknown membership change to {}: {:?}", state_key, ev)
+                    format!(
+                        "* made an unknown membership change to {}: {:?}",
+                        state_key, ev
+                    )
                 },
             }
         },

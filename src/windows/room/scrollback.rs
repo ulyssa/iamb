@@ -452,7 +452,11 @@ impl ScrollbackState {
     ) -> Option<EditRange<MessageCursor>> {
         let other = self.movement(pos.clone(), movement, count, ctx, info)?;
 
-        Some(EditRange::inclusive(pos.into(), other, TargetShape::LineWise))
+        Some(EditRange::inclusive(
+            pos.into(),
+            other,
+            TargetShape::LineWise,
+        ))
     }
 
     fn range(
@@ -476,7 +480,11 @@ impl ScrollbackState {
                 let start = thread.first_key_value()?.0.clone();
                 let end = thread.last_key_value()?.0.clone();
 
-                Some(EditRange::inclusive(start.into(), end.into(), TargetShape::LineWise))
+                Some(EditRange::inclusive(
+                    start.into(),
+                    end.into(),
+                    TargetShape::LineWise,
+                ))
             },
             RangeType::Line | RangeType::Paragraph | RangeType::Sentence => {
                 let thread = self.get_thread(info)?;
@@ -670,7 +678,9 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     },
                     EditTarget::Motion(mt, count) => self.movement(key, mt, count, ctx, info),
                     EditTarget::Range(_, _, _) => {
-                        return Err(EditError::Failure("Cannot use ranges in a list".to_string()));
+                        return Err(EditError::Failure(
+                            "Cannot use ranges in a list".to_string(),
+                        ));
                     },
                     EditTarget::Search(SearchType::Char(_), _, _) => {
                         let msg = "Cannot perform character search in a list";
@@ -864,7 +874,9 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         _: &ProgramContext,
         _: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        Err(EditError::Failure("Cannot perform selection actions in a list".into()))
+        Err(EditError::Failure(
+            "Cannot perform selection actions in a list".into(),
+        ))
     }
 
     fn history_command(
@@ -1428,7 +1440,11 @@ impl StatefulWidget for Scrollback<'_> {
         {
             // If the cursor is at the last message, then update the read marker.
             if let Some((k, _)) = thread.last_key_value() {
-                info.set_receipt(thread.1.clone(), settings.profile.user_id.clone(), k.1.clone());
+                info.set_receipt(
+                    thread.1.clone(),
+                    settings.profile.user_id.clone(),
+                    k.1.clone(),
+                );
             }
         }
 
@@ -1577,118 +1593,184 @@ mod tests {
 
         assert_eq!(scrollback.cursor, MessageCursor::latest());
         assert_eq!(scrollback.viewctx.dimensions, (60, 4));
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG4_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG4_KEY.clone(), 0)
+        );
 
         // Scroll up a line at a time until we hit the first message.
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 4));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 4)
+        );
 
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 3));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 3)
+        );
 
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 2));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 2)
+        );
 
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 1));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 1)
+        );
 
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 0)
+        );
 
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 1));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG2_KEY.clone(), 1)
+        );
 
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG2_KEY.clone(), 0)
+        );
 
         // Cannot scroll any further.
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG2_KEY.clone(), 0)
+        );
 
         // Now scroll back down one line at a time.
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 1));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG2_KEY.clone(), 1)
+        );
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 0)
+        );
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 1));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 1)
+        );
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 2));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 2)
+        );
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 3));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 3)
+        );
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 4));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 4)
+        );
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG4_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG4_KEY.clone(), 0)
+        );
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG5_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG5_KEY.clone(), 0)
+        );
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG1_KEY.clone(), 0)
+        );
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 1));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG1_KEY.clone(), 1)
+        );
 
         // Cannot scroll down any further.
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 1));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG1_KEY.clone(), 1)
+        );
 
         // Scroll up two Pages (eight lines).
         scrollback
             .dirscroll(prev, ScrollSize::Page, &2.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 0)
+        );
 
         // Scroll down two HalfPages (four lines).
         scrollback
             .dirscroll(next, ScrollSize::HalfPage, &2.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 4));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 4)
+        );
     }
 
     #[tokio::test]
@@ -1722,27 +1804,39 @@ mod tests {
 
         assert_eq!(scrollback.cursor, MSG4_KEY.clone().into());
         assert_eq!(scrollback.viewctx.dimensions, (60, 3));
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 3));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 3)
+        );
 
         // Scroll so that the cursor is at the top of the screen.
         scrollback
             .cursorpos(MovePosition::Beginning, Axis::Vertical, &ctx, &mut store)
             .unwrap();
         assert_eq!(scrollback.cursor, MSG4_KEY.clone().into());
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG4_KEY.clone(), 0));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG4_KEY.clone(), 0)
+        );
 
         // Scroll so that the cursor is at the bottom of the screen.
         scrollback
             .cursorpos(MovePosition::End, Axis::Vertical, &ctx, &mut store)
             .unwrap();
         assert_eq!(scrollback.cursor, MSG4_KEY.clone().into());
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 3));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 3)
+        );
 
         // Scroll so that the cursor is in the middle of the screen.
         scrollback
             .cursorpos(MovePosition::Middle, Axis::Vertical, &ctx, &mut store)
             .unwrap();
         assert_eq!(scrollback.cursor, MSG4_KEY.clone().into());
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 4));
+        assert_eq!(
+            scrollback.viewctx.corner,
+            MessageCursor::new(MSG3_KEY.clone(), 4)
+        );
     }
 }

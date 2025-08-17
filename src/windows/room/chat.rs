@@ -222,7 +222,10 @@ impl ChatState {
                     let (source, msg_filename) = match &ev.content.msgtype {
                         MessageType::Audio(c) => (c.source.clone(), c.body.as_str()),
                         MessageType::File(c) => {
-                            (c.source.clone(), c.filename.as_deref().unwrap_or(c.body.as_str()))
+                            (
+                                c.source.clone(),
+                                c.filename.as_deref().unwrap_or(c.body.as_str()),
+                            )
                         },
                         MessageType::Image(c) => (c.source.clone(), c.body.as_str()),
                         MessageType::Video(c) => (c.source.clone(), c.body.as_str()),

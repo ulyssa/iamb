@@ -1328,10 +1328,18 @@ impl VerifyItem {
             if let Some(display_name) = device.display_name() {
                 format!("Device verification with {display_name} ({state})")
             } else {
-                format!("Device verification with device {} ({})", device.device_id(), state)
+                format!(
+                    "Device verification with device {} ({})",
+                    device.device_id(),
+                    state
+                )
             }
         } else {
-            format!("User Verification with {} ({})", self.sasv1.other_user_id(), state)
+            format!(
+                "User Verification with {} ({})",
+                self.sasv1.other_user_id(),
+                state
+            )
         }
     }
 }
@@ -1426,7 +1434,9 @@ impl ListItem<IambInfo> for VerifyItem {
                 lines.push(Line::from(""));
             }
 
-            lines.push(Line::from("    You can start a new verification request with:"));
+            lines.push(Line::from(
+                "    You can start a new verification request with:",
+            ));
         } else if let Some(emoji) = self.sasv1.emoji() {
             lines.push(Line::from(
                 "    Both devices should see the following Emoji sequence:".to_string(),
@@ -1445,7 +1455,9 @@ impl ListItem<IambInfo> for VerifyItem {
                 bold,
             )));
             lines.push(Line::from(""));
-            lines.push(Line::from("    If everything looks right, you can confirm with:"));
+            lines.push(Line::from(
+                "    If everything looks right, you can confirm with:",
+            ));
         } else {
             lines.push(Line::from("    To accept this request, run:"));
         }
@@ -1454,7 +1466,10 @@ impl ListItem<IambInfo> for VerifyItem {
 
         if !cmd.is_empty() {
             lines.push(Line::from(""));
-            lines.push(Line::from(vec![Span::from("        "), Span::styled(cmd, bold)]));
+            lines.push(Line::from(vec![
+                Span::from("        "),
+                Span::styled(cmd, bold),
+            ]));
             lines.push(Line::from(""));
             lines.push(Line::from(vec![
                 Span::from("You can copy the above command with "),
