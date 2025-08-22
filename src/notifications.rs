@@ -51,6 +51,7 @@ pub async fn register_notifications(
     }
     let notify_via = settings.tunables.notifications.via;
     let show_message = settings.tunables.notifications.show_message;
+    let sound_hint = settings.tunables.notifications.sound_hint.clone();
     let server_settings = client.notification_settings().await;
     let Some(startup_ts) = MilliSecondsSinceUnixEpoch::from_system_time(SystemTime::now()) else {
         return;
@@ -61,6 +62,7 @@ pub async fn register_notifications(
         .register_notification_handler(move |notification, room: MatrixRoom, client: Client| {
             let store = store.clone();
             let server_settings = server_settings.clone();
+            let sound_hint = sound_hint.clone();
             async move {
                 let mode = global_or_room_mode(&server_settings, &room).await;
                 if mode == RoomNotificationMode::Mute {
@@ -90,6 +92,7 @@ pub async fn register_notifications(
                                     body.as_deref(),
                                     room_id,
                                     &store,
+                                    sound_hint.as_deref(),
                                 )
                                 .await;
                             },
@@ -114,10 +117,11 @@ async fn send_notification(
     body: Option<&str>,
     room_id: OwnedRoomId,
     store: &AsyncProgramStore,
+    sound_hint: Option<&str>,
 ) {
     #[cfg(feature = "desktop")]
     if via.desktop {
-        send_notification_desktop(summary, body, room_id, store).await;
+        send_notification_desktop(summary, body, room_id, store, sound_hint).await;
     }
     #[cfg(not(feature = "desktop"))]
     {
@@ -140,6 +144,7 @@ async fn send_notification_desktop(
     body: Option<&str>,
     room_id: OwnedRoomId,
     _store: &AsyncProgramStore,
+    sound_hint: Option<&str>,
 ) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
@@ -147,6 +152,10 @@ async fn send_notification_desktop(
         .appname(IAMB_XDG_NAME)
         .icon(IAMB_XDG_NAME)
         .action("default", "default");
+
+    if let Some(sound_hint) = sound_hint {
+        desktop_notification.sound_name(sound_hint);
+    }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     desktop_notification.urgency(notify_rust::Urgency::Normal);

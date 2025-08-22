@@ -483,6 +483,8 @@ pub struct Notifications {
     pub via: NotifyVia,
     #[serde(default = "default_true")]
     pub show_message: bool,
+    #[serde(default)]
+    pub sound_hint: Option<String>,
 }
 
 #[derive(Clone)]
