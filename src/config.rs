@@ -323,7 +323,7 @@ pub struct Session {
 impl From<Session> for MatrixSession {
     fn from(session: Session) -> Self {
         MatrixSession {
-            tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
+            tokens: matrix_sdk::authentication::SessionTokens {
                 access_token: session.access_token,
                 refresh_token: session.refresh_token,
             },

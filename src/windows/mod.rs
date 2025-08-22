@@ -1565,6 +1565,10 @@ impl ListItem<IambInfo> for MemberItem {
     fn get_word(&self) -> Option<String> {
         self.member.user_id().to_string().into()
     }
+
+    fn matches(&self, needle: &regex::Regex) -> bool {
+        needle.is_match(self.member.name()) || needle.is_match(self.member.user_id().as_str())
+    }
 }
 
 impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {

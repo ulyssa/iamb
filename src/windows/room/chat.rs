@@ -220,12 +220,10 @@ impl ChatState {
                     };
 
                     let (source, msg_filename) = match &ev.content.msgtype {
-                        MessageType::Audio(c) => (c.source.clone(), c.body.as_str()),
-                        MessageType::File(c) => {
-                            (c.source.clone(), c.filename.as_deref().unwrap_or(c.body.as_str()))
-                        },
-                        MessageType::Image(c) => (c.source.clone(), c.body.as_str()),
-                        MessageType::Video(c) => (c.source.clone(), c.body.as_str()),
+                        MessageType::Audio(c) => (c.source.clone(), c.filename()),
+                        MessageType::File(c) => (c.source.clone(), c.filename()),
+                        MessageType::Image(c) => (c.source.clone(), c.filename()),
+                        MessageType::Video(c) => (c.source.clone(), c.filename()),
                         _ => {
                             if !flags.contains(DownloadFlags::OPEN) {
                                 return Err(IambError::NoAttachment.into());
@@ -263,7 +261,7 @@ impl ChatState {
                     };
 
                     if filename.is_dir() {
-                        filename.push(msg_filename);
+                        filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
                     }
 
                     if filename.exists() && !flags.contains(DownloadFlags::FORCE) {

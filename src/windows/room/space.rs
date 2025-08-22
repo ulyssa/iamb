@@ -91,12 +91,14 @@ impl SpaceState {
             SpaceAction::SetChild(child_id, order, suggested) => {
                 if !self
                     .room
-                    .can_user_send_state(
+                    .power_levels()
+                    .await
+                    .map_err(matrix_sdk::Error::from)
+                    .map_err(IambError::from)?
+                    .user_can_send_state(
                         &store.application.settings.profile.user_id,
                         StateEventType::SpaceChild,
                     )
-                    .await
-                    .map_err(IambError::from)?
                 {
                     return Err(IambError::InsufficientPermission.into());
                 }
@@ -117,12 +119,14 @@ impl SpaceState {
                 let space = self.list.get().ok_or(IambError::NoSelectedRoomOrSpaceItem)?;
                 if !self
                     .room
-                    .can_user_send_state(
+                    .power_levels()
+                    .await
+                    .map_err(matrix_sdk::Error::from)
+                    .map_err(IambError::from)?
+                    .user_can_send_state(
                         &store.application.settings.profile.user_id,
                         StateEventType::SpaceChild,
                     )
-                    .await
-                    .map_err(IambError::from)?
                 {
                     return Err(IambError::InsufficientPermission.into());
                 }
