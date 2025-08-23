@@ -92,37 +92,37 @@ type MatrixRoomInfo = Arc<(MatrixRoom, Option<Tags>)>;
 const MEMBER_FETCH_DEBOUNCE: Duration = Duration::from_secs(5);
 
 #[inline]
-fn bold_style() -> Style {
-    Style::default().add_modifier(StyleModifier::BOLD)
+fn bold_style(style: Style) -> Style {
+    style.add_modifier(StyleModifier::BOLD)
 }
 
 #[inline]
-fn bold_span(s: &str) -> Span {
-    Span::styled(s, bold_style())
+fn bold_span(s: &str, style: Style) -> Span {
+    Span::styled(s, bold_style(style))
 }
 
 #[inline]
-fn bold_spans(s: &str) -> Line {
-    bold_span(s).into()
+fn bold_spans(s: &str, style: Style) -> Line {
+    bold_span(s, style).into()
 }
 
 #[inline]
-fn selected_style(selected: bool) -> Style {
+fn selected_style(selected: bool, style: Style) -> Style {
     if selected {
-        Style::default().add_modifier(StyleModifier::REVERSED)
+        style.add_modifier(StyleModifier::REVERSED)
     } else {
-        Style::default()
+        style
     }
 }
 
 #[inline]
-fn selected_span(s: &str, selected: bool) -> Span {
-    Span::styled(s, selected_style(selected))
+fn selected_span(s: &str, selected: bool, style: Style) -> Span {
+    Span::styled(s, selected_style(selected, style))
 }
 
 #[inline]
-fn selected_text(s: &str, selected: bool) -> Text {
-    Text::from(selected_span(s, selected))
+fn selected_text(s: &str, selected: bool, style: Style) -> Text {
+    Text::from(selected_span(s, selected, style))
 }
 
 fn name_and_labels(name: &str, unread: bool, style: Style) -> (Span<'_>, Vec<Vec<Span<'_>>>) {
@@ -744,14 +744,15 @@ impl Window<IambInfo> for IambWindow {
     }
 
     fn get_tab_title(&self, store: &mut ProgramStore) -> Line {
+        let style = Default::default();
         match self {
-            IambWindow::DirectList(_) => bold_spans("Direct Messages"),
-            IambWindow::RoomList(_) => bold_spans("Rooms"),
-            IambWindow::SpaceList(_) => bold_spans("Spaces"),
-            IambWindow::VerifyList(_) => bold_spans("Verifications"),
-            IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
-            IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
-            IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::DirectList(_) => bold_spans("Direct Messages", style),
+            IambWindow::RoomList(_) => bold_spans("Rooms", style),
+            IambWindow::SpaceList(_) => bold_spans("Spaces", style),
+            IambWindow::VerifyList(_) => bold_spans("Verifications", style),
+            IambWindow::Welcome(_) => bold_spans("Welcome to iamb", style),
+            IambWindow::ChatList(_) => bold_spans("DMs & Rooms", style),
+            IambWindow::UnreadList(_) => bold_spans("Unread Messages", style),
 
             IambWindow::Room(w) => {
                 let title = store.application.get_room_title(w.id());
@@ -762,8 +763,8 @@ impl Window<IambInfo> for IambWindow {
                 let title = store.application.get_room_title(room_id.as_ref());
                 let n = state.len();
                 let v = vec![
-                    bold_span("Room Members "),
-                    Span::styled(format!("({n}): "), bold_style()),
+                    bold_span("Room Members ", style),
+                    Span::styled(format!("({n}): "), bold_style(style)),
                     title.into(),
                 ];
                 Line::from(v)
@@ -772,22 +773,23 @@ impl Window<IambInfo> for IambWindow {
     }
 
     fn get_win_title(&self, store: &mut ProgramStore) -> Line {
+        let style = store.application.settings.tunables.colors.window_title;
         match self {
-            IambWindow::DirectList(_) => bold_spans("Direct Messages"),
-            IambWindow::RoomList(_) => bold_spans("Rooms"),
-            IambWindow::SpaceList(_) => bold_spans("Spaces"),
-            IambWindow::VerifyList(_) => bold_spans("Verifications"),
-            IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
-            IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
-            IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::DirectList(_) => bold_spans("Direct Messages", style),
+            IambWindow::RoomList(_) => bold_spans("Rooms", style),
+            IambWindow::SpaceList(_) => bold_spans("Spaces", style),
+            IambWindow::VerifyList(_) => bold_spans("Verifications", style),
+            IambWindow::Welcome(_) => bold_spans("Welcome to iamb", style),
+            IambWindow::ChatList(_) => bold_spans("DMs & Rooms", style),
+            IambWindow::UnreadList(_) => bold_spans("Unread Messages", style),
 
             IambWindow::Room(w) => w.get_title(store),
             IambWindow::MemberList(state, room_id, _) => {
                 let title = store.application.get_room_title(room_id.as_ref());
                 let n = state.len();
                 let v = vec![
-                    bold_span("Room Members "),
-                    Span::styled(format!("({n}): "), bold_style()),
+                    bold_span("Room Members ", style),
+                    Span::styled(format!("({n}): "), bold_style(style)),
                     title.into(),
                 ];
                 Line::from(v)
@@ -959,9 +961,19 @@ impl Display for GenericChatItem {
 }
 
 impl ListItem<IambInfo> for GenericChatItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        store: &mut ProgramStore,
+    ) -> Text {
         let unread = self.unread.is_unread();
-        let style = selected_style(selected);
+        let style = if unread {
+            store.application.settings.tunables.colors.room_list_unread
+        } else {
+            store.application.settings.tunables.colors.room_list
+        };
+        let style = selected_style(selected, style);
         let (name, mut labels) = name_and_labels(&self.name, unread, style);
         let mut spans = vec![name];
 
@@ -1073,9 +1085,19 @@ impl Display for RoomItem {
 }
 
 impl ListItem<IambInfo> for RoomItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        store: &mut ProgramStore,
+    ) -> Text {
         let unread = self.unread.is_unread();
-        let style = selected_style(selected);
+        let style = if unread {
+            store.application.settings.tunables.colors.room_list_unread
+        } else {
+            store.application.settings.tunables.colors.room_list
+        };
+        let style = selected_style(selected, style);
         let (name, mut labels) = name_and_labels(&self.name, unread, style);
         let mut spans = vec![name];
 
@@ -1177,9 +1199,19 @@ impl Display for DirectItem {
 }
 
 impl ListItem<IambInfo> for DirectItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        store: &mut ProgramStore,
+    ) -> Text {
         let unread = self.unread.is_unread();
-        let style = selected_style(selected);
+        let style = if unread {
+            store.application.settings.tunables.colors.room_list_unread
+        } else {
+            store.application.settings.tunables.colors.room_list
+        };
+        let style = selected_style(selected, style);
         let (name, mut labels) = name_and_labels(&self.name, unread, style);
         let mut spans = vec![name];
 
@@ -1280,8 +1312,17 @@ impl Display for SpaceItem {
 }
 
 impl ListItem<IambInfo> for SpaceItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
-        selected_text(self.name.as_str(), selected)
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        store: &mut ProgramStore,
+    ) -> Text {
+        selected_text(
+            self.name.as_str(),
+            selected,
+            store.application.settings.tunables.colors.room_list,
+        )
     }
 
     fn get_word(&self) -> Option<String> {
@@ -1415,7 +1456,7 @@ impl ListItem<IambInfo> for VerifyItem {
         let mut lines = vec![];
 
         let bold = Style::default().add_modifier(StyleModifier::BOLD);
-        let item = Span::styled(self.show_item(), selected_style(selected));
+        let item = Span::styled(self.show_item(), selected_style(selected, Default::default()));
         lines.push(Line::from(item));
 
         if self.sasv1.is_done() {
