@@ -573,20 +573,7 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
         MessageType::Video(content) => {
             display_file_to_text!(Video, content);
         },
-        _ => {
-            match content.msgtype() {
-                // Just show the body text for the special Element messages.
-                "nic.custom.confetti" |
-                "nic.custom.fireworks" |
-                "io.element.effect.hearts" |
-                "io.element.effect.rainfall" |
-                "io.element.effect.snowfall" |
-                "io.element.effects.space_invaders" => content.body(),
-                other => {
-                    return Cow::Owned(format!("[Unknown message type: {other:?}]"));
-                },
-            }
-        },
+        _ => content.body(),
     };
 
     Cow::Borrowed(s)
