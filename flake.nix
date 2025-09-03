@@ -8,13 +8,21 @@
     rust-overlay.url = "github:oxalica/rust-overlay";
   };
 
-  outputs = { self, nixpkgs, flake-utils, rust-overlay, ... }:
-    flake-utils.lib.eachDefaultSystem (system:
+  outputs =
+    {
+      self,
+      nixpkgs,
+      flake-utils,
+      rust-overlay,
+      ...
+    }:
+    flake-utils.lib.eachDefaultSystem (
+      system:
       let
         # We only need the nightly overlay in the devShell because .rs files are formatted with nightly.
         overlays = [ (import rust-overlay) ];
         pkgs = import nixpkgs { inherit system overlays; };
-        rustNightly = pkgs.rust-bin.nightly."2024-12-12".default;
+        rustNightly = pkgs.rust-bin.nightly."2025-08-31".default;
       in
       with pkgs;
       {
@@ -26,14 +34,27 @@
             lockFile = ./Cargo.lock;
           };
           nativeBuildInputs = [ pkg-config ];
-          buildInputs = [ openssl ] ++ lib.optionals stdenv.isDarwin
-            (with darwin.apple_sdk.frameworks; [ AppKit Security Cocoa ]);
+          buildInputs =
+            [ openssl ]
+            ++ lib.optionals stdenv.isDarwin (
+              with darwin.apple_sdk.frameworks;
+              [
+                AppKit
+                Security
+                Cocoa
+              ]
+            );
         };
 
         devShell = mkShell {
           buildInputs = [
             (rustNightly.override {
-              extensions = [ "rust-src" "rust-analyzer-preview" "rustfmt" "clippy" ];
+              extensions = [
+                "rust-src"
+                "rust-analyzer-preview"
+                "rustfmt"
+                "clippy"
+              ];
             })
             pkg-config
             cargo-tarpaulin
@@ -41,5 +62,6 @@
             sqlite
           ];
         };
-      });
+      }
+    );
 }
