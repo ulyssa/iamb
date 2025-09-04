@@ -11,6 +11,8 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation;
+use ratatui::style::Color;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
@@ -57,6 +59,7 @@ use modalkit::editing::cursor::Cursor;
 use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
+use crate::base::MessageEdits;
 use crate::config::ImagePreviewSize;
 use crate::{
     base::RoomInfo,
@@ -111,7 +114,7 @@ impl Messages {
         let event_id = key.1.clone();
         let msg = msg.into();
 
-        self.0.insert(key, msg);
+        self.0.entry(key).or_insert(msg);
 
         // Remove any echo.
         let key = (MessageTimeStamp::LocalEcho, event_id);
@@ -438,14 +441,27 @@ fn redaction_unsigned(ev: SyncRoomRedactionEvent) -> RedactedUnsigned {
     RedactedUnsigned::new(serde_json::from_value(redacted_because).unwrap())
 }
 
-#[derive(Clone)]
+fn content_html(msgtype: &MessageType) -> Option<StyleTree> {
+    if let MessageType::Text(content) = msgtype {
+        if let Some(FormattedBody { format: MessageFormat::Html, body }) = &content.formatted {
+            Some(parse_matrix_html(body.as_str()))
+        } else {
+            None
+        }
+    } else {
+        None
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum MessageEvent {
     EncryptedOriginal(Box<OriginalRoomEncryptedEvent>),
     EncryptedRedacted(Box<RedactedRoomEncryptedEvent>),
-    Original(Box<OriginalRoomMessageEvent>),
+    Original(Box<OriginalRoomMessageEvent>, MessageEdits),
+    Edit(Box<OriginalRoomMessageEvent>),
     Redacted(Box<RedactedRoomMessageEvent>),
     State(Box<AnySyncStateEvent>),
-    Local(OwnedEventId, Box<RoomMessageEventContent>),
+    Local(OwnedEventId, Box<RoomMessageEventContent>, MessageEdits),
 }
 
 impl MessageEvent {
@@ -453,61 +469,85 @@ impl MessageEvent {
         match self {
             MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
             MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
-            MessageEvent::Original(ev) => ev.event_id.as_ref(),
+            MessageEvent::Original(ev, _) => ev.event_id.as_ref(),
             MessageEvent::Redacted(ev) => ev.event_id.as_ref(),
             MessageEvent::State(ev) => ev.event_id(),
-            MessageEvent::Local(event_id, _) => event_id.as_ref(),
+            MessageEvent::Local(event_id, _, _) => event_id.as_ref(),
+            MessageEvent::Edit(ev) => ev.event_id.as_ref(),
         }
     }
 
-    pub fn content(&self) -> Option<&RoomMessageEventContent> {
+    pub fn msgtype(&self) -> Option<&MessageType> {
         match self {
             MessageEvent::EncryptedOriginal(_) => None,
-            MessageEvent::Original(ev) => Some(&ev.content),
             MessageEvent::EncryptedRedacted(_) => None,
             MessageEvent::Redacted(_) => None,
             MessageEvent::State(_) => None,
-            MessageEvent::Local(_, content) => Some(content),
+            MessageEvent::Edit(_) => None,
+            MessageEvent::Original(ev, edits) => {
+                edits
+                    .last_key_value()
+                    .map(|(_, ev)| &ev.msgtype)
+                    .or(Some(&ev.content.msgtype))
+            },
+            MessageEvent::Local(_, content, edits) => {
+                edits
+                    .last_key_value()
+                    .map(|(_, ev)| &ev.msgtype)
+                    .or(Some(&content.msgtype))
+            },
         }
     }
 
     pub fn is_emote(&self) -> bool {
-        matches!(
-            self.content(),
-            Some(RoomMessageEventContent { msgtype: MessageType::Emote(_), .. })
-        )
+        matches!(self.msgtype(), Some(MessageType::Emote(_)))
     }
 
     pub fn body(&self) -> Cow<'_, str> {
         match self {
             MessageEvent::EncryptedOriginal(_) => "[Unable to decrypt message]".into(),
-            MessageEvent::Original(ev) => body_cow_content(&ev.content),
+            MessageEvent::Original(ev, edits) => {
+                let msgtype = edits
+                    .last_key_value()
+                    .map(|(_, ev)| &ev.msgtype)
+                    .unwrap_or(&ev.content.msgtype);
+                body_cow_content(msgtype)
+            },
+            MessageEvent::Local(_, content, edits) => {
+                let msgtype = edits
+                    .last_key_value()
+                    .map(|(_, ev)| &ev.msgtype)
+                    .unwrap_or(&content.msgtype);
+                body_cow_content(msgtype)
+            },
             MessageEvent::EncryptedRedacted(ev) => body_cow_reason(&ev.unsigned),
             MessageEvent::Redacted(ev) => body_cow_reason(&ev.unsigned),
             MessageEvent::State(ev) => body_cow_state(ev),
-            MessageEvent::Local(_, content) => body_cow_content(content),
+            MessageEvent::Edit(ev) => body_cow_content(&ev.content.msgtype),
         }
     }
 
     pub fn html(&self) -> Option<StyleTree> {
-        let content = match self {
+        let msgtype = match self {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Original(ev) => &ev.content,
+            MessageEvent::Original(ev, edits) => {
+                edits
+                    .last_key_value()
+                    .map(|(_, ev)| &ev.msgtype)
+                    .unwrap_or(&ev.content.msgtype)
+            },
+            MessageEvent::Local(_, content, edits) => {
+                edits
+                    .last_key_value()
+                    .map(|(_, ev)| &ev.msgtype)
+                    .unwrap_or(&content.msgtype)
+            },
             MessageEvent::Redacted(_) => return None,
             MessageEvent::State(ev) => return Some(html_state(ev)),
-            MessageEvent::Local(_, content) => content,
+            MessageEvent::Edit(_) => return None,
         };
-
-        if let MessageType::Text(content) = &content.msgtype {
-            if let Some(FormattedBody { format: MessageFormat::Html, body }) = &content.formatted {
-                Some(parse_matrix_html(body.as_str()))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+        content_html(msgtype)
     }
 
     fn redact(&mut self, redaction: SyncRoomRedactionEvent, version: &RoomVersionId) {
@@ -516,8 +556,8 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(_) => return,
             MessageEvent::Redacted(_) => return,
             MessageEvent::State(_) => return,
-            MessageEvent::Local(_, _) => return,
-            MessageEvent::Original(ev) => {
+            MessageEvent::Local(_, _, _) => return,
+            MessageEvent::Original(ev, _) | MessageEvent::Edit(ev) => {
                 let redacted = RedactedRoomMessageEvent {
                     content: ev.content.clone().redact(version),
                     event_id: ev.event_id.clone(),
@@ -528,6 +568,14 @@ impl MessageEvent {
                 };
                 *self = MessageEvent::Redacted(Box::new(redacted));
             },
+        }
+    }
+
+    fn is_edited(&self) -> bool {
+        if let MessageEvent::Original(_, edits) = self {
+            !edits.is_empty()
+        } else {
+            false
         }
     }
 }
@@ -553,8 +601,8 @@ macro_rules! display_file_to_text {
     };
 }
 
-fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
-    let s = match &content.msgtype {
+fn body_cow_content(msgtype: &MessageType) -> Cow<'_, str> {
+    let s = match msgtype {
         MessageType::Text(content) => content.body.as_str(),
         MessageType::VerificationRequest(_) => "[Verification Request]",
         MessageType::Emote(content) => content.body.as_ref(),
@@ -573,7 +621,7 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
         MessageType::Video(content) => {
             display_file_to_text!(Video, content);
         },
-        _ => content.body(),
+        _ => msgtype.body(),
     };
 
     Cow::Borrowed(s)
@@ -861,14 +909,23 @@ impl Message {
         }
     }
 
+    pub fn new_edit(event: OriginalRoomMessageEvent) -> Self {
+        let timestamp = event.origin_server_ts.into();
+        let user_id = event.sender.clone();
+        let content = MessageEvent::Edit(event.into());
+
+        Message::new(content, user_id, timestamp)
+    }
+
     pub fn reply_to(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, content) => content,
-            MessageEvent::Original(ev) => &ev.content,
+            MessageEvent::Local(_, content, _) => content,
+            MessageEvent::Original(ev, _) => &ev.content,
             MessageEvent::Redacted(_) => return None,
             MessageEvent::State(_) => return None,
+            MessageEvent::Edit(_) => return None,
         };
 
         match &content.relates_to {
@@ -886,10 +943,11 @@ impl Message {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, content) => content,
-            MessageEvent::Original(ev) => &ev.content,
+            MessageEvent::Local(_, content, _) => content,
+            MessageEvent::Original(ev, _) => &ev.content,
             MessageEvent::Redacted(_) => return None,
             MessageEvent::State(_) => return None,
+            MessageEvent::Edit(_) => return None,
         };
 
         match &content.relates_to {
@@ -1027,6 +1085,17 @@ impl Message {
             fmt.push_spans(space_span(width, style).into(), style, &mut text);
         }
 
+        if self.event.is_edited() {
+            fmt.push_spans(
+                Line::from(vec![
+                    Span::styled("(edited)", style.fg(Color::Gray)),
+                    space_span(fmt.width() - 8, style),
+                ]),
+                style,
+                &mut text,
+            );
+        }
+
         if settings.tunables.reaction_display {
             let reactions = info.get_reactions(self.event.event_id());
             fmt.push_reactions(reactions, style, &mut text);
@@ -1134,6 +1203,42 @@ impl Message {
         self.downloaded = false;
         self.image_preview = ImageStatus::None;
     }
+
+    pub fn set_edits(&mut self, new_edits: MessageEdits) {
+        match &mut self.event {
+            MessageEvent::Original(_, edits) | MessageEvent::Local(_, _, edits) => {
+                *edits = new_edits;
+
+                self.html = content_html(&edits.last_key_value().unwrap().1.msgtype);
+            },
+            _ => (),
+        }
+    }
+
+    pub fn insert_edit(&mut self, key: MessageKey, edit: RoomMessageEventContentWithoutRelation) {
+        match &mut self.event {
+            MessageEvent::Original(_, edits) | MessageEvent::Local(_, _, edits) => {
+                edits.insert(key, edit);
+
+                self.html = content_html(&edits.last_key_value().unwrap().1.msgtype);
+            },
+            _ => (),
+        }
+    }
+
+    pub fn remove_edit(&mut self, key: &MessageKey) {
+        let (orig_content, edits) = match &mut self.event {
+            MessageEvent::Original(content, edits) => (&content.content.msgtype, edits),
+            MessageEvent::Local(_, content, edits) => (&content.msgtype, edits),
+            _ => return,
+        };
+
+        edits.remove(key);
+
+        let content = edits.last_key_value().map(|(_, msg)| &msg.msgtype).unwrap_or(orig_content);
+
+        self.html = content_html(content);
+    }
 }
 
 impl From<RoomEncryptedEvent> for Message {
@@ -1153,7 +1258,7 @@ impl From<OriginalRoomMessageEvent> for Message {
     fn from(event: OriginalRoomMessageEvent) -> Self {
         let timestamp = event.origin_server_ts.into();
         let user_id = event.sender.clone();
-        let content = MessageEvent::Original(event.into());
+        let content = MessageEvent::Original(event.into(), Default::default());
 
         Message::new(content, user_id, timestamp)
     }
@@ -1413,78 +1518,78 @@ pub mod tests {
     #[test]
     fn test_display_attachment_size() {
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            body_cow_content(&MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::default()))
-            ))),
+            )),
             "[Attached Image: Alt text]".to_string()
         );
 
         let mut info = ImageInfo::default();
         info.size = Some(442630_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            body_cow_content(&MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Image: Alt text (442.63 kB)]".to_string()
         );
 
         let mut info = ImageInfo::default();
         info.size = Some(12_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            body_cow_content(&MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Image: Alt text (12 B)]".to_string()
         );
 
         let mut info = AudioInfo::default();
         info.size = Some(4294967295_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Audio(
+            body_cow_content(&MessageType::Audio(
                 AudioMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Audio: Alt text (4.29 GB)]".to_string()
         );
 
         let mut info = FileInfo::default();
         info.size = Some(4426300_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::File(
+            body_cow_content(&MessageType::File(
                 FileMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached File: Alt text (4.43 MB)]".to_string()
         );
 
         let mut info = VideoInfo::default();
         info.size = Some(44000_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Video(
+            body_cow_content(&MessageType::Video(
                 VideoMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Video: Alt text (44 kB)]".to_string()
         );
     }
