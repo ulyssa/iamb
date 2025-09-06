@@ -11,6 +11,8 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::sticker::StickerEvent;
+use matrix_sdk::ruma::events::MessageLikeEvent;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
@@ -19,32 +21,17 @@ use matrix_sdk::ruma::{
         relation::Thread,
         room::{
             encrypted::{
-                OriginalRoomEncryptedEvent,
-                RedactedRoomEncryptedEvent,
-                RoomEncryptedEvent,
+                OriginalRoomEncryptedEvent, RedactedRoomEncryptedEvent, RoomEncryptedEvent,
             },
             message::{
-                FormattedBody,
-                MessageFormat,
-                MessageType,
-                OriginalRoomMessageEvent,
-                RedactedRoomMessageEvent,
-                Relation,
-                RoomMessageEvent,
-                RoomMessageEventContent,
+                FormattedBody, MessageFormat, MessageType, OriginalRoomMessageEvent,
+                RedactedRoomMessageEvent, Relation, RoomMessageEvent, RoomMessageEventContent,
             },
             redaction::SyncRoomRedactionEvent,
         },
-        AnySyncStateEvent,
-        RedactContent,
-        RedactedUnsigned,
+        AnySyncStateEvent, RedactContent, RedactedUnsigned,
     },
-    EventId,
-    MilliSecondsSinceUnixEpoch,
-    OwnedEventId,
-    OwnedUserId,
-    RoomVersionId,
-    UInt,
+    EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, RoomVersionId, UInt,
 };
 
 use ratatui::{
@@ -445,6 +432,7 @@ pub enum MessageEvent {
     Original(Box<OriginalRoomMessageEvent>),
     Redacted(Box<RedactedRoomMessageEvent>),
     State(Box<AnySyncStateEvent>),
+    Sticker(Box<StickerEvent>),
     Local(OwnedEventId, Box<RoomMessageEventContent>),
 }
 
@@ -456,6 +444,7 @@ impl MessageEvent {
             MessageEvent::Original(ev) => ev.event_id.as_ref(),
             MessageEvent::Redacted(ev) => ev.event_id.as_ref(),
             MessageEvent::State(ev) => ev.event_id(),
+            MessageEvent::Sticker(ev) => ev.event_id(),
             MessageEvent::Local(event_id, _) => event_id.as_ref(),
         }
     }
@@ -467,6 +456,7 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(_) => None,
             MessageEvent::Redacted(_) => None,
             MessageEvent::State(_) => None,
+            MessageEvent::Sticker(_) => None,
             MessageEvent::Local(_, content) => Some(content),
         }
     }
@@ -484,6 +474,7 @@ impl MessageEvent {
             MessageEvent::Original(ev) => body_cow_content(&ev.content),
             MessageEvent::EncryptedRedacted(ev) => body_cow_reason(&ev.unsigned),
             MessageEvent::Redacted(ev) => body_cow_reason(&ev.unsigned),
+            MessageEvent::Sticker(ev) => body_cow_sticker(ev),
             MessageEvent::State(ev) => body_cow_state(ev),
             MessageEvent::Local(_, content) => body_cow_content(content),
         }
@@ -496,6 +487,7 @@ impl MessageEvent {
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
             MessageEvent::State(ev) => return Some(html_state(ev)),
+            MessageEvent::Sticker(_) => return None,
             MessageEvent::Local(_, content) => content,
         };
 
@@ -516,6 +508,7 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(_) => return,
             MessageEvent::Redacted(_) => return,
             MessageEvent::State(_) => return,
+            MessageEvent::Sticker(_) => return,
             MessageEvent::Local(_, _) => return,
             MessageEvent::Original(ev) => {
                 let redacted = RedactedRoomMessageEvent {
@@ -577,6 +570,15 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
     };
 
     Cow::Borrowed(s)
+}
+
+fn body_cow_sticker(content: &StickerEvent) -> Cow<'_, str> {
+    match content {
+        MessageLikeEvent::Original(sticker) => {
+            Cow::Owned(format!("* sent a sticker: {}", sticker.content.body))
+        },
+        MessageLikeEvent::Redacted(_) => Cow::Borrowed("[Redacted]"),
+    }
 }
 
 fn body_cow_reason(unsigned: &RedactedUnsigned) -> Cow<'_, str> {
@@ -869,6 +871,7 @@ impl Message {
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
             MessageEvent::State(_) => return None,
+            MessageEvent::Sticker(_) => return None,
         };
 
         match &content.relates_to {
@@ -890,6 +893,7 @@ impl Message {
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_) => return None,
             MessageEvent::State(_) => return None,
+            MessageEvent::Sticker(_) => return None,
         };
 
         match &content.relates_to {
@@ -936,8 +940,8 @@ impl Message {
         };
         let user_gutter = settings.tunables.user_gutter_width;
 
-        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
-            settings.tunables.read_receipt_display
+        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width
+            && settings.tunables.read_receipt_display
         {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
@@ -1106,9 +1110,9 @@ impl Message {
         settings: &'a ApplicationSettings,
     ) -> Option<Span<'a>> {
         if let Some(prev) = prev {
-            if self.sender == prev.sender &&
-                self.timestamp.same_day(&prev.timestamp) &&
-                !self.event.is_emote()
+            if self.sender == prev.sender
+                && self.timestamp.same_day(&prev.timestamp)
+                && !self.event.is_emote()
             {
                 return None;
             }
@@ -1188,6 +1192,16 @@ impl From<AnySyncStateEvent> for Message {
     }
 }
 
+impl From<StickerEvent> for Message {
+    fn from(event: StickerEvent) -> Self {
+        let timestamp = event.origin_server_ts().into();
+        let user_id = event.sender().to_owned();
+        let event = MessageEvent::Sticker(event.into());
+
+        Message::new(event, user_id, timestamp)
+    }
+}
+
 impl Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.event.body())
@@ -1198,13 +1212,8 @@ impl Display for Message {
 pub mod tests {
     use matrix_sdk::ruma::events::room::{
         message::{
-            AudioInfo,
-            AudioMessageEventContent,
-            FileInfo,
-            FileMessageEventContent,
-            ImageMessageEventContent,
-            VideoInfo,
-            VideoMessageEventContent,
+            AudioInfo, AudioMessageEventContent, FileInfo, FileMessageEventContent,
+            ImageMessageEventContent, VideoInfo, VideoMessageEventContent,
         },
         ImageInfo,
     };

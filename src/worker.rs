@@ -358,6 +358,9 @@ fn load_insert(
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
                         info.insert_reaction(ev);
                     },
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
+                        info.insert_sticker(ev);
+                    },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
                     },
