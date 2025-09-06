@@ -358,6 +358,16 @@ fn load_insert(
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
                         info.insert_reaction(ev);
                     },
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
+                        info.insert_sticker(
+                            room_id.clone(),
+                            store.clone(),
+                            picker.clone(),
+                            ev,
+                            settings,
+                            client.media(),
+                        );
+                    },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
                     },
