@@ -97,12 +97,12 @@ fn bold_style() -> Style {
 }
 
 #[inline]
-fn bold_span(s: &str) -> Span {
+fn bold_span(s: &str) -> Span<'_> {
     Span::styled(s, bold_style())
 }
 
 #[inline]
-fn bold_spans(s: &str) -> Line {
+fn bold_spans(s: &str) -> Line<'_> {
     bold_span(s).into()
 }
 
@@ -116,12 +116,12 @@ fn selected_style(selected: bool) -> Style {
 }
 
 #[inline]
-fn selected_span(s: &str, selected: bool) -> Span {
+fn selected_span(s: &str, selected: bool) -> Span<'_> {
     Span::styled(s, selected_style(selected))
 }
 
 #[inline]
-fn selected_text(s: &str, selected: bool) -> Text {
+fn selected_text(s: &str, selected: bool) -> Text<'_> {
     Text::from(selected_span(s, selected))
 }
 
@@ -743,7 +743,7 @@ impl Window<IambInfo> for IambWindow {
         }
     }
 
-    fn get_tab_title(&self, store: &mut ProgramStore) -> Line {
+    fn get_tab_title(&self, store: &mut ProgramStore) -> Line<'_> {
         match self {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
@@ -771,7 +771,7 @@ impl Window<IambInfo> for IambWindow {
         }
     }
 
-    fn get_win_title(&self, store: &mut ProgramStore) -> Line {
+    fn get_win_title(&self, store: &mut ProgramStore) -> Line<'_> {
         match self {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
@@ -959,7 +959,12 @@ impl Display for GenericChatItem {
 }
 
 impl ListItem<IambInfo> for GenericChatItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         let unread = self.unread.is_unread();
         let style = selected_style(selected);
         let (name, mut labels) = name_and_labels(&self.name, unread, style);
@@ -1073,7 +1078,12 @@ impl Display for RoomItem {
 }
 
 impl ListItem<IambInfo> for RoomItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         let unread = self.unread.is_unread();
         let style = selected_style(selected);
         let (name, mut labels) = name_and_labels(&self.name, unread, style);
@@ -1177,7 +1187,12 @@ impl Display for DirectItem {
 }
 
 impl ListItem<IambInfo> for DirectItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         let unread = self.unread.is_unread();
         let style = selected_style(selected);
         let (name, mut labels) = name_and_labels(&self.name, unread, style);
@@ -1280,7 +1295,12 @@ impl Display for SpaceItem {
 }
 
 impl ListItem<IambInfo> for SpaceItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         selected_text(self.name.as_str(), selected)
     }
 
@@ -1411,7 +1431,12 @@ impl Display for VerifyItem {
 }
 
 impl ListItem<IambInfo> for VerifyItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         let mut lines = vec![];
 
         let bold = Style::default().add_modifier(StyleModifier::BOLD);
@@ -1521,7 +1546,7 @@ impl ListItem<IambInfo> for MemberItem {
         selected: bool,
         _: &ViewportContext<ListCursor>,
         store: &mut ProgramStore,
-    ) -> Text {
+    ) -> Text<'_> {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let user_id = self.member.user_id();
 

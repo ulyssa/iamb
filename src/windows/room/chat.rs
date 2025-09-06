@@ -610,8 +610,7 @@ impl ChatState {
                             let mut buff = std::io::Cursor::new(bytes);
                             dynimage.write_to(&mut buff, image::ImageFormat::Png)?;
                             Ok(buff.into_inner())
-                        })
-                        .map_err(IambError::from)?;
+                        })?;
                 let mime = mime::IMAGE_PNG;
 
                 let name = "Clipboard.png";

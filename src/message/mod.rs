@@ -233,13 +233,13 @@ impl MessageTimeStamp {
         dt1.date_naive() == dt2.date_naive()
     }
 
-    fn show_date(&self) -> Option<Span> {
+    fn show_date(&self) -> Option<Span<'_>> {
         let time = self.as_datetime().format("%A, %B %d %Y").to_string();
 
         Span::styled(time, BOLD_STYLE).into()
     }
 
-    fn show_time(&self) -> Option<Span> {
+    fn show_time(&self) -> Option<Span<'_>> {
         match self {
             MessageTimeStamp::OriginServer(ms) => {
                 let time = millis_to_datetime(*ms).format("%T");

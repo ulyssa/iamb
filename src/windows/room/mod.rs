@@ -658,7 +658,7 @@ impl RoomState {
         }
     }
 
-    pub fn get_title(&self, store: &mut ProgramStore) -> Line {
+    pub fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
         let title = store.application.get_room_title(self.id());
         let style = Style::default().add_modifier(StyleModifier::BOLD);
         let mut spans = vec![];
