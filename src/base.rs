@@ -1042,8 +1042,11 @@ impl RoomInfo {
 
                 self.keys.remove(redacts);
             },
-            Some(EventLocation::Sticker(event_id)) => {
-                self.keys.remove(redacts);
+            Some(EventLocation::Sticker(key)) => {
+                if let Some(msg) = self.messages.get_mut(key) {
+                    let ev = SyncRoomRedactionEvent::Original(ev);
+                    msg.redact(ev, room_version);
+                }
             },
         }
     }
@@ -1075,7 +1078,8 @@ impl RoomInfo {
         match sticker {
             MessageLikeEvent::Original(ref sticker_content) => {
                 //TODO
-                let key = (sticker_content.origin_server_ts.into(), sticker_content.event_id.clone());
+                let key =
+                    (sticker_content.origin_server_ts.into(), sticker_content.event_id.clone());
 
                 let loc = EventLocation::Sticker(key.clone());
 
