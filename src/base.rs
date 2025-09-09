@@ -1099,7 +1099,7 @@ impl RoomInfo {
         store: AsyncProgramStore,
         picker: Option<Picker>,
         sticker: StickerEvent,
-        settings: &mut ApplicationSettings,
+        settings: &ApplicationSettings,
         media: matrix_sdk::Media,
     ) {
         match sticker {
@@ -1129,8 +1129,9 @@ impl RoomInfo {
                     }
                 }
             },
-            MessageLikeEvent::Redacted(_) => {
-                return;
+            MessageLikeEvent::Redacted(ref redaction) => {
+                let key = (redaction.origin_server_ts.into(), redaction.event_id.clone());
+                self.messages.insert_message(key.clone(), sticker.clone());
             },
         }
     }
