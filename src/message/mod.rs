@@ -11,7 +11,8 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
-use matrix_sdk::ruma::events::sticker::StickerEvent;
+use matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation;
+use matrix_sdk::ruma::events::sticker::{RedactedStickerEvent, StickerEvent};
 use matrix_sdk::ruma::events::MessageLikeEvent;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
@@ -523,8 +524,24 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(_) => return,
             MessageEvent::Redacted(_) => return,
             MessageEvent::State(_) => return,
-            MessageEvent::Sticker(_) => return,
             MessageEvent::Local(_, _) => return,
+            MessageEvent::Sticker(ev) => {
+                match ev.as_ref() {
+                    MessageLikeEvent::Original(sticker) => {
+                        let redacted = RedactedStickerEvent {
+                            content: sticker.content.clone().redact(version),
+                            event_id: ev.event_id().to_owned(),
+                            sender: ev.sender().to_owned(),
+                            origin_server_ts: ev.origin_server_ts(),
+                            room_id: ev.room_id().to_owned(),
+                            unsigned: redaction_unsigned(redaction),
+                        };
+                        *self =
+                            MessageEvent::Sticker(Box::new(MessageLikeEvent::Redacted(redacted)));
+                    },
+                    MessageLikeEvent::Redacted(_) => {},
+                }
+            },
             MessageEvent::Original(ev) => {
                 let redacted = RedactedRoomMessageEvent {
                     content: ev.content.clone().redact(version),
