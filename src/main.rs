@@ -29,7 +29,8 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
-use matrix_sdk::ruma::OwnedUserId;
+use matrix_sdk::ruma::matrix_uri::MatrixId;
+use matrix_sdk::ruma::{MatrixToUri, MatrixUri, OwnedUserId};
 use modalkit::keybindings::InputBindings;
 use rand::{distributions::Alphanumeric, Rng};
 use temp_dir::TempDir;
@@ -191,13 +192,109 @@ fn restore_layout(
     tabs.to_layout(area.into(), store)
 }
 
+fn resolve_initial_room(
+    settings: &ApplicationSettings,
+    store: &mut ProgramStore,
+    id: MatrixId,
+) -> IambResult<Option<IambWindow>> {
+    let mut room_name = String::new();
+    let room_id = match id {
+        MatrixId::Room(id) => {
+            room_name = id.to_string();
+            id
+        },
+        MatrixId::RoomAlias(alias_id) => {
+            room_name = alias_id.to_string();
+            store.application.worker.resolve_alias(alias_id)?
+        },
+        MatrixId::User(user_id) => {
+            match store.application.worker.client.get_dm_room(&user_id) {
+                Some(room) => room.room_id().to_owned(),
+                None => {
+                    restore_tty(false, settings.tunables.mouse.enabled);
+
+                    let question = format!("No dm with {user_id} found. Create new DM? [y]es/[n]o");
+
+                    loop {
+                        match read_yesno(&question) {
+                            Some('y') => break,
+                            Some('n') => {
+                                setup_tty(settings, false)?;
+                                return Ok(None);
+                            },
+                            Some(_) | None => continue,
+                        }
+                    }
+
+                    setup_tty(settings, false)?;
+
+                    store.application.worker.join_room(user_id.to_string())?
+                },
+            }
+        },
+        MatrixId::Event(owned_room_or_alias_id, _event_id) => {
+            // ignore event id for now
+            room_name = owned_room_or_alias_id.to_string();
+            let room_or_alias_id: &matrix_sdk::ruma::RoomOrAliasId = &owned_room_or_alias_id;
+            if let Ok(alias_id) = <&matrix_sdk::ruma::RoomAliasId>::try_from(room_or_alias_id) {
+                store.application.worker.resolve_alias(alias_id.to_owned())?
+            } else {
+                matrix_sdk::ruma::OwnedRoomId::try_from(owned_room_or_alias_id).unwrap()
+            }
+        },
+        _ => {
+            tracing::error!("encountered unrecoginsed matrix id: {id:?}");
+            return Ok(None);
+        },
+    };
+
+    if !store
+        .application
+        .worker
+        .client
+        .joined_rooms()
+        .iter()
+        .any(|room| room.room_id() == room_id)
+    {
+        restore_tty(false, settings.tunables.mouse.enabled);
+
+        let question = format!("Join room {room_name:?}? [y]es/[n]o");
+
+        loop {
+            match read_yesno(&question) {
+                Some('y') => break,
+                Some('n') => {
+                    setup_tty(settings, false)?;
+                    return Ok(None);
+                },
+                Some(_) | None => continue,
+            }
+        }
+
+        setup_tty(settings, false)?;
+
+        store.application.worker.join_room(room_id.to_string())?;
+    }
+
+    let id = IambId::Room(room_id, None);
+    let win = IambWindow::open(id, store)?;
+    Ok(Some(win))
+}
+
 fn setup_screen(
     settings: ApplicationSettings,
     store: &mut ProgramStore,
+    initial_room: Option<MatrixId>,
 ) -> IambResult<ScreenState<IambWindow, IambInfo>> {
     let cmd = CommandBarState::new(store);
     let dims = crossterm::terminal::size()?;
     let area = Rect::new(0, 0, dims.0, dims.1);
+
+    if let Some(id) = initial_room {
+        if let Some(win) = resolve_initial_room(&settings, store, id)? {
+            return Ok(ScreenState::new(win, cmd));
+        }
+    }
 
     match settings.layout {
         config::Layout::Restore => {
@@ -269,6 +366,7 @@ impl Application {
     pub async fn new(
         settings: ApplicationSettings,
         store: AsyncProgramStore,
+        initial_room: Option<MatrixId>,
     ) -> IambResult<Application> {
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend)?;
@@ -278,7 +376,7 @@ impl Application {
         let bindings = KeyManager::new(bindings);
 
         let mut locked = store.lock().await;
-        let screen = setup_screen(settings, locked.deref_mut())?;
+        let screen = setup_screen(settings, locked.deref_mut(), initial_room)?;
 
         let worker = locked.application.worker.clone();
 
@@ -1017,7 +1115,7 @@ fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
     let _ = crossterm::terminal::disable_raw_mode();
 }
 
-async fn run(settings: ApplicationSettings) -> IambResult<()> {
+async fn run(settings: ApplicationSettings, initial_room: Option<MatrixId>) -> IambResult<()> {
     // Get old keys the first time we run w/ the upgraded SDK.
     let import_keys = check_import_keys(&settings).await?;
 
@@ -1072,7 +1170,7 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     }));
 
     // And finally, start running the terminal UI.
-    let mut application = Application::new(settings, store)
+    let mut application = Application::new(settings, store, initial_room)
         .await
         .inspect_err(|_| restore_tty(enable_enhanced_keys, enable_mouse))?;
     application
@@ -1089,6 +1187,15 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
 fn main() -> IambResult<()> {
     // Parse command-line flags.
     let iamb = Iamb::parse();
+
+    let initial_room = if let Some(uri) = &iamb.uri {
+        MatrixUri::parse(uri)
+            .map(|uri| uri.id().clone())
+            .or_else(|_| MatrixToUri::parse(uri).map(|uri| uri.id().clone()))
+            .ok()
+    } else {
+        None
+    };
 
     // Load configuration and set up the Matrix SDK.
     let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);
@@ -1123,7 +1230,7 @@ fn main() -> IambResult<()> {
         .build()
         .unwrap();
 
-    rt.block_on(async move { run(settings).await })?;
+    rt.block_on(async move { run(settings, initial_room).await })?;
 
     drop(guard);
     process::exit(0);
