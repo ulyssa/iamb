@@ -135,6 +135,9 @@ pub struct Iamb {
 
     #[clap(short = 'C', long, value_parser)]
     pub config_directory: Option<PathBuf>,
+
+    /// `matrix:` uri or `https://matrix.to` link to open
+    pub uri: Option<String>,
 }
 
 #[derive(thiserror::Error, Debug)]
