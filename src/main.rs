@@ -1072,8 +1072,13 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     }));
 
     // And finally, start running the terminal UI.
-    let mut application = Application::new(settings, store).await?;
-    application.run().await?;
+    let mut application = Application::new(settings, store)
+        .await
+        .inspect_err(|_| restore_tty(enable_enhanced_keys, enable_mouse))?;
+    application
+        .run()
+        .await
+        .inspect_err(|_| restore_tty(enable_enhanced_keys, enable_mouse))?;
 
     // Clean up the terminal on exit.
     restore_tty(enable_enhanced_keys, enable_mouse);
