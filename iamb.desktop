@@ -1,7 +1,8 @@
 [Desktop Entry]
 Categories=Network;InstantMessaging;Chat;
 Comment=A Matrix client for Vim addicts
-Exec=iamb
+Exec=iamb %u
+MimeType=x-scheme-handler/matrix
 GenericName=Matrix Client
 Keywords=Matrix;matrix.org;chat;communications;talk;
 Name=iamb
