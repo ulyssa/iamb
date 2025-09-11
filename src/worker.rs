@@ -1356,8 +1356,8 @@ impl ClientWorker {
     }
 
     async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<OwnedRoomId> {
-        for room in self.client.rooms() {
-            if !is_direct(&room).await {
+        for room in self.client.joined_rooms().iter().chain(self.client.invited_rooms().iter()) {
+            if !is_direct(room).await {
                 continue;
             }
 
