@@ -1393,7 +1393,11 @@ impl ClientWorker {
 
     async fn get_room(&mut self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
         if let Some(room) = self.client.get_room(&room_id) {
-            let name = room.cached_display_name().ok_or_else(|| IambError::UnknownRoom(room_id))?;
+            let name = if let Some(name) = room.cached_display_name() {
+                name
+            } else {
+                room.display_name().await.map_err(IambError::from)?
+            };
             let tags = room.tags().await.map_err(IambError::from)?;
 
             Ok((room, name, tags))

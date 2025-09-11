@@ -192,6 +192,96 @@ fn restore_layout(
     tabs.to_layout(area.into(), store)
 }
 
+fn resolve_initial_room(
+    settings: &ApplicationSettings,
+    store: &mut ProgramStore,
+    id: MatrixId,
+) -> IambResult<Option<IambWindow>> {
+    let mut room_name = String::new();
+    let room_id = match id {
+        MatrixId::Room(id) => {
+            room_name = id.to_string();
+            id
+        },
+        MatrixId::RoomAlias(alias_id) => {
+            room_name = alias_id.to_string();
+            store.application.worker.resolve_alias(alias_id)?
+        },
+        MatrixId::User(user_id) => {
+            match store.application.worker.client.get_dm_room(&user_id) {
+                Some(room) => room.room_id().to_owned(),
+                None => {
+                    restore_tty(false, settings.tunables.mouse.enabled);
+
+                    let question =
+                        format!("No dm with {} found. Create new DM? [y]es/[n]o", user_id);
+
+                    loop {
+                        match read_yesno(&question) {
+                            Some('y') => break,
+                            Some('n') => {
+                                setup_tty(settings, false)?;
+                                return Ok(None);
+                            },
+                            Some(_) | None => continue,
+                        }
+                    }
+
+                    setup_tty(settings, false)?;
+
+                    store.application.worker.join_room(user_id.to_string())?
+                },
+            }
+        },
+        MatrixId::Event(owned_room_or_alias_id, _event_id) => {
+            // ignore event id for now
+            room_name = owned_room_or_alias_id.to_string();
+            let room_or_alias_id: &matrix_sdk::ruma::RoomOrAliasId = &owned_room_or_alias_id;
+            if let Ok(alias_id) = <&matrix_sdk::ruma::RoomAliasId>::try_from(room_or_alias_id) {
+                store.application.worker.resolve_alias(alias_id.to_owned())?
+            } else {
+                matrix_sdk::ruma::OwnedRoomId::try_from(owned_room_or_alias_id).unwrap()
+            }
+        },
+        _ => {
+            tracing::error!("encountered unrecoginsed matrix id: {id:?}");
+            return Ok(None);
+        },
+    };
+
+    if !store
+        .application
+        .worker
+        .client
+        .joined_rooms()
+        .iter()
+        .any(|room| room.room_id() == room_id)
+    {
+        restore_tty(false, settings.tunables.mouse.enabled);
+
+        let question = format!("Join room {:?}? [y]es/[n]o", room_name);
+
+        loop {
+            match read_yesno(&question) {
+                Some('y') => break,
+                Some('n') => {
+                    setup_tty(settings, false)?;
+                    return Ok(None);
+                },
+                Some(_) | None => continue,
+            }
+        }
+
+        setup_tty(settings, false)?;
+
+        store.application.worker.join_room(room_id.to_string())?;
+    }
+
+    let id = IambId::Room(room_id, None);
+    let win = IambWindow::open(id, store)?;
+    Ok(Some(win))
+}
+
 fn setup_screen(
     settings: ApplicationSettings,
     store: &mut ProgramStore,
@@ -202,30 +292,9 @@ fn setup_screen(
     let area = Rect::new(0, 0, dims.0, dims.1);
 
     if let Some(id) = initial_room {
-        let id = match id {
-            MatrixId::Room(id) => id,
-            MatrixId::RoomAlias(alias_id) => store.application.worker.resolve_alias(alias_id)?,
-            MatrixId::User(user_id) => {
-                match store.application.worker.client.get_dm_room(&user_id) {
-                    Some(room) => room.room_id().to_owned(),
-                    None => return Err(IambError::NotJoined.into()), // TODO improve error handling
-                }
-            },
-            MatrixId::Event(owned_room_or_alias_id, _event_id) => {
-                // ignore event id for now
-                let room_or_alias_id: &matrix_sdk::ruma::RoomOrAliasId = &owned_room_or_alias_id;
-                if let Ok(alias_id) = <&matrix_sdk::ruma::RoomAliasId>::try_from(room_or_alias_id) {
-                    store.application.worker.resolve_alias(alias_id.to_owned())?
-                } else {
-                    matrix_sdk::ruma::OwnedRoomId::try_from(owned_room_or_alias_id).unwrap()
-                }
-            },
-            _ => todo!(),
-        };
-
-        let id = IambId::Room(id, None);
-        let win = IambWindow::open(id, store)?;
-        return Ok(ScreenState::new(win, cmd));
+        if let Some(win) = resolve_initial_room(&settings, store, id)? {
+            return Ok(ScreenState::new(win, cmd));
+        }
     }
 
     match settings.layout {
@@ -1095,14 +1164,13 @@ async fn run(settings: ApplicationSettings, initial_room: Option<MatrixId>) -> I
     }));
 
     // And finally, start running the terminal UI.
-    let mut application = Application::new(settings, store, initial_room).await.map_err(|e| {
-        restore_tty(enable_enhanced_keys, enable_mouse);
-        e
-    })?;
-    application.run().await.map_err(|e| {
-        restore_tty(enable_enhanced_keys, enable_mouse);
-        e
-    })?;
+    let mut application = Application::new(settings, store, initial_room)
+        .await
+        .inspect_err(|_| restore_tty(enable_enhanced_keys, enable_mouse))?;
+    application
+        .run()
+        .await
+        .inspect_err(|_| restore_tty(enable_enhanced_keys, enable_mouse))?;
 
     // Clean up the terminal on exit.
     restore_tty(enable_enhanced_keys, enable_mouse);
