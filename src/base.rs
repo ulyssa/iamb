@@ -2325,13 +2325,13 @@ pub mod tests {
         let text = EditRope::from("hello @user1 ");
         let mut cursor = Cursor::new(0, 12);
         let res = complete_msgbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec!["@user1:example.com"]);
+        assert_eq!(res, vec!["[@user1:example.com](https://matrix.to/#/@user1:example.com)"]);
         assert_eq!(cursor, Cursor::new(0, 6));
 
         let text = EditRope::from("see #room ");
         let mut cursor = Cursor::new(0, 9);
         let res = complete_msgbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec!["#room1:example.com"]);
+        assert_eq!(res, vec!["[#room1:example.com](https://matrix.to/#/%23room1:example.com)"]);
         assert_eq!(cursor, Cursor::new(0, 4));
     }
 

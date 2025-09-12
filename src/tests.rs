@@ -4,10 +4,12 @@ use std::path::PathBuf;
 use matrix_sdk::ruma::{
     event_id,
     events::room::message::{OriginalRoomMessageEvent, RoomMessageEventContent},
+    owned_room_alias_id,
     server_name,
     user_id,
     EventId,
     OwnedEventId,
+    OwnedRoomAliasId,
     OwnedRoomId,
     OwnedUserId,
     RoomId,
@@ -46,9 +48,8 @@ use crate::{
     worker::Requester,
 };
 
-const TEST_ROOM1_ALIAS: &str = "#room1:example.com";
-
 lazy_static! {
+    pub static ref TEST_ROOM1_ALIAS: OwnedRoomAliasId = owned_room_alias_id!("#room1:example.com");
     pub static ref TEST_ROOM1_ID: OwnedRoomId = RoomId::new(server_name!("example.com")).to_owned();
     pub static ref TEST_USER1: OwnedUserId = user_id!("@user1:example.com").to_owned();
     pub static ref TEST_USER2: OwnedUserId = user_id!("@user2:example.com").to_owned();
@@ -247,7 +248,7 @@ pub async fn mock_store() -> ProgramStore {
     let info = mock_room();
 
     store.rooms.insert(room_id.clone(), info);
-    store.names.insert(TEST_ROOM1_ALIAS.to_string(), room_id);
+    store.names.insert(TEST_ROOM1_ALIAS.clone(), room_id);
 
     ProgramStore::new(store)
 }
