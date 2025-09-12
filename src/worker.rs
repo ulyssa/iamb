@@ -436,7 +436,11 @@ fn members_insert(
             let user_id = member.user_id();
             let display_name =
                 member.display_name().map_or(user_id.to_string(), |str| str.to_string());
-            info.display_names.insert(user_id.to_owned(), display_name);
+            let old_name = info.display_names.insert(user_id.to_owned(), display_name.clone());
+            if let Some(old_name) = old_name {
+                info.display_name_completion.remove(&old_name);
+            }
+            info.display_name_completion.insert(display_name, user_id.to_owned());
         }
     }
     // else ???
@@ -1152,11 +1156,21 @@ impl ClientWorker {
                     let info = locked.application.get_room_info(room_id.to_owned());
 
                     if ambiguous {
-                        info.display_names.remove(&user_id);
+                        let old_name = info.display_names.remove(&user_id);
+                        if let Some(old_name) = old_name {
+                            info.display_name_completion.remove(&old_name);
+                        }
                     } else if let Some(display) = ev.content.displayname {
-                        info.display_names.insert(user_id, display);
+                        let old_name = info.display_names.insert(user_id.clone(), display.clone());
+                        if let Some(old_name) = old_name {
+                            info.display_name_completion.remove(&old_name);
+                        }
+                        info.display_name_completion.insert(display, user_id);
                     } else {
-                        info.display_names.remove(&user_id);
+                        let old_name = info.display_names.remove(&user_id);
+                        if let Some(old_name) = old_name {
+                            info.display_name_completion.remove(&old_name);
+                        }
                     }
                 }
             },
