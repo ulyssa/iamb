@@ -192,11 +192,13 @@ fn restore_layout(
     tabs.to_layout(area.into(), store)
 }
 
-fn resolve_initial_room(
-    settings: &ApplicationSettings,
+/// Returns the `IambId` for the new window or a string to query the user. If they answer `y` this
+/// function should be rerun with `join_or_create` set to `true`.
+fn resolve_mxid(
     store: &mut ProgramStore,
     id: MatrixId,
-) -> IambResult<Option<IambWindow>> {
+    join_or_create: bool,
+) -> IambResult<Result<IambId, String>> {
     let mut room_name = String::new();
     let room_id = match id {
         MatrixId::Room(id) => {
@@ -210,26 +212,10 @@ fn resolve_initial_room(
         MatrixId::User(user_id) => {
             match store.application.worker.client.get_dm_room(&user_id) {
                 Some(room) => room.room_id().to_owned(),
-                None => {
-                    restore_tty(false, settings.tunables.mouse.enabled);
-
-                    let question = format!("No dm with {user_id} found. Create new DM? [y]es/[n]o");
-
-                    loop {
-                        match read_yesno(&question) {
-                            Some('y') => break,
-                            Some('n') => {
-                                setup_tty(settings, false)?;
-                                return Ok(None);
-                            },
-                            Some(_) | None => continue,
-                        }
-                    }
-
-                    setup_tty(settings, false)?;
-
+                None if join_or_create => {
                     store.application.worker.join_room(user_id.to_string())?
                 },
+                None => return Ok(Err(format!("No dm with {user_id} found. Create new DM?"))),
             }
         },
         MatrixId::Event(owned_room_or_alias_id, _event_id) => {
@@ -244,7 +230,7 @@ fn resolve_initial_room(
         },
         _ => {
             tracing::error!("encountered unrecoginsed matrix id: {id:?}");
-            return Ok(None);
+            return Ok(Err("Matrix link cannot be opened. Press 'n' to continue.".to_owned()));
         },
     };
 
@@ -256,29 +242,14 @@ fn resolve_initial_room(
         .iter()
         .any(|room| room.room_id() == room_id)
     {
-        restore_tty(false, settings.tunables.mouse.enabled);
-
-        let question = format!("Join room {room_name:?}? [y]es/[n]o");
-
-        loop {
-            match read_yesno(&question) {
-                Some('y') => break,
-                Some('n') => {
-                    setup_tty(settings, false)?;
-                    return Ok(None);
-                },
-                Some(_) | None => continue,
-            }
+        if join_or_create {
+            store.application.worker.join_room(room_id.to_string())?;
+        } else {
+            return Ok(Err(format!("Join room {room_name:?}?")));
         }
-
-        setup_tty(settings, false)?;
-
-        store.application.worker.join_room(room_id.to_string())?;
     }
 
-    let id = IambId::Room(room_id, None);
-    let win = IambWindow::open(id, store)?;
-    Ok(Some(win))
+    Ok(Ok(IambId::Room(room_id, None)))
 }
 
 fn setup_screen(
@@ -291,8 +262,27 @@ fn setup_screen(
     let area = Rect::new(0, 0, dims.0, dims.1);
 
     if let Some(id) = initial_room {
-        if let Some(win) = resolve_initial_room(&settings, store, id)? {
-            return Ok(ScreenState::new(win, cmd));
+        match resolve_mxid(store, id.clone(), false)? {
+            Ok(id) => {
+                return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
+            },
+            Err(question) => {
+                restore_tty(false, settings.tunables.mouse.enabled);
+                let join_or_create = loop {
+                    match read_yesno(&format!("{question} [y]es/[n]o")) {
+                        Some('y') => break true,
+                        Some('n') => break false,
+                        Some(_) | None => continue,
+                    }
+                };
+                setup_tty(&settings, false)?;
+
+                if join_or_create {
+                    if let Ok(id) = resolve_mxid(store, id, true)? {
+                        return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
+                    }
+                }
+            },
         }
     }
 
@@ -703,12 +693,33 @@ impl Application {
                 self.screen.current_window_mut()?.send_command(act, ctx, store).await?
             },
 
-            IambAction::OpenLink(url) => {
-                tokio::task::spawn_blocking(move || {
-                    return open::that(url);
-                });
+            IambAction::OpenLink(url, join_or_create) => {
+                let matrix_id = MatrixUri::parse(&url)
+                    .map(|uri| uri.id().clone())
+                    .or_else(|_| MatrixToUri::parse(&url).map(|uri| uri.id().clone()))
+                    .ok();
 
-                None
+                if let Some(id) = matrix_id {
+                    match resolve_mxid(store, id.clone(), join_or_create)? {
+                        Ok(room) => {
+                            let target = OpenTarget::Application(room);
+                            let action = WindowAction::Switch(target);
+
+                            self.action_prepend(vec![(action.into(), ctx)]);
+                            None
+                        },
+                        Err(prompt) => {
+                            let act = IambAction::OpenLink(url, true).into();
+                            let dialog = PromptYesNo::new(prompt, vec![act]);
+                            let err = UIError::NeedConfirm(Box::new(dialog));
+                            return Err(err);
+                        },
+                    }
+                } else {
+                    tokio::task::spawn_blocking(move || open::that(url));
+
+                    None
+                }
             },
 
             IambAction::Verify(act, user_dev) => {
