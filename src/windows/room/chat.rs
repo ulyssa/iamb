@@ -7,7 +7,12 @@ use std::path::{Path, PathBuf};
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
+use matrix_sdk::ruma::events::room::message::{MessageFormat, ReplacementMetadata};
+use matrix_sdk::ruma::events::Mentions;
+use matrix_sdk::ruma::matrix_uri::MatrixId;
+use matrix_sdk::ruma::MatrixToUri;
 use modalkit::editing::store::RegisterError;
+use regex::Regex;
 use std::process::Command;
 use tokio;
 use url::Url;
@@ -18,13 +23,12 @@ use matrix_sdk::{
     room::Room as MatrixRoom,
     ruma::{
         events::reaction::ReactionEventContent,
-        events::relation::{Annotation, Replacement},
+        events::relation::Annotation,
         events::room::message::{
             AddMentions,
             ForwardThread,
             MessageType,
             OriginalRoomMessageEvent,
-            Relation,
             ReplyWithinThread,
             RoomMessageEventContent,
             TextMessageEventContent,
@@ -523,11 +527,38 @@ impl ChatState {
 
                 let mut msg = text_to_message(msg);
 
+                // extract mentions from `matrix.to` links
+                let mut mentions = Mentions::new();
+                if let MessageType::Text(content) = &msg.msgtype {
+                    if let Some(formatted) = &content.formatted {
+                        if matches!(&formatted.format, MessageFormat::Html) {
+                            let html = formatted.body.as_str();
+
+                            let re = Regex::new(r#""(https://matrix.to/#/@[^"]*:[^"]*)""#).unwrap();
+
+                            mentions =
+                                Mentions::with_user_ids(re.captures_iter(html).map(|capture| {
+                                    let link = capture.get(1).unwrap().as_str();
+                                    let uri = MatrixToUri::parse(link).unwrap();
+                                    let MatrixId::User(user_id) = uri.id() else {
+                                        unreachable!()
+                                    };
+                                    user_id.to_owned()
+                                }));
+                        }
+                    }
+                }
+                msg = msg.add_mentions(mentions);
+
                 if let Some((_, event_id)) = &self.editing {
-                    msg.relates_to = Some(Relation::Replacement(Replacement::new(
-                        event_id.clone(),
-                        msg.msgtype.clone().into(),
-                    )));
+                    let mut mentions = None;
+                    if let Some(message) = info.get_event(event_id) {
+                        if let MessageEvent::Original(ev) = &message.event {
+                            mentions = ev.content.mentions.clone();
+                        }
+                    }
+                    let metadata = ReplacementMetadata::new(event_id.to_owned(), mentions);
+                    msg = msg.make_replacement(metadata, None);
 
                     show_echo = false;
                 } else if let Some(thread_root) = self.scrollback.thread() {
