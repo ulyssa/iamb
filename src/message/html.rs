@@ -820,7 +820,8 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                     *c2t(&node.children.borrow(), state)
                 },
 
-                _ => return vec![],
+                // Treat unknown tags as plain text.
+                _ => *c2t(&node.children.borrow(), state),
             }
         },
 
