@@ -44,6 +44,7 @@ use ratatui::{
 };
 
 use crate::{
+    base::RoomInfo,
     config::ApplicationSettings,
     message::printer::TextPrinter,
     util::{join_cell_text, space_text},
@@ -170,6 +171,7 @@ impl Table {
         width: usize,
         style: Style,
         settings: &'a ApplicationSettings,
+        info: &'a RoomInfo,
     ) -> Text<'a> {
         let mut text = Text::default();
         let columns = self.columns();
@@ -190,7 +192,7 @@ impl Table {
             let subw = width.saturating_sub(6);
             let mut printer =
                 TextPrinter::new(subw, style, true, settings).align(Alignment::Center);
-            caption.print(&mut printer, style);
+            caption.print(&mut printer, style, info);
 
             for mut line in printer.finish().lines {
                 line.spans.insert(0, Span::styled("   ", style));
@@ -236,7 +238,7 @@ impl Table {
                                 CellType::Data => style,
                             };
 
-                            cell.to_text(*w, style, settings)
+                            cell.to_text(*w, style, settings, info)
                         } else {
                             space_text(*w, style)
                         };
@@ -308,9 +310,10 @@ impl StyleTreeNode {
         width: usize,
         style: Style,
         settings: &'a ApplicationSettings,
+        info: &'a RoomInfo,
     ) -> Text<'a> {
         let mut printer = TextPrinter::new(width, style, true, settings);
-        self.print(&mut printer, style);
+        self.print(&mut printer, style, info);
         printer.finish()
     }
 
@@ -366,13 +369,13 @@ impl StyleTreeNode {
         }
     }
 
-    pub fn print<'a>(&'a self, printer: &mut TextPrinter<'a>, style: Style) {
+    pub fn print<'a>(&'a self, printer: &mut TextPrinter<'a>, style: Style, info: &'a RoomInfo) {
         let width = printer.width();
 
         match self {
             StyleTreeNode::Anchor(child, c, _) => {
                 let bold = style.add_modifier(StyleModifier::BOLD);
-                child.print(printer, bold);
+                child.print(printer, bold, info);
 
                 let link = format!("[{c}]");
                 let span = Span::styled(link, style);
@@ -380,7 +383,7 @@ impl StyleTreeNode {
             },
             StyleTreeNode::Blockquote(child) => {
                 let mut subp = printer.sub(3);
-                child.print(&mut subp, style);
+                child.print(&mut subp, style, info);
 
                 for mut line in subp.finish() {
                     line.spans.insert(0, Span::styled(" ", style));
@@ -391,7 +394,7 @@ impl StyleTreeNode {
                 }
             },
             StyleTreeNode::Code(child, _) => {
-                child.print(printer, style);
+                child.print(printer, style, info);
             },
             StyleTreeNode::Header(child, level) => {
                 let style = style.add_modifier(StyleModifier::BOLD);
@@ -401,7 +404,7 @@ impl StyleTreeNode {
                 }
 
                 printer.push_str(" ", style);
-                child.print(printer, style);
+                child.print(printer, style, info);
             },
             StyleTreeNode::Image(None) => {},
             StyleTreeNode::Image(Some(alt)) => {
@@ -417,7 +420,7 @@ impl StyleTreeNode {
                 for child in children {
                     let mut subp = printer.sub(liw);
                     let mut bullet = bullets.next();
-                    child.print(&mut subp, style);
+                    child.print(&mut subp, style, info);
 
                     for mut line in subp.finish() {
                         let leading = if let Some(bullet) = bullet.take() {
@@ -433,14 +436,14 @@ impl StyleTreeNode {
             },
             StyleTreeNode::Paragraph(child) => {
                 printer.push_break();
-                child.print(printer, style);
+                child.print(printer, style, info);
                 printer.commit();
             },
             StyleTreeNode::Pre(child) => {
                 let mut subp = printer.sub(2).literal(true);
                 let subw = subp.width();
 
-                child.print(&mut subp, style);
+                child.print(&mut subp, style, info);
 
                 printer.commit();
                 printer.push_line(
@@ -475,7 +478,7 @@ impl StyleTreeNode {
                 }
 
                 printer.push_break();
-                child.print(printer, style);
+                child.print(printer, style, info);
                 printer.commit();
             },
             StyleTreeNode::Ruler => {
@@ -484,7 +487,7 @@ impl StyleTreeNode {
                 }
             },
             StyleTreeNode::Table(table) => {
-                let text = table.to_text(width, style, printer.settings);
+                let text = table.to_text(width, style, printer.settings, info);
                 printer.push_text(text);
             },
             StyleTreeNode::Break => {
@@ -494,16 +497,21 @@ impl StyleTreeNode {
                 printer.push_str(s.as_ref(), style);
             },
 
-            StyleTreeNode::Style(child, patch) => child.print(printer, style.patch(*patch)),
+            StyleTreeNode::Style(child, patch) => child.print(printer, style.patch(*patch), info),
             StyleTreeNode::Sequence(children) => {
                 for child in children {
-                    child.print(printer, style);
+                    child.print(printer, style, info);
                 }
             },
 
             StyleTreeNode::UserId(user_id, _) => {
                 let style = printer.settings().get_user_style(user_id);
-                printer.push_str(user_id.as_str(), style);
+                let name = info
+                    .display_names
+                    .get(user_id)
+                    .map(|n| n.as_str())
+                    .unwrap_or(user_id.as_str());
+                printer.push_str(name, style);
             },
             StyleTreeNode::DisplayName(display_name, user_id, _) => {
                 let style = printer.settings().get_user_style(user_id);
@@ -543,11 +551,12 @@ impl StyleTree {
         style: Style,
         hide_reply: bool,
         settings: &'a ApplicationSettings,
+        info: &'a RoomInfo,
     ) -> Text<'a> {
         let mut printer = TextPrinter::new(width, style, hide_reply, settings);
 
         for child in self.children.iter() {
-            child.print(&mut printer, style);
+            child.print(&mut printer, style, info);
         }
 
         printer.finish()

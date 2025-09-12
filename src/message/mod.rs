@@ -729,7 +729,7 @@ impl<'a> MessageFormatter<'a> {
     ) -> Option<ProtocolPreview<'a>> {
         let width = self.width();
         let w = width.saturating_sub(2);
-        let (mut replied, proto) = msg.show_msg(w, style, true, settings);
+        let (mut replied, proto) = msg.show_msg(w, style, true, settings, info);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -1008,7 +1008,7 @@ impl Message {
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings);
+        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings, info);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
@@ -1056,9 +1056,10 @@ impl Message {
         style: Style,
         hide_reply: bool,
         settings: &'a ApplicationSettings,
+        info: &'a RoomInfo,
     ) -> (Text<'a>, Option<&'a Protocol>) {
         if let Some(html) = &self.html {
-            (html.to_text(width, style, hide_reply, settings), None)
+            (html.to_text(width, style, hide_reply, settings, info), None)
         } else {
             let mut msg = self.event.body();
             if settings.tunables.message_shortcode_display {
