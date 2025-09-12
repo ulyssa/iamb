@@ -151,16 +151,13 @@ fn config_tab_to_desc(
 
             let window = match window {
                 config::WindowPath::UserId(user_id) => {
-                    let name = user_id.to_string();
-                    let room_id = worker.join_room(name.clone())?;
-                    names.insert(name, room_id.clone());
+                    let room_id = worker.join_room(user_id.to_string())?;
                     IambId::Room(room_id, None)
                 },
                 config::WindowPath::RoomId(room_id) => IambId::Room(room_id, None),
                 config::WindowPath::AliasId(alias) => {
-                    let name = alias.to_string();
-                    let room_id = worker.join_room(name.clone())?;
-                    names.insert(name, room_id.clone());
+                    let room_id = worker.join_room(alias.to_string())?;
+                    names.insert(alias, room_id.clone());
                     IambId::Room(room_id, None)
                 },
                 config::WindowPath::Window(id) => id,
