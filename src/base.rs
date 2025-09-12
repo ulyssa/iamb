@@ -1024,12 +1024,34 @@ impl RoomInfo {
 
     /// Get an event for an identifier.
     pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
-        self.messages.get(self.get_message_key(event_id)?)
+        let (thread_root, key) = match self.keys.get(event_id)? {
+            EventLocation::Message(thread_root, key) => (thread_root, key),
+            EventLocation::State(key) => (&None, key),
+            _ => return None,
+        };
+
+        let messages = if let Some(root) = thread_root {
+            self.threads.get(root)?
+        } else {
+            &self.messages
+        };
+        messages.get(key)
     }
 
     /// Get an event for an identifier as mutable.
     pub fn get_event_mut(&mut self, event_id: &EventId) -> Option<&mut Message> {
-        self.messages.get_mut(self.keys.get(event_id)?.to_message_key()?)
+        let (thread_root, key) = match self.keys.get(event_id)? {
+            EventLocation::Message(thread_root, key) => (thread_root, key),
+            EventLocation::State(key) => (&None, key),
+            _ => return None,
+        };
+
+        let messages = if let Some(root) = thread_root {
+            self.threads.get_mut(root)?
+        } else {
+            &mut self.messages
+        };
+        messages.get_mut(key)
     }
 
     pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent, rules: &RedactionRules) {
