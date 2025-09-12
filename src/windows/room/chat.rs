@@ -212,123 +212,98 @@ impl ChatState {
                 Err(UIError::NeedConfirm(prompt))
             },
             MessageAction::Download(filename, flags) => {
-                if let MessageEvent::Original(ev) = &msg.event {
-                    let media = client.media();
-
-                    let mut filename = match (filename, &settings.dirs.downloads) {
-                        (Some(f), _) => PathBuf::from(f),
-                        (None, Some(downloads)) => downloads.clone(),
-                        (None, None) => return Err(IambError::NoDownloadDir.into()),
-                    };
-
-                    let (source, msg_filename) = match &ev.content.msgtype {
-                        MessageType::Audio(c) => (c.source.clone(), c.filename()),
-                        MessageType::File(c) => (c.source.clone(), c.filename()),
-                        MessageType::Image(c) => (c.source.clone(), c.filename()),
-                        MessageType::Video(c) => (c.source.clone(), c.filename()),
-                        _ => {
-                            if !flags.contains(DownloadFlags::OPEN) {
-                                return Err(IambError::NoAttachment.into());
-                            }
-
-                            let links = if let Some(html) = &msg.html {
-                                html.get_links()
-                            } else {
-                                linkify::LinkFinder::new()
-                                    .links(&msg.event.body())
-                                    .filter_map(|u| Url::parse(u.as_str()).ok())
-                                    .scan(TreeGenState { link_num: 0 }, |state, u| {
-                                        state.next_link_char().map(|c| (c, u))
-                                    })
-                                    .collect()
-                            };
-
-                            if links.is_empty() {
-                                return Err(IambError::NoAttachment.into());
-                            }
-
-                            let choices = links
-                                .into_iter()
-                                .map(|l| {
-                                    let url = l.1.to_string();
-                                    let act = IambAction::OpenLink(url.clone(), false).into();
-                                    MultiChoiceItem::new(l.0, url, vec![act])
-                                })
-                                .collect();
-                            let dialog = MultiChoice::new(choices);
-                            let err = UIError::NeedConfirm(Box::new(dialog));
-
-                            return Err(err);
-                        },
-                    };
-
-                    if filename.is_dir() {
-                        filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
-                    }
-
-                    if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
-                        // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
-                        if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
-                            let ext = filename.extension();
-                            let mut filename_incr = filename.clone();
-                            for n in 1..=1000 {
-                                if let Some(ext) = ext.and_then(OsStr::to_str) {
-                                    filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
-                                } else {
-                                    filename_incr.set_file_name(format!("{stem}-{n}"));
+                match &msg.event {
+                    MessageEvent::Original(ev) => {
+                        let media = client.media();
+                        let mut filename = match (filename, &settings.dirs.downloads) {
+                            (Some(f), _) => PathBuf::from(f),
+                            (None, Some(downloads)) => downloads.clone(),
+                            (None, None) => return Err(IambError::NoDownloadDir.into()),
+                        };
+                        let (source, msg_filename) = match &ev.content.msgtype {
+                            MessageType::Audio(c) => (c.source.clone(), c.filename()),
+                            MessageType::File(c) => (c.source.clone(), c.filename()),
+                            MessageType::Image(c) => (c.source.clone(), c.filename()),
+                            MessageType::Video(c) => (c.source.clone(), c.filename()),
+                            _ => {
+                                if !flags.contains(DownloadFlags::OPEN) {
+                                    return Err(IambError::NoAttachment.into());
                                 }
-
-                                if !filename_incr.exists() {
-                                    filename = filename_incr;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
-                        let req = MediaRequestParameters { source, format: MediaFormat::File };
-
-                        let bytes =
-                            media.get_media_content(&req, true).await.map_err(IambError::from)?;
-
-                        fs::write(filename.as_path(), bytes.as_slice())?;
-
-                        msg.downloaded = true;
-                    } else if !flags.contains(DownloadFlags::OPEN) {
-                        let msg = format!(
-                            "The file {} already exists; add ! to end of command to overwrite it.",
-                            filename.display()
-                        );
-                        let err = UIError::Failure(msg);
-
-                        return Err(err);
-                    }
-
-                    let info = if flags.contains(DownloadFlags::OPEN) {
-                        let target = filename.clone().into_os_string();
-                        match open_command(
-                            store.application.settings.tunables.open_command.as_ref(),
-                            target,
-                        ) {
-                            Ok(_) => {
-                                InfoMessage::from(format!(
-                                    "Attachment downloaded to {} and opened",
-                                    filename.display()
-                                ))
-                            },
-                            Err(err) => {
+                                let err = open_links(msg);
                                 return Err(err);
                             },
+                        };
+                        if filename.is_dir() {
+                            filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
                         }
-                    } else {
-                        InfoMessage::from(format!(
-                            "Attachment downloaded to {}",
-                            filename.display()
-                        ))
-                    };
+                        if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
+                            // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
+                            if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
+                                let ext = filename.extension();
+                                let mut filename_incr = filename.clone();
+                                for n in 1..=1000 {
+                                    if let Some(ext) = ext.and_then(OsStr::to_str) {
+                                        filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
+                                    } else {
+                                        filename_incr.set_file_name(format!("{stem}-{n}"));
+                                    }
 
-                    return Ok(info.into());
+                                    if !filename_incr.exists() {
+                                        filename = filename_incr;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
+                            let req = MediaRequestParameters { source, format: MediaFormat::File };
+
+                            let bytes = media
+                                .get_media_content(&req, true)
+                                .await
+                                .map_err(IambError::from)?;
+
+                            fs::write(filename.as_path(), bytes.as_slice())?;
+
+                            msg.downloaded = true;
+                        } else if !flags.contains(DownloadFlags::OPEN) {
+                            let msg = format!(
+                                                "The file {} already exists; add ! to end of command to overwrite it.",
+                                                filename.display()
+                                            );
+                            let err = UIError::Failure(msg);
+
+                            return Err(err);
+                        }
+                        let info = if flags.contains(DownloadFlags::OPEN) {
+                            let target = filename.clone().into_os_string();
+                            match open_command(
+                                store.application.settings.tunables.open_command.as_ref(),
+                                target,
+                            ) {
+                                Ok(_) => {
+                                    InfoMessage::from(format!(
+                                        "Attachment downloaded to {} and opened",
+                                        filename.display()
+                                    ))
+                                },
+                                Err(err) => {
+                                    return Err(err);
+                                },
+                            }
+                        } else {
+                            InfoMessage::from(format!(
+                                "Attachment downloaded to {}",
+                                filename.display()
+                            ))
+                        };
+                        return Ok(info.into());
+                    },
+                    MessageEvent::State(_) => {
+                        let err = open_links(msg);
+                        return Err(err);
+                    },
+                    _ => (),
                 }
 
                 Err(IambError::NoAttachment.into())
@@ -698,6 +673,33 @@ impl ChatState {
 
         store.application.worker.typing_notice(self.room_id.clone());
     }
+}
+
+fn open_links(msg: &Message) -> UIError<IambInfo> {
+    let links = if let Some(html) = &msg.html {
+        html.get_links()
+    } else {
+        linkify::LinkFinder::new()
+            .links(&msg.event.body())
+            .filter_map(|u| Url::parse(u.as_str()).ok())
+            .scan(TreeGenState { link_num: 0 }, |state, u| state.next_link_char().map(|c| (c, u)))
+            .collect()
+    };
+
+    if links.is_empty() {
+        return IambError::NoAttachment.into();
+    }
+
+    let choices = links
+        .into_iter()
+        .map(|l| {
+            let url = l.1.to_string();
+            let act = IambAction::OpenLink(url.clone(), false).into();
+            MultiChoiceItem::new(l.0, url, vec![act])
+        })
+        .collect();
+    let dialog = MultiChoice::new(choices);
+    UIError::NeedConfirm(Box::new(dialog))
 }
 
 macro_rules! delegate {
