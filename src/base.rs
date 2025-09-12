@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::OwnedRoomAliasId;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -1525,7 +1526,7 @@ pub struct ChatStore {
     pub rooms: CompletionMap<OwnedRoomId, RoomInfo>,
 
     /// Map of room names.
-    pub names: CompletionMap<String, OwnedRoomId>,
+    pub names: CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
 
     /// Presence information for other users.
     pub presences: CompletionMap<OwnedUserId, PresenceState>,
@@ -1977,17 +1978,22 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
     match id.chars().next() {
         // Complete room aliases.
         Some('#') => {
-            return store.names.complete(id.as_ref());
+            store
+                .names
+                .complete(id.as_ref())
+                .into_iter()
+                .map(|i| format!("[{}]({})", i, i.matrix_to_uri()))
+                .collect()
         },
 
         // Complete room identifiers.
         Some('!') => {
-            return store
+            store
                 .rooms
                 .complete(id.as_ref())
                 .into_iter()
-                .map(|i| i.to_string())
-                .collect();
+                .map(|i| format!("[{}]({})", i, i.matrix_to_uri()))
+                .collect()
         },
 
         // Complete Emoji shortcodes.
@@ -1995,26 +2001,26 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
             let list = store.emojis.complete(&id[1..]);
             let iter = list.into_iter().take(200).map(|s| format!(":{}:", s));
 
-            return iter.collect();
+            iter.collect()
         },
 
         // Complete usernames for @ and empty strings.
         Some('@') | None => {
-            return store
+            store
                 .presences
                 .complete(id.as_ref())
                 .into_iter()
-                .map(|i| i.to_string())
-                .collect();
+                .map(|i| format!("[{}]({})", i, i.matrix_to_uri()))
+                .collect()
         },
 
         // Unknown sigil.
-        Some(_) => return vec![],
+        Some(_) => vec![],
     }
 }
 
-/// Tab completion for Matrix identifiers (usernames, room aliases, etc.)
-fn complete_matrix_names(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+/// Tab completion for Matrix room aliases
+fn complete_matrix_aliases(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
     let id = text
         .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
         .unwrap_or_else(EditRope::empty);
@@ -2022,7 +2028,7 @@ fn complete_matrix_names(text: &EditRope, cursor: &mut Cursor, store: &ChatStore
 
     let list = store.names.complete(id.as_ref());
     if !list.is_empty() {
-        return list;
+        return list.into_iter().map(|i| i.to_string()).collect();
     }
 
     let list = store.presences.complete(id.as_ref());
@@ -2078,7 +2084,7 @@ fn complete_cmdarg(
         "react" | "unreact" => complete_emoji(text, cursor, store),
 
         "invite" => complete_users(text, cursor, store),
-        "join" | "split" | "vsplit" | "tabedit" => complete_matrix_names(text, cursor, store),
+        "join" | "split" | "vsplit" | "tabedit" => complete_matrix_aliases(text, cursor, store),
         "room" => vec![],
         "verify" => vec![],
         "vertical" | "horizontal" | "aboveleft" | "belowright" | "tab" => {
