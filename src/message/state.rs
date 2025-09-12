@@ -13,6 +13,8 @@ use matrix_sdk::ruma::{
     UserId,
 };
 
+use crate::message::TreeGenState;
+
 use super::html::{StyleTree, StyleTreeNode};
 use ratatui::style::{Modifier as StyleModifier, Style};
 
@@ -497,12 +499,16 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let prefix = StyleTreeNode::Text("* set the room aliases to: ".into());
             let mut cs = vec![prefix];
 
+            let mut state = TreeGenState { link_num: 0 };
+
             for (i, alias) in content.aliases.iter().enumerate() {
                 if i != 0 {
                     cs.push(StyleTreeNode::Text(", ".into()));
                 }
 
-                cs.push(StyleTreeNode::RoomAlias(alias.clone()));
+                let c = state.next_link_char();
+
+                cs.push(StyleTreeNode::RoomAlias(alias.clone(), c));
             }
 
             cs
@@ -597,7 +603,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             let prev_details = prev_content.as_ref().map(|p| p.details());
             let change = content.membership_change(prev_details, ev.sender(), &state_key);
-            let user_id = StyleTreeNode::UserId(state_key.clone());
+            let user_id = StyleTreeNode::UserId(state_key.clone(), Some('0'));
 
             match change {
                 MembershipChange::None => {
@@ -676,7 +682,11 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                                 (None, Some(new)) => {
                                     vec![
                                         StyleTreeNode::Text("* set their display name to ".into()),
-                                        StyleTreeNode::DisplayName(new.into(), state_key),
+                                        StyleTreeNode::DisplayName(
+                                            new.into(),
+                                            state_key,
+                                            Some('0'),
+                                        ),
                                     ]
                                 },
                                 (Some(old), Some(new)) => {
@@ -684,9 +694,13 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                                         StyleTreeNode::Text(
                                             "* changed their display name from ".into(),
                                         ),
-                                        StyleTreeNode::DisplayName(old.into(), state_key.clone()),
+                                        StyleTreeNode::DisplayName(
+                                            old.into(),
+                                            state_key.clone(),
+                                            Some('0'),
+                                        ),
                                         StyleTreeNode::Text(" to ".into()),
-                                        StyleTreeNode::DisplayName(new.into(), state_key),
+                                        StyleTreeNode::DisplayName(new.into(), state_key, None),
                                     ]
                                 },
                                 (Some(_), None) => {
@@ -765,7 +779,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             ..
         }) => {
             let prefix = StyleTreeNode::Text("* upgraded the room; replacement room is ".into());
-            let room = StyleTreeNode::RoomId(content.replacement_room.clone());
+            let room = StyleTreeNode::RoomId(content.replacement_room.clone(), Some('0'));
             vec![prefix, room]
         },
         AnyFullStateEventContent::RoomTopic(FullStateEventContent::Original {
@@ -779,7 +793,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let prefix = StyleTreeNode::Text("* added a space child: ".into());
 
             let room_id = if let Ok(room_id) = OwnedRoomId::from_str(ev.state_key()) {
-                StyleTreeNode::RoomId(room_id)
+                StyleTreeNode::RoomId(room_id, Some('0'))
             } else {
                 bold(ev.state_key().to_string())
             };
@@ -796,7 +810,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             };
 
             let room_id = if let Ok(room_id) = OwnedRoomId::from_str(ev.state_key()) {
-                StyleTreeNode::RoomId(room_id)
+                StyleTreeNode::RoomId(room_id, Some('0'))
             } else {
                 bold(ev.state_key().to_string())
             };
@@ -819,12 +833,16 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             );
             let mut cs = vec![prefix];
 
+            let mut state = TreeGenState { link_num: 0 };
+
             for (i, member) in content.service_members.iter().enumerate() {
                 if i != 0 {
                     cs.push(StyleTreeNode::Text(", ".into()));
                 }
 
-                cs.push(StyleTreeNode::UserId(member.clone()));
+                let c = state.next_link_char();
+
+                cs.push(StyleTreeNode::UserId(member.clone(), c));
             }
 
             cs

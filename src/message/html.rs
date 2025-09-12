@@ -11,11 +11,18 @@
 //! This isn't as important for iamb, since it isn't a browser environment, but we do still map
 //! input onto an enum of the safe list of tags to keep it easy to understand and process.
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::ops::Deref;
 
 use css_color_parser::Color as CssColor;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use matrix_sdk::ruma::{OwnedRoomAliasId, OwnedRoomId, OwnedUserId};
+use matrix_sdk::ruma::{
+    matrix_uri::MatrixId,
+    MatrixToUri,
+    OwnedRoomAliasId,
+    OwnedRoomId,
+    OwnedUserId,
+};
 use unicode_segmentation::UnicodeSegmentation;
 use url::Url;
 
@@ -283,10 +290,10 @@ pub enum StyleTreeNode {
     Table(Table),
     Text(Cow<'static, str>),
     Sequence(StyleTreeChildren),
-    RoomAlias(OwnedRoomAliasId),
-    RoomId(OwnedRoomId),
-    UserId(OwnedUserId),
-    DisplayName(String, OwnedUserId),
+    RoomAlias(OwnedRoomAliasId, Option<char>),
+    RoomId(OwnedRoomId, Option<char>),
+    UserId(OwnedUserId, Option<char>),
+    DisplayName(String, OwnedUserId, Option<char>),
 }
 
 impl StyleTreeNode {
@@ -327,16 +334,29 @@ impl StyleTreeNode {
                 table.gather_links(urls);
             },
 
+            StyleTreeNode::DisplayName(_, user_id, c) | StyleTreeNode::UserId(user_id, c) => {
+                if let Some(c) = c {
+                    let to_url = Url::parse(&user_id.matrix_uri(false).to_string()).unwrap();
+                    urls.push((*c, to_url));
+                }
+            },
+            StyleTreeNode::RoomId(room_id, c) => {
+                if let Some(c) = c {
+                    let to_url = Url::parse(&room_id.matrix_uri(false).to_string()).unwrap();
+                    urls.push((*c, to_url));
+                }
+            },
+            StyleTreeNode::RoomAlias(alias, c) => {
+                if let Some(c) = c {
+                    let to_url = Url::parse(&alias.matrix_uri(false).to_string()).unwrap();
+                    urls.push((*c, to_url));
+                }
+            },
+
             StyleTreeNode::Image(_) => {},
             StyleTreeNode::Ruler => {},
             StyleTreeNode::Text(_) => {},
             StyleTreeNode::Break => {},
-
-            // TODO: eventually these should turn into internal links:
-            StyleTreeNode::UserId(_) => {},
-            StyleTreeNode::RoomId(_) => {},
-            StyleTreeNode::RoomAlias(_) => {},
-            StyleTreeNode::DisplayName(_, _) => {},
         }
     }
 
@@ -475,19 +495,19 @@ impl StyleTreeNode {
                 }
             },
 
-            StyleTreeNode::UserId(user_id) => {
+            StyleTreeNode::UserId(user_id, _) => {
                 let style = printer.settings().get_user_style(user_id);
                 printer.push_str(user_id.as_str(), style);
             },
-            StyleTreeNode::DisplayName(display_name, user_id) => {
+            StyleTreeNode::DisplayName(display_name, user_id, _) => {
                 let style = printer.settings().get_user_style(user_id);
                 printer.push_str(display_name.as_str(), style);
             },
-            StyleTreeNode::RoomId(room_id) => {
+            StyleTreeNode::RoomId(room_id, _) => {
                 let bold = style.add_modifier(StyleModifier::BOLD);
                 printer.push_str(room_id.as_str(), bold);
             },
-            StyleTreeNode::RoomAlias(alias) => {
+            StyleTreeNode::RoomAlias(alias, _) => {
                 let bold = style.add_modifier(StyleModifier::BOLD);
                 printer.push_str(alias.as_str(), bold);
             },
