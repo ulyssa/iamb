@@ -11,11 +11,18 @@
 //! This isn't as important for iamb, since it isn't a browser environment, but we do still map
 //! input onto an enum of the safe list of tags to keep it easy to understand and process.
 use std::borrow::Cow;
+use std::convert::TryFrom;
 use std::ops::Deref;
 
 use css_color_parser::Color as CssColor;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use matrix_sdk::ruma::{OwnedRoomAliasId, OwnedRoomId, OwnedUserId};
+use matrix_sdk::ruma::{
+    matrix_uri::MatrixId,
+    MatrixToUri,
+    OwnedRoomAliasId,
+    OwnedRoomId,
+    OwnedUserId,
+};
 use unicode_segmentation::UnicodeSegmentation;
 use url::Url;
 
@@ -731,7 +738,43 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                     let h = attrs_to_href(&attrs.borrow()).and_then(|u| Url::parse(&u).ok());
 
                     if let Some(h) = h {
-                        if let Some(n) = state.next_link_char() {
+                        let n = state.next_link_char();
+
+                        if let Ok(uri) = MatrixToUri::parse(h.as_str()) {
+                            match uri.id() {
+                                MatrixId::Room(room_id) => {
+                                    StyleTreeNode::RoomId(room_id.to_owned(), n)
+                                },
+                                MatrixId::RoomAlias(alias) => {
+                                    StyleTreeNode::RoomAlias(alias.to_owned(), n)
+                                },
+                                MatrixId::User(user_id) => {
+                                    StyleTreeNode::UserId(user_id.to_owned(), n)
+                                },
+                                MatrixId::Event(room_or_alias_id, _) => {
+                                    let room_or_alias_id: &matrix_sdk::ruma::RoomOrAliasId =
+                                        room_or_alias_id;
+                                    // ignore event id for now
+                                    if let Ok(alias_id) =
+                                        <&matrix_sdk::ruma::RoomAliasId>::try_from(room_or_alias_id)
+                                    {
+                                        StyleTreeNode::RoomAlias(alias_id.to_owned(), n)
+                                    } else {
+                                        let room_id =
+                                            <&matrix_sdk::ruma::RoomId>::try_from(room_or_alias_id)
+                                                .unwrap();
+                                        StyleTreeNode::RoomId(room_id.to_owned(), n)
+                                    }
+                                },
+                                _ => {
+                                    if let Some(n) = n {
+                                        StyleTreeNode::Anchor(c, n, h)
+                                    } else {
+                                        *c
+                                    }
+                                },
+                            }
+                        } else if let Some(n) = n {
                             StyleTreeNode::Anchor(c, n, h)
                         } else {
                             *c
