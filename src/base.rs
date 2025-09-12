@@ -506,7 +506,7 @@ pub enum KeysAction {
     Import(String, String),
 }
 
-/// An action that the main program loop should.
+/// An action that the main program loop should execute.
 ///
 /// See [the commands module][super::commands] for where these are usually created.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -523,8 +523,8 @@ pub enum IambAction {
     /// Perform an action on the current space.
     Space(SpaceAction),
 
-    /// Open a URL.
-    OpenLink(String),
+    /// Open a URL (and specify whether to join linked matrix rooms).
+    OpenLink(String, bool),
 
     /// Perform an action on the currently focused room.
     Room(RoomAction),

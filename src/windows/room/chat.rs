@@ -251,7 +251,7 @@ impl ChatState {
                                 .into_iter()
                                 .map(|l| {
                                     let url = l.1.to_string();
-                                    let act = IambAction::OpenLink(url.clone()).into();
+                                    let act = IambAction::OpenLink(url.clone(), false).into();
                                     MultiChoiceItem::new(l.0, url, vec![act])
                                 })
                                 .collect();
