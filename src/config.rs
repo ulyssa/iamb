@@ -1008,7 +1008,7 @@ impl Tunables {
         }
     }
 
-    fn values(self) -> TunableValues {
+    pub fn values(self) -> TunableValues {
         TunableValues {
             encryption: self.encryption.values(),
             proxy: self.proxy.unwrap_or_default().values(),
