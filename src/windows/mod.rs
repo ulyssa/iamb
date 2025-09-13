@@ -70,6 +70,7 @@ use crate::base::{
     ProgramContext,
     ProgramStore,
     RoomAction,
+    RoomView,
     SendAction,
     SortColumn,
     SortFieldRoom,
@@ -296,7 +297,7 @@ fn room_prompt(
 ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
     match act {
         PromptAction::Submit => {
-            let room = IambId::Room(room_id.to_owned(), None);
+            let room = IambId::Room(room_id.to_owned(), RoomView::Main);
             let open = WindowAction::Switch(OpenTarget::Application(room));
             let acts = vec![(open.into(), ctx.clone())];
 
@@ -730,7 +731,7 @@ impl WindowOps<IambInfo> for IambWindow {
 impl Window<IambInfo> for IambWindow {
     fn id(&self) -> IambId {
         match self {
-            IambWindow::Room(room) => IambId::Room(room.id().to_owned(), room.thread().cloned()),
+            IambWindow::Room(room) => IambId::Room(room.id().to_owned(), room.view()),
             IambWindow::DirectList(_) => IambId::DirectList,
             IambWindow::MemberList(_, room_id, _) => IambId::MemberList(room_id.clone()),
             IambWindow::RoomList(_) => IambId::RoomList,
@@ -852,7 +853,7 @@ impl Window<IambInfo> for IambWindow {
         let ChatStore { names, worker, .. } = &mut store.application;
 
         if let Some(room) = names.get_mut(&name) {
-            let id = IambId::Room(room.clone(), None);
+            let id = IambId::Room(room.clone(), RoomView::Main);
 
             IambWindow::open(id, store)
         } else {
@@ -860,7 +861,7 @@ impl Window<IambInfo> for IambWindow {
             names.insert(name, room_id.clone());
 
             let (room, name, tags) = store.application.worker.get_room(room_id)?;
-            let room = RoomState::new(room, None, name, tags, store);
+            let room = RoomState::new(room, RoomView::Main, name, tags, store);
 
             store.application.need_load.need_members(room.id().to_owned());
             Ok(room.into())

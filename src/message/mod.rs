@@ -7,10 +7,13 @@ use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
+use std::sync::Arc;
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::Mentions;
+use matrix_sdk::ruma::UserId;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
@@ -69,7 +72,7 @@ pub use self::compose::text_to_message;
 use self::state::{body_cow_state, html_state};
 pub use html::TreeGenState;
 
-type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
+type ProtocolPreview = (Arc<Protocol>, u16, u16);
 
 pub type MessageKey = (MessageTimeStamp, OwnedEventId);
 
@@ -140,7 +143,7 @@ const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
 
 const TIME_GUTTER_EMPTY: &str = "            ";
-const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
+pub const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
 
 const USIZE_TOO_SMALL: bool = usize::BITS < u64::BITS;
 
@@ -193,7 +196,7 @@ fn placeholder_frame(
 }
 
 #[inline]
-fn millis_to_datetime(ms: UInt) -> DateTime<LocalTz> {
+pub fn millis_to_datetime(ms: UInt) -> DateTime<LocalTz> {
     let time = i64::from(ms) / 1000;
     let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
     time.into()
@@ -494,6 +497,17 @@ impl MessageEvent {
         }
     }
 
+    pub fn mentions(&self) -> &Option<Mentions> {
+        match self {
+            MessageEvent::EncryptedOriginal(_) |
+            MessageEvent::EncryptedRedacted(_) |
+            MessageEvent::Redacted(..) |
+            MessageEvent::State(_) => &None,
+            MessageEvent::Original(ev) => &ev.content.mentions,
+            MessageEvent::Local(_, ev) => &ev.mentions,
+        }
+    }
+
     fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
         match self {
             MessageEvent::EncryptedOriginal(_) => return,
@@ -709,7 +723,7 @@ impl<'a> MessageFormatter<'a> {
         text: &mut Text<'a>,
         info: &'a RoomInfo,
         tunables: &'a TunableValues,
-    ) -> Option<ProtocolPreview<'a>> {
+    ) -> Option<ProtocolPreview> {
         let reply_style = if tunables.message_user_color {
             style.patch(tunables.get_user_color(&msg.sender))
         } else {
@@ -755,7 +769,12 @@ impl<'a> MessageFormatter<'a> {
         proto
     }
 
-    fn push_reactions(&mut self, counts: Vec<(&'a str, usize)>, style: Style, text: &mut Text<'a>) {
+    fn push_reactions(
+        &mut self,
+        counts: Vec<(&'a str, Vec<&'a UserId>)>,
+        style: Style,
+        text: &mut Text<'a>,
+    ) {
         let mut emojis = printer::TextPrinter::new(self.width(), style, false, self.tunables);
         let mut reactions = 0;
 
@@ -785,7 +804,7 @@ impl<'a> MessageFormatter<'a> {
             emojis.push_str("[", style);
             emojis.push_str(name, style);
             emojis.push_str(" ", style);
-            emojis.push_span_nobreak(Span::styled(count.to_string(), style));
+            emojis.push_span_nobreak(Span::styled(count.len().to_string(), style));
             emojis.push_str("]", style);
 
             reactions += 1;
@@ -822,7 +841,7 @@ impl<'a> MessageFormatter<'a> {
 pub enum ImageStatus {
     None,
     Downloading(ImagePreviewSize),
-    Loaded(Protocol),
+    Loaded(Arc<Protocol>),
     Error(String),
 }
 
@@ -997,7 +1016,7 @@ impl Message {
         width: usize,
         info: &'a RoomInfo,
         tunables: &'a TunableValues,
-    ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
+    ) -> (Text<'a>, [Option<ProtocolPreview>; 2]) {
         let style = self.get_render_style(selected, tunables);
         let mut fmt = self.get_render_format(prev, width, info, tunables);
         let mut text = Text::default();
@@ -1062,7 +1081,7 @@ impl Message {
         style: Style,
         hide_reply: bool,
         tunables: &'a TunableValues,
-    ) -> (Text<'a>, Option<&'a Protocol>) {
+    ) -> (Text<'a>, Option<Arc<Protocol>>) {
         if let Some(html) = &self.html {
             (html.to_text(width, style, hide_reply, tunables), None)
         } else {
@@ -1082,7 +1101,7 @@ impl Message {
                     placeholder_frame(Some("Downloading..."), width, image_preview_size)
                 },
                 ImageStatus::Loaded(backend) => {
-                    proto = Some(backend);
+                    proto = Some(Arc::clone(backend));
                     placeholder_frame(Some("No Space..."), width, &backend.area().into())
                 },
                 ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),

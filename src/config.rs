@@ -674,7 +674,7 @@ impl Tunables {
         }
     }
 
-    fn values(self) -> TunableValues {
+    pub fn values(self) -> TunableValues {
         TunableValues {
             log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
             max_log_files: self.max_log_files.unwrap_or(7),
