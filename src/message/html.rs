@@ -511,7 +511,7 @@ impl StyleTreeNode {
                 let Cow::Borrowed(name) = span.content else {
                     unreachable!()
                 };
-                printer.push_str(&*name, style);
+                printer.push_str(name, style);
             },
             StyleTreeNode::DisplayName(display_name, user_id, _) => {
                 let style = printer.settings().get_user_style(user_id);
