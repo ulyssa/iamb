@@ -505,13 +505,13 @@ impl StyleTreeNode {
             },
 
             StyleTreeNode::UserId(user_id, _) => {
-                let style = printer.settings().get_user_style(user_id);
-                let name = info
-                    .display_names
-                    .get(user_id)
-                    .map(|n| n.as_str())
-                    .unwrap_or(user_id.as_str());
-                printer.push_str(name, style);
+                let span: Span<'a> = printer.settings().get_user_span(user_id, info);
+                let style = span.style;
+
+                let Cow::Borrowed(name) = span.content else {
+                    unreachable!()
+                };
+                printer.push_str(&*name, style);
             },
             StyleTreeNode::DisplayName(display_name, user_id, _) => {
                 let style = printer.settings().get_user_style(user_id);
