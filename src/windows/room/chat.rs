@@ -122,7 +122,7 @@ impl ChatState {
     pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
         let room_id = room.room_id().to_owned();
         let scrollback = ScrollbackState::new(room_id.clone(), thread.clone());
-        let id = IambBufferId::Room(room_id.clone(), thread, RoomFocus::MessageBar);
+        let id = IambBufferId::Room(room_id.clone(), thread.into(), RoomFocus::MessageBar);
         let ebuf = store.load_buffer(id);
         let tbox = TextBoxState::new(ebuf);
 
@@ -810,6 +810,11 @@ impl ChatState {
         &self.room_id
     }
 
+    pub fn current_message(&self, store: &mut ProgramStore) -> Option<MessageId> {
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        self.scrollback.get_key(info).map(|key| key.id)
+    }
+
     pub fn auto_toggle_focus(
         &mut self,
         act: &EditorAction,
@@ -862,8 +867,8 @@ impl WindowOps<IambInfo> for ChatState {
         // XXX: I want each WindowSlot to have its own shared buffer, instead of each Room; need to
         // find a good way to pass that info here so that it can be part of the content id.
         let room_id = self.room_id.clone();
-        let thread = self.thread().cloned();
-        let id = IambBufferId::Room(room_id.clone(), thread, RoomFocus::MessageBar);
+        let view = self.thread().cloned().into();
+        let id = IambBufferId::Room(room_id.clone(), view, RoomFocus::MessageBar);
         let ebuf = store.load_buffer(id);
         let tbox = TextBoxState::new(ebuf);
 
@@ -931,9 +936,9 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
         // And now we can finally run the editor command.
         match delegate!(self, w => w.editor_command(act, ctx, store)) {
             res @ Ok(_) => res,
-            Err(EditError::WrongBuffer(IambBufferId::Room(room_id, thread, focus)))
+            Err(EditError::WrongBuffer(IambBufferId::Room(room_id, view, focus)))
                 if room_id == self.room_id &&
-                    thread.as_ref() == self.thread() &&
+                    view == self.thread().into() &&
                     act.is_switchable(ctx) =>
             {
                 // Switch focus.
@@ -1306,7 +1311,10 @@ mod tests {
 
     use modalkit::actions::{EditAction, InsertTextAction};
 
-    use crate::tests::{TEST_ROOM1_ID, mock_store};
+    use crate::{
+        base::RoomView,
+        tests::{TEST_ROOM1_ID, mock_store},
+    };
 
     macro_rules! move_line {
         ($dir: expr, $count: expr) => {
@@ -1325,7 +1333,7 @@ mod tests {
         let room_id = TEST_ROOM1_ID.clone();
         let scrollback = ScrollbackState::new(room_id.clone(), None);
 
-        let id = IambBufferId::Room(room_id, None, RoomFocus::MessageBar);
+        let id = IambBufferId::Room(room_id, RoomView::Main, RoomFocus::MessageBar);
         let ebuf = store.load_buffer(id);
         let mut tbox = TextBoxState::new(ebuf);
 

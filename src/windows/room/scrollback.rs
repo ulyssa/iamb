@@ -52,6 +52,7 @@ use crate::{
         RoomFetchStatus,
         RoomFocus,
         RoomInfo,
+        RoomView,
     },
     config::TunableValues,
     message::{Message, MessageCursor, MessageKey, Messages},
@@ -143,7 +144,8 @@ pub struct ScrollbackState {
 
 impl ScrollbackState {
     pub fn new(room_id: OwnedRoomId, thread: Option<OwnedEventId>) -> ScrollbackState {
-        let id = IambBufferId::Room(room_id.to_owned(), thread.clone(), RoomFocus::Scrollback);
+        let id =
+            IambBufferId::Room(room_id.to_owned(), thread.clone().into(), RoomFocus::Scrollback);
         let cursor = MessageCursor::default();
         let viewctx = ViewportContext::default();
         let jumped = HistoryList::default();
@@ -1064,7 +1066,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         return Err(err);
                     };
                     let room_id = self.room_id.clone();
-                    let id = IambId::Room(room_id, Some(root.to_owned()));
+                    let id = IambId::Room(room_id, RoomView::Thread(root.to_owned()));
                     let open = WindowAction::Switch(OpenTarget::Application(id));
                     Ok(vec![(open.into(), ctx.clone())])
                 }
@@ -1485,7 +1487,7 @@ impl StatefulWidget for Scrollback<'_> {
         // Render image previews after all text lines have been drawn, as the render might draw below the current
         // line.
         for (x, y, backend) in image_previews {
-            let image_widget = Image::new(backend);
+            let image_widget = Image::new(&backend);
             let mut rect: Rect = backend.size().into();
             rect.x = x;
             rect.y = y;
@@ -1562,7 +1564,11 @@ mod tests {
             std::mem::take(&mut store.application.need_load)
                 .into_iter()
                 .collect::<Vec<(OwnedRoomId, Need)>>(),
-            vec![(room_id.clone(), Need { messages: Some(Vec::new()), members: false })]
+            vec![(room_id.clone(), Need {
+                messages: Some(Vec::new()),
+                members: false,
+                events: Vec::new()
+            })]
         );
 
         // Search forward twice to MSG1.
