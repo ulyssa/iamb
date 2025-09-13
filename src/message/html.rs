@@ -291,8 +291,8 @@ pub enum StyleTreeNode {
     Table(Table),
     Text(Cow<'static, str>),
     Sequence(StyleTreeChildren),
-    RoomAlias(OwnedRoomAliasId, Option<char>),
-    RoomId(OwnedRoomId, Vec<OwnedServerName>, Option<char>),
+    RoomAlias(OwnedRoomAliasId, Option<char>, Option<OwnedEventId>),
+    RoomId(OwnedRoomId, Vec<OwnedServerName>, Option<char>, Option<OwnedEventId>),
     UserId(OwnedUserId, Option<char>),
     DisplayName(String, OwnedUserId, Option<char>),
 }
@@ -342,17 +342,29 @@ impl StyleTreeNode {
                     urls.push((*c, to_url));
                 }
             },
-            StyleTreeNode::RoomId(room_id, via, c) => {
+            StyleTreeNode::RoomId(room_id, via, c, event_id) => {
                 if let Some(c) = c {
-                    let to_url =
-                        Url::parse(&room_id.matrix_uri_via(via.iter().cloned(), false).to_string())
-                            .unwrap();
+                    let uri = if let Some(ev_id) = event_id {
+                        room_id.matrix_event_uri(ev_id.to_owned()).to_string()
+                    } else {
+                        room_id.matrix_uri_via(via.iter().cloned(), false).to_string()
+                    };
+                    let to_url = Url::parse(&uri).unwrap();
                     urls.push((*c, to_url));
                 }
             },
-            StyleTreeNode::RoomAlias(alias, c) => {
+            StyleTreeNode::RoomAlias(alias, c, event_id) => {
                 if let Some(c) = c {
-                    let to_url = Url::parse(&alias.matrix_uri(false).to_string()).unwrap();
+                    let uri = if let Some(ev_id) = event_id {
+                        #[expect(
+                            deprecated,
+                            reason = "we only use this if we received a deprecated link"
+                        )]
+                        alias.matrix_event_uri(ev_id.to_owned()).to_string()
+                    } else {
+                        alias.matrix_uri(false).to_string()
+                    };
+                    let to_url = Url::parse(&uri).unwrap();
                     urls.push((*c, to_url));
                 }
             },
@@ -516,12 +528,18 @@ impl StyleTreeNode {
                 let style = printer.settings().get_user_style(user_id);
                 printer.push_str(display_name.as_str(), style);
             },
-            StyleTreeNode::RoomId(room_id, _, _) => {
+            StyleTreeNode::RoomId(room_id, _, _, event_id) => {
                 let bold = style.add_modifier(StyleModifier::BOLD);
+                if event_id.is_some() {
+                    printer.push_str("Event in ", bold);
+                }
                 printer.push_str(room_id.as_str(), bold);
             },
-            StyleTreeNode::RoomAlias(alias, _) => {
+            StyleTreeNode::RoomAlias(alias, _, event_id) => {
                 let bold = style.add_modifier(StyleModifier::BOLD);
+                if event_id.is_some() {
+                    printer.push_str("Event in ", bold);
+                }
                 printer.push_str(alias.as_str(), bold);
             },
         }
@@ -742,17 +760,20 @@ fn mxid2t(
     h: &Url,
 ) -> StyleTreeNode {
     match id {
-        MatrixId::Room(room_id) => StyleTreeNode::RoomId(room_id.to_owned(), via.to_owned(), n),
-        MatrixId::RoomAlias(alias) => StyleTreeNode::RoomAlias(alias.to_owned(), n),
+        MatrixId::Room(room_id) => {
+            StyleTreeNode::RoomId(room_id.to_owned(), via.to_owned(), n, None)
+        },
+        MatrixId::RoomAlias(alias) => StyleTreeNode::RoomAlias(alias.to_owned(), n, None),
         MatrixId::User(user_id) => StyleTreeNode::UserId(user_id.to_owned(), n),
-        MatrixId::Event(room_or_alias_id, _) => {
+        MatrixId::Event(room_or_alias_id, event_id) => {
             let room_or_alias_id: &matrix_sdk::ruma::RoomOrAliasId = room_or_alias_id;
-            // ignore event id for now
+            let event_id = Some(event_id.to_owned());
+
             if let Ok(alias_id) = <&matrix_sdk::ruma::RoomAliasId>::try_from(room_or_alias_id) {
-                StyleTreeNode::RoomAlias(alias_id.to_owned(), n)
+                StyleTreeNode::RoomAlias(alias_id.to_owned(), n, event_id)
             } else {
                 let room_id = <&matrix_sdk::ruma::RoomId>::try_from(room_or_alias_id).unwrap();
-                StyleTreeNode::RoomId(room_id.to_owned(), via.to_owned(), n)
+                StyleTreeNode::RoomId(room_id.to_owned(), via.to_owned(), n, event_id)
             }
         },
         _ => {

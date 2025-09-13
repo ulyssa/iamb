@@ -511,7 +511,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             ..
         }) => {
             if let Some(canon) = content.alias.as_ref() {
-                let canon = StyleTreeNode::RoomAlias(canon.to_owned(), Some('0'));
+                let canon = StyleTreeNode::RoomAlias(canon.to_owned(), Some('0'), None);
                 let prefix =
                     StyleTreeNode::Text("* updated the canonical alias for the room to: ".into());
                 vec![prefix, canon]
@@ -768,7 +768,8 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             ..
         }) => {
             let prefix = StyleTreeNode::Text("* upgraded the room; replacement room is ".into());
-            let room = StyleTreeNode::RoomId(content.replacement_room.clone(), vec![], Some('0'));
+            let room =
+                StyleTreeNode::RoomId(content.replacement_room.clone(), vec![], Some('0'), None);
             vec![prefix, room]
         },
         AnyStateEventContentChange::RoomTopic(StateEventContentChange::Original {
@@ -783,7 +784,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let prefix = StyleTreeNode::Text("* added a space child: ".into());
 
             let room_id = if let Ok(room_id) = OwnedRoomId::from_str(ev.state_key()) {
-                StyleTreeNode::RoomId(room_id, vec![], Some('0'))
+                StyleTreeNode::RoomId(room_id, vec![], Some('0'), None)
             } else {
                 bold(ev.state_key().to_string())
             };
@@ -801,7 +802,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             };
 
             let room_id = if let Ok(room_id) = OwnedRoomId::from_str(ev.state_key()) {
-                StyleTreeNode::RoomId(room_id, vec![], Some('0'))
+                StyleTreeNode::RoomId(room_id, vec![], Some('0'), None)
             } else {
                 bold(ev.state_key().to_string())
             };
