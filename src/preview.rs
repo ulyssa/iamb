@@ -2,6 +2,7 @@ use std::{
     fs::File,
     io::{Read, Write},
     path::{Path, PathBuf},
+    sync::Arc,
 };
 
 use matrix_sdk::{
@@ -108,7 +109,7 @@ pub fn spawn_insert_preview(
                         try_set_msg_preview_error(&mut locked.application, room_id, event_id, err);
                     },
                     Ok((backend, msg)) => {
-                        msg.image_preview = ImageStatus::Loaded(backend);
+                        msg.image_preview = ImageStatus::Loaded(Arc::new(backend));
                     },
                 }
             },

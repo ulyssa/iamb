@@ -713,7 +713,7 @@ impl Tunables {
         }
     }
 
-    fn values(self) -> TunableValues {
+    pub fn values(self) -> TunableValues {
         TunableValues {
             log_level: self.log_level.map(Level::from).unwrap_or(Level::INFO),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
