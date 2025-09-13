@@ -612,7 +612,7 @@ fn complete_cmdarg(
 
         // These have no arguments
         "cancel" | "chats" | "dms" | "editor" | "edit" | "forget" | "leave" | "members" |
-        "mentions" | "replied" | "reply" | "rooms" | "spaces" | "welcome" => vec![],
+        "mentions" | "message" | "replied" | "reply" | "rooms" | "spaces" | "welcome" => vec![],
 
         "abo" | "aboveleft" | "bel" | "belowright" | "hor" | "horizontal" | "lefta" |
         "leftabove" | "rightb" | "rightbelow" | "tab" | "vert" | "vertical" => {

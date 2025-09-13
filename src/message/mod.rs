@@ -4,11 +4,12 @@ use std::cmp::{Ord, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
 use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{DECIMAL, format_size};
-use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::ruma::UInt;
+use matrix_sdk::ruma::events::Mentions;
 use matrix_sdk::ruma::events::RedactedUnsigned;
 use matrix_sdk::ruma::events::room::encrypted::{
     OriginalRoomEncryptedEvent,
@@ -25,6 +26,7 @@ use matrix_sdk::ruma::events::room::message::{
 use matrix_sdk::ruma::events::room::redaction::SyncRoomRedactionEvent;
 use matrix_sdk::ruma::events::sticker::{OriginalStickerEvent, RedactedStickerEvent, StickerEvent};
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
+use matrix_sdk::ruma::{OwnedTransactionId, UserId};
 use matrix_sdk::send_queue::SendHandle;
 use modalkit::editing::cursor::Cursor;
 use ratatui::symbols::line::THICK_VERTICAL;
@@ -45,7 +47,7 @@ mod state;
 pub use self::compose::{text_to_message, text_to_text_message_event_content};
 pub use self::html::TreeGenState;
 
-type ProtocolPreview<'a> = (&'a SlicedProtocol, u16, u16);
+type ProtocolPreview = (Arc<SlicedProtocol>, u16, u16);
 
 /// The key used for uniquely identifying messages within a room and its threads.
 ///
@@ -125,7 +127,7 @@ const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
 
 const TIME_GUTTER_EMPTY: &str = "            ";
-const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
+pub const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
 
 const USIZE_TOO_SMALL: bool = usize::BITS < u64::BITS;
 
@@ -191,9 +193,24 @@ impl MessageId {
     }
 }
 
+impl Display for MessageId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MessageId::Origin(id) => write!(f, "{}", id),
+            MessageId::Local(id) => write!(f, "{}", id),
+        }
+    }
+}
+
 impl From<OwnedEventId> for MessageId {
     fn from(value: OwnedEventId) -> Self {
         Self::Origin(value)
+    }
+}
+
+impl From<OwnedTransactionId> for MessageId {
+    fn from(value: OwnedTransactionId) -> Self {
+        Self::Local(value)
     }
 }
 
@@ -210,7 +227,7 @@ pub enum TimeStampIntError {
 pub struct MessageTimeStamp(pub MilliSecondsSinceUnixEpoch);
 
 impl MessageTimeStamp {
-    fn as_datetime(self) -> DateTime<LocalTz> {
+    pub fn as_datetime(self) -> DateTime<LocalTz> {
         let time = i64::from(self.0.0) / 1000;
         let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
         time.into()
@@ -472,6 +489,23 @@ impl MessageEvent {
 
     pub fn filename(&self) -> Option<String> {
         self.msgtype().and_then(content_filename)
+    }
+
+    pub fn mentions(&self) -> Option<&Mentions> {
+        match self {
+            MessageEvent::EncryptedOriginal(..) |
+            MessageEvent::EncryptedRedacted(..) |
+            MessageEvent::Redacted(..) |
+            MessageEvent::Sticker(..) |
+            MessageEvent::State(..) => None,
+            MessageEvent::Original(ev, edits) => {
+                edits
+                    .last_key_value()
+                    .and_then(|(_, ev)| ev.mentions.as_ref())
+                    .or(ev.content.mentions.as_ref())
+            },
+            MessageEvent::Local(_, _, ev) => ev.mentions.as_ref(),
+        }
     }
 
     fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
@@ -772,7 +806,7 @@ impl<'a> MessageFormatter<'a> {
         info: &'a RoomInfo,
         tunables: &'a TunableValues,
         previews: &'a PreviewManager,
-    ) -> Option<ProtocolPreview<'a>> {
+    ) -> Option<ProtocolPreview> {
         let reply_style = if tunables.message_user_color {
             style.patch(tunables.get_user_color(&msg.sender))
         } else {
@@ -820,12 +854,12 @@ impl<'a> MessageFormatter<'a> {
 
     fn push_reactions(
         &mut self,
-        counts: Vec<(&'a str, usize, &'a Option<MediaSource>)>,
+        counts: Vec<(&'a str, Vec<&'a UserId>, &'a Option<MediaSource>)>,
         style: Style,
         text: &mut Text<'a>,
         tunables: &'a TunableValues,
         previews: &'a PreviewManager,
-    ) -> Vec<ProtocolPreview<'a>> {
+    ) -> Vec<ProtocolPreview> {
         let mut emojis = printer::TextPrinter::new(self.width(), style, self.tunables, self.info);
         let mut reactions = 0;
         let mut protos = Vec::new();
@@ -868,6 +902,8 @@ impl<'a> MessageFormatter<'a> {
 
             emojis.push_str("[", style);
             if let Some(Some(proto)) = proto {
+                let proto = Arc::clone(proto);
+
                 let (x, y) = emojis.cursor_pos();
                 let y = (y + text.lines.len()) as u16;
                 let x = x as u16 + self.cols.user_gutter_width(tunables);
@@ -876,7 +912,7 @@ impl<'a> MessageFormatter<'a> {
             }
             emojis.push_str(name, style);
             emojis.push_str(" ", style);
-            emojis.push_span_nobreak(Span::styled(count.to_string(), style));
+            emojis.push_span_nobreak(Span::styled(count.len().to_string(), style));
             emojis.push_str("]", style);
 
             reactions += 1;
@@ -1178,7 +1214,7 @@ impl Message {
         info: &'a RoomInfo,
         tunables: &'a TunableValues,
         previews: &'a PreviewManager,
-    ) -> (Text<'a>, Vec<ProtocolPreview<'a>>) {
+    ) -> (Text<'a>, Vec<ProtocolPreview>) {
         let style = self.get_render_style(selected, tunables);
         let mut fmt = self.get_render_format(prev, width, info, tunables);
         let mut text = Text::default();
@@ -1273,7 +1309,7 @@ impl Message {
         tunables: &'a TunableValues,
         previews: &'a PreviewManager,
         info: &'a RoomInfo,
-    ) -> (Text<'a>, Option<&'a SlicedProtocol>) {
+    ) -> (Text<'a>, Option<Arc<SlicedProtocol>>) {
         let mut proto = None;
         let placeholder = match self
             .image_preview()
@@ -1287,7 +1323,7 @@ impl Message {
                 placeholder_frame(Some("Downloading..."), width, image_preview_size)
             },
             Some(ImageStatus::Loaded(backend)) => {
-                proto = Some(backend);
+                proto = Some(Arc::clone(backend));
                 placeholder_frame(None, width, &backend.size())
             },
             Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),

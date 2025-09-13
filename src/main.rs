@@ -49,7 +49,7 @@ use tokio::sync::Mutex as AsyncMutex;
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::base::{HomeserverAction, KeysAction};
+use crate::base::{HomeserverAction, KeysAction, RoomView};
 use crate::completions::IambCompleter;
 use crate::config::{CursorShape, Iamb};
 use crate::prelude::*;
@@ -87,13 +87,13 @@ fn config_tab_to_desc(
             let window = match window {
                 config::WindowPath::UserId(user_id) => {
                     let room_id = worker.join_room(user_id.to_string(), via)?;
-                    IambId::Room(room_id, None)
+                    IambId::Room(room_id, RoomView::Main)
                 },
-                config::WindowPath::RoomId(room_id) => IambId::Room(room_id, None),
+                config::WindowPath::RoomId(room_id) => IambId::Room(room_id, RoomView::Main),
                 config::WindowPath::AliasId(alias) => {
                     let room_id = worker.join_room(alias.to_string(), via)?;
                     names.insert(alias, room_id.clone());
-                    IambId::Room(room_id, None)
+                    IambId::Room(room_id, RoomView::Main)
                 },
                 config::WindowPath::Window(id) => id,
             };
@@ -183,7 +183,7 @@ fn resolve_mxid(
         }
     }
 
-    Ok(Ok(IambId::Room(room_id, None)))
+    Ok(Ok(IambId::Room(room_id, RoomView::Main)))
 }
 
 fn setup_screen(
@@ -694,7 +694,7 @@ impl Application {
             HomeserverAction::CreateRoom(alias, vis, flags) => {
                 let client = &store.application.worker.client;
                 let room_id = create_room(client, alias, vis, flags).await?;
-                let room = IambId::Room(room_id, None);
+                let room = IambId::Room(room_id, RoomView::Main);
                 let target = OpenTarget::Application(room);
                 let action = WindowAction::Switch(target);
 

@@ -7,11 +7,13 @@ use std::fmt::{Debug, Formatter};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
 use futures::StreamExt;
+use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use gethostname::gethostname;
 use matrix_sdk::OwnedServerName;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::config::{RequestConfig, SyncSettings};
+use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::room::{Messages as MatrixMessages, MessagesOptions, RoomMember};
@@ -164,6 +166,7 @@ async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id:
 enum Plan {
     Messages(OwnedRoomId, Option<String>, Vec<MessageNeed>),
     Members(OwnedRoomId),
+    Events(OwnedRoomId, Vec<OwnedEventId>),
 }
 
 async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
@@ -191,6 +194,9 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
         if need.members {
             plan.push(Plan::Members(room_id.to_owned()));
         }
+        if !need.events.is_empty() {
+            plan.push(Plan::Events(room_id, need.events));
+        }
     }
 
     return plan;
@@ -211,6 +217,11 @@ async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permit
             let res = members_load(client, &room_id).await;
             let mut locked = store.lock().await;
             members_insert(room_id, res, locked.deref_mut());
+        },
+        Plan::Events(room_id, events) => {
+            let res = events_load(client, &room_id, events).await;
+            let mut locked = store.lock().await;
+            events_insert(room_id, res, locked.deref_mut());
         },
     }
     drop(permit);
@@ -366,6 +377,25 @@ fn member_active(state: &MembershipState) -> bool {
     matches!(state, MembershipState::Invite | MembershipState::Join)
 }
 
+async fn events_load(
+    client: &Client,
+    room_id: &RoomId,
+    events: Vec<OwnedEventId>,
+) -> IambResult<Vec<TimelineEvent>> {
+    if let Some(room) = client.get_room(room_id) {
+        let res = join_all(
+            events
+                .into_iter()
+                .map(async |event_id| room.load_or_fetch_event(&event_id, None).await),
+        )
+        .await;
+
+        Ok(res.into_iter().filter_map(Result::ok).collect())
+    } else {
+        Err(IambError::UnknownRoom(room_id.to_owned()).into())
+    }
+}
+
 fn members_insert(
     room_id: OwnedRoomId,
     res: IambResult<Vec<RoomMember>>,
@@ -381,6 +411,73 @@ fn members_insert(
             let is_active = member_active(member.membership());
 
             info.display_names.set(user_id, name, is_active);
+        }
+    }
+    // else ???
+}
+
+fn events_insert(
+    room_id: OwnedRoomId,
+    res: IambResult<Vec<TimelineEvent>>,
+    locked: &mut ProgramStore,
+) {
+    if let Ok(events) = res {
+        let ChatStore { rooms, settings, previews, .. } = &mut locked.application;
+        let info = rooms.get_or_default(room_id.clone());
+
+        for event in events {
+            let event = match event.kind {
+                TimelineEventKind::Decrypted(event) => {
+                    match event.event.deserialize() {
+                        Ok(event) => event,
+                        Err(err) => {
+                            warn!(
+                                err = %err,
+                                room_id = room_id.as_str(),
+                                raw_event = ?event,
+                                "Failed to deserialize event"
+                            );
+                            continue;
+                        },
+                    }
+                },
+                TimelineEventKind::UnableToDecrypt { event, utd_info: _ } |
+                TimelineEventKind::PlainText { event } => {
+                    let event = match event.deserialize() {
+                        Ok(event) => event,
+                        Err(err) => {
+                            warn!(
+                                err = %err,
+                                room_id = room_id.as_str(),
+                                raw_event = ?event,
+                                "Failed to deserialize event"
+                            );
+                            continue;
+                        },
+                    };
+                    event.into_full_event(room_id.clone())
+                },
+            };
+            match event {
+                AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
+                    info.insert_encrypted(msg);
+                },
+                AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
+                    info.insert_with_preview(msg, settings, previews);
+                },
+                AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
+                    info.insert_reaction_with_preview(ev, settings, previews);
+                },
+                AnyTimelineEvent::MessageLike(ev) => {
+                    tracing::debug!("Ignoring unimplemented event type {}", ev.event_type());
+                    continue;
+                },
+                AnyTimelineEvent::State(msg) => {
+                    if settings.tunables.state_event_display {
+                        info.insert_any_state(msg.into());
+                    }
+                },
+            }
         }
     }
     // else ???

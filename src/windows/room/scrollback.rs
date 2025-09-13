@@ -15,7 +15,7 @@ use modalkit_ratatui::ScrollActions;
 use ratatui_image::sliced::{SignedPosition, SlicedImage};
 use regex::Regex;
 
-use crate::base::RoomFetchStatus;
+use crate::base::{RoomFetchStatus, RoomView};
 use crate::message::MessageCursor;
 use crate::prelude::*;
 
@@ -104,7 +104,8 @@ pub struct ScrollbackState {
 
 impl ScrollbackState {
     pub fn new(room_id: OwnedRoomId, thread: Option<OwnedEventId>) -> ScrollbackState {
-        let id = IambBufferId::Room(room_id.to_owned(), thread.clone(), RoomFocus::Scrollback);
+        let id =
+            IambBufferId::Room(room_id.to_owned(), thread.clone().into(), RoomFocus::Scrollback);
         let cursor = MessageCursor::default();
         let viewctx = ViewportContext::default();
         let jumped = HistoryList::default();
@@ -1025,7 +1026,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         return Err(err);
                     };
                     let room_id = self.room_id.clone();
-                    let id = IambId::Room(room_id, Some(root.to_owned()));
+                    let id = IambId::Room(room_id, RoomView::Thread(root.to_owned()));
                     let open = WindowAction::Switch(OpenTarget::Application(id));
                     Ok(vec![(open.into(), ctx.clone())])
                 }
@@ -1471,7 +1472,7 @@ impl StatefulWidget for Scrollback<'_> {
                 let hidden_lines = (area.y as i16 - y).max(0);
 
                 let position = SignedPosition { x: 0, y: -hidden_lines };
-                let image_widget = SlicedImage::new(backend, position);
+                let image_widget = SlicedImage::new(&backend, position);
                 let mut rect: Rect = backend.size().into();
                 rect.x = x;
                 rect.y = (y + hidden_lines) as u16;
@@ -1555,7 +1556,11 @@ mod tests {
             std::mem::take(&mut store.application.need_load)
                 .into_iter()
                 .collect::<Vec<(OwnedRoomId, Need)>>(),
-            vec![(room_id.clone(), Need { messages: Some(Vec::new()), members: false })]
+            vec![(room_id.clone(), Need {
+                messages: Some(Vec::new()),
+                members: false,
+                events: Vec::new()
+            })]
         );
 
         // Search forward twice to MSG1.
