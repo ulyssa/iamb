@@ -591,7 +591,11 @@ impl Application {
             },
             IambAction::Keys(act) => self.keys_command(act, ctx, store).await?,
             IambAction::Message(act) => {
-                self.screen.current_window_mut()?.message_command(act, ctx, store).await?
+                let acts =
+                    self.screen.current_window_mut()?.message_command(act, ctx, store).await?;
+                self.action_prepend(acts);
+
+                None
             },
             IambAction::Space(act) => {
                 self.screen.current_window_mut()?.space_command(act, ctx, store).await?
