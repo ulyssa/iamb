@@ -539,6 +539,9 @@ pub enum IambAction {
 
     /// Clear all unread messages.
     ClearUnreads,
+
+    /// Generate a permalink for the current room or event.
+    Permalink(Option<OwnedEventId>),
 }
 
 impl IambAction {
@@ -582,6 +585,7 @@ impl ApplicationAction for IambAction {
     fn is_edit_sequence(&self, _: &EditContext) -> SequenceStatus {
         match self {
             IambAction::ClearUnreads => SequenceStatus::Break,
+            IambAction::Permalink(..) => SequenceStatus::Break,
             IambAction::Homeserver(..) => SequenceStatus::Break,
             IambAction::Keys(..) => SequenceStatus::Break,
             IambAction::Message(..) => SequenceStatus::Break,
@@ -598,6 +602,7 @@ impl ApplicationAction for IambAction {
     fn is_last_action(&self, _: &EditContext) -> SequenceStatus {
         match self {
             IambAction::ClearUnreads => SequenceStatus::Atom,
+            IambAction::Permalink(..) => SequenceStatus::Atom,
             IambAction::Homeserver(..) => SequenceStatus::Atom,
             IambAction::Keys(..) => SequenceStatus::Atom,
             IambAction::Message(..) => SequenceStatus::Atom,
@@ -614,6 +619,7 @@ impl ApplicationAction for IambAction {
     fn is_last_selection(&self, _: &EditContext) -> SequenceStatus {
         match self {
             IambAction::ClearUnreads => SequenceStatus::Ignore,
+            IambAction::Permalink(..) => SequenceStatus::Ignore,
             IambAction::Homeserver(..) => SequenceStatus::Ignore,
             IambAction::Keys(..) => SequenceStatus::Ignore,
             IambAction::Message(..) => SequenceStatus::Ignore,
@@ -630,6 +636,7 @@ impl ApplicationAction for IambAction {
     fn is_switchable(&self, _: &EditContext) -> bool {
         match self {
             IambAction::ClearUnreads => false,
+            IambAction::Permalink(..) => false,
             IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
             IambAction::Space(..) => false,

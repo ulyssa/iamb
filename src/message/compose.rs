@@ -163,11 +163,35 @@ fn text_to_html(input: &str) -> Option<String> {
 }
 
 fn text_to_message_content(input: String) -> TextMessageEventContent {
-    if let Some(html) = text_to_html(input.as_str()) {
-        TextMessageEventContent::html(input, html)
+    // MSC4352: Convert HTTPS permalinks to matrix: URIs in formatted_body if enabled
+    let (body, formatted_body) = if let Some(html_with_matrix_links) = apply_msc4352_conversion(&input) {
+        // We have permalinks to convert
+        (input, Some(html_with_matrix_links))
+    } else if let Some(html) = text_to_html(input.as_str()) {
+        // Normal markdown processing
+        (input, Some(html))
     } else {
-        TextMessageEventContent::plain(input)
+        // Plain text
+        (input, None)
+    };
+
+    if let Some(formatted) = formatted_body {
+        TextMessageEventContent::html(body, formatted)
+    } else {
+        TextMessageEventContent::plain(body)
     }
+}
+
+/// Apply MSC4352 permalink conversion if enabled and permalinks are found
+fn apply_msc4352_conversion(input: &str) -> Option<String> {
+    use crate::permalink::{Msc4352Config, linkify_outgoing_text_to_html};
+
+    let config = Msc4352Config::default();
+    if !config.enabled {
+        return None;
+    }
+
+    linkify_outgoing_text_to_html(input)
 }
 
 pub fn text_to_message(input: String) -> RoomMessageEventContent {
@@ -372,5 +396,20 @@ pub mod tests {
         let content = text_to_message("/spaceinvaders hello".into()).msgtype;
         assert_eq!(content.msgtype(), "io.element.effects.space_invaders");
         assert_eq!(content.body(), "hello");
+    }
+
+    #[test]
+    fn test_msc4352_conversion() {
+        // Test that MSC4352 conversion preserves body text and adds matrix: hrefs
+        let input = "Check this room: https://links.example.org/#/%23room%3Aexample.org?via=example.org";
+
+        if let Some(html) = apply_msc4352_conversion(input) {
+            assert!(html.contains(r#"<a href="matrix:r/room:example.org?via=example.org""#));
+            assert!(html.contains("https://links.example.org"));
+        }
+
+        // Test with no permalinks - should return None
+        let input_no_permalinks = "Just regular text with http://example.com";
+        assert!(apply_msc4352_conversion(input_no_permalinks).is_none());
     }
 }

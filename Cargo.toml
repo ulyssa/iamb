@@ -65,6 +65,8 @@ url = {version = "^2.2.2", features = ["serde"]}
 edit = "0.1.4"
 humansize = "2.0.0"
 linkify = "0.10.0"
+reqwest = { version = "0.11", features = ["json"] }
+html-escape = "0.2"
 
 [dependencies.comrak]
 version = "0.22.0"

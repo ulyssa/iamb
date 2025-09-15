@@ -74,6 +74,7 @@ mod config;
 mod keybindings;
 mod message;
 mod notifications;
+mod permalink;
 mod preview;
 mod sled_export;
 mod util;
@@ -627,6 +628,9 @@ impl Application {
                     return Err(IambError::InvalidUserId(user_id).into());
                 }
             },
+            IambAction::Permalink(event_id) => {
+                self.permalink_command(event_id, ctx, store).await?
+            },
         };
 
         Ok(info)
@@ -694,6 +698,67 @@ impl Application {
                 Ok(Some(msg.into()))
             },
         }
+    }
+
+    async fn permalink_command(
+        &mut self,
+        event_id: Option<matrix_sdk::ruma::OwnedEventId>,
+        _: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        use crate::permalink::{Msc4352Config, discover_resolver_base, effective_permalink_base, make_https_permalink, MatrixIdentifier};
+
+        let config = Msc4352Config::default();
+
+        if !config.enabled {
+            return Ok(Some("MSC4352 permalink feature is disabled. Set IAMB_MSC4352=1 to enable.".into()));
+        }
+
+        // Get current room info
+        let current_room_id = match self.screen.current_window_mut()? {
+            IambWindow::Room(room_state) => room_state.id().to_owned(),
+            _ => return Ok(Some("No current room to generate permalink for".into())),
+        };
+
+        // Get room info to prefer canonical alias
+        let room_info = store.application.rooms.get(&current_room_id);
+        let identifier = if let Some(room) = room_info {
+            if let Some(alias) = &room.alias {
+                MatrixIdentifier::RoomAlias(alias.to_string())
+            } else {
+                MatrixIdentifier::RoomId(current_room_id.clone())
+            }
+        } else {
+            MatrixIdentifier::RoomId(current_room_id.clone())
+        };
+
+        // Discover permalink base
+        let homeserver_domain = store.application.settings.profile.user_id.server_name().as_str();
+        let discovered_base = discover_resolver_base(homeserver_domain).await.unwrap_or(None);
+
+        let base_url = effective_permalink_base(
+            config.env_override.as_deref(),
+            discovered_base.as_deref(),
+        );
+
+        // Use homeserver as via parameter
+        let via_servers = vec![homeserver_domain.to_string()];
+
+        // Generate permalink
+        let event_id_str = event_id.as_ref().map(|e| e.as_str());
+        let permalink = make_https_permalink(&base_url, &identifier, event_id_str, &via_servers);
+
+        // Try to copy to clipboard if available
+        #[cfg(feature = "desktop")]
+        {
+            use modalkit::clipboard::ClipboardProvider;
+            if let Ok(mut clipboard) = modalkit::clipboard::ClipboardProvider::new() {
+                let _ = clipboard.set_contents(permalink.clone());
+            }
+        }
+
+        let msg = format!("Permalink: {} (copied to clipboard)", permalink);
+        Ok(Some(msg.into()))
     }
 
     fn handle_info(&mut self, info: InfoMessage) {
