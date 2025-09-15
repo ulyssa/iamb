@@ -1,6 +1,8 @@
 //! # Windows for Matrix rooms and spaces
 
 use matrix_sdk::RoomDisplayName;
+use modalkit::editing::completion::CompletionList;
+use modalkit::editing::context::EditContext;
 
 use crate::base::RoomView;
 use crate::config::EncryptionIndicatorLocation;
@@ -170,7 +172,7 @@ impl RoomState {
         act: MessageAction,
         ctx: ProgramContext,
         store: &mut ProgramStore,
-    ) -> IambResult<EditInfo> {
+    ) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
         match self {
             RoomState::Chat(chat) => chat.message_command(act, ctx, store).await,
             RoomState::Space(_) => Err(IambError::NoSelectedMessage.into()),

@@ -9,7 +9,7 @@
 
 use std::cmp::Ord;
 use std::collections::HashSet;
-use std::fmt::{self};
+use std::fmt;
 
 use feruca::Collator;
 use matrix_sdk::notification_settings::RoomNotificationMode;
@@ -27,6 +27,7 @@ use matrix_sdk::ruma::events::room::name::RoomNameEventContent;
 use matrix_sdk::ruma::events::room::topic::RoomTopicEventContent;
 use matrix_sdk::ruma::events::tag::TagInfo;
 use matrix_sdk::ruma::room::{AllowRule, Restricted as JoinRestrictions};
+use modalkit::editing::context::EditContext;
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 
@@ -387,7 +388,7 @@ impl IambWindow {
         act: MessageAction,
         ctx: ProgramContext,
         store: &mut ProgramStore,
-    ) -> IambResult<EditInfo> {
+    ) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
         if let IambWindow::Room(w) = self {
             w.message_command(act, ctx, store).await
         } else {
