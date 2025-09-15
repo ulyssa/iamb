@@ -37,18 +37,21 @@ use ratatui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
-use modalkit::actions::{
-    Action,
-    Editable,
-    EditorAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
-    WindowAction,
-};
 use modalkit::errors::{EditResult, UIError};
 use modalkit::prelude::*;
+use modalkit::{
+    actions::{
+        Action,
+        Editable,
+        EditorAction,
+        Jumpable,
+        PromptAction,
+        Promptable,
+        Scrollable,
+        WindowAction,
+    },
+    editing::context::EditContext,
+};
 use modalkit::{editing::completion::CompletionList, keybindings::dialog::PromptYesNo};
 use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
 
@@ -226,7 +229,7 @@ impl RoomState {
         act: MessageAction,
         ctx: ProgramContext,
         store: &mut ProgramStore,
-    ) -> IambResult<EditInfo> {
+    ) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
         match self {
             RoomState::Chat(chat) => chat.message_command(act, ctx, store).await,
             RoomState::Space(_) => Err(IambError::NoSelectedMessage.into()),

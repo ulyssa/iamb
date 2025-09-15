@@ -3,9 +3,12 @@ use std::sync::Arc;
 
 use matrix_sdk::room::Room as MatrixRoom;
 use matrix_sdk::ruma::{EventId, OwnedEventId, OwnedRoomId, RoomId};
+use modalkit::actions::{Action, WindowAction};
 use modalkit::editing::completion::CompletionList;
+use modalkit::editing::context::EditContext;
 use modalkit::editing::rope::EditRope;
-use modalkit::prelude::{CloseFlags, EditInfo, WordStyle, WriteFlags};
+use modalkit::errors::UIError;
+use modalkit::prelude::{CloseFlags, EditInfo, OpenTarget, WordStyle, WriteFlags};
 use modalkit_ratatui::textbox::TextBoxState;
 use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
 use ratatui::buffer::Buffer;
@@ -20,6 +23,8 @@ use url::Url;
 
 use crate::base::{
     IambBufferId,
+    IambError,
+    IambId,
     IambInfo,
     IambResult,
     MessageAction,
@@ -32,6 +37,7 @@ use crate::base::{
 use crate::config::{TunableValues, UserDisplayStyle};
 use crate::message::{millis_to_datetime, Message, MessageTimeStamp};
 use crate::util::space;
+use crate::windows::room::chat;
 
 type ImagePreview = (Arc<Protocol>, u16);
 
@@ -78,7 +84,6 @@ fn user_date_line(
         Span::styled(date, Style::new().add_modifier(Modifier::BOLD))
 }
 
-// TODO: store possible actions per line
 /// State needed for rendering [`MessageWidget`].
 pub struct MessageState {
     room_id: OwnedRoomId,
@@ -113,11 +118,59 @@ impl MessageState {
 
     pub async fn message_command(
         &mut self,
-        _: MessageAction,
-        _: ProgramContext,
-        _: &mut ProgramStore,
-    ) -> IambResult<EditInfo> {
-        todo!()
+        act: MessageAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
+        let worker = &store.application.worker;
+
+        let settings = &store.application.settings;
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
+
+        let msg = info.get_event(self.id()).ok_or(IambError::NoSelectedMessage)?;
+
+        match act {
+            MessageAction::Download(filename, flags) => {
+                let msg = info.get_event_mut(self.id()).unwrap();
+                chat::msg_download(
+                    ctx,
+                    &store.application.worker.client,
+                    msg,
+                    settings,
+                    filename,
+                    flags,
+                )
+                .await
+            },
+            MessageAction::React(reaction, literal) => {
+                chat::msg_react(msg, settings, info, worker, &self.room_id, reaction, literal).await
+            },
+            MessageAction::Redact(reason, skip_confirm) => {
+                chat::msg_redact(msg, worker, &self.room_id, reason, skip_confirm).await
+            },
+            MessageAction::Unreact(reaction, literal) => {
+                chat::msg_unreact(msg, settings, info, worker, &self.room_id, reaction, literal)
+                    .await
+            },
+            MessageAction::Replied => {
+                let Some(reply) = msg.reply_to() else {
+                    let msg = "Selected message is not a reply";
+                    return Err(UIError::Failure(msg.into()));
+                };
+                let act = Action::Window(WindowAction::Switch(OpenTarget::Application(
+                    IambId::Room(self.room_id.clone(), RoomView::Message(reply)),
+                )));
+
+                Ok(vec![(act, ctx)])
+            },
+            MessageAction::Edit | MessageAction::Reply => {
+                let msg = "Cannot write message in this view.";
+                let err = UIError::Failure(msg.into());
+
+                Err(err)
+            },
+            _ => Ok(vec![]),
+        }
     }
 
     pub fn room(&self) -> &MatrixRoom {

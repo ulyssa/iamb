@@ -26,6 +26,7 @@ use matrix_sdk::{
     RoomState as MatrixRoomState,
 };
 
+use modalkit::editing::context::EditContext;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -360,7 +361,7 @@ impl IambWindow {
         act: MessageAction,
         ctx: ProgramContext,
         store: &mut ProgramStore,
-    ) -> IambResult<EditInfo> {
+    ) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
         if let IambWindow::Room(w) = self {
             w.message_command(act, ctx, store).await
         } else {
