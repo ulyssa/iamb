@@ -1415,7 +1415,7 @@ impl RoomInfo {
 
     /// Checks if a given user has reacted with the given emoji on the given event
     pub fn user_reactions_contains(
-        &mut self,
+        &self,
         user_id: &UserId,
         event_id: &EventId,
         emoji: &str,

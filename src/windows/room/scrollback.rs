@@ -184,6 +184,16 @@ impl ScrollbackState {
             .or_else(|| self.get_thread(info)?.last_key_value().map(|kv| kv.0.clone()))
     }
 
+    pub fn get<'a>(&self, info: &'a RoomInfo) -> Option<&'a Message> {
+        let thread = self.get_thread(info);
+
+        if let Some(k) = &self.cursor.timestamp {
+            thread.and_then(|t| t.get(k))
+        } else {
+            thread.and_then(|t| t.last_key_value()).map(|(_, v)| v)
+        }
+    }
+
     pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
         let thread = self.get_thread_mut(info);
 
