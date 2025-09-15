@@ -1244,28 +1244,42 @@ impl RoomInfo {
         self.get_thread_mut(root.map(ToOwned::to_owned)).get_mut(key)
     }
 
-    /// Get an event for an identifier.
-    pub fn get_message(&self, message_id: &MessageId) -> Option<&Message> {
-        let get_thread_key = || {
-            let event_id = match message_id {
-                MessageId::Local(id) => {
-                    let loc = self.echo_keys.get(id)?;
-                    match loc {
-                        EchoLocation::Message(root, key) => return Some((root.as_deref(), key)),
-                        EchoLocation::Replaced(event_id) => event_id,
-                    }
-                },
-                MessageId::Origin(event_id) => event_id,
-            };
-
-            let loc = self.keys.get(event_id)?;
-
-            Some((loc.to_thread_root(), loc.to_message_key()?))
+    /// Map an event identifier to its [`MessageKey`] and thread root.
+    fn get_message_thread_key(
+        &self,
+        message_id: &MessageId,
+    ) -> Option<(Option<&EventId>, &MessageKey)> {
+        let event_id = match message_id {
+            MessageId::Local(id) => {
+                let loc = self.echo_keys.get(id)?;
+                match loc {
+                    EchoLocation::Message(root, key) => return Some((root.as_deref(), key)),
+                    EchoLocation::Replaced(event_id) => event_id,
+                }
+            },
+            MessageId::Origin(event_id) => event_id,
         };
 
-        let (root, key) = get_thread_key()?;
+        let loc = self.keys.get(event_id)?;
+
+        Some((loc.to_thread_root(), loc.to_message_key()?))
+    }
+
+    /// Get an event for an identifier.
+    pub fn get_message(&self, message_id: &MessageId) -> Option<&Message> {
+        let (root, key) = self.get_message_thread_key(message_id)?;
 
         self.get_thread(root)?.get(key)
+    }
+
+    /// Get an event for an identifier as mutable.
+    pub fn get_message_mut(&mut self, message_id: &MessageId) -> Option<&mut Message> {
+        let (root, key) = self.get_message_thread_key(message_id)?;
+
+        let root = root.map(ToOwned::to_owned);
+        let key = key.to_owned();
+
+        self.get_thread_mut(root).get_mut(&key)
     }
 
     pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
@@ -1732,7 +1746,7 @@ impl RoomInfo {
 
     /// Checks if a given user has reacted with the given emoji on the given event
     pub fn user_reactions_contains(
-        &mut self,
+        &self,
         user_id: &UserId,
         event_id: &EventId,
         emoji: &str,

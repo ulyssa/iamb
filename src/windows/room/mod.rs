@@ -14,11 +14,12 @@ use ratatui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
+use modalkit::editing::completion::CompletionList;
 use modalkit::errors::EditResult;
 use modalkit::prelude::*;
 use modalkit::{
-    actions::{Editable, EditorAction, Jumpable, PromptAction, Promptable, Scrollable},
-    editing::completion::CompletionList,
+    actions::{Action, Editable, EditorAction, Jumpable, PromptAction, Promptable, Scrollable},
+    editing::context::EditContext,
 };
 use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
 
@@ -205,7 +206,7 @@ impl RoomState {
         act: MessageAction,
         ctx: ProgramContext,
         store: &mut ProgramStore,
-    ) -> IambResult<EditInfo> {
+    ) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
         match self {
             RoomState::Chat(chat) => chat.message_command(act, ctx, store).await,
             RoomState::Space(_) => Err(IambError::NoSelectedMessage.into()),

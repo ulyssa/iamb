@@ -5,15 +5,38 @@ use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::base::{
+    DownloadFlags,
+    EchoLocation,
+    IambAction,
+    IambBufferId,
+    IambError,
+    IambInfo,
+    IambResult,
+    MessageAction,
+    ProgramAction,
+    ProgramContext,
+    ProgramStore,
+    RoomFocus,
+    RoomInfo,
+    SendAction,
+};
+use crate::config::{ApplicationSettings, EncryptionIndicatorLocation};
+use crate::message::{
+    Message,
+    MessageEvent,
+    MessageId,
+    MessageKey,
+    TreeGenState,
+    text_to_message,
+    text_to_text_message_event_content,
+};
+use crate::worker::Requester;
 use edit::Builder;
 use edit::edit_with_builder as external_edit;
+use matrix_sdk::Client;
 use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
 use matrix_sdk::room::reply::{EnforceThread, Reply};
-use modalkit::editing::store::RegisterError;
-use std::process::Command;
-use tokio;
-use url::Url;
-
 use matrix_sdk::{
     RoomState,
     attachment::AttachmentConfig,
@@ -36,24 +59,6 @@ use matrix_sdk::{
     },
     send_queue::RoomSendQueueError,
 };
-
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    prelude::Stylize,
-    text::{Line, Span},
-    widgets::{Paragraph, StatefulWidget, Widget},
-};
-
-use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem, PromptYesNo};
-
-use modalkit_ratatui::{
-    PromptActions,
-    TerminalCursor,
-    WindowOps,
-    textbox::{TextBox, TextBoxState},
-};
-
 use modalkit::actions::{
     Action,
     Editable,
@@ -63,6 +68,8 @@ use modalkit::actions::{
     Promptable,
     Scrollable,
 };
+use modalkit::editing::context::EditContext;
+use modalkit::editing::store::RegisterError;
 use modalkit::editing::{
     completion::CompletionList,
     context::Resolve,
@@ -70,35 +77,24 @@ use modalkit::editing::{
     rope::EditRope,
 };
 use modalkit::errors::{EditError, EditResult, UIError};
+use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem, PromptYesNo};
 use modalkit::prelude::*;
-
-use crate::base::{
-    DownloadFlags,
-    EchoLocation,
-    IambAction,
-    IambBufferId,
-    IambError,
-    IambInfo,
-    IambResult,
-    MessageAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomFocus,
-    RoomInfo,
-    SendAction,
+use modalkit_ratatui::{
+    PromptActions,
+    TerminalCursor,
+    WindowOps,
+    textbox::{TextBox, TextBoxState},
 };
-
-use crate::config::{ApplicationSettings, EncryptionIndicatorLocation};
-use crate::message::{
-    MessageEvent,
-    MessageId,
-    MessageKey,
-    TreeGenState,
-    text_to_message,
-    text_to_text_message_event_content,
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    prelude::Stylize,
+    text::{Line, Span},
+    widgets::{Paragraph, StatefulWidget, Widget},
 };
-use crate::worker::Requester;
+use std::process::Command;
+use tokio;
+use url::Url;
 
 use super::scrollback::{Scrollback, ScrollbackState};
 
@@ -146,18 +142,6 @@ impl ChatState {
         self.scrollback.thread()
     }
 
-    fn get_joined(&self, worker: &Requester) -> Result<MatrixRoom, IambError> {
-        let Some(room) = worker.client.get_room(self.id()) else {
-            return Err(IambError::NotJoined);
-        };
-
-        if room.state() == RoomState::Joined {
-            Ok(room)
-        } else {
-            Err(IambError::NotJoined)
-        }
-    }
-
     fn get_reply_to<'a>(&self, info: &'a RoomInfo) -> Option<&'a OriginalRoomMessageEvent> {
         let thread = self.scrollback.get_thread(info)?;
         let key = self.reply_to.as_ref()?;
@@ -185,9 +169,9 @@ impl ChatState {
     pub async fn message_command(
         &mut self,
         act: MessageAction,
-        _: ProgramContext,
+        ctx: ProgramContext,
         store: &mut ProgramStore,
-    ) -> IambResult<EditInfo> {
+    ) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
         let client = &store.application.worker.client;
 
         let settings = &store.application.settings;
@@ -200,7 +184,7 @@ impl ChatState {
                 if skip_confirm {
                     self.reset();
 
-                    return Ok(None);
+                    return Ok(vec![]);
                 }
 
                 self.reply_to = None;
@@ -214,130 +198,7 @@ impl ChatState {
                 Err(UIError::NeedConfirm(prompt))
             },
             MessageAction::Download(filename, flags) => {
-                if let Some(msgtype) = msg.event.msgtype() {
-                    let media = client.media();
-
-                    let mut filename = match (filename, &settings.dirs.downloads) {
-                        (Some(f), _) => PathBuf::from(f),
-                        (None, Some(downloads)) => downloads.clone(),
-                        (None, None) => return Err(IambError::NoDownloadDir.into()),
-                    };
-
-                    let (source, msg_filename) = match msgtype {
-                        MessageType::Audio(c) => (c.source.clone(), c.filename()),
-                        MessageType::File(c) => (c.source.clone(), c.filename()),
-                        MessageType::Image(c) => (c.source.clone(), c.filename()),
-                        MessageType::Video(c) => (c.source.clone(), c.filename()),
-                        _ => {
-                            if !flags.contains(DownloadFlags::OPEN) {
-                                return Err(IambError::NoAttachment.into());
-                            }
-
-                            let mut links = if let Some(html) = &msg.html {
-                                html.get_links()
-                            } else {
-                                vec![]
-                            };
-
-                            if links.is_empty() {
-                                links = linkify::LinkFinder::new()
-                                    .links(&msg.event.body())
-                                    .filter_map(|u| Url::parse(u.as_str()).ok())
-                                    .scan(TreeGenState { link_num: 0 }, |state, u| {
-                                        state.next_link_char().map(|c| (c, u))
-                                    })
-                                    .collect();
-                            }
-
-                            if links.is_empty() {
-                                return Err(IambError::NoAttachment.into());
-                            }
-
-                            let choices = links
-                                .into_iter()
-                                .map(|l| {
-                                    let url = l.1.to_string();
-                                    let act = IambAction::OpenLink(url.clone()).into();
-                                    MultiChoiceItem::new(l.0, url, vec![act])
-                                })
-                                .collect();
-                            let dialog = MultiChoice::new(choices);
-                            let err = UIError::NeedConfirm(Box::new(dialog));
-
-                            return Err(err);
-                        },
-                    };
-
-                    if filename.is_dir() {
-                        filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
-                    }
-
-                    if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
-                        // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
-                        if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
-                            let ext = filename.extension();
-                            let mut filename_incr = filename.clone();
-                            for n in 1..=1000 {
-                                if let Some(ext) = ext.and_then(OsStr::to_str) {
-                                    filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
-                                } else {
-                                    filename_incr.set_file_name(format!("{stem}-{n}"));
-                                }
-
-                                if !filename_incr.exists() {
-                                    filename = filename_incr;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
-                        let req = MediaRequestParameters { source, format: MediaFormat::File };
-
-                        let bytes =
-                            media.get_media_content(&req, true).await.map_err(IambError::from)?;
-
-                        fs::write(filename.as_path(), bytes.as_slice())?;
-
-                        msg.downloaded = true;
-                    } else if !flags.contains(DownloadFlags::OPEN) {
-                        let msg = format!(
-                            "The file {} already exists; add ! to end of command to overwrite it.",
-                            filename.display()
-                        );
-                        let err = UIError::Failure(msg);
-
-                        return Err(err);
-                    }
-
-                    let info = if flags.contains(DownloadFlags::OPEN) {
-                        let target = filename.clone().into_os_string();
-                        match open_command(
-                            store.application.settings.tunables.open_command.as_ref(),
-                            target,
-                        ) {
-                            Ok(_) => {
-                                InfoMessage::from(format!(
-                                    "Attachment downloaded to {} and opened",
-                                    filename.display()
-                                ))
-                            },
-                            Err(err) => {
-                                return Err(err);
-                            },
-                        }
-                    } else {
-                        InfoMessage::from(format!(
-                            "Attachment downloaded to {}",
-                            filename.display()
-                        ))
-                    };
-
-                    return Ok(info.into());
-                }
-
-                Err(IambError::NoAttachment.into())
+                msg_download(ctx, client, msg, &store.application.settings, filename, flags).await
             },
             MessageAction::Edit => {
                 if msg.sender != settings.profile.user_id {
@@ -369,115 +230,29 @@ impl ChatState {
                 self.editing = self.scrollback.get_key(info);
                 self.focus = RoomFocus::MessageBar;
 
-                Ok(None)
+                Ok(vec![])
             },
             MessageAction::React(reaction, literal) => {
-                let emoji = if literal {
-                    reaction
-                } else if let Some(emoji) =
-                    emojis::get(&reaction).or_else(|| emojis::get_by_shortcode(&reaction))
-                {
-                    emoji.to_string()
-                } else {
-                    let msg = format!(
-                        "{reaction:?} is not a known Emoji shortcode; do you want to react with exactly {reaction:?}?"
-                    );
-                    let act = IambAction::Message(MessageAction::React(reaction, true));
-                    let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
-                    let prompt = Box::new(prompt);
-
-                    return Err(UIError::NeedConfirm(prompt));
-                };
-
-                let room = self.get_joined(&store.application.worker)?;
-                let event_id = match &msg.event {
-                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
-                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev, _) => ev.event_id.clone(),
-                    MessageEvent::Local(..) => {
-                        // XXX: Implement reactions for local echos
-
-                        let msg = "Cannot react to a local echo";
-                        let err = UIError::Failure(msg.into());
-
-                        return Err(err);
-                    },
-                    MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
-                    MessageEvent::Redacted(_, _) => {
-                        let msg = "Cannot react to a redacted message";
-                        let err = UIError::Failure(msg.into());
-
-                        return Err(err);
-                    },
-                };
-
-                if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
-                    let msg = format!("You’ve already reacted to this message with {emoji}");
-                    let err = UIError::Failure(msg);
-
-                    return Err(err);
-                }
-
-                let reaction = Annotation::new(event_id, emoji);
-                let msg = ReactionEventContent::new(reaction);
-
-                room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
-
-                Ok(None)
+                let msg = self.scrollback.get(info).unwrap();
+                msg_react(
+                    msg,
+                    settings,
+                    info,
+                    &store.application.worker,
+                    self.id(),
+                    reaction,
+                    literal,
+                )
+                .await
             },
             MessageAction::Redact(reason, skip_confirm) => {
-                if !skip_confirm {
-                    let msg = "Are you sure you want to redact this message?";
-                    let act = IambAction::Message(MessageAction::Redact(reason, true));
-                    let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
-                    let prompt = Box::new(prompt);
-
-                    return Err(UIError::NeedConfirm(prompt));
-                }
-
-                let room = self.get_joined(&store.application.worker)?;
-                let event_id = match &msg.event {
-                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
-                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev, _) => ev.event_id.clone(),
-                    MessageEvent::Local(_, handle, _) => {
-                        let succeeded = handle
-                            .abort()
-                            .await
-                            .map_err(RoomSendQueueError::from)
-                            .map_err(IambError::from)?;
-
-                        if !succeeded {
-                            let msg = "local echo was already sent; please retry";
-                            let err = UIError::Failure(msg.into());
-
-                            return Err(err);
-                        }
-
-                        return Ok(None);
-                    },
-                    MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
-                    MessageEvent::Redacted(_, _) => {
-                        let msg = "Cannot redact already redacted message";
-                        let err = UIError::Failure(msg.into());
-
-                        return Err(err);
-                    },
-                };
-
-                let event_id = event_id.as_ref();
-                let reason = reason.as_deref();
-                let _ = room.redact(event_id, reason, None).await.map_err(IambError::from)?;
-
-                Ok(None)
+                msg_redact(msg, &store.application.worker, self.id(), reason, skip_confirm).await
             },
             MessageAction::Reply => {
                 self.reply_to = self.scrollback.get_key(info);
                 self.focus = RoomFocus::MessageBar;
 
-                Ok(None)
+                Ok(vec![])
             },
             MessageAction::Replied => {
                 let Some(reply) = msg.reply_to() else {
@@ -492,79 +267,20 @@ impl ChatState {
                 };
 
                 self.scrollback.goto_message(key.clone());
-                Ok(None)
+                Ok(vec![])
             },
             MessageAction::Unreact(reaction, literal) => {
-                let emoji = match reaction {
-                    reaction if literal => reaction,
-                    Some(reaction) => {
-                        if let Some(emoji) =
-                            emojis::get(&reaction).or_else(|| emojis::get_by_shortcode(&reaction))
-                        {
-                            Some(emoji.to_string())
-                        } else {
-                            let msg = format!(
-                                "{reaction:?} is not a known Emoji shortcode; do you want to remove exactly {reaction:?}?"
-                            );
-                            let act =
-                                IambAction::Message(MessageAction::Unreact(Some(reaction), true));
-                            let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
-                            let prompt = Box::new(prompt);
-
-                            return Err(UIError::NeedConfirm(prompt));
-                        }
-                    },
-                    None => None,
-                };
-
-                let room = self.get_joined(&store.application.worker)?;
-                let event_id = match &msg.event {
-                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
-                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev, _) => ev.event_id.clone(),
-                    MessageEvent::Local(..) => {
-                        let msg = "Cannot unreact to a local echo";
-                        let err = UIError::Failure(msg.into());
-
-                        return Err(err);
-                    },
-                    MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
-                    MessageEvent::Redacted(_, _) => {
-                        let msg = "Cannot unreact to a redacted message";
-                        let err = UIError::Failure(msg.into());
-
-                        return Err(err);
-                    },
-                };
-
-                let reactions = match info.reactions.get(&event_id) {
-                    Some(r) => r,
-                    None => return Ok(None),
-                };
-
-                let reactions =
-                    reactions.iter().filter_map(|(event_id, (reaction, user_id, _))| {
-                        if user_id != &settings.profile.user_id {
-                            return None;
-                        }
-
-                        if let Some(emoji) = &emoji {
-                            if emoji == reaction {
-                                return Some(event_id);
-                            } else {
-                                return None;
-                            }
-                        } else {
-                            return Some(event_id);
-                        }
-                    });
-
-                for reaction in reactions {
-                    let _ = room.redact(reaction, None, None).await.map_err(IambError::from)?;
-                }
-
-                Ok(None)
+                let msg = self.scrollback.get(info).unwrap();
+                msg_unreact(
+                    msg,
+                    settings,
+                    info,
+                    &store.application.worker,
+                    self.id(),
+                    reaction,
+                    literal,
+                )
+                .await
             },
         }
     }
@@ -625,7 +341,7 @@ impl ChatState {
     ) -> IambResult<EditInfo> {
         let settings = &store.application.settings;
         let tunables = &settings.tunables;
-        let room = self.get_joined(&store.application.worker)?;
+        let room = get_joined(self.id(), &store.application.worker)?;
         let info = store.application.rooms.get_or_default(self.id().to_owned());
 
         match act {
@@ -839,6 +555,342 @@ impl ChatState {
 
         store.application.worker.typing_notice(self.room_id.clone());
     }
+}
+
+fn get_joined(id: &RoomId, worker: &Requester) -> Result<MatrixRoom, IambError> {
+    let Some(room) = worker.client.get_room(id) else {
+        return Err(IambError::NotJoined);
+    };
+
+    if room.state() == RoomState::Joined {
+        Ok(room)
+    } else {
+        Err(IambError::NotJoined)
+    }
+}
+
+fn open_links(msg: &Message) -> UIError<IambInfo> {
+    let mut links = if let Some(html) = &msg.html {
+        html.get_links()
+    } else {
+        vec![]
+    };
+
+    if links.is_empty() {
+        links = linkify::LinkFinder::new()
+            .links(&msg.event.body())
+            .filter_map(|u| Url::parse(u.as_str()).ok())
+            .scan(TreeGenState { link_num: 0 }, |state, u| state.next_link_char().map(|c| (c, u)))
+            .collect();
+    }
+
+    if links.is_empty() {
+        return IambError::NoAttachment.into();
+    }
+
+    let choices = links
+        .into_iter()
+        .map(|l| {
+            let url = l.1.to_string();
+            let act = IambAction::OpenLink(url.clone()).into();
+            MultiChoiceItem::new(l.0, url, vec![act])
+        })
+        .collect();
+    let dialog = MultiChoice::new(choices);
+    UIError::NeedConfirm(Box::new(dialog))
+}
+
+pub async fn msg_download(
+    ctx: ProgramContext,
+    client: &Client,
+    msg: &mut Message,
+    settings: &ApplicationSettings,
+    filename: Option<String>,
+    flags: DownloadFlags,
+) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
+    if let Some(msgtype) = msg.event.msgtype() {
+        let media = client.media();
+
+        let mut filename = match (filename, &settings.dirs.downloads) {
+            (Some(f), _) => PathBuf::from(f),
+            (None, Some(downloads)) => downloads.clone(),
+            (None, None) => return Err(IambError::NoDownloadDir.into()),
+        };
+
+        let (source, msg_filename) = match msgtype {
+            MessageType::Audio(c) => (c.source.clone(), c.filename()),
+            MessageType::File(c) => (c.source.clone(), c.filename()),
+            MessageType::Image(c) => (c.source.clone(), c.filename()),
+            MessageType::Video(c) => (c.source.clone(), c.filename()),
+            _ => {
+                if !flags.contains(DownloadFlags::OPEN) {
+                    return Err(IambError::NoAttachment.into());
+                }
+
+                return Err(open_links(msg));
+            },
+        };
+
+        if filename.is_dir() {
+            filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
+        }
+
+        if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
+            // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
+            if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
+                let ext = filename.extension();
+                let mut filename_incr = filename.clone();
+                for n in 1..=1000 {
+                    if let Some(ext) = ext.and_then(OsStr::to_str) {
+                        filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
+                    } else {
+                        filename_incr.set_file_name(format!("{stem}-{n}"));
+                    }
+
+                    if !filename_incr.exists() {
+                        filename = filename_incr;
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
+            let req = MediaRequestParameters { source, format: MediaFormat::File };
+
+            let bytes = media.get_media_content(&req, true).await.map_err(IambError::from)?;
+
+            fs::write(filename.as_path(), bytes.as_slice())?;
+
+            msg.downloaded = true;
+        } else if !flags.contains(DownloadFlags::OPEN) {
+            let msg = format!(
+                "The file {} already exists; add ! to end of command to overwrite it.",
+                filename.display()
+            );
+            let err = UIError::Failure(msg);
+
+            return Err(err);
+        }
+
+        let info = if flags.contains(DownloadFlags::OPEN) {
+            let target = filename.clone().into_os_string();
+            match open_command(settings.tunables.open_command.as_ref(), target) {
+                Ok(_) => {
+                    InfoMessage::from(format!(
+                        "Attachment downloaded to {} and opened",
+                        filename.display()
+                    ))
+                },
+                Err(err) => {
+                    return Err(err);
+                },
+            }
+        } else {
+            InfoMessage::from(format!("Attachment downloaded to {}", filename.display()))
+        };
+
+        return Ok(vec![(Action::ShowInfoMessage(info), ctx)]);
+    }
+
+    Err(IambError::NoAttachment.into())
+}
+
+pub async fn msg_react(
+    msg: &Message,
+    settings: &ApplicationSettings,
+    info: &RoomInfo,
+    worker: &Requester,
+    id: &RoomId,
+    reaction: String,
+    literal: bool,
+) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
+    let emoji = if literal {
+        reaction
+    } else if let Some(emoji) =
+        emojis::get(&reaction).or_else(|| emojis::get_by_shortcode(&reaction))
+    {
+        emoji.to_string()
+    } else {
+        let msg = format!(
+            "{reaction:?} is not a known Emoji shortcode; do you want to react with exactly {reaction:?}?"
+        );
+        let act = IambAction::Message(MessageAction::React(reaction, true));
+        let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
+        let prompt = Box::new(prompt);
+
+        return Err(UIError::NeedConfirm(prompt));
+    };
+
+    let room = get_joined(id, worker)?;
+    let event_id = match &msg.event {
+        MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
+        MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
+        MessageEvent::Original(ev, _) => ev.event_id.clone(),
+        MessageEvent::Local(..) => {
+            // XXX: Implement reactions for local echos
+
+            let msg = "Cannot react to a local echo";
+            let err = UIError::Failure(msg.into());
+
+            return Err(err);
+        },
+        MessageEvent::State(ev) => ev.event_id().to_owned(),
+        MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
+        MessageEvent::Redacted(_, _) => {
+            let msg = "Cannot react to a redacted message";
+            let err = UIError::Failure(msg.into());
+
+            return Err(err);
+        },
+    };
+
+    if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
+        let msg = format!("You’ve already reacted to this message with {emoji}");
+        let err = UIError::Failure(msg);
+
+        return Err(err);
+    }
+
+    let reaction = Annotation::new(event_id, emoji);
+    let msg = ReactionEventContent::new(reaction);
+
+    room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
+
+    Ok(vec![])
+}
+
+pub async fn msg_redact(
+    msg: &Message,
+    worker: &Requester,
+    id: &RoomId,
+    reason: Option<String>,
+    skip_confirm: bool,
+) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
+    if !skip_confirm {
+        let msg = "Are you sure you want to redact this message?";
+        let act = IambAction::Message(MessageAction::Redact(reason, true));
+        let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
+        let prompt = Box::new(prompt);
+
+        return Err(UIError::NeedConfirm(prompt));
+    }
+
+    let room = get_joined(id, worker)?;
+    let event_id = match &msg.event {
+        MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
+        MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
+        MessageEvent::Original(ev, _) => ev.event_id.clone(),
+        MessageEvent::Local(_, handle, _) => {
+            let succeeded = handle
+                .abort()
+                .await
+                .map_err(RoomSendQueueError::from)
+                .map_err(IambError::from)?;
+
+            if !succeeded {
+                let msg = "local echo was already sent; please retry";
+                let err = UIError::Failure(msg.into());
+
+                return Err(err);
+            }
+
+            return Ok(vec![]);
+        },
+        MessageEvent::State(ev) => ev.event_id().to_owned(),
+        MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
+        MessageEvent::Redacted(_, _) => {
+            let msg = "Cannot redact already redacted message";
+            let err = UIError::Failure(msg.into());
+
+            return Err(err);
+        },
+    };
+
+    let event_id = event_id.as_ref();
+    let reason = reason.as_deref();
+    let _ = room.redact(event_id, reason, None).await.map_err(IambError::from)?;
+
+    Ok(vec![])
+}
+
+pub async fn msg_unreact(
+    msg: &Message,
+    settings: &ApplicationSettings,
+    info: &RoomInfo,
+    worker: &Requester,
+    id: &RoomId,
+    reaction: Option<String>,
+    literal: bool,
+) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
+    let emoji = match reaction {
+        reaction if literal => reaction,
+        Some(reaction) => {
+            if let Some(emoji) =
+                emojis::get(&reaction).or_else(|| emojis::get_by_shortcode(&reaction))
+            {
+                Some(emoji.to_string())
+            } else {
+                let msg = format!(
+                    "{reaction:?} is not a known Emoji shortcode; do you want to remove exactly {reaction:?}?"
+                );
+                let act = IambAction::Message(MessageAction::Unreact(Some(reaction), true));
+                let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
+                let prompt = Box::new(prompt);
+
+                return Err(UIError::NeedConfirm(prompt));
+            }
+        },
+        None => None,
+    };
+
+    let room = get_joined(id, worker)?;
+    let event_id = match &msg.event {
+        MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
+        MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
+        MessageEvent::Original(ev, _) => ev.event_id.clone(),
+        MessageEvent::Local(..) => {
+            let msg = "Cannot unreact to a local echo";
+            let err = UIError::Failure(msg.into());
+
+            return Err(err);
+        },
+        MessageEvent::State(ev) => ev.event_id().to_owned(),
+        MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
+        MessageEvent::Redacted(_, _) => {
+            let msg = "Cannot unreact to a redacted message";
+            let err = UIError::Failure(msg.into());
+
+            return Err(err);
+        },
+    };
+
+    let reactions = match info.reactions.get(&event_id) {
+        Some(r) => r,
+        None => return Ok(vec![]),
+    };
+
+    let reactions = reactions.iter().filter_map(|(event_id, (reaction, user_id, _))| {
+        if user_id != &settings.profile.user_id {
+            return None;
+        }
+
+        if let Some(emoji) = &emoji {
+            if emoji == reaction {
+                return Some(event_id);
+            } else {
+                return None;
+            }
+        } else {
+            return Some(event_id);
+        }
+    });
+
+    for reaction in reactions {
+        let _ = room.redact(reaction, None, None).await.map_err(IambError::from)?;
+    }
+
+    Ok(vec![])
 }
 
 macro_rules! delegate {
