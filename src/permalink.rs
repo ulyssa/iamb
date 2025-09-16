@@ -57,7 +57,7 @@ pub fn convert_https_permalink_to_matrix_uri(url_str: &str) -> Option<String> {
         // Room alias - Example: #room:example.org -> matrix:r/room:example.org
         format!("matrix:r/{}", &stripped[1..])
     } else if stripped.starts_with('!') {
-        // Room ID - Example: !roomid:example.org -> matrix:roomid/roomid:example.org
+        // Room ID - Example: !roomid:example.org -> matrix:roomid/!roomid:example.org
         format!("matrix:roomid/{}", stripped)
     } else if stripped.starts_with('@') {
         // User ID - Example: @user:example.org -> matrix:u/user:example.org
@@ -235,5 +235,73 @@ mod tests {
             effective_permalink_base(None, None),
             "https://matrix.to"
         );
+    }
+
+    #[test]
+    fn test_room_alias_conversion() {
+        // Test room alias: #room:example.org
+        let url = "https://links.example.org/#/#room:example.org";
+        let result = convert_https_permalink_to_matrix_uri(url).unwrap();
+        assert_eq!(result, "matrix:r/room:example.org");
+    }
+
+    #[test]
+    fn test_room_id_conversion() {
+        // Test room ID: !roomid:example.org
+        let url = "https://custom.resolver/#/!roomid:example.org";
+        let result = convert_https_permalink_to_matrix_uri(url).unwrap();
+        assert_eq!(result, "matrix:roomid/!roomid:example.org");
+    }
+
+    #[test]
+    fn test_user_id_conversion() {
+        // Test user ID: @user:example.org
+        let url = "https://matrix.to/#/@user:example.org";
+        let result = convert_https_permalink_to_matrix_uri(url).unwrap();
+        assert_eq!(result, "matrix:u/user:example.org");
+    }
+
+    #[test]
+    fn test_event_permalink_with_query() {
+        // Test with query parameters
+        let url = "https://matrix.to/#/#room:example.org?via=server1.org&via=server2.org";
+        let result = convert_https_permalink_to_matrix_uri(url).unwrap();
+        // Should preserve query parameters
+        assert_eq!(result, "matrix:r/room:example.org?via=server1.org&via=server2.org");
+    }
+
+    #[test]
+    fn test_invalid_permalink_no_conversion() {
+        // Test invalid permalink (no fragment)
+        let url = "https://example.com/page";
+        let result = convert_https_permalink_to_matrix_uri(url);
+        assert!(result.is_none());
+
+        // Test invalid permalink (fragment doesn't start with /)
+        let url2 = "https://example.com/#anchor";
+        let result2 = convert_https_permalink_to_matrix_uri(url2);
+        assert!(result2.is_none());
+    }
+
+    #[test]
+    fn test_linkify_with_room_id() {
+        // Test linkify with room ID
+        let text = "Join this room: https://matrix.to/#/!roomid:example.org";
+        let result = linkify_outgoing_text_to_html(text).unwrap();
+
+        // Should contain correct matrix: URI with ! preserved
+        assert!(result.contains(r#"href="matrix:roomid/!roomid:example.org""#));
+        assert!(result.contains("https://matrix.to/#/!roomid:example.org"));
+    }
+
+    #[test]
+    fn test_linkify_mixed_identifiers() {
+        // Test with different identifier types
+        let text = "User https://matrix.to/#/@user:example.org room https://links.org/#/!room:example.org";
+        let result = linkify_outgoing_text_to_html(text).unwrap();
+
+        // Check both conversions
+        assert!(result.contains("matrix:u/user:example.org"));
+        assert!(result.contains("matrix:roomid/!room:example.org"));
     }
 }

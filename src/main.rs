@@ -770,10 +770,16 @@ impl Application {
         // Try to copy to clipboard if available
         #[cfg(feature = "desktop")]
         {
-            use modalkit::clipboard::ClipboardProvider;
-            if let Ok(mut clipboard) = modalkit::clipboard::ClipboardProvider::new() {
-                let _ = clipboard.set_contents(permalink.clone());
-            }
+            use modalkit::prelude::{Register, TargetShape};
+            use modalkit::editing::rope::EditRope;
+            use modalkit::editing::store::{RegisterCell, RegisterPutFlags};
+
+            let cell = RegisterCell {
+                value: EditRope::from(permalink.clone()),
+                shape: TargetShape::LineWise,
+            };
+
+            let _ = store.registers.put(&Register::SelectionClipboard, cell, RegisterPutFlags::NONE);
         }
 
         let msg = format!("Permalink: {} (copied to clipboard)", permalink);

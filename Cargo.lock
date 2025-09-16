@@ -2376,7 +2376,6 @@ dependencies = [
  "nom",
  "notify-rust",
  "open",
- "percent-encoding",
  "pretty_assertions",
  "rand 0.8.5",
  "ratatui",
