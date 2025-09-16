@@ -1447,6 +1447,7 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("permalink event $event:example.org", ctx.clone()).unwrap();
+        use std::convert::TryInto;
         let event_id: matrix_sdk::ruma::OwnedEventId = "$event:example.org".try_into().unwrap();
         let act = IambAction::Permalink(Some(event_id));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);

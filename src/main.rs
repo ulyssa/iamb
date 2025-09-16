@@ -707,7 +707,7 @@ impl Application {
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
         use crate::permalink::{Msc4352Config, discover_resolver_base, effective_permalink_base, make_https_permalink_with_base};
-        use matrix_sdk::ruma::{MatrixToUri, IdParseError};
+        use matrix_sdk::ruma::MatrixToUri;
 
         let config = Msc4352Config::default();
 
@@ -721,15 +721,15 @@ impl Application {
             _ => return Ok(Some("No current room to generate permalink for".into())),
         };
 
-        // Get room info to prefer canonical alias
-        let room_info = store.application.rooms.get(&current_room_id);
+        // Get room from SDK to prefer canonical alias
+        let room = store.application.worker.client.get_room(&current_room_id);
 
         // Build MatrixToUri string
         let homeserver_domain = store.application.settings.profile.user_id.server_name();
 
         // Build the matrix.to URL string
-        let matrix_to_url = if let Some(room) = room_info {
-            if let Some(alias) = &room.alias {
+        let matrix_to_url = if let Some(room) = room {
+            if let Some(alias) = room.canonical_alias() {
                 // Use alias if available
                 if let Some(event_id) = &event_id {
                     format!("https://matrix.to/#/{}/{}?via={}", alias, event_id, homeserver_domain)
@@ -754,7 +754,7 @@ impl Application {
 
         // Parse into MatrixToUri
         let matrix_to_uri = MatrixToUri::parse(&matrix_to_url)
-            .map_err(|e| IambError::Custom(format!("Failed to create permalink: {}", e)))?;
+            .map_err(|e| IambError::InvalidRoomAlias(format!("Failed to create permalink: {}", e)))?;
 
         // Discover permalink base
         let discovered_base = discover_resolver_base(homeserver_domain.as_str()).await.unwrap_or(None);
@@ -767,16 +767,10 @@ impl Application {
         // Generate permalink
         let permalink = make_https_permalink_with_base(&base_url, &matrix_to_uri);
 
-        // Try to copy to clipboard if available
-        #[cfg(feature = "desktop")]
-        {
-            use modalkit::clipboard::ClipboardProvider;
-            if let Ok(mut clipboard) = modalkit::clipboard::ClipboardProvider::new() {
-                let _ = clipboard.set_contents(permalink.clone());
-            }
-        }
+        // Clipboard functionality temporarily disabled due to build issues
+        // TODO: Re-enable when modalkit clipboard feature is properly configured
 
-        let msg = format!("Permalink: {} (copied to clipboard)", permalink);
+        let msg = format!("Permalink: {}", permalink);
         Ok(Some(msg.into()))
     }
 

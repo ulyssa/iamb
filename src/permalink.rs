@@ -8,7 +8,7 @@ use std::env;
 use url::Url;
 use serde::{Deserialize, Serialize};
 use anyhow::{Result, Context};
-use matrix_sdk::ruma::{MatrixUri, MatrixToUri};
+use matrix_sdk::ruma::MatrixToUri;
 use regex::Regex;
 
 /// Configuration for MSC4352 feature
@@ -40,15 +40,7 @@ struct WellKnownClient {
 
 /// Convert HTTPS permalink to matrix: URI
 pub fn convert_https_permalink_to_matrix_uri(url_str: &str) -> Option<String> {
-    // Try to parse as a MatrixToUri first
-    if let Ok(matrix_to_uri) = MatrixToUri::parse(url_str) {
-        // Convert to MatrixUri
-        if let Ok(matrix_uri) = MatrixUri::try_from(&matrix_to_uri) {
-            return Some(matrix_uri.to_string());
-        }
-    }
-
-    // If not a standard matrix.to URL, try to handle custom base URLs
+    // Parse the URL
     let url = Url::parse(url_str).ok()?;
 
     // Check if this looks like a resolver-style permalink
@@ -57,22 +49,29 @@ pub fn convert_https_permalink_to_matrix_uri(url_str: &str) -> Option<String> {
         return None;
     }
 
-    // Reconstruct as matrix.to URL and parse
-    let matrix_to_url = format!("https://matrix.to{}", fragment);
-    if let Some(query) = url.query() {
-        let matrix_to_url = format!("{}?{}", matrix_to_url, query);
-        if let Ok(matrix_to_uri) = MatrixToUri::parse(&matrix_to_url) {
-            if let Ok(matrix_uri) = MatrixUri::try_from(&matrix_to_uri) {
-                return Some(matrix_uri.to_string());
-            }
-        }
-    } else if let Ok(matrix_to_uri) = MatrixToUri::parse(&matrix_to_url) {
-        if let Ok(matrix_uri) = MatrixUri::try_from(&matrix_to_uri) {
-            return Some(matrix_uri.to_string());
-        }
-    }
+    // Remove the leading slash from fragment
+    let stripped = &fragment[1..];
 
-    None
+    // Convert to matrix: URI format based on the identifier type
+    let matrix_uri_str = if stripped.starts_with('#') {
+        // Room alias - Example: #room:example.org -> matrix:r/room:example.org
+        format!("matrix:r/{}", &stripped[1..])
+    } else if stripped.starts_with('!') {
+        // Room ID - Example: !roomid:example.org -> matrix:roomid/roomid:example.org
+        format!("matrix:roomid/{}", stripped)
+    } else if stripped.starts_with('@') {
+        // User ID - Example: @user:example.org -> matrix:u/user:example.org
+        format!("matrix:u/{}", &stripped[1..])
+    } else {
+        return None;
+    };
+
+    // Add query parameters if present
+    if let Some(query) = url.query() {
+        Some(format!("{}?{}", matrix_uri_str, query))
+    } else {
+        Some(matrix_uri_str)
+    }
 }
 
 /// Discover permalink base URL from homeserver's well-known
@@ -207,11 +206,17 @@ mod tests {
 
     #[test]
     fn test_linkify_outgoing_text_to_html() {
+        // This test only works when MSC4352 is enabled, but linkify_outgoing_text_to_html
+        // doesn't check the config - that's done by the caller.
+        // So we test the function directly.
         let text = "Check out this room: https://links.example.org/#/#room:example.org";
-        let result = linkify_outgoing_text_to_html(text).unwrap();
+        let result = linkify_outgoing_text_to_html(text);
 
-        assert!(result.contains(r#"<a href="matrix:"#));
-        assert!(result.contains("https://links.example.org"));
+        // The function should find and convert the permalink
+        assert!(result.is_some());
+        let html = result.unwrap();
+        assert!(html.contains(r#"<a href="matrix:"#));
+        assert!(html.contains("https://links.example.org"));
     }
 
     #[test]
