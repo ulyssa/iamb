@@ -767,10 +767,16 @@ impl Application {
         // Generate permalink
         let permalink = make_https_permalink_with_base(&base_url, &matrix_to_uri);
 
-        // Clipboard functionality temporarily disabled due to build issues
-        // TODO: Re-enable when modalkit clipboard feature is properly configured
+        // Try to copy to clipboard if available
+        #[cfg(feature = "desktop")]
+        {
+            use modalkit::clipboard::ClipboardProvider;
+            if let Ok(mut clipboard) = modalkit::clipboard::ClipboardProvider::new() {
+                let _ = clipboard.set_contents(permalink.clone());
+            }
+        }
 
-        let msg = format!("Permalink: {}", permalink);
+        let msg = format!("Permalink: {} (copied to clipboard)", permalink);
         Ok(Some(msg.into()))
     }
 
