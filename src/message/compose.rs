@@ -163,22 +163,25 @@ fn text_to_html(input: &str) -> Option<String> {
 }
 
 fn text_to_message_content(input: String) -> TextMessageEventContent {
-    // MSC4352: Convert HTTPS permalinks to matrix: URIs in formatted_body if enabled
-    let (body, formatted_body) = if let Some(html_with_matrix_links) = apply_msc4352_conversion(&input) {
-        // We have permalinks to convert
-        (input, Some(html_with_matrix_links))
-    } else if let Some(html) = text_to_html(input.as_str()) {
-        // Normal markdown processing
-        (input, Some(html))
+    // First process markdown to HTML
+    let html = text_to_html(input.as_str());
+
+    // Then apply MSC4352 conversion to the HTML if enabled
+    let formatted_body = if let Some(html_content) = html {
+        if let Some(converted) = apply_msc4352_conversion(&html_content) {
+            Some(converted)
+        } else {
+            Some(html_content)
+        }
     } else {
-        // Plain text
-        (input, None)
+        // No markdown formatting, try MSC4352 conversion on plain text
+        apply_msc4352_conversion(&input)
     };
 
     if let Some(formatted) = formatted_body {
-        TextMessageEventContent::html(body, formatted)
+        TextMessageEventContent::html(input, formatted)
     } else {
-        TextMessageEventContent::plain(body)
+        TextMessageEventContent::plain(input)
     }
 }
 

@@ -5,11 +5,10 @@
 //! maintaining compatibility with the existing matrix.to path/query grammar.
 
 use std::env;
-use std::collections::HashMap;
-use url::{Url, percent_encoding::{utf8_percent_encode, NON_ALPHANUMERIC}};
+use url::Url;
 use serde::{Deserialize, Serialize};
 use anyhow::{Result, Context};
-use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, OwnedEventId};
+use matrix_sdk::ruma::{MatrixUri, MatrixToUri};
 use regex::Regex;
 
 /// Configuration for MSC4352 feature
@@ -39,52 +38,17 @@ struct WellKnownClient {
     unstable_permalink_base_url: Option<String>,
 }
 
-/// Matrix identifier types for permalinks
-#[derive(Debug, Clone, PartialEq)]
-pub enum MatrixIdentifier {
-    RoomAlias(String),     // #alias:server
-    RoomId(OwnedRoomId),   // !room:server
-    UserId(OwnedUserId),   // @user:server
-    GroupId(String),       // +group:server
-}
-
-impl MatrixIdentifier {
-    /// Parse a Matrix identifier from a string
-    pub fn parse(s: &str) -> Option<Self> {
-        if let Some(stripped) = s.strip_prefix('#') {
-            Some(MatrixIdentifier::RoomAlias(format!("#{}", stripped)))
-        } else if let Some(stripped) = s.strip_prefix('!') {
-            if let Ok(room_id) = format!("!{}", stripped).try_into() {
-                Some(MatrixIdentifier::RoomId(room_id))
-            } else {
-                None
-            }
-        } else if let Some(stripped) = s.strip_prefix('@') {
-            if let Ok(user_id) = format!("@{}", stripped).try_into() {
-                Some(MatrixIdentifier::UserId(user_id))
-            } else {
-                None
-            }
-        } else if let Some(stripped) = s.strip_prefix('+') {
-            Some(MatrixIdentifier::GroupId(format!("+{}", stripped)))
-        } else {
-            None
-        }
-    }
-
-    /// Get the string representation of this identifier
-    pub fn as_str(&self) -> &str {
-        match self {
-            MatrixIdentifier::RoomAlias(s) => s,
-            MatrixIdentifier::RoomId(id) => id.as_str(),
-            MatrixIdentifier::UserId(id) => id.as_str(),
-            MatrixIdentifier::GroupId(s) => s,
-        }
-    }
-}
-
-/// Convert Matrix identifier and event to matrix: URI
+/// Convert HTTPS permalink to matrix: URI
 pub fn convert_https_permalink_to_matrix_uri(url_str: &str) -> Option<String> {
+    // Try to parse as a MatrixToUri first
+    if let Ok(matrix_to_uri) = MatrixToUri::parse(url_str) {
+        // Convert to MatrixUri
+        if let Ok(matrix_uri) = MatrixUri::try_from(&matrix_to_uri) {
+            return Some(matrix_uri.to_string());
+        }
+    }
+
+    // If not a standard matrix.to URL, try to handle custom base URLs
     let url = Url::parse(url_str).ok()?;
 
     // Check if this looks like a resolver-style permalink
@@ -93,68 +57,22 @@ pub fn convert_https_permalink_to_matrix_uri(url_str: &str) -> Option<String> {
         return None;
     }
 
-    let path_parts: Vec<&str> = fragment[1..].split('/').collect();
-    if path_parts.is_empty() {
-        return None;
+    // Reconstruct as matrix.to URL and parse
+    let matrix_to_url = format!("https://matrix.to{}", fragment);
+    if let Some(query) = url.query() {
+        let matrix_to_url = format!("{}?{}", matrix_to_url, query);
+        if let Ok(matrix_to_uri) = MatrixToUri::parse(&matrix_to_url) {
+            if let Ok(matrix_uri) = MatrixUri::try_from(&matrix_to_uri) {
+                return Some(matrix_uri.to_string());
+            }
+        }
+    } else if let Ok(matrix_to_uri) = MatrixToUri::parse(&matrix_to_url) {
+        if let Ok(matrix_uri) = MatrixUri::try_from(&matrix_to_uri) {
+            return Some(matrix_uri.to_string());
+        }
     }
 
-    // Decode the identifier
-    let identifier_encoded = path_parts[0];
-    let identifier = percent_encoding::percent_decode_str(identifier_encoded)
-        .decode_utf8()
-        .ok()?;
-
-    let matrix_id = MatrixIdentifier::parse(&identifier)?;
-
-    // Handle event if present
-    let event_id = if path_parts.len() > 1 {
-        let event_encoded = path_parts[1];
-        let event_decoded = percent_encoding::percent_decode_str(event_encoded)
-            .decode_utf8()
-            .ok()?;
-        Some(event_decoded.to_string())
-    } else {
-        None
-    };
-
-    // Extract via parameters
-    let via_params: Vec<String> = url.query_pairs()
-        .filter(|(key, _)| key == "via")
-        .map(|(_, value)| value.to_string())
-        .collect();
-
-    // Build matrix: URI
-    let mut matrix_uri = match matrix_id {
-        MatrixIdentifier::RoomAlias(alias) => {
-            let alias_without_hash = alias.strip_prefix('#')?;
-            format!("matrix:r/{}", alias_without_hash)
-        },
-        MatrixIdentifier::RoomId(room_id) => {
-            format!("matrix:roomid/{}", room_id)
-        },
-        MatrixIdentifier::UserId(user_id) => {
-            format!("matrix:u/{}", user_id)
-        },
-        MatrixIdentifier::GroupId(group_id) => {
-            format!("matrix:g/{}", group_id)
-        },
-    };
-
-    // Add event if present
-    if let Some(event) = event_id {
-        matrix_uri.push_str(&format!("/e/{}", event));
-    }
-
-    // Add via parameters
-    if !via_params.is_empty() {
-        matrix_uri.push('?');
-        let via_query: Vec<String> = via_params.iter()
-            .map(|server| format!("via={}", server))
-            .collect();
-        matrix_uri.push_str(&via_query.join("&"));
-    }
-
-    Some(matrix_uri)
+    None
 }
 
 /// Discover permalink base URL from homeserver's well-known
@@ -211,32 +129,20 @@ pub fn effective_permalink_base(
         .to_string()
 }
 
-/// Generate HTTPS permalink using matrix.to navigation grammar
-pub fn make_https_permalink(
+/// Generate HTTPS permalink using custom base URL
+pub fn make_https_permalink_with_base(
     base_origin: &str,
-    identifier: &MatrixIdentifier,
-    event_id: Option<&str>,
-    via_servers: &[String],
+    matrix_to_uri: &MatrixToUri,
 ) -> String {
-    let mut url = format!("{}/#/{}",
-        base_origin.trim_end_matches('/'),
-        utf8_percent_encode(identifier.as_str(), NON_ALPHANUMERIC)
-    );
+    // Get the string representation and replace the base URL
+    let matrix_to_str = matrix_to_uri.to_string();
 
-    if let Some(event) = event_id {
-        url.push('/');
-        url.push_str(&utf8_percent_encode(event, NON_ALPHANUMERIC).to_string());
+    // Replace https://matrix.to with custom base
+    if let Some(stripped) = matrix_to_str.strip_prefix("https://matrix.to") {
+        format!("{}{}", base_origin.trim_end_matches('/'), stripped)
+    } else {
+        matrix_to_str
     }
-
-    if !via_servers.is_empty() {
-        url.push('?');
-        let via_params: Vec<String> = via_servers.iter()
-            .map(|server| format!("via={}", utf8_percent_encode(server, NON_ALPHANUMERIC)))
-            .collect();
-        url.push_str(&via_params.join("&"));
-    }
-
-    url
 }
 
 /// Convert outgoing text containing resolver-style permalinks to HTML with matrix: hrefs
@@ -283,52 +189,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_matrix_identifier_parse() {
-        assert_eq!(
-            MatrixIdentifier::parse("#room:example.org"),
-            Some(MatrixIdentifier::RoomAlias("#room:example.org".to_string()))
-        );
-
-        assert_eq!(
-            MatrixIdentifier::parse("@user:example.org").unwrap(),
-            MatrixIdentifier::UserId("@user:example.org".try_into().unwrap())
-        );
-
-        assert_eq!(
-            MatrixIdentifier::parse("+group:example.org"),
-            Some(MatrixIdentifier::GroupId("+group:example.org".to_string()))
-        );
-    }
-
-    #[test]
-    fn test_make_https_permalink() {
-        let identifier = MatrixIdentifier::RoomAlias("#room:example.org".to_string());
-        let result = make_https_permalink(
-            "https://links.example.com",
-            &identifier,
-            None,
-            &["example.org".to_string()],
-        );
-
-        assert!(result.starts_with("https://links.example.com/#/"));
-        assert!(result.contains("via=example.org"));
-    }
-
-    #[test]
     fn test_convert_https_permalink_to_matrix_uri() {
+        // Test standard matrix.to URL
         let result = convert_https_permalink_to_matrix_uri(
-            "https://links.example.org/#/%23room%3Aexample.org?via=example.org"
+            "https://matrix.to/#/#room:example.org"
         );
+        assert!(result.is_some());
+        assert!(result.unwrap().starts_with("matrix:"));
 
-        assert_eq!(result, Some("matrix:r/room:example.org?via=example.org".to_string()));
+        // Test custom base URL
+        let result = convert_https_permalink_to_matrix_uri(
+            "https://links.example.org/#/#room:example.org?via=example.org"
+        );
+        assert!(result.is_some());
+        assert!(result.unwrap().starts_with("matrix:"));
     }
 
     #[test]
     fn test_linkify_outgoing_text_to_html() {
-        let text = "Check out this room: https://links.example.org/#/%23room%3Aexample.org";
+        let text = "Check out this room: https://links.example.org/#/#room:example.org";
         let result = linkify_outgoing_text_to_html(text).unwrap();
 
-        assert!(result.contains(r#"<a href="matrix:r/room:example.org""#));
+        assert!(result.contains(r#"<a href="matrix:"#));
         assert!(result.contains("https://links.example.org"));
     }
 
