@@ -910,8 +910,8 @@ pub struct RoomInfo {
     /// Users currently typing in this room, and when we received notification of them doing so.
     pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
 
-    /// The display names for users in this room.
-    pub display_names: HashMap<OwnedUserId, String>,
+    /// The display names for users in this room with a flag whether they are ambiguous.
+    pub display_names: HashMap<OwnedUserId, (String, bool)>,
 
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
