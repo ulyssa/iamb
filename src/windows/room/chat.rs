@@ -2,7 +2,6 @@
 use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use edit::edit_with_builder as external_edit;
@@ -159,7 +158,7 @@ impl ChatState {
         let key = self.reply_to.as_ref()?;
         let msg = thread.get(key)?;
 
-        if let MessageEvent::Original(ev) = &msg.event {
+        if let MessageEvent::Original(ev, _) = &msg.event {
             Some(ev)
         } else {
             None
@@ -210,7 +209,7 @@ impl ChatState {
                 Err(UIError::NeedConfirm(prompt))
             },
             MessageAction::Download(filename, flags) => {
-                if let MessageEvent::Original(ev) = &msg.event {
+                if let MessageEvent::Original(ev, edits) = &msg.event {
                     let media = client.media();
 
                     let mut filename = match (filename, &settings.dirs.downloads) {
@@ -219,7 +218,11 @@ impl ChatState {
                         (None, None) => return Err(IambError::NoDownloadDir.into()),
                     };
 
-                    let (source, msg_filename) = match &ev.content.msgtype {
+                    let msgtype = edits
+                        .last_key_value()
+                        .map(|(_, ev)| &ev.msgtype)
+                        .unwrap_or(&ev.content.msgtype);
+                    let (source, msg_filename) = match msgtype {
                         MessageType::Audio(c) => (c.source.clone(), c.filename()),
                         MessageType::File(c) => (c.source.clone(), c.filename()),
                         MessageType::Image(c) => (c.source.clone(), c.filename()),
@@ -339,9 +342,16 @@ impl ChatState {
                     return Err(err);
                 }
 
-                let ev = match &msg.event {
-                    MessageEvent::Original(ev) => &ev.content,
-                    MessageEvent::Local(_, ev) => ev.deref(),
+                let msgtype = match &msg.event {
+                    MessageEvent::Original(ev, edits) => {
+                        edits
+                            .last_key_value()
+                            .map(|(_, ev)| &ev.msgtype)
+                            .unwrap_or(&ev.content.msgtype)
+                    },
+                    MessageEvent::Local(_, ev, edits) => {
+                        edits.last_key_value().map(|(_, ev)| &ev.msgtype).unwrap_or(&ev.msgtype)
+                    },
                     _ => {
                         let msg = "Cannot edit a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -350,7 +360,7 @@ impl ChatState {
                     },
                 };
 
-                let text = match &ev.msgtype {
+                let text = match msgtype {
                     MessageType::Text(msg) => msg.body.as_str(),
                     _ => {
                         let msg = "Cannot edit a non-text message";
@@ -387,11 +397,17 @@ impl ChatState {
                 let event_id = match &msg.event {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Original(ev, _) => ev.event_id.clone(),
+                    MessageEvent::Local(event_id, _, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_) => {
                         let msg = "Cannot react to a redacted message";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
+                    MessageEvent::Edit(_) => {
+                        let msg = "Cannot react to an edit event";
                         let err = UIError::Failure(msg.into());
 
                         return Err(err);
@@ -425,9 +441,10 @@ impl ChatState {
                 let event_id = match &msg.event {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Original(ev, _) => ev.event_id.clone(),
+                    MessageEvent::Local(event_id, _, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Edit(ev) => ev.event_id.to_owned(),
                     MessageEvent::Redacted(_) => {
                         let msg = "Cannot redact already redacted message";
                         let err = UIError::Failure(msg.into());
@@ -473,11 +490,17 @@ impl ChatState {
                 let event_id = match &msg.event {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Original(ev, _) => ev.event_id.clone(),
+                    MessageEvent::Local(event_id, _, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_) => {
                         let msg = "Cannot unreact to a redacted message";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
+                    MessageEvent::Edit(_) => {
+                        let msg = "Cannot unreact to an edit event";
                         let err = UIError::Failure(msg.into());
 
                         return Err(err);
@@ -633,7 +656,7 @@ impl ChatState {
         if show_echo {
             let user = store.application.settings.profile.user_id.clone();
             let key = (MessageTimeStamp::LocalEcho, event_id.clone());
-            let msg = MessageEvent::Local(event_id, msg.into());
+            let msg = MessageEvent::Local(event_id, msg.into(), Default::default());
             let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
             let thread = self.scrollback.get_thread_mut(info);
             thread.insert(key, msg);
