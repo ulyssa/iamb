@@ -51,10 +51,16 @@ url = "https://example.com"
 user_id = "@user:example.com"
 ```
 
-## Installation (via `crates.io`)
+## Installation (building)
 
 Install Rust (1.83.0 or above) and Cargo, and then run:
 
+From the directory containing the sources (ie: from a git clone):
+```
+cargo install --locked --path .
+```
+
+Via `crates.io` (installs the latest tagged release on `crates.io`):
 ```
 cargo install --locked iamb
 ```
