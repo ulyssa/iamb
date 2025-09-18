@@ -80,7 +80,7 @@ fn nth_key_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageKey {
 fn nth_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageCursor {
     let key = nth_key_before(pos, n, thread);
 
-    if matches!(thread.last_key_value(), Some((last, _)) if &key == last) {
+    if matches!(last_key_value(thread), Some((last, _)) if &key == last) {
         MessageCursor::latest()
     } else {
         MessageCursor::from(key)
@@ -113,6 +113,14 @@ fn prevmsg<'a>(key: &MessageKey, thread: &'a Messages) -> Option<&'a Message> {
 
 fn msg_not_hidden(item: &(&MessageKey, &Message)) -> bool {
     !matches!(&item.1.event, MessageEvent::Edit(_))
+}
+
+fn first_key(thread: &Messages) -> Option<&MessageKey> {
+    thread.iter().find(msg_not_hidden).map(|(k, _)| k)
+}
+
+fn last_key_value(thread: &Messages) -> Option<(&MessageKey, &Message)> {
+    thread.iter().filter(msg_not_hidden).next_back()
 }
 
 pub struct ScrollbackState {
@@ -183,7 +191,7 @@ impl ScrollbackState {
         self.cursor
             .timestamp
             .clone()
-            .or_else(|| self.get_thread(info)?.last_key_value().map(|kv| kv.0.clone()))
+            .or_else(|| last_key_value(self.get_thread(info)?).map(|kv| kv.0.clone()))
     }
 
     pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
@@ -244,7 +252,7 @@ impl ScrollbackState {
             _ => {},
         }
 
-        let first_key = self.get_thread(info).and_then(|t| t.first_key_value()).map(|(k, _)| k);
+        let first_key = self.get_thread(info).and_then(|t| first_key(t));
         let at_top = first_key == self.viewctx.corner.timestamp.as_ref();
 
         match (at_top, self.thread.as_ref()) {
@@ -347,7 +355,7 @@ impl ScrollbackState {
             return;
         };
 
-        let last_key = if let Some(k) = thread.last_key_value() {
+        let last_key = if let Some(k) = last_key_value(thread) {
             k.0
         } else {
             return;
@@ -415,7 +423,7 @@ impl ScrollbackState {
             MoveType::BufferLineOffset => None,
             MoveType::BufferLinePercent => None,
             MoveType::BufferPos(MovePosition::Beginning) => {
-                let start = self.get_thread(info)?.first_key_value()?.0.clone();
+                let start = first_key(self.get_thread(info)?)?.clone();
 
                 Some(start.into())
             },
@@ -482,8 +490,8 @@ impl ScrollbackState {
 
             RangeType::Buffer => {
                 let thread = self.get_thread(info)?;
-                let start = thread.first_key_value()?.0.clone();
-                let end = thread.last_key_value()?.0.clone();
+                let start = first_key(thread)?.clone();
+                let end = last_key_value(thread)?.0.clone();
 
                 Some(EditRange::inclusive(start.into(), end.into(), TargetShape::LineWise))
             },
@@ -1074,7 +1082,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         let mut corner = self.viewctx.corner.clone();
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
-        let last_key = if let Some(k) = thread.last_key_value() {
+        let last_key = if let Some(k) = last_key_value(thread) {
             k.0
         } else {
             return Ok(None);
@@ -1093,7 +1101,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
         match dir {
             MoveDir2D::Up => {
-                let first_key = thread.first_key_value().map(|f| f.0.clone());
+                let first_key = first_key(thread).cloned();
 
                 for (key, item) in thread.range(..=&corner_key).rev().filter(msg_not_hidden) {
                     let sel = key == cursor_key;
@@ -1427,7 +1435,7 @@ impl StatefulWidget for Scrollback<'_> {
             state.cursor.timestamp.is_none()
         {
             // If the cursor is at the last message, then update the read marker.
-            if let Some((k, _)) = thread.last_key_value() {
+            if let Some((k, _)) = last_key_value(thread) {
                 info.set_receipt(thread.1.clone(), settings.profile.user_id.clone(), k.1.clone());
             }
         }
