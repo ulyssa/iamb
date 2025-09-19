@@ -87,12 +87,16 @@ use crate::base::{
 };
 
 use crate::message::{
-    text_to_message,
+    text_to_message_with_command,
+    LiveMessageManager,
+    LiveMessageSession,
     Message,
     MessageEvent,
     MessageKey,
     MessageTimeStamp,
     TreeGenState,
+    send_live_message_with_custom_fields,
+    send_live_update_with_custom_fields,
 };
 use crate::worker::Requester;
 
@@ -112,6 +116,9 @@ pub struct ChatState {
 
     reply_to: Option<MessageKey>,
     editing: Option<MessageKey>,
+
+    live_messages: LiveMessageManager,
+    live_event_id_receiver: Option<tokio::sync::oneshot::Receiver<matrix_sdk::ruma::OwnedEventId>>,
 }
 
 impl ChatState {
@@ -135,6 +142,9 @@ impl ChatState {
 
             reply_to: None,
             editing: None,
+
+            live_messages: LiveMessageManager::new(),
+            live_event_id_receiver: None,
         }
     }
 
@@ -545,8 +555,55 @@ impl ChatState {
                     msg.trim_end().to_string()
                 };
 
-                let mut msg = text_to_message(msg);
+                // Check if this is a /live message
+                let is_live_message = msg.trim_end().starts_with("/live ");
 
+                if is_live_message {
+                    // Remove "/live " prefix to get actual message
+                    let actual_msg = msg.trim_end().strip_prefix("/live ").unwrap_or("").to_string();
+
+                    // Check if we have an active live session that needs finalizing
+                    if let Some(session) = self.live_messages.end_session(&self.room_id) {
+                        if actual_msg.is_empty() {
+                            // Cancel the live message by redacting it
+                            let _ = room.redact(&session.event_id, Some("Live message cancelled"), None).await;
+
+                            self.tbox.reset();
+                            return Ok(EditInfo::from(InfoMessage::from("Live message cancelled")));
+                        } else {
+                            // Send final update with content
+                            tracing::info!("[LIVE FINAL] Sending final update for {:?} with content: {:?}",
+                                session.event_id, actual_msg);
+                            let result = send_live_update_with_custom_fields(
+                                &room,
+                                &session.event_id,
+                                &actual_msg,
+                                true, // final
+                                None,
+                            ).await;
+
+                            match result {
+                                Ok(event_id) => {
+                                    tracing::info!("[LIVE FINAL] Final update sent successfully: {:?}", event_id);
+                                },
+                                Err(e) => {
+                                    tracing::error!("[LIVE FINAL] Failed to send final update: {:?}", e);
+                                }
+                            }
+
+                            self.tbox.reset();
+                            return Ok(EditInfo::from(InfoMessage::from("Live message completed")));
+                        }
+                    } else {
+                        // No active session - just clear input
+                        self.tbox.reset();
+                        return Ok(EditInfo::from(InfoMessage::from("No active live session")));
+                    }
+                }
+
+                let (mut msg, _cmd) = text_to_message_with_command(msg);
+
+                // Process message relations (editing, threading, replies)
                 if let Some((_, event_id)) = &self.editing {
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(
                         event_id.clone(),
@@ -566,8 +623,7 @@ impl ChatState {
                     msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
                 }
 
-                // XXX: second parameter can be a locally unique transaction id.
-                // Useful for doing retries.
+                // Send the normal message
                 let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
                 let event_id = resp.event_id;
 
@@ -666,7 +722,7 @@ impl ChatState {
     }
 
     pub fn typing_notice(
-        &self,
+        &mut self,
         act: &EditorAction,
         ctx: &ProgramContext,
         store: &mut ProgramStore,
@@ -675,11 +731,274 @@ impl ChatState {
             return;
         }
 
-        if !store.application.settings.tunables.typing_notice_send {
+        if store.application.settings.tunables.typing_notice_send {
+            store.application.worker.typing_notice(self.room_id.clone());
+        }
+
+        // Handle live message updates if in live mode
+        self.handle_live_typing(store);
+    }
+
+    /// Check if we should send a live update based on timer
+    /// This is called periodically from draw() to ensure updates are sent even when user isn't typing
+    fn check_live_updates(&mut self, store: &mut ProgramStore) {
+        // Check if we have a /live message in progress
+        let current_text = self.tbox.get();
+        let current_text_str = current_text.trim_end().to_string();
+
+        // Check if we're in live mode
+        let is_live_command = current_text_str == "/live" || current_text_str.starts_with("/live ");
+        if !is_live_command {
             return;
         }
 
-        store.application.worker.typing_notice(self.room_id.clone());
+        // Extract content
+        let live_content = if current_text_str == "/live" {
+            String::new()
+        } else {
+            current_text_str.strip_prefix("/live ").unwrap_or("").to_string()
+        };
+
+        // First check if we have a pending event ID to update
+        if let Some(rx) = self.live_event_id_receiver.as_mut() {
+            // Try to receive the event ID without blocking
+            match rx.try_recv() {
+                Ok(event_id) => {
+                    // Update the session with the real event ID
+                    self.live_messages.set_event_id(&self.room_id, event_id.clone());
+                    tracing::debug!("Updated live session with real event ID: {:?}", event_id);
+                    self.live_event_id_receiver = None; // Clear the receiver
+                },
+                Err(tokio::sync::oneshot::error::TryRecvError::Empty) => {
+                    // Still waiting for event ID, continue
+                },
+                Err(tokio::sync::oneshot::error::TryRecvError::Closed) => {
+                    // Channel closed without sending, clear it
+                    self.live_event_id_receiver = None;
+                }
+            }
+        }
+
+        // Check if there's an active session
+        if let Some(session) = self.live_messages.get_session(&self.room_id) {
+            // Skip if we have a temporary event ID
+            if self.live_messages.has_temp_event_id(&self.room_id) {
+                return;
+            }
+
+            // Check if content differs and enough time has passed for an update
+            if live_content != session.current_content && self.live_messages.should_send_update(&self.room_id) {
+                // Send update based on timer
+                if let Some(updated_session) = self.live_messages.update_session(
+                    &self.room_id,
+                    live_content,
+                ) {
+                    self.send_live_update(updated_session, store);
+                }
+            }
+        }
+    }
+
+    fn handle_live_typing(&mut self, store: &mut ProgramStore) {
+        let current_text = self.tbox.get();
+        let current_text_str = current_text.trim_end().to_string();
+
+        // Check if we're in live mode (text starts with "/live" with or without space)
+        let is_live_command = current_text_str == "/live" || current_text_str.starts_with("/live ");
+
+        if !is_live_command {
+            // User completely removed /live prefix - cancel the message
+            if let Some(session) = self.live_messages.get_session(&self.room_id) {
+                // Only redact if we have a real event ID (not temporary)
+                if !self.live_messages.has_temp_event_id(&self.room_id) {
+                    tracing::info!("[LIVE] User removed /live prefix completely, redacting message");
+
+                    let worker = store.application.worker.clone();
+                    let room_id = self.room_id.clone();
+                    let event_id = session.event_id.clone();
+
+                    tokio::spawn(async move {
+                        if let Some(room) = worker.client.get_room(&room_id) {
+                            let _ = room.redact(&event_id, Some("Live message cancelled"), None).await;
+                            tracing::info!("[LIVE] Message redacted: {:?}", event_id);
+                        }
+                    });
+                }
+
+                self.live_messages.end_session(&self.room_id);
+            }
+            return;
+        }
+
+        // Extract the actual message content after "/live " or empty if just "/live"
+        let live_content = if current_text_str == "/live" {
+            String::new()
+        } else {
+            current_text_str.strip_prefix("/live ").unwrap_or("").to_string()
+        };
+
+        tracing::debug!("[LIVE] handle_live_typing: text_len={}, live_content_len={}, has_session={}",
+            current_text_str.len(),
+            live_content.len(),
+            self.live_messages.get_session(&self.room_id).is_some());
+
+        // Enable live messaging for this session
+        self.live_messages.enabled = true;
+
+        // Check if there's an active session
+        if let Some(session) = self.live_messages.get_session(&self.room_id) {
+            // We have an active session - check if we should send an update
+
+            // Skip if we have a temporary event ID (initial message still being sent)
+            if self.live_messages.has_temp_event_id(&self.room_id) {
+                return;
+            }
+
+            // Check if content changed (including becoming empty)
+            if live_content != session.current_content {
+                // Update the local echo to reflect the new content
+                let event_id = session.event_id.clone();
+                let info = store.application.rooms.get_or_default(self.room_id.clone());
+                let thread = self.scrollback.get_thread_mut(info);
+
+                // Find and update the local echo message
+                let key = (MessageTimeStamp::LocalEcho, event_id.clone());
+                if let Some(msg) = thread.get_mut(&key) {
+                    // Update the message content
+                    if let MessageEvent::Local(_, content) = &mut msg.event {
+                        *content = Box::new(RoomMessageEventContent::text_plain(&live_content));
+                        tracing::info!("[LIVE ECHO] Updated local echo content to: {:?}", live_content);
+                    }
+                }
+
+                // Check if we just typed a boundary character (space, punctuation)
+                let just_typed_boundary = live_content.len() > session.current_content.len() &&
+                    live_content.chars().last()
+                        .map(|c| c.is_whitespace() || c.is_ascii_punctuation())
+                        .unwrap_or(false);
+
+                // Also send update if user deleted significant amount of text or made content empty
+                let significant_deletion = live_content.len() < session.current_content.len() - 5;
+                let became_empty = live_content.is_empty() && !session.current_content.is_empty();
+
+                if just_typed_boundary || significant_deletion || became_empty {
+                    // Send immediately
+                    if let Some(updated_session) = self.live_messages.update_session(
+                        &self.room_id,
+                        live_content,
+                    ) {
+                        self.send_live_update(updated_session, store);
+                    }
+                }
+                // Timer-based updates are handled by check_live_updates()
+            }
+        } else {
+            // No active session - start a new one if we have content after "/live "
+            if !live_content.is_empty() && self.live_event_id_receiver.is_none() {
+                tracing::info!("[LIVE] Starting new session with text: '{}'", live_content);
+
+                // Start a live session with current content
+                if let Some(session) = self.live_messages.start_session(
+                    self.room_id.clone(),
+                    live_content.clone(),
+                ) {
+                    tracing::info!("[LIVE] Session started with event_id: {:?}", session.event_id);
+                    // Send initial message asynchronously
+                    let worker = store.application.worker.clone();
+                    let room_id = self.room_id.clone();
+                    let session_content = session.current_content.clone();
+
+                    // Create a channel to communicate back the event ID
+                    use tokio::sync::oneshot;
+                    let (tx, rx) = oneshot::channel();
+
+                    // Store the receiver so we can check it later
+                    self.live_event_id_receiver = Some(rx);
+
+                    // Spawn the task to send the initial message
+                    tokio::spawn(async move {
+                        if let Some(room) = worker.client.get_room(&room_id) {
+                            use serde_json::json;
+                            let custom_fields = json!({
+                                "org.matrix.msc4357.session_start": true,
+                                "org.matrix.msc4357.animation": {
+                                    "smooth": true,
+                                }
+                            });
+
+                            tracing::info!("Sending initial live message: content={:?}", session_content);
+
+                            match send_live_message_with_custom_fields(
+                                &room,
+                                &session_content,
+                                Some(custom_fields)
+                            ).await {
+                                Ok(event_id) => {
+                                    tracing::info!("Initial live message sent successfully: {:?}", event_id);
+                                    // Send event ID back through channel
+                                    let _ = tx.send(event_id);
+                                },
+                                Err(e) => {
+                                    tracing::error!("Failed to send initial live message: {:?}", e);
+                                }
+                            }
+                        }
+                    });
+
+                    return; // Don't send update immediately after initial
+                }
+            }
+        }
+    }
+
+
+    fn send_live_update(&self, session: LiveMessageSession, store: &mut ProgramStore) {
+        let room_id = self.room_id.clone();
+        let worker = store.application.worker.clone();
+        let event_id = session.event_id.clone();
+        let content = session.current_content.clone();
+        let update_count = session.update_count;
+
+        // Use a zero-width space for empty content to keep the message visible
+        let display_content = if content.is_empty() {
+            "\u{200B}".to_string() // Zero-width space
+        } else {
+            content.clone()
+        };
+
+        tracing::info!("Sending live update #{}: event_id={:?}, content={:?}",
+            update_count, event_id, display_content);
+
+        // Send the update in the background
+        tokio::spawn(async move {
+            if let Some(room) = worker.client.get_room(&room_id) {
+                use serde_json::json;
+                // Add custom fields for live message tracking and animation hints
+                let custom_fields = json!({
+                    "org.matrix.msc4357.update_number": update_count,
+                    "org.matrix.msc4357.animation": {
+                        "smooth": true,      // Enable smooth character-by-character animation
+                    }
+                });
+
+                let result = send_live_update_with_custom_fields(
+                    &room,
+                    &event_id,
+                    &display_content,
+                    false, // not final
+                    Some(custom_fields)
+                ).await;
+
+                match result {
+                    Ok(new_event_id) => {
+                        tracing::info!("Live update sent successfully: {:?}", new_event_id);
+                    },
+                    Err(e) => {
+                        tracing::error!("Failed to send live update: {:?}", e);
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -702,6 +1021,12 @@ macro_rules! delegate {
 
 impl WindowOps<IambInfo> for ChatState {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
+        // Check for live message updates periodically when drawing
+        // This ensures timer-based updates work even when user isn't typing
+        if self.live_messages.get_session(&self.room_id).is_some() {
+            self.check_live_updates(store);
+        }
+
         Chat::new(store).focus(focused).render(area, buf, self)
     }
 
@@ -727,6 +1052,9 @@ impl WindowOps<IambInfo> for ChatState {
 
             reply_to: None,
             editing: None,
+
+            live_messages: LiveMessageManager::new(),
+            live_event_id_receiver: None,
         }
     }
 
@@ -975,7 +1303,11 @@ impl StatefulWidget for Chat<'_> {
             Paragraph::new(desc_spans).render(descarea, buf);
         }
 
-        let prompt = if self.focused { "> " } else { "  " };
+        let prompt = if self.focused {
+            "> "
+        } else {
+            "  "
+        };
 
         let tbox = TextBox::new().prompt(prompt);
         tbox.render(textarea, buf, &mut state.tbox);

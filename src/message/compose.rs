@@ -16,7 +16,7 @@ use matrix_sdk::ruma::events::room::message::{
 };
 
 #[derive(Clone, Debug, Default)]
-enum SlashCommand {
+pub enum SlashCommand {
     /// Send an emote message.
     Emote,
 
@@ -47,6 +47,9 @@ enum SlashCommand {
 
     /// Send a message with heart effects in clients that show them.
     SpaceInvaders,
+
+    /// Send a live message that updates as you type (MSC4357)
+    Live,
 }
 
 impl SlashCommand {
@@ -95,6 +98,11 @@ impl SlashCommand {
                     Default::default(),
                 )?
             },
+            SlashCommand::Live => {
+                // Live messages are handled specially in the chat window
+                // This should not be called directly
+                return Err(anyhow::anyhow!("Live message"));
+            },
         };
 
         Ok(msgtype)
@@ -104,6 +112,7 @@ impl SlashCommand {
 fn parse_slash_command_inner(input: &str) -> IResult<&str, SlashCommand> {
     let (input, _) = space0(input)?;
     let (input, slash) = alt((
+        // Commands that require text after them (with space)
         value(SlashCommand::Emote, tag("/me ")),
         value(SlashCommand::Html, tag("/h ")),
         value(SlashCommand::Html, tag("/html ")),
@@ -118,6 +127,7 @@ fn parse_slash_command_inner(input: &str) -> IResult<&str, SlashCommand> {
         value(SlashCommand::Rainfall, tag("/rainfall ")),
         value(SlashCommand::Snowfall, tag("/snowfall ")),
         value(SlashCommand::SpaceInvaders, tag("/spaceinvaders ")),
+        value(SlashCommand::Live, tag("/live ")),
     ))(input)?;
     let (input, _) = space0(input)?;
 
@@ -170,12 +180,23 @@ fn text_to_message_content(input: String) -> TextMessageEventContent {
     }
 }
 
+#[allow(dead_code)]
 pub fn text_to_message(input: String) -> RoomMessageEventContent {
-    let msg = parse_slash_command(input.as_str())
-        .and_then(|(input, slash)| slash.to_message(input))
-        .unwrap_or_else(|_| MessageType::Text(text_to_message_content(input)));
+    text_to_message_with_command(input).0
+}
 
-    RoomMessageEventContent::new(msg)
+pub fn text_to_message_with_command(input: String) -> (RoomMessageEventContent, Option<SlashCommand>) {
+    match parse_slash_command(input.as_str()) {
+        Ok((text, slash)) => {
+            let msg = slash.to_message(text)
+                .unwrap_or_else(|_| MessageType::Text(text_to_message_content(text.to_string())));
+            (RoomMessageEventContent::new(msg), Some(slash))
+        },
+        Err(_) => {
+            let msg = MessageType::Text(text_to_message_content(input));
+            (RoomMessageEventContent::new(msg), None)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -330,8 +351,7 @@ pub mod tests {
         assert_eq!(content.body, "<b>bold</b>");
         assert_eq!(content.formatted.unwrap().body, "<b>bold</b>");
 
-        let MessageType::Text(content) = text_to_message("/plain <b>bold</b>".into()).msgtype
-        else {
+        let MessageType::Text(content) = text_to_message("/plain <b>bold</b>".into()).msgtype else {
             panic!("Expected MessageType::Text");
         };
         assert_eq!(content.body, "<b>bold</b>");
@@ -343,33 +363,40 @@ pub mod tests {
         assert_eq!(content.body, "<b>bold</b>");
         assert!(content.formatted.is_none(), "{:?}", content.formatted);
 
-        let MessageType::Emote(content) = text_to_message("/me *bold*".into()).msgtype else {
+        let (msg, _) = text_to_message_with_command("/me *bold*".into());
+        let MessageType::Emote(content) = msg.msgtype else {
             panic!("Expected MessageType::Emote");
         };
         assert_eq!(content.body, "*bold*");
         assert_eq!(content.formatted.unwrap().body, "<p><em>bold</em></p>\n");
 
-        let content = text_to_message("/confetti hello".into()).msgtype;
+        let (msg, _) = text_to_message_with_command("/confetti hello".into());
+        let content = msg.msgtype;
         assert_eq!(content.msgtype(), "nic.custom.confetti");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/fireworks hello".into()).msgtype;
+        let (msg, _) = text_to_message_with_command("/fireworks hello".into());
+        let content = msg.msgtype;
         assert_eq!(content.msgtype(), "nic.custom.fireworks");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/hearts hello".into()).msgtype;
+        let (msg, _) = text_to_message_with_command("/hearts hello".into());
+        let content = msg.msgtype;
         assert_eq!(content.msgtype(), "io.element.effect.hearts");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/rainfall hello".into()).msgtype;
+        let (msg, _) = text_to_message_with_command("/rainfall hello".into());
+        let content = msg.msgtype;
         assert_eq!(content.msgtype(), "io.element.effect.rainfall");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/snowfall hello".into()).msgtype;
+        let (msg, _) = text_to_message_with_command("/snowfall hello".into());
+        let content = msg.msgtype;
         assert_eq!(content.msgtype(), "io.element.effect.snowfall");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/spaceinvaders hello".into()).msgtype;
+        let (msg, _) = text_to_message_with_command("/spaceinvaders hello".into());
+        let content = msg.msgtype;
         assert_eq!(content.msgtype(), "io.element.effects.space_invaders");
         assert_eq!(content.body(), "hello");
     }

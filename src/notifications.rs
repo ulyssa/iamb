@@ -76,6 +76,12 @@ pub async fn register_notifications(
                 let room_id = room.room_id().to_owned();
                 match notification.event {
                     RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
+                        // Skip notifications for live messages
+                        if crate::message::live_detection::has_live_marker_in_raw(&e) {
+                            tracing::debug!("Skipping notification for live message");
+                            return;
+                        }
+
                         match parse_full_notification(e, room, show_message).await {
                             Ok((summary, body, server_ts)) => {
                                 if server_ts < startup_ts {
@@ -142,7 +148,7 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
 async fn send_notification_desktop(
     summary: &str,
     body: Option<&str>,
-    room_id: OwnedRoomId,
+    _room_id: OwnedRoomId,
     _store: &AsyncProgramStore,
     sound_hint: Option<&str>,
 ) {
@@ -166,17 +172,19 @@ async fn send_notification_desktop(
 
     match desktop_notification.show() {
         Err(err) => tracing::error!("Failed to send notification: {err}"),
+        #[cfg(all(unix, not(target_os = "macos")))]
         Ok(handle) => {
-            #[cfg(all(unix, not(target_os = "macos")))]
             _store
                 .lock()
                 .await
                 .application
                 .open_notifications
-                .entry(room_id)
+                .entry(_room_id)
                 .or_default()
                 .push(NotificationHandle(Some(handle)));
         },
+        #[cfg(not(all(unix, not(target_os = "macos"))))]
+        Ok(_) => {},
     }
 }
 
