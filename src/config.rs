@@ -489,12 +489,14 @@ pub struct Notifications {
 
 #[derive(Clone)]
 pub struct ImagePreviewValues {
+    pub lazy_load: bool,
     pub size: ImagePreviewSize,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct ImagePreview {
+    pub lazy_load: Option<bool>,
     pub size: Option<ImagePreviewSize>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
@@ -502,13 +504,14 @@ pub struct ImagePreview {
 impl ImagePreview {
     fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
+            lazy_load: self.lazy_load.unwrap_or(true),
             size: self.size.unwrap_or_default(),
             protocol: self.protocol,
         }
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Copy, Deserialize, Debug)]
 pub struct ImagePreviewSize {
     pub width: usize,
     pub height: usize,
@@ -683,19 +686,17 @@ pub struct DirectoryValues {
     pub data: PathBuf,
     pub logs: PathBuf,
     pub downloads: Option<PathBuf>,
-    pub image_previews: PathBuf,
 }
 
 impl DirectoryValues {
     fn create_dir_all(&self) -> std::io::Result<()> {
         use std::fs::create_dir_all;
 
-        let Self { cache, data, logs, downloads, image_previews } = self;
+        let Self { cache, data, logs, downloads } = self;
 
         create_dir_all(cache)?;
         create_dir_all(data)?;
         create_dir_all(logs)?;
-        create_dir_all(image_previews)?;
 
         if let Some(downloads) = downloads {
             create_dir_all(downloads)?;
@@ -711,7 +712,6 @@ pub struct Directories {
     pub data: Option<PathBuf>,
     pub logs: Option<PathBuf>,
     pub downloads: Option<PathBuf>,
-    pub image_previews: Option<PathBuf>,
 }
 
 impl Directories {
@@ -721,7 +721,6 @@ impl Directories {
             data: self.data.or(other.data),
             logs: self.logs.or(other.logs),
             downloads: self.downloads.or(other.downloads),
-            image_previews: self.image_previews.or(other.image_previews),
         }
     }
 
@@ -752,13 +751,7 @@ impl Directories {
 
         let downloads = self.downloads.or_else(dirs::download_dir);
 
-        let image_previews = self.image_previews.unwrap_or_else(|| {
-            let mut dir = cache.clone();
-            dir.push("image_preview_downloads");
-            dir
-        });
-
-        DirectoryValues { cache, data, logs, downloads, image_previews }
+        DirectoryValues { cache, data, logs, downloads }
     }
 }
 
