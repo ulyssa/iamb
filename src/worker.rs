@@ -339,7 +339,7 @@ fn load_insert(
 
     match res {
         Ok((fetch_id, msgs)) => {
-            // First pass: collect all messages and replacements separately
+            // First pass: collect all messages and categorize them
             let mut normal_messages = Vec::new();
             let mut replacement_messages = Vec::new();
             let mut other_events = Vec::new();
@@ -360,16 +360,15 @@ fn load_insert(
                         // Check if this is a replacement/edit event
                         if let RoomMessageEvent::Original(ref orig) = msg {
                             if let Some(Relation::Replacement(_)) = &orig.content.relates_to {
-                                // This is an edit - save it for later
-                                // We'll process live status only for the LATEST edit
+                                // This is an edit - save it for later processing
+                                // The is_live flag is already determined from the raw event
                                 replacement_messages.push((msg, is_live));
                             } else {
-                                // Normal message - for history loading, we shouldn't mark as live
-                                // Live messages should always have at least one replacement
+                                // Normal message
                                 normal_messages.push(msg);
                             }
                         } else {
-                            // Other message types
+                            // Other message types (redacted, etc.)
                             normal_messages.push(msg);
                         }
                     },
@@ -415,7 +414,7 @@ fn load_insert(
             // Group replacements by the event they're replacing and keep only the latest
             info!("[LOADING] Processing {} replacement messages", replacement_messages.len());
 
-            // Group replacements by target event ID, keeping track of the latest one
+            // Group replacements by target event ID, keeping only the latest one
             let mut latest_replacements: HashMap<OwnedEventId, (MilliSecondsSinceUnixEpoch, RoomMessageEvent, bool)> = HashMap::new();
 
             for (msg, is_live) in replacement_messages {
@@ -424,10 +423,10 @@ fn load_insert(
                         let target_id = repl.event_id.clone();
                         let timestamp = orig.origin_server_ts;
 
-                        // Only keep this replacement if it's newer than what we have
+                        // Keep only the latest replacement for each target
                         match latest_replacements.get(&target_id) {
                             Some((existing_ts, _, _)) if existing_ts > &timestamp => {
-                                // We already have a newer replacement, skip this one
+                                // Skip older replacement
                                 info!(
                                     "[M.REPLACE] Skipping older replacement {} -> {} (ts: {:?}, is_live: {})",
                                     msg.event_id(),
@@ -435,7 +434,6 @@ fn load_insert(
                                     timestamp,
                                     is_live
                                 );
-                                continue;
                             }
                             _ => {
                                 // This is newer or first, keep it
@@ -453,7 +451,7 @@ fn load_insert(
                 }
             }
 
-            // Apply only the latest replacement for each message and update live status
+            // Apply only the latest replacement for each message
             info!("[LOADING] Applying {} latest replacements", latest_replacements.len());
             for (target_id, (_timestamp, msg, is_live)) in latest_replacements {
                 if let RoomMessageEvent::Original(ref orig) = msg {
@@ -465,7 +463,8 @@ fn load_insert(
                         is_live
                     );
 
-                    // Update live_message_ids based on the LATEST edit's live status
+                    // Update live status based on the replacement's is_live flag
+                    // The is_live flag comes from centralized detection in load_older_one
                     if is_live {
                         info.live_message_ids.insert(target_id.clone());
                     } else {

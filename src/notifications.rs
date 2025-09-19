@@ -76,6 +76,12 @@ pub async fn register_notifications(
                 let room_id = room.room_id().to_owned();
                 match notification.event {
                     RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
+                        // Skip notifications for live messages
+                        if crate::message::live_detection::has_live_marker_in_raw(&e) {
+                            tracing::debug!("Skipping notification for live message");
+                            return;
+                        }
+
                         match parse_full_notification(e, room, show_message).await {
                             Ok((summary, body, server_ts)) => {
                                 if server_ts < startup_ts {
