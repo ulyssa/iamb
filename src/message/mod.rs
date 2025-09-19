@@ -997,7 +997,7 @@ impl Message {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-    ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
+    ) -> (Text<'a>, Vec<ProtocolPreview<'a>>) {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected, settings);
@@ -1005,28 +1005,35 @@ impl Message {
         let mut text = Text::default();
         let width = fmt.width();
 
+        let mut protos = Vec::new();
+
         // Show the message that this one replied to, if any.
         let reply = self
             .reply_to()
             .or_else(|| self.thread_root())
             .and_then(|e| info.get_event(&e));
-        let proto_reply = reply.as_ref().and_then(|r| {
+        if let Some(reply) = reply {
             // Format the reply header, push it into the `Text` buffer, and get any image.
-            fmt.push_in_reply(r, style, &mut text, info, settings, previews)
-        });
+            if let Some(proto) =
+                fmt.push_in_reply(reply, style, &mut text, info, settings, previews)
+            {
+                protos.push(proto);
+            }
+        }
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
         let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings, previews);
 
         // Given our text so far, determine the image offset.
-        let proto_main = proto.map(|p| {
+        if let Some(p) = proto {
             let y_off = text.lines.len() as u16;
             let x_off = fmt.cols.user_gutter_width(settings);
             // Adjust y_off by 1 if a date was printed before the message to account for
             // the extra line we're going to print.
             let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
-            (p, x_off, y_off)
-        });
+
+            protos.push((p, x_off, y_off));
+        }
 
         fmt.push_text(msg, style, &mut text);
 
@@ -1044,7 +1051,7 @@ impl Message {
             fmt.push_thread_reply_count(thread.len(), &mut text);
         }
 
-        (text, [proto_main, proto_reply])
+        (text, protos)
     }
 
     pub fn show<'a>(
