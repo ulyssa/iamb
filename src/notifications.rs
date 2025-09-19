@@ -142,7 +142,7 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
 async fn send_notification_desktop(
     summary: &str,
     body: Option<&str>,
-    room_id: OwnedRoomId,
+    _room_id: OwnedRoomId,
     _store: &AsyncProgramStore,
     sound_hint: Option<&str>,
 ) {
@@ -166,17 +166,19 @@ async fn send_notification_desktop(
 
     match desktop_notification.show() {
         Err(err) => tracing::error!("Failed to send notification: {err}"),
+        #[cfg(all(unix, not(target_os = "macos")))]
         Ok(handle) => {
-            #[cfg(all(unix, not(target_os = "macos")))]
             _store
                 .lock()
                 .await
                 .application
                 .open_notifications
-                .entry(room_id)
+                .entry(_room_id)
                 .or_default()
                 .push(NotificationHandle(Some(handle)));
         },
+        #[cfg(not(all(unix, not(target_os = "macos"))))]
+        Ok(_) => {},
     }
 }
 
