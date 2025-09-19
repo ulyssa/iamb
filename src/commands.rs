@@ -695,6 +695,31 @@ fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_permalink(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let args = desc.arg.strings()?;
+
+    let event_id = if args.len() == 2 && args[0] == "event" {
+        // Parse event ID from second argument
+        match args[1].parse::<matrix_sdk::ruma::OwnedEventId>() {
+            Ok(event_id) => Some(event_id),
+            Err(_) => {
+                let msg = format!("Invalid event ID: {}", args[1]);
+                return Err(CommandError::Error(msg));
+            }
+        }
+    } else if args.is_empty() {
+        // No event ID, just room permalink
+        None
+    } else {
+        return Err(CommandError::InvalidArgument);
+    };
+
+    let iact = IambAction::Permalink(event_id);
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand {
         name: "cancel".into(),
@@ -801,6 +826,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "logout".into(),
         aliases: vec![],
         f: iamb_logout,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "permalink".into(),
+        aliases: vec![],
+        f: iamb_permalink,
     });
 }
 
@@ -1405,5 +1435,31 @@ mod tests {
 
         let res = cmds.input_cmd("keys import foo bar baz", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_permalink() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let res = cmds.input_cmd("permalink", ctx.clone()).unwrap();
+        let act = IambAction::Permalink(None);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("permalink event $event:example.org", ctx.clone()).unwrap();
+        use std::convert::TryInto;
+        let event_id: matrix_sdk::ruma::OwnedEventId = "$event:example.org".try_into().unwrap();
+        let act = IambAction::Permalink(Some(event_id));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        // Invalid arguments
+        let res = cmds.input_cmd("permalink foo", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("permalink event", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("permalink event invalid-event-id", ctx.clone());
+        assert!(res.is_err());
     }
 }

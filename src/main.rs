@@ -74,6 +74,7 @@ mod config;
 mod keybindings;
 mod message;
 mod notifications;
+mod permalink;
 mod preview;
 mod sled_export;
 mod util;
@@ -627,6 +628,9 @@ impl Application {
                     return Err(IambError::InvalidUserId(user_id).into());
                 }
             },
+            IambAction::Permalink(event_id) => {
+                self.permalink_command(event_id, ctx, store).await?
+            },
         };
 
         Ok(info)
@@ -694,6 +698,92 @@ impl Application {
                 Ok(Some(msg.into()))
             },
         }
+    }
+
+    async fn permalink_command(
+        &mut self,
+        event_id: Option<matrix_sdk::ruma::OwnedEventId>,
+        _: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        use crate::permalink::{Msc4352Config, discover_resolver_base, effective_permalink_base, make_https_permalink_with_base};
+        use matrix_sdk::ruma::MatrixToUri;
+
+        let config = Msc4352Config::default();
+
+        if !config.enabled {
+            return Ok(Some("MSC4352 permalink feature is disabled. Set IAMB_MSC4352=1 to enable.".into()));
+        }
+
+        // Get current room info
+        let current_room_id = match self.screen.current_window_mut()? {
+            IambWindow::Room(room_state) => room_state.id().to_owned(),
+            _ => return Ok(Some("No current room to generate permalink for".into())),
+        };
+
+        // Get room from SDK to prefer canonical alias
+        let room = store.application.worker.client.get_room(&current_room_id);
+
+        // Build MatrixToUri string
+        let homeserver_domain = store.application.settings.profile.user_id.server_name();
+
+        // Build the matrix.to URL string
+        let matrix_to_url = if let Some(room) = room {
+            if let Some(alias) = room.canonical_alias() {
+                // Use alias if available
+                if let Some(event_id) = &event_id {
+                    format!("https://matrix.to/#/{}/{}?via={}", alias, event_id, homeserver_domain)
+                } else {
+                    format!("https://matrix.to/#/{}?via={}", alias, homeserver_domain)
+                }
+            } else {
+                // Use room ID
+                if let Some(event_id) = &event_id {
+                    format!("https://matrix.to/#/{}/{}?via={}", current_room_id, event_id, homeserver_domain)
+                } else {
+                    format!("https://matrix.to/#/{}?via={}", current_room_id, homeserver_domain)
+                }
+            }
+        } else {
+            if let Some(event_id) = &event_id {
+                format!("https://matrix.to/#/{}/{}?via={}", current_room_id, event_id, homeserver_domain)
+            } else {
+                format!("https://matrix.to/#/{}?via={}", current_room_id, homeserver_domain)
+            }
+        };
+
+        // Parse into MatrixToUri
+        let matrix_to_uri = MatrixToUri::parse(&matrix_to_url)
+            .map_err(|e| IambError::InvalidRoomAlias(format!("Failed to create permalink: {}", e)))?;
+
+        // Discover permalink base
+        let discovered_base = discover_resolver_base(homeserver_domain.as_str()).await.unwrap_or(None);
+
+        let base_url = effective_permalink_base(
+            config.env_override.as_deref(),
+            discovered_base.as_deref(),
+        );
+
+        // Generate permalink
+        let permalink = make_https_permalink_with_base(&base_url, &matrix_to_uri);
+
+        // Try to copy to clipboard if available
+        #[cfg(feature = "desktop")]
+        {
+            use modalkit::prelude::{Register, TargetShape};
+            use modalkit::editing::rope::EditRope;
+            use modalkit::editing::store::{RegisterCell, RegisterPutFlags};
+
+            let cell = RegisterCell {
+                value: EditRope::from(permalink.clone()),
+                shape: TargetShape::LineWise,
+            };
+
+            let _ = store.registers.put(&Register::SelectionClipboard, cell, RegisterPutFlags::NONE);
+        }
+
+        let msg = format!("Permalink: {} (copied to clipboard)", permalink);
+        Ok(Some(msg.into()))
     }
 
     fn handle_info(&mut self, info: InfoMessage) {
