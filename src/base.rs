@@ -91,9 +91,8 @@ use modalkit::{
 };
 
 use crate::config::ImagePreviewProtocolValues;
-use crate::message::ImageStatus;
 use crate::notifications::NotificationHandle;
-use crate::preview::{source_from_event, spawn_insert_preview};
+use crate::preview::{source_from_event, PreviewManager};
 use crate::{
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     worker::Requester,
@@ -1233,34 +1232,23 @@ impl RoomInfo {
         }
     }
 
-    /// Insert a new message event, and spawn a task for image-preview if it has an image
-    /// attachment.
+    /// Insert a new message event, and prepare for image-preview if it has an image attachment.
     pub fn insert_with_preview(
         &mut self,
-        room_id: OwnedRoomId,
-        store: AsyncProgramStore,
-        picker: Option<Arc<Picker>>,
         ev: RoomMessageEvent,
-        settings: &mut ApplicationSettings,
-        media: matrix_sdk::Media,
+        settings: &ApplicationSettings,
+        previews: &mut PreviewManager,
+        worker: &Requester,
     ) {
-        let source = picker.and_then(|_| source_from_event(&ev));
+        let source = source_from_event(&ev);
         self.insert(ev);
 
         if let Some((event_id, source)) = source {
             if let (Some(msg), Some(image_preview)) =
                 (self.get_event_mut(&event_id), &settings.tunables.image_preview)
             {
-                msg.image_preview = ImageStatus::Downloading(image_preview.size.clone());
-                spawn_insert_preview(
-                    store,
-                    room_id,
-                    event_id,
-                    source,
-                    media,
-                    settings.dirs.image_previews.clone(),
-                    image_preview.size.clone(),
-                )
+                msg.image_preview = Some(source.clone());
+                previews.register_preview(settings, source, image_preview.size, worker)
             }
         }
     }
@@ -1602,8 +1590,8 @@ pub struct ChatStore {
     /// Information gathered by the background thread.
     pub sync_info: SyncInfo,
 
-    /// Image preview "protocol" picker.
-    pub picker: Option<Arc<Picker>>,
+    /// Rendered image previews.
+    pub previews: PreviewManager,
 
     /// Last draw time, used to match with RoomInfo's draw_last.
     pub draw_curr: Option<Instant>,
@@ -1629,7 +1617,7 @@ impl ChatStore {
         ChatStore {
             worker,
             settings,
-            picker: picker.map(Into::into),
+            previews: PreviewManager::new(picker),
             cmds: crate::commands::setup_commands(),
             emojis: emoji_map(),
 
