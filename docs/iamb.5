@@ -133,6 +133,13 @@ The room to show by default instead of the
 .Sy :welcome
 window.
 
+.IT Sy cache_policy
+Configure how downloaded files and image previews are cached internally.
+Specifying this object will replace the upstream defaults and possibly lead to unconstrained cache growth.
+Possible keys and their effect are documented at:
+.br
+.Lk https://docs.rs/matrix-sdk/latest/matrix_sdk/media/struct.MediaRetentionPolicy.html#fields
+
 .It Sy image_preview
 Enable image previews and configure it.
 An empty object will enable the feature with default settings, omitting it will disable the feature.
