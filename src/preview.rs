@@ -31,6 +31,12 @@ pub enum ImageStatus {
     Error(String),
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PreviewKind {
+    Message,
+    Reaction,
+}
+
 pub struct PreviewManager {
     /// Image preview "protocol" picker.
     picker: Option<Arc<Picker>>,
@@ -39,7 +45,7 @@ pub struct PreviewManager {
     permits: Arc<Semaphore>,
 
     /// Indexed by [`MediaSource::unique_key`]
-    previews: HashMap<String, ImageStatus>,
+    previews: HashMap<(String, PreviewKind), ImageStatus>,
 }
 
 impl PreviewManager {
@@ -51,17 +57,17 @@ impl PreviewManager {
         }
     }
 
-    pub fn get(&self, source: &MediaSource) -> Option<&ImageStatus> {
-        self.previews.get(&source.unique_key())
+    pub fn get(&self, source: &MediaSource, kind: PreviewKind) -> Option<&ImageStatus> {
+        self.previews.get(&(source.unique_key(), kind))
     }
 
-    fn insert(&mut self, key: String, status: ImageStatus) {
-        self.previews.insert(key, status);
+    fn insert(&mut self, key: String, kind: PreviewKind, status: ImageStatus) {
+        self.previews.insert((key, kind), status);
     }
 
     /// Queue download and preparation of preview
-    pub fn load(&mut self, source: &MediaSource, worker: &Requester) {
-        let Some(status) = self.previews.get_mut(&source.unique_key()) else {
+    pub fn load(&mut self, source: &MediaSource, kind: PreviewKind, worker: &Requester) {
+        let Some(status) = self.previews.get_mut(&(source.unique_key(), kind)) else {
             return;
         };
         let Some(picker) = &self.picker else { return };
@@ -72,6 +78,7 @@ impl PreviewManager {
 
             worker.load_image(
                 source.to_owned(),
+                kind,
                 size.to_owned(),
                 Arc::clone(picker),
                 Arc::clone(&self.permits),
@@ -83,6 +90,7 @@ impl PreviewManager {
         &mut self,
         settings: &ApplicationSettings,
         source: MediaSource,
+        kind: PreviewKind,
         size: ImagePreviewSize,
         worker: &Requester,
     ) {
@@ -90,7 +98,7 @@ impl PreviewManager {
             return;
         }
 
-        let key = source.unique_key();
+        let key = (source.unique_key(), kind);
         if self.previews.contains_key(&key) {
             return;
         }
@@ -102,7 +110,7 @@ impl PreviewManager {
             .as_ref()
             .is_some_and(|setting| !setting.lazy_load)
         {
-            self.load(&source, worker);
+            self.load(&source, kind, worker);
         }
     }
 }
@@ -133,6 +141,7 @@ pub async fn load_image(
     store: AsyncProgramStore,
     media: Media,
     source: MediaSource,
+    kind: PreviewKind,
     picker: Arc<Picker>,
     permits: Arc<Semaphore>,
     size: ImagePreviewSize,
@@ -178,5 +187,5 @@ pub async fn load_image(
     };
 
     let mut locked = store.lock().await;
-    locked.application.previews.insert(key, status);
+    locked.application.previews.insert(key, kind, status);
 }

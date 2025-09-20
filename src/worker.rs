@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
+use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::ruma::events::room::MediaSource;
 use ratatui_image::picker::Picker;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -93,7 +94,7 @@ use modalkit::prelude::{EditInfo, InfoMessage};
 use crate::base::MessageNeed;
 use crate::config::ImagePreviewSize;
 use crate::notifications::register_notifications;
-use crate::preview::load_image;
+use crate::preview::PreviewKind;
 use crate::{
     base::{
         AsyncProgramStore,
@@ -349,7 +350,7 @@ fn load_insert(
                         info.insert_with_preview(msg, settings, previews, worker);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
-                        info.insert_reaction(ev);
+                        info.insert_reaction_with_preview(ev, settings, previews, worker);
                     },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
@@ -631,7 +632,7 @@ pub enum WorkerTask {
     TypingNotice(OwnedRoomId),
     Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
     VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
-    LoadImage(MediaSource, ImagePreviewSize, Arc<Picker>, Arc<Semaphore>),
+    LoadImage(MediaSource, PreviewKind, ImagePreviewSize, Arc<Picker>, Arc<Semaphore>),
 }
 
 impl Debug for WorkerTask {
@@ -695,9 +696,10 @@ impl Debug for WorkerTask {
                     .field(&format_args!("_"))
                     .finish()
             },
-            WorkerTask::LoadImage(source, size, _, _) => {
+            WorkerTask::LoadImage(source, kind, size, _, _) => {
                 f.debug_tuple("WorkerTask::RenderImage")
                     .field(source)
+                    .field(kind)
                     .field(size)
                     .field(&format_args!("_"))
                     .field(&format_args!("_"))
@@ -723,7 +725,10 @@ async fn create_client_inner(
         .build()
         .unwrap();
 
-    let req_config = RequestConfig::new().timeout(req_timeout).max_retry_time(req_timeout);
+    let req_config = RequestConfig::new()
+        .timeout(req_timeout)
+        .max_retry_time(req_timeout)
+        .retry_limit(8);
 
     // Set up the Matrix client for the selected profile.
     let builder = Client::builder()
@@ -755,7 +760,21 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
         res => res,
     };
 
-    res.expect("Failed to instantiate client")
+    let client = res.expect("Failed to instantiate client");
+
+    client
+        .media()
+        .set_media_retention_policy(
+            MediaRetentionPolicy::new()
+                // 4 GiB.
+                .with_max_cache_size(Some(4 * 1024 * 1024 * 1024))
+                // 200 MiB.
+                .with_max_file_size(Some(200 * 1024 * 1024)),
+        )
+        .await
+        .expect("Failed to set cache policy");
+
+    client
 }
 
 #[derive(Clone)]
@@ -852,11 +871,14 @@ impl Requester {
     pub fn load_image(
         &self,
         source: MediaSource,
+        kind: PreviewKind,
         size: ImagePreviewSize,
         picker: Arc<Picker>,
         permits: Arc<Semaphore>,
     ) {
-        self.tx.send(WorkerTask::LoadImage(source, size, picker, permits)).unwrap();
+        self.tx
+            .send(WorkerTask::LoadImage(source, kind, size, picker, permits))
+            .unwrap();
     }
 }
 
@@ -955,12 +977,13 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.verify_request(user_id).await);
             },
-            WorkerTask::LoadImage(source, size, picker, permits) => {
+            WorkerTask::LoadImage(source, kind, size, picker, permits) => {
                 assert!(self.initialized);
-                tokio::spawn(load_image(
+                tokio::spawn(crate::preview::load_image(
                     self.store.clone().unwrap(),
                     self.client.media(),
                     source,
+                    kind,
                     picker,
                     permits,
                     size,
@@ -1064,9 +1087,18 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let info = locked.application.get_room_info(room_id.to_owned());
+                    let ChatStore { rooms, previews, settings, worker, .. } =
+                        &mut locked.application;
+                    let info = rooms.get_or_default(room_id.to_owned());
+
                     update_event_receipts(info, &room, ev.event_id()).await;
-                    info.insert_reaction(ev.into_full_event(room_id.to_owned()));
+
+                    info.insert_reaction_with_preview(
+                        ev.into_full_event(room_id.to_owned()),
+                        settings,
+                        previews,
+                        worker,
+                    );
                 }
             },
         );

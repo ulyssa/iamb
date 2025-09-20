@@ -55,7 +55,7 @@ use crate::{
     },
     config::ApplicationSettings,
     message::{Message, MessageCursor, MessageKey, Messages},
-    preview::PreviewManager,
+    preview::{PreviewKind, PreviewManager},
 };
 
 fn no_msgs() -> EditError<IambInfo> {
@@ -1360,12 +1360,13 @@ impl StatefulWidget for Scrollback<'_> {
         let mut prev = prevmsg(&corner_key, thread);
 
         // load image previews
-        for (_, item) in thread.range(&corner_key..).rev() {
+        for ((_, event_id), item) in thread.range(&corner_key..).rev() {
             if let Some(source) = &item.image_preview {
-                self.store
-                    .application
-                    .previews
-                    .load(source, &self.store.application.worker);
+                self.store.application.previews.load(
+                    source,
+                    PreviewKind::Message,
+                    &self.store.application.worker,
+                );
             }
             let reply = item
                 .reply_to()
@@ -1373,10 +1374,23 @@ impl StatefulWidget for Scrollback<'_> {
                 .and_then(|e| info.get_event(&e))
                 .and_then(|msg| msg.image_preview.as_ref());
             if let Some(source) = reply {
-                self.store
-                    .application
-                    .previews
-                    .load(source, &self.store.application.worker);
+                self.store.application.previews.load(
+                    source,
+                    PreviewKind::Message,
+                    &self.store.application.worker,
+                );
+            }
+            let reactions = info.reactions.get(event_id).map(|reactions| {
+                reactions.iter().filter_map(|(_, (_, _, source))| source.as_ref())
+            });
+            if let Some(reactions) = reactions {
+                for source in reactions {
+                    self.store.application.previews.load(
+                        source,
+                        PreviewKind::Reaction,
+                        &self.store.application.worker,
+                    );
+                }
             }
         }
 
