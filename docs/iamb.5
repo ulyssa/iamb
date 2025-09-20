@@ -126,6 +126,12 @@ These options are configured as an object under the
 key and can be overridden as described in
 .Sx PROFILES .
 .Bl -tag -width Ds
+.It Sy cache_policy
+Configure how downloaded files and image previews are cached internally.
+Specifying this object will replace the upstream defaults and possibly lead to unconstrained cache growth.
+Possible keys and their effect are documented at:
+.br
+.Lk https://docs.rs/matrix-sdk/latest/matrix_sdk/media/struct.MediaRetentionPolicy.html#fields
 .It Sy default_markup
 Controls how text in the message bar is interpreted by default.
 Possible values are

@@ -886,6 +886,12 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
     client.event_cache().subscribe().expect("Failed to start event cache");
 
     client
+        .media()
+        .set_media_retention_policy(settings.tunables.cache_policy)
+        .await
+        .expect("Failed to start event cache");
+
+    client
 }
 
 #[derive(Clone)]

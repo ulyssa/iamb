@@ -208,6 +208,7 @@ pub fn mock_tunables() -> TunableValues {
         members_split: Default::default(),
         default_split: Default::default(),
         ssl_verify: true,
+        cache_policy: Default::default(),
     }
 }
 
