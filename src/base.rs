@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::OwnedMxcUri;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -89,9 +91,9 @@ use modalkit::{
     prelude::{CommandType, WordStyle},
 };
 
-use crate::config::ImagePreviewProtocolValues;
+use crate::config::{ImagePreviewProtocolValues, ImagePreviewSize};
 use crate::notifications::NotificationHandle;
-use crate::preview::{source_from_event, PreviewManager};
+use crate::preview::{source_from_event, PreviewKind, PreviewManager};
 use crate::{
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     worker::Requester,
@@ -686,7 +688,7 @@ pub type IambResult<T> = UIResult<T, IambInfo>;
 ///
 /// The event identifier used as a key here is the ID for the reaction, and not for the message
 /// it's reacting to.
-pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
+pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId, Option<MediaSource>)>;
 
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
@@ -992,22 +994,25 @@ impl RoomInfo {
     }
 
     /// Get the reactions and their counts for a message.
-    pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize)> {
+    pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize, &Option<MediaSource>)> {
         if let Some(reacts) = self.reactions.get(event_id) {
             let mut counts = HashMap::new();
 
             let mut seen_user_reactions = BTreeSet::new();
 
-            for (key, user) in reacts.values() {
+            for (key, user, source) in reacts.values() {
                 if !seen_user_reactions.contains(&(key, user)) {
                     seen_user_reactions.insert((key, user));
-                    let count = counts.entry(key.as_str()).or_default();
-                    *count += 1;
+                    let count = counts.entry(key.as_str()).or_insert((0, source));
+                    count.0 += 1;
                 }
             }
 
-            let mut reactions = counts.into_iter().collect::<Vec<_>>();
-            reactions.sort();
+            let mut reactions = counts
+                .into_iter()
+                .map(|(key, (count, source))| (key, count, source))
+                .collect::<Vec<_>>();
+            reactions.sort_by_key(|item| (item.0, item.1));
 
             reactions
         } else {
@@ -1068,24 +1073,46 @@ impl RoomInfo {
     }
 
     /// Insert a reaction to a message.
-    pub fn insert_reaction(&mut self, react: ReactionEvent) {
-        match react {
-            MessageLikeEvent::Original(react) => {
-                let rel_id = react.content.relates_to.event_id;
-                let key = react.content.relates_to.key;
+    fn insert_reaction(&mut self, react: ReactionEvent, source: Option<MediaSource>) {
+        let MessageLikeEvent::Original(react) = react else {
+            return;
+        };
+        let rel_id = react.content.relates_to.event_id;
+        let key = react.content.relates_to.key;
 
-                let message = self.reactions.entry(rel_id.clone()).or_default();
-                let event_id = react.event_id;
-                let user_id = react.sender;
+        let message = self.reactions.entry(rel_id.clone()).or_default();
+        let event_id = react.event_id;
+        let user_id = react.sender;
 
-                message.insert(event_id.clone(), (key, user_id));
+        message.insert(event_id.clone(), (key, user_id, source));
 
-                let loc = EventLocation::Reaction(rel_id);
-                self.keys.insert(event_id, loc);
-            },
-            MessageLikeEvent::Redacted(_) => {
-                return;
-            },
+        let loc = EventLocation::Reaction(rel_id);
+        self.keys.insert(event_id, loc);
+    }
+
+    /// Insert a reaction to a message.
+    pub fn insert_reaction_with_preview(
+        &mut self,
+        react: ReactionEvent,
+        settings: &ApplicationSettings,
+        previews: &mut PreviewManager,
+        worker: &Requester,
+    ) {
+        let MessageLikeEvent::Original(ref orig_react) = react else {
+            return;
+        };
+        let image_uri = OwnedMxcUri::from(orig_react.content.relates_to.key.as_str());
+        let source = if image_uri.is_valid() && settings.tunables.image_preview.is_some() {
+            Some(MediaSource::Plain(image_uri))
+        } else {
+            None
+        };
+
+        self.insert_reaction(react, source.clone());
+
+        if let (Some(source), Some(_)) = (source, &settings.tunables.image_preview) {
+            let size = ImagePreviewSize { width: 2, height: 1 };
+            previews.register_preview(settings, source, PreviewKind::Reaction, size, worker);
         }
     }
 
@@ -1247,7 +1274,13 @@ impl RoomInfo {
                 (self.get_event_mut(&event_id), &settings.tunables.image_preview)
             {
                 msg.image_preview = Some(source.clone());
-                previews.register_preview(settings, source, image_preview.size, worker)
+                previews.register_preview(
+                    settings,
+                    source,
+                    PreviewKind::Message,
+                    image_preview.size,
+                    worker,
+                )
             }
         }
     }
@@ -1404,7 +1437,7 @@ impl RoomInfo {
         if let Some(reactions) = self.reactions.get(event_id) {
             reactions
                 .values()
-                .any(|(annotation, user)| annotation == emoji && user == user_id)
+                .any(|(annotation, user, _)| annotation == emoji && user == user_id)
         } else {
             false
         }
@@ -2205,7 +2238,7 @@ pub mod tests {
         for i in 0..3 {
             let event_id = format!("$house_{i}");
             let react = create_reaction_event(&content, &event_id, "@foo:example.com");
-            info.insert_reaction(react);
+            info.insert_reaction(react, None);
         }
 
         let content = ReactionEventContent::new(Annotation::new(
@@ -2216,19 +2249,21 @@ pub mod tests {
         for i in 0..2 {
             let event_id = format!("$smile_{i}");
             let react = create_reaction_event(&content, &event_id, "@foo:example.com");
-            info.insert_reaction(react);
+            info.insert_reaction(react, None);
         }
 
         for i in 2..4 {
             let event_id = format!("$smile2_{i}");
             let react = create_reaction_event(&content, &event_id, "@bar:example.com");
-            info.insert_reaction(react);
+            info.insert_reaction(react, None);
         }
 
-        assert_eq!(info.get_reactions(&owned_event_id!("$my_reaction")), vec![
-            ("🏠", 1),
-            ("🙂", 2)
-        ]);
+        let reacts: Vec<_> = info
+            .get_reactions(&owned_event_id!("$my_reaction"))
+            .into_iter()
+            .map(|(key, count, _)| (key, count))
+            .collect();
+        assert_eq!(reacts, vec![("🏠", 1), ("🙂", 2)]);
     }
 
     #[test]
