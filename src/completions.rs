@@ -1,0 +1,448 @@
+use std::{borrow::Cow, str::FromStr};
+
+use modalkit::{
+    editing::{
+        completion::{complete_path, Completer},
+        cursor::Cursor,
+        rope::EditRope,
+    },
+    env::vim::command::CommandDescription,
+    prelude::{CommandType, WordStyle},
+};
+
+use crate::base::{ChatStore, IambBufferId, IambInfo, RoomFocus, MATRIX_ID_WORD};
+
+mod parse {
+    use nom::{
+        branch::alt,
+        bytes::complete::{escaped_transform, is_not, tag},
+        character::complete::{char, space1},
+        combinator::{cut, eof, opt, value},
+        error::{ErrorKind, ParseError},
+        IResult,
+        InputLength,
+        Parser,
+    };
+
+    fn parse_text(input: &str) -> IResult<&str, String> {
+        if input.is_empty() {
+            let err = ParseError::from_error_kind(input, ErrorKind::Eof);
+            let err = nom::Err::Error(err);
+            return Err(err);
+        }
+
+        let _ = is_not("\"")(input)?;
+
+        escaped_transform(
+            is_not("\t\n\\ |\""),
+            '\\',
+            alt((
+                value("\\", tag("\\")),
+                value(" ", tag(" ")),
+                value("#", tag("#")),
+                value("%", tag("%")),
+                value("|", tag("|")),
+                value("\"", tag("\"")),
+            )),
+        )(input)
+    }
+
+    fn parse_unclosed_quote(input: &str) -> IResult<&str, String> {
+        if input.is_empty() {
+            let err = ParseError::from_error_kind(input, ErrorKind::Eof);
+            let err = nom::Err::Error(err);
+            return Err(err);
+        }
+
+        let (input, _) = char('\"')(input)?;
+        let (input, text) = cut(escaped_transform(
+            is_not("\t\n\\\""),
+            '\\',
+            alt((
+                value("\t", tag("t")),
+                value("\r", tag("r")),
+                value("\n", tag("n")),
+                value("\\", tag("\\")),
+                value("\"", tag("\"")),
+            )),
+        ))(input)?;
+
+        Ok((input, text))
+    }
+
+    fn parse_quote(input: &str) -> IResult<&str, String> {
+        let (input, text) = parse_unclosed_quote(input)?;
+        let (input, _) = char('\"')(input)?;
+
+        Ok((input, text))
+    }
+
+    fn parse_string(input: &str) -> IResult<&str, String> {
+        alt((parse_quote, parse_text))(input)
+    }
+
+    /// Acts linke [`separated_list0`](nom::multi::separated_list0) but additionally returns a copy of the last element unparsed.
+    fn separated_list0_last_raw<I, O, O2, E, F, G>(
+        mut sep: G,
+        mut f: F,
+    ) -> impl FnMut(I) -> IResult<I, (Vec<O>, I), E>
+    where
+        I: Clone + InputLength,
+        F: Parser<I, O, E>,
+        G: Parser<I, O2, E>,
+        E: ParseError<I>,
+    {
+        move |mut i: I| {
+            let mut res = Vec::new();
+            let mut old_i = i.clone();
+
+            match f.parse(i.clone()) {
+                Err(nom::Err::Error(_)) => return Ok((i, (res, old_i))),
+                Err(e) => return Err(e),
+                Ok((i1, o)) => {
+                    res.push(o);
+                    i = i1;
+                },
+            }
+
+            loop {
+                let len = i.input_len();
+                match sep.parse(i.clone()) {
+                    Err(nom::Err::Error(_)) => return Ok((i, (res, old_i))),
+                    Err(e) => return Err(e),
+                    Ok((i1, _)) => {
+                        // infinite loop check: the parser must always consume
+                        if i1.input_len() == len {
+                            return Err(nom::Err::Error(E::from_error_kind(
+                                i1,
+                                ErrorKind::SeparatedList,
+                            )));
+                        }
+
+                        match f.parse(i1.clone()) {
+                            Err(nom::Err::Error(_)) => return Ok((i, (res, old_i))),
+                            Err(e) => return Err(e),
+                            Ok((i2, o)) => {
+                                res.push(o);
+                                i = i2;
+                                old_i = i1.clone();
+                            },
+                        }
+                    },
+                }
+            }
+        }
+    }
+
+    fn parse_last_arg(input: &str) -> IResult<&str, (String, &str)> {
+        let (input, _) = space1(input)?;
+
+        let old_input = input;
+        let (input, arg) = opt(parse_unclosed_quote)(input)?;
+
+        Ok((input, (arg.unwrap_or_default(), old_input)))
+    }
+
+    /// Returns a list with the parsed strings and a raw version of the last string to be stripped
+    /// from the input before completing.
+    pub fn parse_started_strings(input: &str) -> IResult<&str, (Vec<String>, &str)> {
+        let (input, (mut args, mut last_arg_raw)) =
+            separated_list0_last_raw(space1, parse_string)(input)?;
+        let (input, end_arg) = opt(parse_last_arg)(input)?;
+        let (input, _) = eof(input)?;
+
+        if let Some((arg, end_arg_raw)) = end_arg {
+            args.push(arg);
+            last_arg_raw = end_arg_raw;
+        }
+
+        if args.is_empty() {
+            args.push(String::new());
+        }
+
+        Ok((input, (args, last_arg_raw)))
+    }
+}
+
+/// Tab completion for user IDs.
+fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+    let id = text
+        .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
+        .unwrap_or_else(EditRope::empty);
+    let id = Cow::from(&id);
+
+    store
+        .presences
+        .complete(id.as_ref())
+        .into_iter()
+        .map(|i| i.to_string())
+        .collect()
+}
+
+/// Tab completion for Matrix room aliases
+fn complete_matrix_aliases(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+    let id = text
+        .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
+        .unwrap_or_else(EditRope::empty);
+    let id = Cow::from(&id);
+
+    let list = store.names.complete(id.as_ref());
+    if !list.is_empty() {
+        return list.into_iter().map(|i| i.to_string()).collect();
+    }
+
+    let list = store.presences.complete(id.as_ref());
+    if !list.is_empty() {
+        return list.into_iter().map(|i| i.to_string()).collect();
+    }
+
+    store
+        .rooms
+        .complete(id.as_ref())
+        .into_iter()
+        .map(|i| i.to_string())
+        .collect()
+}
+
+/// Tab completion for Emoji shortcode names.
+fn complete_emoji(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+    let sc = text.get_prefix_word_mut(cursor, &WordStyle::Little);
+    let sc = sc.unwrap_or_else(EditRope::empty);
+    let sc = Cow::from(&sc);
+
+    store.emojis.complete(sc.as_ref())
+}
+
+fn complete_invite(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+    let text = text.slice(..text.cursor_to_offset(cursor));
+    let text = Cow::from(&text);
+
+    todo!()
+}
+
+/// Tab completion for command arguments.
+fn complete_cmdarg(
+    desc: CommandDescription,
+    text: &EditRope,
+    cursor: &mut Cursor,
+    store: &ChatStore,
+) -> Vec<String> {
+    let cmd = match store.cmds.get(desc.command.as_str()) {
+        Ok(cmd) => cmd,
+        Err(_) => return vec![],
+    };
+
+    let Ok((_, (args, to_strip))) = parse::parse_started_strings(&desc.arg.text) else {
+        return vec![];
+    };
+
+    match cmd.name.as_str() {
+        "cancel" | "dms" | "edit" | "redact" | "reply" => vec![],
+        "members" | "rooms" | "spaces" | "welcome" | "forget" => vec![],
+        "download" | "keys" | "open" | "upload" => complete_path(text, cursor),
+        "react" | "unreact" => complete_emoji(text, cursor, store),
+
+        "invite" => complete_users(text, cursor, store),
+        "join" | "split" | "vsplit" | "tabedit" => complete_matrix_aliases(text, cursor, store),
+        "room" => vec![],
+        "verify" => vec![],
+        "vertical" | "horizontal" | "aboveleft" | "belowright" | "tab" => {
+            complete_cmd(desc.arg.text.as_str(), text, cursor, store)
+        },
+        _ => vec![],
+    }
+}
+
+/// Tab completion for command names.
+fn complete_cmdname(
+    desc: CommandDescription,
+    text: &EditRope,
+    cursor: &mut Cursor,
+    store: &ChatStore,
+) -> Vec<String> {
+    // Complete command name and set cursor position.
+    let _ = text.get_prefix_word_mut(cursor, &WordStyle::Little);
+    store.cmds.complete_name(desc.command.as_str())
+}
+
+/// Tab completion for commands.
+fn complete_cmd(cmd: &str, text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+    match CommandDescription::from_str(cmd) {
+        Ok(desc) => {
+            if desc.arg.untrimmed.is_empty() {
+                complete_cmdname(desc, text, cursor, store)
+            } else {
+                // Complete command argument.
+                complete_cmdarg(desc, text, cursor, store)
+            }
+        },
+
+        // Can't parse command text, so return zero completions.
+        Err(_) => vec![],
+    }
+}
+
+/// Tab completion for the command bar.
+fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+    let eo = text.cursor_to_offset(cursor);
+    let slice = text.slice(..eo);
+    let cow = Cow::from(&slice);
+
+    complete_cmd(cow.as_ref(), text, cursor, store)
+}
+
+/// Tab completion within the message bar.
+fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+    let id = text
+        .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
+        .unwrap_or_else(EditRope::empty);
+    let id = Cow::from(&id);
+
+    match id.chars().next() {
+        // Complete room aliases.
+        Some('#') => {
+            return store.names.complete(id.as_ref());
+        },
+
+        // Complete room identifiers.
+        Some('!') => {
+            return store
+                .rooms
+                .complete(id.as_ref())
+                .into_iter()
+                .map(|i| i.to_string())
+                .collect();
+        },
+
+        // Complete Emoji shortcodes.
+        Some(':') => {
+            let list = store.emojis.complete(&id[1..]);
+            let iter = list.into_iter().take(200).map(|s| format!(":{s}:"));
+
+            return iter.collect();
+        },
+
+        // Complete usernames for @ and empty strings.
+        Some('@') | None => {
+            return store
+                .presences
+                .complete(id.as_ref())
+                .into_iter()
+                .map(|i| i.to_string())
+                .collect();
+        },
+
+        // Unknown sigil.
+        Some(_) => return vec![],
+    }
+}
+
+pub struct IambCompleter;
+
+impl Completer<IambInfo> for IambCompleter {
+    fn complete(
+        &mut self,
+        text: &EditRope,
+        cursor: &mut Cursor,
+        content: &IambBufferId,
+        store: &mut ChatStore,
+    ) -> Vec<String> {
+        match content {
+            IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
+            IambBufferId::Command(CommandType::Search) => vec![],
+            IambBufferId::Room(_, _, RoomFocus::MessageBar) => complete_msgbar(text, cursor, store),
+            IambBufferId::Room(_, _, RoomFocus::Scrollback) => vec![],
+
+            IambBufferId::DirectList => vec![],
+            IambBufferId::MemberList(_) => vec![],
+            IambBufferId::RoomList => vec![],
+            IambBufferId::SpaceList => vec![],
+            IambBufferId::VerifyList => vec![],
+            IambBufferId::Welcome => vec![],
+            IambBufferId::ChatList => vec![],
+            IambBufferId::UnreadList => vec![],
+        }
+    }
+}
+
+#[cfg(test)]
+pub mod tests {
+    use super::*;
+    use crate::tests::*;
+    use pretty_assertions::assert_eq;
+
+    #[tokio::test]
+    async fn test_complete_msgbar() {
+        let store = mock_store().await;
+        let store = store.application;
+
+        let text = EditRope::from("going for a walk :walk ");
+        let mut cursor = Cursor::new(0, 22);
+        let res = complete_msgbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec![":walking:", ":walking_man:", ":walking_woman:"]);
+        assert_eq!(cursor, Cursor::new(0, 17));
+
+        let text = EditRope::from("hello @user1 ");
+        let mut cursor = Cursor::new(0, 12);
+        let res = complete_msgbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["@user1:example.com"]);
+        assert_eq!(cursor, Cursor::new(0, 6));
+
+        let text = EditRope::from("see #room ");
+        let mut cursor = Cursor::new(0, 9);
+        let res = complete_msgbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["#room1:example.com"]);
+        assert_eq!(cursor, Cursor::new(0, 4));
+    }
+
+    #[tokio::test]
+    async fn test_complete_cmdbar() {
+        let store = mock_store().await;
+        let store = store.application;
+        let users = vec![
+            "@user1:example.com",
+            "@user2:example.com",
+            "@user3:example.com",
+            "@user4:example.com",
+            "@user5:example.com",
+        ];
+
+        let text = EditRope::from("invite    ");
+        let mut cursor = Cursor::new(0, 7);
+        let id = text
+            .get_prefix_word_mut(&mut cursor, &MATRIX_ID_WORD)
+            .unwrap_or_else(EditRope::empty);
+        assert_eq!(id.to_string(), "");
+        assert_eq!(cursor, Cursor::new(0, 7));
+
+        let text = EditRope::from("invite    ");
+        let mut cursor = Cursor::new(0, 7);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, users);
+
+        let text = EditRope::from("invite ignored");
+        let mut cursor = Cursor::new(0, 7);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, users);
+
+        let text = EditRope::from("invite @user1ignored");
+        let mut cursor = Cursor::new(0, 13);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["@user1:example.com"]);
+
+        let text = EditRope::from("abo hor");
+        let mut cursor = Cursor::new(0, 7);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["horizontal"]);
+
+        let text = EditRope::from("abo hor inv");
+        let mut cursor = Cursor::new(0, 11);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, vec!["invite"]);
+
+        let text = EditRope::from("abo hor invite \n");
+        let mut cursor = Cursor::new(0, 15);
+        let res = complete_cmdbar(&text, &mut cursor, &store);
+        assert_eq!(res, users);
+    }
+}
