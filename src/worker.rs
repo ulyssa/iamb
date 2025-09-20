@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
-use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::ruma::events::room::MediaSource;
 use ratatui_image::picker::Picker;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
@@ -764,13 +763,7 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
 
     client
         .media()
-        .set_media_retention_policy(
-            MediaRetentionPolicy::new()
-                // 4 GiB.
-                .with_max_cache_size(Some(4 * 1024 * 1024 * 1024))
-                // 200 MiB.
-                .with_max_file_size(Some(200 * 1024 * 1024)),
-        )
+        .set_media_retention_policy(settings.tunables.cache_policy)
         .await
         .expect("Failed to set cache policy");
 

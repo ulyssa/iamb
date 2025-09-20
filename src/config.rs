@@ -12,6 +12,7 @@ use std::process;
 
 use clap::Parser;
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
@@ -584,6 +585,7 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub cache_policy: MediaRetentionPolicy,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -612,6 +614,7 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    pub cache_policy: Option<MediaRetentionPolicy>,
 }
 
 impl Tunables {
@@ -646,6 +649,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            cache_policy: self.cache_policy.or(other.cache_policy),
         }
     }
 
@@ -676,6 +680,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            cache_policy: self.cache_policy.unwrap_or_default(),
         }
     }
 }
