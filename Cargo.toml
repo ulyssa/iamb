@@ -11,7 +11,7 @@ license = "Apache-2.0"
 exclude = [".github", "CONTRIBUTING.md"]
 keywords = ["matrix", "chat", "tui", "vim"]
 categories = ["command-line-utilities"]
-rust-version = "1.85"
+rust-version = "1.87"
 build = "build.rs"
 
 [features]
