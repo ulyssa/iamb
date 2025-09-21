@@ -1583,7 +1583,7 @@ pub struct ChatStore {
     pub presences: CompletionMap<OwnedUserId, PresenceState>,
 
     /// In-progress and completed verifications.
-    pub verifications: HashMap<String, SasVerification>,
+    pub verifications: CompletionMap<String, SasVerification>,
 
     /// Settings for the current profile loaded from config file.
     pub settings: ApplicationSettings,
