@@ -198,6 +198,11 @@ fn complete_matrix_aliases(input: &str, store: &ChatStore) -> Vec<String> {
     store.rooms.complete(input).into_iter().map(|i| i.to_string()).collect()
 }
 
+/// Tab completion for open verification requests
+fn complete_verification(input: &str, store: &ChatStore) -> Vec<String> {
+    store.verifications.complete(input)
+}
+
 /// Tab completion for Emoji shortcode names.
 fn complete_emoji(input: &str, store: &ChatStore) -> Vec<String> {
     store.emojis.complete(input)
@@ -239,6 +244,17 @@ fn complete_iamb_keys(
     }
 }
 
+/// Tab completion for `:verify`
+fn complete_iamb_verify(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    let subcmds = ["request", "accept", "confirm", "cancel", "missmatch"];
+    match args.len() {
+        1 => complete_choices(&args[0], &subcmds),
+        2 if args[0] == "request" => complete_users(&args[1], store),
+        2 if subcmds.contains(&args[0].as_str()) => complete_verification(&args[1], store),
+        _ => vec![],
+    }
+}
+
 /// Tab completion for command arguments.
 fn complete_cmdarg(
     desc: CommandDescription,
@@ -273,6 +289,7 @@ fn complete_cmdarg(
     let completions = match cmd.name.as_str() {
         "invite" => complete_iamb_invite(args, store),
         "keys" => complete_iamb_keys(args, input, orig_cursor, cursor),
+        "verify" => complete_iamb_verify(args, store),
 
         // TODO: replace old options
         _ => vec![],
