@@ -1,3 +1,4 @@
+//! Tab completion for iamb
 use std::{borrow::Cow, str::FromStr};
 
 use modalkit::{
@@ -7,7 +8,15 @@ use modalkit::{
         rope::EditRope,
     },
     env::vim::command::CommandDescription,
-    prelude::{CommandType, WordStyle},
+    prelude::{
+        CommandType,
+        Count,
+        CursorMovements,
+        CursorMovementsContext,
+        MoveDir1D,
+        MoveType,
+        WordStyle,
+    },
 };
 
 use crate::base::{ChatStore, IambBufferId, IambInfo, RoomFocus, MATRIX_ID_WORD};
@@ -165,65 +174,75 @@ mod parse {
 }
 
 /// Tab completion for user IDs.
-fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
-    let id = text
-        .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
-        .unwrap_or_else(EditRope::empty);
-    let id = Cow::from(&id);
-
+fn complete_users(input: &str, store: &ChatStore) -> Vec<String> {
     store
         .presences
-        .complete(id.as_ref())
+        .complete(input)
         .into_iter()
         .map(|i| i.to_string())
         .collect()
 }
 
 /// Tab completion for Matrix room aliases
-fn complete_matrix_aliases(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
-    let id = text
-        .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
-        .unwrap_or_else(EditRope::empty);
-    let id = Cow::from(&id);
-
-    let list = store.names.complete(id.as_ref());
+fn complete_matrix_aliases(input: &str, store: &ChatStore) -> Vec<String> {
+    let list = store.names.complete(input);
     if !list.is_empty() {
         return list.into_iter().map(|i| i.to_string()).collect();
     }
 
-    let list = store.presences.complete(id.as_ref());
+    let list = store.presences.complete(input);
     if !list.is_empty() {
         return list.into_iter().map(|i| i.to_string()).collect();
     }
 
-    store
-        .rooms
-        .complete(id.as_ref())
-        .into_iter()
-        .map(|i| i.to_string())
-        .collect()
+    store.rooms.complete(input).into_iter().map(|i| i.to_string()).collect()
 }
 
 /// Tab completion for Emoji shortcode names.
-fn complete_emoji(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
-    let sc = text.get_prefix_word_mut(cursor, &WordStyle::Little);
-    let sc = sc.unwrap_or_else(EditRope::empty);
-    let sc = Cow::from(&sc);
-
-    store.emojis.complete(sc.as_ref())
+fn complete_emoji(input: &str, store: &ChatStore) -> Vec<String> {
+    store.emojis.complete(input)
 }
 
-fn complete_invite(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
-    let text = text.slice(..text.cursor_to_offset(cursor));
-    let text = Cow::from(&text);
+/// Tab completion for compile-time known strings
+fn complete_choices(input: &str, options: &[&'static str]) -> Vec<String> {
+    options
+        .iter()
+        .filter(|opt| opt.starts_with(input))
+        .map(|opt| opt.to_string())
+        .collect()
+}
 
-    todo!()
+/// Tab completion for `:invite`
+fn complete_iamb_invite(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    match args.len() {
+        1 => complete_choices(&args[0], &["accept", "reject", "send"]),
+        2 if args[0] == "send" => complete_users(&args[1], store),
+        _ => vec![],
+    }
+}
+
+/// Tab completion for `:keys`
+fn complete_iamb_keys(
+    args: Vec<String>,
+    input: &EditRope,
+    orig_cursor: Cursor,
+    cursor: &mut Cursor,
+) -> Vec<String> {
+    let subcmds = ["export", "import"];
+    match args.len() {
+        1 => complete_choices(&args[0], &subcmds),
+        2 if subcmds.contains(&args[0].as_str()) => {
+            *cursor = orig_cursor;
+            complete_path(input, cursor)
+        },
+        _ => vec![],
+    }
 }
 
 /// Tab completion for command arguments.
 fn complete_cmdarg(
     desc: CommandDescription,
-    text: &EditRope,
+    input: &EditRope,
     cursor: &mut Cursor,
     store: &ChatStore,
 ) -> Vec<String> {
@@ -235,22 +254,33 @@ fn complete_cmdarg(
     let Ok((_, (args, to_strip))) = parse::parse_started_strings(&desc.arg.text) else {
         return vec![];
     };
+    debug_assert!(!args.is_empty()); // empty string is inserted if text is empty
 
-    match cmd.name.as_str() {
-        "cancel" | "dms" | "edit" | "redact" | "reply" => vec![],
-        "members" | "rooms" | "spaces" | "welcome" | "forget" => vec![],
-        "download" | "keys" | "open" | "upload" => complete_path(text, cursor),
-        "react" | "unreact" => complete_emoji(text, cursor, store),
+    // move cursor to start of last arg
+    let ctx = CursorMovementsContext {
+        action: &Default::default(),
+        view: &Default::default(),
+        context: &Default::default(),
+    };
+    let movement = MoveType::Column(MoveDir1D::Previous, true);
+    let count = Count::Exact(to_strip.len());
+    let Some(new_cursor) = input.movement(cursor, &movement, &count, &ctx) else {
+        return vec![];
+    };
+    let orig_cursor = cursor.clone();
+    *cursor = new_cursor;
 
-        "invite" => complete_users(text, cursor, store),
-        "join" | "split" | "vsplit" | "tabedit" => complete_matrix_aliases(text, cursor, store),
-        "room" => vec![],
-        "verify" => vec![],
-        "vertical" | "horizontal" | "aboveleft" | "belowright" | "tab" => {
-            complete_cmd(desc.arg.text.as_str(), text, cursor, store)
-        },
+    let completions = match cmd.name.as_str() {
+        "invite" => complete_iamb_invite(args, store),
+        "keys" => complete_iamb_keys(args, input, orig_cursor, cursor),
+
+        // TODO: replace old options
         _ => vec![],
-    }
+    };
+
+    // TODO: escape stuff
+
+    completions
 }
 
 /// Tab completion for command names.
@@ -444,5 +474,9 @@ pub mod tests {
         let mut cursor = Cursor::new(0, 15);
         let res = complete_cmdbar(&text, &mut cursor, &store);
         assert_eq!(res, users);
+    }
+
+    fn test_all_commands_complete() {
+        todo!()
     }
 }
