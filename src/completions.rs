@@ -255,6 +255,14 @@ fn complete_iamb_verify(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     }
 }
 
+/// Tab completion for `:unreads`
+fn complete_iamb_unreads(args: Vec<String>) -> Vec<String> {
+    match args.len() {
+        1 if "clear".starts_with(&args[0]) => vec!["clear".to_string()],
+        _ => vec![],
+    }
+}
+
 /// Tab completion for command arguments.
 fn complete_cmdarg(
     desc: CommandDescription,
@@ -288,8 +296,34 @@ fn complete_cmdarg(
 
     let completions = match cmd.name.as_str() {
         "invite" => complete_iamb_invite(args, store),
+
         "keys" => complete_iamb_keys(args, input, orig_cursor, cursor),
+
         "verify" => complete_iamb_verify(args, store),
+
+        // These have no arguments
+        "dms" | "members" | "leave" | "cancel" | "edit" => vec![],
+
+        "react" if args.len() == 1 => complete_emoji(&args[0], store),
+        "react" => vec![],
+
+        // TODO: Check whether we can get the id of the focused message to improve completion
+        "unreact" if args.len() == 1 => complete_emoji(&args[0], store),
+        "unreact" => vec![],
+
+        // The redaction reason is free text
+        "redact" => vec![],
+
+        // These have no arguments
+        "reply" | "editor" | "rooms" | "chats" => vec![],
+
+        "unreads" => complete_iamb_unreads(args),
+
+        // These have no arguments
+        "spaces" | "welcome" => vec![],
+
+        "join" if args.len() == 1 => complete_matrix_aliases(&args[0], store),
+        "join" => vec![],
 
         // TODO: replace old options
         _ => vec![],
