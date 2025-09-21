@@ -263,6 +263,72 @@ fn complete_iamb_unreads(args: Vec<String>) -> Vec<String> {
     }
 }
 
+/// Tab completion for `:create`
+fn complete_iamb_create(args: Vec<String>) -> Vec<String> {
+    let opts = ["++alias=", "++public", "++space", "++encrypted"];
+    let opts_left: Vec<_> = opts
+        .iter()
+        .filter(|o| {
+            !args
+                .iter()
+                .any(|arg| arg.as_str() == **o || (o.ends_with('=') && arg.starts_with(*o)))
+        })
+        .copied()
+        .collect();
+    complete_choices(args.last().unwrap(), opts_left.as_slice())
+}
+
+/// Tab completion for `:room`
+// TODO: Check whether we can get the id of the focused room to improve
+// "kick","ban","unban", ".. unset" and "dm/tag set/unset"
+fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    let subcmds = [
+        "dm",
+        "kick",
+        "ban",
+        "unban",
+        "history",
+        "name",
+        "topic",
+        "tag",
+        "notify",
+        "alias",
+        "canonicalalias",
+        "id",
+    ];
+    if args.len() == 1 {
+        complete_choices(&args[0], &subcmds)
+    } else if args.len() == 2 {
+        let input = &args[1];
+        match args[0].as_str() {
+            "kick" | "ban" | "unban" => complete_users(input, store),
+            "id" => complete_choices(input, &["show"]),
+            "dm" | "name" | "tag" => complete_choices(input, &["set", "unset"]),
+
+            "history" | "topic" | "notify" | "alias" | "canonicalalias" | "canon" => {
+                complete_choices(input, &["show", "set", "unset"])
+            },
+
+            _ => vec![],
+        }
+    } else if args.len() == 3 {
+        let input = &args[2];
+        match (args[0].as_str(), args[1].as_str()) {
+            ("history", "set") => {
+                complete_choices(input, &["invited", "joined", "shared", "world_readable"])
+            },
+            ("tag", "set") | ("tag", "unset") => {
+                complete_choices(input, &["favourite", "lowpriority", "server_notice", "u."])
+            },
+            ("notify", "set") => complete_choices(input, &["mute", "mentions", "keywords", "all"]),
+
+            _ => vec![],
+        }
+    } else {
+        vec![]
+    }
+}
+
 /// Tab completion for command arguments.
 fn complete_cmdarg(
     desc: CommandDescription,
@@ -325,11 +391,15 @@ fn complete_cmdarg(
         "join" if args.len() == 1 => complete_matrix_aliases(&args[0], store),
         "join" => vec![],
 
+        "create" => complete_iamb_create(args),
+
+        "room" => complete_iamb_room(args, store),
+
         // TODO: replace old options
         _ => vec![],
     };
 
-    // TODO: escape stuff
+    // TODO: escape stuff including with paths
 
     completions
 }

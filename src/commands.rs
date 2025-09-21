@@ -522,15 +522,15 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         ("notify", "show", None) => RoomAction::Show(RoomField::NotificationMode).into(),
         ("notify", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
-        // :room aliases show
+        // :room alias show
         ("alias", "show", None) => RoomAction::Show(RoomField::Aliases).into(),
         ("alias", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
-        // :room aliases unset <alias>
+        // :room alias unset <alias>
         ("alias", "unset", Some(s)) => RoomAction::Unset(RoomField::Alias(s)).into(),
         ("alias", "unset", None) => return Result::Err(CommandError::InvalidArgument),
 
-        // :room aliases set <alias>
+        // :room alias set <alias>
         ("alias", "set", Some(s)) => RoomAction::Set(RoomField::Alias(s), "".into()).into(),
         ("alias", "set", None) => return Result::Err(CommandError::InvalidArgument),
 
