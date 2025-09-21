@@ -194,7 +194,7 @@ pub enum SpaceAction {
     ///
     /// The [`Option<String>`] argument is the order parameter.
     /// The [`bool`] argument indicates whether the room is suggested.
-    SetChild(OwnedRoomId, Option<String>, bool),
+    SetChild(String, Option<String>, bool),
 
     /// Remove the selected room.
     RemoveChild,
@@ -1835,7 +1835,7 @@ pub struct ChatStore {
     pub presences: CompletionMap<OwnedUserId, PresenceState>,
 
     /// In-progress and completed verifications.
-    pub verifications: HashMap<String, SasVerification>,
+    pub verifications: CompletionMap<String, SasVerification>,
 
     /// Settings for the current profile loaded from config file.
     pub settings: ApplicationSettings,

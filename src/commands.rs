@@ -6,7 +6,6 @@ use std::{convert::TryFrom, str::FromStr as _};
 
 use matrix_sdk::ruma::{
     OwnedMxcUri,
-    OwnedRoomId,
     OwnedRoomOrAliasId,
     OwnedUserId,
     RoomVersionId,
@@ -732,15 +731,15 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         },
         ("version", "upgrade", None) => return Result::Err(CommandError::InvalidArgument),
 
-        // :room aliases show
+        // :room alias show
         ("alias", "show", None) => RoomAction::Show(RoomField::Aliases).into(),
         ("alias", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
-        // :room aliases unset <alias>
+        // :room alias unset <alias>
         ("alias", "unset", Some(s)) => RoomAction::Unset(RoomField::Alias(s)).into(),
         ("alias", "unset", None) => return Result::Err(CommandError::InvalidArgument),
 
-        // :room aliases set <alias>
+        // :room alias set <alias>
         ("alias", "set", Some(s)) => RoomAction::Set(RoomField::Alias(s), "".into()).into(),
         ("alias", "set", None) => return Result::Err(CommandError::InvalidArgument),
 
@@ -882,10 +881,7 @@ fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
                 }
             }
 
-            let child = if let Some(child) = raw_child {
-                OwnedRoomId::from_str(&child)
-                    .map_err(|_| CommandError::Error("Invalid room id specified".into()))?
-            } else {
+            let Some(child) = raw_child else {
                 let msg = "Must specify a room to add";
                 return Err(CommandError::Error(msg.into()));
             };
@@ -966,7 +962,7 @@ fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
-fn add_iamb_commands(cmds: &mut ProgramCommands) {
+pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand {
         name: "cancel".into(),
         aliases: vec![],
@@ -1113,7 +1109,7 @@ pub fn setup_commands() -> ProgramCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matrix_sdk::ruma::{room_id, user_id};
+    use matrix_sdk::ruma::user_id;
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
 
@@ -1493,16 +1489,13 @@ mod tests {
 
         let cmd = "space child set !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
-        let act = SpaceAction::SetChild(room_id!("!roomid:example.org").to_owned(), None, false);
+        let act = SpaceAction::SetChild("!roomid:example.org".to_owned(), None, false);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let cmd = "space child set ++order=abcd ++suggested !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
-        let act = SpaceAction::SetChild(
-            room_id!("!roomid:example.org").to_owned(),
-            Some("abcd".into()),
-            true,
-        );
+        let act =
+            SpaceAction::SetChild("!roomid:example.org".to_owned(), Some("abcd".into()), true);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let cmd = "space child set ++order=abcd ++order=1234 !roomid:example.org";
@@ -1527,10 +1520,6 @@ mod tests {
         let cmd = "space child ++order=abcd ++suggested set !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
-
-        let cmd = "space child set foo";
-        let res = cmds.input_cmd(cmd, ctx.clone());
-        assert_eq!(res, Err(CommandError::Error("Invalid room id specified".into())));
 
         let cmd = "space child set";
         let res = cmds.input_cmd(cmd, ctx.clone());
