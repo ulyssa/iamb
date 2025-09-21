@@ -1398,7 +1398,7 @@ impl ClientWorker {
         }
     }
 
-    async fn join_room(&mut self, name: String) -> IambResult<OwnedRoomId> {
+    pub async fn join_room(&mut self, name: String) -> IambResult<OwnedRoomId> {
         if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
             match self.client.join_room_by_id_or_alias(&alias_id, &[]).await {
                 Ok(resp) => Ok(resp.room_id().to_owned()),

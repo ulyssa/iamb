@@ -2,9 +2,9 @@
 //!
 //! The command-bar commands are set up here, and iamb-specific commands are defined here. See
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
-use std::{convert::TryFrom, str::FromStr as _};
+use std::convert::TryFrom;
 
-use matrix_sdk::ruma::{events::tag::TagName, OwnedRoomId, OwnedUserId};
+use matrix_sdk::ruma::{events::tag::TagName, OwnedUserId};
 
 use modalkit::{
     commands::{CommandError, CommandResult, CommandStep},
@@ -633,10 +633,7 @@ fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
                 }
             }
 
-            let child = if let Some(child) = raw_child {
-                OwnedRoomId::from_str(&child)
-                    .map_err(|_| CommandError::Error("Invalid room id specified".into()))?
-            } else {
+            let Some(child) = raw_child else {
                 let msg = "Must specify a room to add";
                 return Err(CommandError::Error(msg.into()));
             };
@@ -848,7 +845,7 @@ pub fn setup_commands() -> ProgramCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matrix_sdk::ruma::{room_id, user_id};
+    use matrix_sdk::ruma::user_id;
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
 
@@ -1228,16 +1225,13 @@ mod tests {
 
         let cmd = "space child set !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
-        let act = SpaceAction::SetChild(room_id!("!roomid:example.org").to_owned(), None, false);
+        let act = SpaceAction::SetChild("!roomid:example.org".to_owned(), None, false);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let cmd = "space child set ++order=abcd ++suggested !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
-        let act = SpaceAction::SetChild(
-            room_id!("!roomid:example.org").to_owned(),
-            Some("abcd".into()),
-            true,
-        );
+        let act =
+            SpaceAction::SetChild("!roomid:example.org".to_owned(), Some("abcd".into()), true);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let cmd = "space child set ++order=abcd ++order=1234 !roomid:example.org";
@@ -1262,10 +1256,6 @@ mod tests {
         let cmd = "space child ++order=abcd ++suggested set !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
-
-        let cmd = "space child set foo";
-        let res = cmds.input_cmd(cmd, ctx.clone());
-        assert_eq!(res, Err(CommandError::Error("Invalid room id specified".into())));
 
         let cmd = "space child set";
         let res = cmds.input_cmd(cmd, ctx.clone());
