@@ -476,7 +476,11 @@ fn complete_cmdname(
 ) -> Vec<String> {
     // Complete command name and set cursor position.
     let _ = text.get_prefix_word_mut(cursor, &WordStyle::Little);
-    store.cmds.complete_name(desc.command.as_str())
+    let mut comps = store.cmds.complete_name(desc.command.as_str());
+
+    comps.extend(store.cmds.complete_aliases(desc.command.as_str()));
+
+    comps
 }
 
 /// Tab completion for commands.
@@ -582,7 +586,12 @@ impl Completer<IambInfo> for IambCompleter {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::tests::*;
+    use crate::{
+        base::{ProgramCommand, ProgramCommands},
+        commands::add_iamb_commands,
+        tests::*,
+    };
+    use modalkit::{commands::CommandResult, env::vim::command::CommandContext};
     use pretty_assertions::assert_eq;
 
     #[tokio::test]
@@ -613,6 +622,7 @@ pub mod tests {
     async fn test_complete_cmdbar() {
         let store = mock_store().await;
         let store = store.application;
+        let cmds = vec!["accept", "reject", "send"];
         let users = vec![
             "@user1:example.com",
             "@user2:example.com",
@@ -632,20 +642,20 @@ pub mod tests {
         let text = EditRope::from("invite    ");
         let mut cursor = Cursor::new(0, 7);
         let res = complete_cmdbar(&text, &mut cursor, &store);
-        assert_eq!(res, users);
+        assert_eq!(res, cmds);
 
         let text = EditRope::from("invite ignored");
         let mut cursor = Cursor::new(0, 7);
         let res = complete_cmdbar(&text, &mut cursor, &store);
-        assert_eq!(res, users);
+        assert_eq!(res, cmds);
 
-        let text = EditRope::from("invite @user1ignored");
-        let mut cursor = Cursor::new(0, 13);
+        let text = EditRope::from("invite send @user1ignored");
+        let mut cursor = Cursor::new(0, 18);
         let res = complete_cmdbar(&text, &mut cursor, &store);
         assert_eq!(res, vec!["@user1:example.com"]);
 
-        let text = EditRope::from("abo hor");
-        let mut cursor = Cursor::new(0, 7);
+        let text = EditRope::from("abo hori");
+        let mut cursor = Cursor::new(0, 8);
         let res = complete_cmdbar(&text, &mut cursor, &store);
         assert_eq!(res, vec!["horizontal"]);
 
@@ -654,13 +664,59 @@ pub mod tests {
         let res = complete_cmdbar(&text, &mut cursor, &store);
         assert_eq!(res, vec!["invite"]);
 
-        let text = EditRope::from("abo hor invite \n");
-        let mut cursor = Cursor::new(0, 15);
+        let text = EditRope::from("abo hor invite send \n");
+        let mut cursor = Cursor::new(0, 20);
         let res = complete_cmdbar(&text, &mut cursor, &store);
         assert_eq!(res, users);
     }
 
-    fn test_all_commands_complete() {
-        todo!()
+    #[tokio::test]
+    async fn test_all_commands_complete() {
+        let mut cmds = ProgramCommands::new();
+        add_iamb_commands(&mut cmds);
+
+        let store = mock_store().await;
+        let mut store = store.application;
+        store.cmds = cmds;
+        let cmds = &store.cmds;
+
+        for command in cmds.complete_name("") {
+            let mut text = EditRope::from(command);
+            text += " ".into();
+            let mut cursor = text.last();
+            cursor.right(1);
+            complete_cmdbar(&text, &mut cursor, &store);
+        }
+    }
+
+    fn mock_command(
+        _: CommandDescription,
+        _: &mut CommandContext,
+    ) -> CommandResult<ProgramCommand> {
+        panic!("mock command called");
+    }
+
+    #[tokio::test]
+    #[should_panic(expected = "trying to complete unknown subcommand `testmockcommand`")]
+    async fn test_complete_unknown_panics() {
+        let mut cmds = ProgramCommands::new();
+        cmds.add_command(ProgramCommand {
+            name: "testmockcommand".into(),
+            aliases: vec![],
+            f: mock_command,
+        });
+
+        let store = mock_store().await;
+        let mut store = store.application;
+        store.cmds = cmds;
+        let cmds = &store.cmds;
+
+        for command in cmds.complete_name("") {
+            let mut text = EditRope::from(command);
+            text += " ".into();
+            let mut cursor = text.last();
+            cursor.right(1);
+            complete_cmdbar(&text, &mut cursor, &store);
+        }
     }
 }

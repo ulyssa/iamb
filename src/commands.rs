@@ -714,7 +714,7 @@ fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
-fn add_iamb_commands(cmds: &mut ProgramCommands) {
+pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand {
         name: "cancel".into(),
         aliases: vec![],
