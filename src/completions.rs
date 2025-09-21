@@ -365,6 +365,15 @@ fn complete_iamb_space(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     }
 }
 
+/// Tab completion for `:logout`
+fn complete_iamb_logout(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    let id = store.settings.profile.user_id.as_str();
+    match args.len() {
+        1 if id.starts_with(&args[0]) => vec![id.to_string()],
+        _ => vec![],
+    }
+}
+
 /// Tab completion for command arguments.
 fn complete_cmdarg(
     desc: CommandDescription,
@@ -404,7 +413,7 @@ fn complete_cmdarg(
         "verify" => complete_iamb_verify(args, store),
 
         // These have no arguments
-        "dms" | "members" | "leave" | "cancel" | "edit" => vec![],
+        "dms" | "members" | "leave" | "forget" | "cancel" | "edit" => vec![],
 
         "react" if args.len() == 1 => complete_emoji(&args[0], store),
         "react" => vec![],
@@ -417,7 +426,7 @@ fn complete_cmdarg(
         "redact" => vec![],
 
         // These have no arguments
-        "reply" | "editor" | "rooms" | "chats" => vec![],
+        "reply" | "replied" | "editor" | "rooms" | "chats" => vec![],
 
         "unreads" => complete_iamb_unreads(args),
 
@@ -433,8 +442,24 @@ fn complete_cmdarg(
 
         "space" => complete_iamb_space(args, store),
 
-        // TODO: replace old options
-        _ => vec![],
+        "upload" | "download" | "open" => {
+            *cursor = orig_cursor;
+            complete_path(input, cursor)
+        },
+
+        "logout" => complete_iamb_logout(args, store),
+
+        "vertical" | "vert" | "horizontal" | "hor" | "aboveleft" | "lefta" | "leftabove" |
+        "abo" | "belowright" | "rightb" | "rightbelow" | "bel" | "tab" => {
+            complete_cmd(desc.arg.text.as_str(), input, cursor, store)
+        },
+
+        _cmd => {
+            #[cfg(test)]
+            panic!("trying to complete unknown subcommand `{}`", _cmd);
+
+            vec![]
+        },
     };
 
     // TODO: escape stuff including with paths
