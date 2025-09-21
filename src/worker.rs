@@ -2,7 +2,7 @@
 //!
 //! The worker thread handles asynchronous work, and can receive messages from the main thread that
 //! block on a reply from the async worker.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
@@ -59,7 +59,9 @@ use matrix_sdk::{
             typing::SyncTypingEvent,
             AnyInitialStateEvent,
             AnyMessageLikeEvent,
+            AnySyncMessageLikeEvent,
             AnySyncStateEvent,
+            AnySyncTimelineEvent,
             AnyTimelineEvent,
             EmptyStateKey,
             InitialStateEvent,
@@ -293,6 +295,11 @@ async fn load_older_one(
         let Messages { end, chunk, .. } = room.messages(opts).await.map_err(IambError::from)?;
 
         let mut msgs = vec![];
+        // Track which events we've already seen the latest version of
+        // Since events come in reverse chronological order, the first edit we see is the latest
+        let mut seen_latest_edits: HashMap<OwnedEventId, OwnedEventId> = HashMap::new();
+        // Track original events that have bundled replacements
+        let mut has_bundled_replacement: HashSet<OwnedEventId> = HashSet::new();
 
         for ev in chunk.into_iter() {
             let raw = ev.into_raw();
@@ -300,9 +307,55 @@ async fn load_older_one(
             // Check if this is a live message using centralized detection
             let is_live = crate::message::live_detection::has_live_marker_in_raw(&raw);
 
+            // Check for bundled relations
+            let raw_json_str = raw.json().get();
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(raw_json_str) {
+                if let Some(unsigned) = json_value.get("unsigned") {
+                    if let Some(relations) = unsigned.get("m.relations") {
+                        if relations.get("m.replace").is_some() {
+                            // This event has bundled replacement - track it
+                            if let Some(event_id_val) = json_value.get("event_id") {
+                                if let Some(event_id_str) = event_id_val.as_str() {
+                                    if let Ok(event_id) = OwnedEventId::try_from(event_id_str) {
+                                        has_bundled_replacement.insert(event_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
             let Ok(msg) = raw.deserialize() else {
                 continue;
             };
+
+            // Skip obsolete edits
+            if let AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(ref room_msg)) = msg {
+                if let SyncMessageLikeEvent::Original(ref orig) = room_msg {
+                    if let Some(Relation::Replacement(ref repl)) = &orig.content.relates_to {
+                        let target_id = &repl.event_id;
+
+                        // Check if we already have a newer edit for this target
+                        if seen_latest_edits.contains_key(target_id) {
+                            // Skip this older edit
+                            tracing::debug!("Skipping obsolete edit {} for {}", msg.event_id(), target_id);
+                            continue;
+                        }
+
+                        // Check if the original has bundled replacement
+                        if has_bundled_replacement.contains(target_id) {
+                            // Skip this edit as the original already has bundled latest version
+                            tracing::debug!("Skipping edit {} - original {} has bundled replacement",
+                                msg.event_id(), target_id);
+                            continue;
+                        }
+
+                        // This is the latest edit we've seen for this target
+                        seen_latest_edits.insert(target_id.clone(), msg.event_id().to_owned());
+                    }
+                }
+            }
 
             let event_id = msg.event_id();
             let receipts = match room
