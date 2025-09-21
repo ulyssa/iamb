@@ -187,7 +187,7 @@ pub enum SpaceAction {
     ///
     /// The [`Option<String>`] argument is the order parameter.
     /// The [`bool`] argument indicates whether the room is suggested.
-    SetChild(OwnedRoomId, Option<String>, bool),
+    SetChild(String, Option<String>, bool),
 
     /// Remove the selected room.
     RemoveChild,

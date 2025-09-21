@@ -90,7 +90,7 @@ impl SpaceState {
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
         match act {
-            SpaceAction::SetChild(child_id, order, suggested) => {
+            SpaceAction::SetChild(name, order, suggested) => {
                 if !self
                     .room
                     .power_levels()
@@ -104,6 +104,8 @@ impl SpaceState {
                 {
                     return Err(IambError::InsufficientPermission.into());
                 }
+
+                let child_id = store.application.worker.join_room(name)?;
 
                 let via = self.room.route().await.map_err(IambError::from)?;
                 let mut ev = SpaceChildEventContent::new(via);

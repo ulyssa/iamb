@@ -217,6 +217,20 @@ fn complete_choices(input: &str, options: &[&'static str]) -> Vec<String> {
         .collect()
 }
 
+/// Tab completion for vim-like options
+fn complete_options(args: &[String], options: &[&'static str]) -> Vec<String> {
+    let opts: Vec<_> = options
+        .iter()
+        .filter(|o| {
+            !args
+                .iter()
+                .any(|arg| arg.as_str() == **o || (o.ends_with('=') && arg.starts_with(*o)))
+        })
+        .copied()
+        .collect();
+    complete_choices(args.last().unwrap(), opts.as_slice())
+}
+
 /// Tab completion for `:invite`
 fn complete_iamb_invite(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     match args.len() {
@@ -265,17 +279,8 @@ fn complete_iamb_unreads(args: Vec<String>) -> Vec<String> {
 
 /// Tab completion for `:create`
 fn complete_iamb_create(args: Vec<String>) -> Vec<String> {
-    let opts = ["++alias=", "++public", "++space", "++encrypted"];
-    let opts_left: Vec<_> = opts
-        .iter()
-        .filter(|o| {
-            !args
-                .iter()
-                .any(|arg| arg.as_str() == **o || (o.ends_with('=') && arg.starts_with(*o)))
-        })
-        .copied()
-        .collect();
-    complete_choices(args.last().unwrap(), opts_left.as_slice())
+    let options = ["++alias=", "++public", "++space", "++encrypted"];
+    complete_options(args.as_slice(), &options)
 }
 
 /// Tab completion for `:room`
@@ -323,6 +328,37 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
             ("notify", "set") => complete_choices(input, &["mute", "mentions", "keywords", "all"]),
 
             _ => vec![],
+        }
+    } else {
+        vec![]
+    }
+}
+
+/// Tab completion for `:space`
+fn complete_iamb_space(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    if args.len() == 1 {
+        complete_choices(&args[0], &["child"])
+    } else if args.len() == 2 && &args[0] == "child" {
+        complete_choices(&args[1], &["set", "remove"])
+    } else if args.len() > 2 && &args[0] == "child" && args[1] == "set" {
+        let options = ["++suggested", "++order="];
+
+        let has_room = args.iter().skip(2).rev().skip(1).any(|arg| !arg.starts_with('+'));
+
+        let arg = args.last().unwrap();
+
+        if arg.is_empty() {
+            let mut opts = complete_options(args.as_slice(), &options);
+            if !has_room {
+                opts.extend(complete_matrix_aliases(arg, store));
+            }
+            opts
+        } else if arg.starts_with('+') {
+            complete_options(args.as_slice(), &options)
+        } else if !has_room {
+            complete_matrix_aliases(arg, store)
+        } else {
+            vec![]
         }
     } else {
         vec![]
@@ -394,6 +430,8 @@ fn complete_cmdarg(
         "create" => complete_iamb_create(args),
 
         "room" => complete_iamb_room(args, store),
+
+        "space" => complete_iamb_space(args, store),
 
         // TODO: replace old options
         _ => vec![],
