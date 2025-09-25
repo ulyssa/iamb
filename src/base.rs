@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::room_version_rules::RedactionRules;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -57,7 +58,6 @@ use matrix_sdk::{
         OwnedRoomId,
         OwnedUserId,
         RoomId,
-        RoomVersionId,
         UserId,
     },
     RoomState as MatrixRoomState,
@@ -783,6 +783,10 @@ pub enum IambError {
     #[error("Invalid room alias id: {0}")]
     InvalidRoomAliasId(#[from] matrix_sdk::ruma::IdParseError),
 
+    /// An invalid space child order was specified.
+    #[error("Invalid space child order: {0}")]
+    InvalidSpaceChildOrder(matrix_sdk::ruma::IdParseError),
+
     /// A failure occurred during verification.
     #[error("Verification request error: {0}")]
     VerificationRequestError(#[from] matrix_sdk::encryption::identities::RequestVerificationError),
@@ -1023,7 +1027,7 @@ impl RoomInfo {
         self.messages.get_mut(self.keys.get(event_id)?.to_message_key()?)
     }
 
-    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent, room_version: &RoomVersionId) {
+    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent, rules: &RedactionRules) {
         let Some(redacts) = &ev.redacts else {
             return;
         };
@@ -1033,20 +1037,20 @@ impl RoomInfo {
             Some(EventLocation::State(key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev, room_version);
+                    msg.redact(ev, rules);
                 }
             },
             Some(EventLocation::Message(None, key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev, room_version);
+                    msg.redact(ev, rules);
                 }
             },
             Some(EventLocation::Message(Some(root), key)) => {
                 if let Some(thread) = self.threads.get_mut(root) {
                     if let Some(msg) = thread.get_mut(key) {
                         let ev = SyncRoomRedactionEvent::Original(ev);
-                        msg.redact(ev, room_version);
+                        msg.redact(ev, rules);
                     }
                 }
             },

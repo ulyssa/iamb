@@ -49,7 +49,8 @@ use crate::{
 const TEST_ROOM1_ALIAS: &str = "#room1:example.com";
 
 lazy_static! {
-    pub static ref TEST_ROOM1_ID: OwnedRoomId = RoomId::new(server_name!("example.com")).to_owned();
+    pub static ref TEST_ROOM1_ID: OwnedRoomId =
+        RoomId::new_v1(server_name!("example.com")).to_owned();
     pub static ref TEST_USER1: OwnedUserId = user_id!("@user1:example.com").to_owned();
     pub static ref TEST_USER2: OwnedUserId = user_id!("@user2:example.com").to_owned();
     pub static ref TEST_USER3: OwnedUserId = user_id!("@user3:example.com").to_owned();
