@@ -581,14 +581,14 @@ impl ChatState {
                     show_echo = false;
                 } else if let Some(thread_root) = self.scrollback.thread() {
                     if let Some(m) = self.get_reply_to(info) {
-                        msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::No);
+                        msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::Yes);
                     } else if let Some(m) = info.get_thread_last(thread_root) {
-                        msg = msg.make_for_thread(m, ReplyWithinThread::No, AddMentions::No);
+                        msg = msg.make_for_thread(m, ReplyWithinThread::No, AddMentions::Yes);
                     } else {
                         // Internal state is wonky?
                     }
                 } else if let Some(m) = self.get_reply_to(info) {
-                    msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
+                    msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::Yes);
                 }
 
                 // XXX: second parameter can be a locally unique transaction id.
