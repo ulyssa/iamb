@@ -16,13 +16,16 @@ use std::ops::Deref;
 
 use css_color_parser::Color as CssColor;
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use matrix_sdk::ruma::{
-    matrix_uri::MatrixId,
-    MatrixToUri,
-    MatrixUri,
-    OwnedRoomAliasId,
-    OwnedRoomId,
-    OwnedUserId,
+use matrix_sdk::{
+    ruma::{
+        matrix_uri::MatrixId,
+        MatrixToUri,
+        MatrixUri,
+        OwnedRoomAliasId,
+        OwnedRoomId,
+        OwnedUserId,
+    },
+    OwnedServerName,
 };
 use unicode_segmentation::UnicodeSegmentation;
 use url::Url;
@@ -299,7 +302,7 @@ pub enum StyleTreeNode {
     Text(Cow<'static, str>),
     Sequence(StyleTreeChildren),
     RoomAlias(OwnedRoomAliasId, Option<char>),
-    RoomId(OwnedRoomId, Option<char>),
+    RoomId(OwnedRoomId, Vec<OwnedServerName>, Option<char>),
     UserId(OwnedUserId, Option<char>),
     DisplayName(String, OwnedUserId, Option<char>),
 }
@@ -349,9 +352,11 @@ impl StyleTreeNode {
                     urls.push((*c, to_url));
                 }
             },
-            StyleTreeNode::RoomId(room_id, c) => {
+            StyleTreeNode::RoomId(room_id, via, c) => {
                 if let Some(c) = c {
-                    let to_url = Url::parse(&room_id.matrix_uri(false).to_string()).unwrap();
+                    let to_url =
+                        Url::parse(&room_id.matrix_uri_via(via.iter().cloned(), false).to_string())
+                            .unwrap();
                     urls.push((*c, to_url));
                 }
             },
@@ -520,7 +525,7 @@ impl StyleTreeNode {
                 let style = printer.settings().get_user_style(user_id);
                 printer.push_str(display_name.as_str(), style);
             },
-            StyleTreeNode::RoomId(room_id, _) => {
+            StyleTreeNode::RoomId(room_id, _, _) => {
                 let bold = style.add_modifier(StyleModifier::BOLD);
                 printer.push_str(room_id.as_str(), bold);
             },
@@ -739,9 +744,15 @@ fn attrs_to_style(attrs: &[Attribute]) -> Style {
     return style;
 }
 
-fn mxid2t(id: &MatrixId, n: Option<char>, c: &StyleTreeNode, h: &Url) -> StyleTreeNode {
+fn mxid2t(
+    id: &MatrixId,
+    via: &[OwnedServerName],
+    n: Option<char>,
+    c: &StyleTreeNode,
+    h: &Url,
+) -> StyleTreeNode {
     match id {
-        MatrixId::Room(room_id) => StyleTreeNode::RoomId(room_id.to_owned(), n),
+        MatrixId::Room(room_id) => StyleTreeNode::RoomId(room_id.to_owned(), via.to_owned(), n),
         MatrixId::RoomAlias(alias) => StyleTreeNode::RoomAlias(alias.to_owned(), n),
         MatrixId::User(user_id) => StyleTreeNode::UserId(user_id.to_owned(), n),
         MatrixId::Event(room_or_alias_id, _) => {
@@ -751,7 +762,7 @@ fn mxid2t(id: &MatrixId, n: Option<char>, c: &StyleTreeNode, h: &Url) -> StyleTr
                 StyleTreeNode::RoomAlias(alias_id.to_owned(), n)
             } else {
                 let room_id = <&matrix_sdk::ruma::RoomId>::try_from(room_or_alias_id).unwrap();
-                StyleTreeNode::RoomId(room_id.to_owned(), n)
+                StyleTreeNode::RoomId(room_id.to_owned(), via.to_owned(), n)
             }
         },
         _ => {
@@ -784,9 +795,9 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                         let n = state.next_link_char();
 
                         if let Ok(uri) = MatrixToUri::parse(h.as_str()) {
-                            mxid2t(uri.id(), n, &c, &h)
+                            mxid2t(uri.id(), uri.via(), n, &c, &h)
                         } else if let Ok(uri) = MatrixUri::parse(h.as_str()) {
-                            mxid2t(uri.id(), n, &c, &h)
+                            mxid2t(uri.id(), uri.via(), n, &c, &h)
                         } else if let Some(n) = n {
                             StyleTreeNode::Anchor(c, n, h)
                         } else {

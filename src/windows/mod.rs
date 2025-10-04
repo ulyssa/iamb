@@ -857,7 +857,7 @@ impl Window<IambInfo> for IambWindow {
 
             IambWindow::open(id, store)
         } else {
-            let room_id = worker.join_room(name.clone())?;
+            let room_id = worker.join_room(name.clone(), vec![])?;
 
             if let Ok(alias) = OwnedRoomAliasId::from_str(&name) {
                 names.insert(alias, room_id.clone());

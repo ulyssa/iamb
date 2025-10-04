@@ -31,6 +31,7 @@ use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
 use matrix_sdk::ruma::matrix_uri::MatrixId;
 use matrix_sdk::ruma::{MatrixToUri, MatrixUri, OwnedUserId};
+use matrix_sdk::OwnedServerName;
 use modalkit::keybindings::InputBindings;
 use rand::{distributions::Alphanumeric, Rng};
 use temp_dir::TempDir;
@@ -151,12 +152,12 @@ fn config_tab_to_desc(
 
             let window = match window {
                 config::WindowPath::UserId(user_id) => {
-                    let room_id = worker.join_room(user_id.to_string())?;
+                    let room_id = worker.join_room(user_id.to_string(), vec![])?;
                     IambId::Room(room_id, None)
                 },
                 config::WindowPath::RoomId(room_id) => IambId::Room(room_id, None),
                 config::WindowPath::AliasId(alias) => {
-                    let room_id = worker.join_room(alias.to_string())?;
+                    let room_id = worker.join_room(alias.to_string(), vec![])?;
                     names.insert(alias, room_id.clone());
                     IambId::Room(room_id, None)
                 },
@@ -194,6 +195,7 @@ fn restore_layout(
 fn resolve_mxid(
     store: &mut ProgramStore,
     id: MatrixId,
+    via: &[OwnedServerName],
     join_or_create: bool,
 ) -> IambResult<Result<IambId, String>> {
     let mut room_name = String::new();
@@ -210,7 +212,7 @@ fn resolve_mxid(
             match store.application.worker.client.get_dm_room(&user_id) {
                 Some(room) => room.room_id().to_owned(),
                 None if join_or_create => {
-                    store.application.worker.join_room(user_id.to_string())?
+                    store.application.worker.join_room(user_id.to_string(), via.to_owned())?
                 },
                 None => return Ok(Err(format!("No dm with {user_id} found. Create new DM?"))),
             }
@@ -240,7 +242,7 @@ fn resolve_mxid(
         .any(|room| room.room_id() == room_id)
     {
         if join_or_create {
-            store.application.worker.join_room(room_id.to_string())?;
+            store.application.worker.join_room(room_id.to_string(), via.to_owned())?;
         } else {
             return Ok(Err(format!("Join room {room_name:?}?")));
         }
@@ -252,14 +254,14 @@ fn resolve_mxid(
 fn setup_screen(
     settings: ApplicationSettings,
     store: &mut ProgramStore,
-    initial_room: Option<MatrixId>,
+    initial_room: Option<(MatrixId, Vec<OwnedServerName>)>,
 ) -> IambResult<ScreenState<IambWindow, IambInfo>> {
     let cmd = CommandBarState::new(store);
     let dims = crossterm::terminal::size()?;
     let area = Rect::new(0, 0, dims.0, dims.1);
 
-    if let Some(id) = initial_room {
-        match resolve_mxid(store, id.clone(), false)? {
+    if let Some((id, via)) = initial_room {
+        match resolve_mxid(store, id.clone(), &via, false)? {
             Ok(id) => {
                 return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
             },
@@ -275,7 +277,7 @@ fn setup_screen(
                 setup_tty(&settings, false)?;
 
                 if join_or_create {
-                    if let Ok(id) = resolve_mxid(store, id, true)? {
+                    if let Ok(id) = resolve_mxid(store, id, &via, true)? {
                         return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
                     }
                 }
@@ -353,7 +355,7 @@ impl Application {
     pub async fn new(
         settings: ApplicationSettings,
         store: AsyncProgramStore,
-        initial_room: Option<MatrixId>,
+        initial_room: Option<(MatrixId, Vec<OwnedServerName>)>,
     ) -> IambResult<Application> {
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend)?;
@@ -691,13 +693,16 @@ impl Application {
             },
 
             IambAction::OpenLink(url, join_or_create) => {
-                let matrix_id = MatrixUri::parse(&url)
-                    .map(|uri| uri.id().clone())
-                    .or_else(|_| MatrixToUri::parse(&url).map(|uri| uri.id().clone()))
-                    .ok();
+                let matrix_uri = MatrixUri::parse(&url).ok();
+                let matrix_to_uri = MatrixToUri::parse(&url).ok();
 
-                if let Some(id) = matrix_id {
-                    match resolve_mxid(store, id.clone(), join_or_create)? {
+                let matrix_id = matrix_uri
+                    .as_ref()
+                    .map(|uri| (uri.id(), uri.via()))
+                    .or(matrix_to_uri.as_ref().map(|uri| (uri.id(), uri.via())));
+
+                if let Some((id, via)) = matrix_id {
+                    match resolve_mxid(store, id.clone(), via, join_or_create)? {
                         Ok(room) => {
                             let target = OpenTarget::Application(room);
                             let action = WindowAction::Switch(target);
@@ -1123,7 +1128,10 @@ fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
     let _ = crossterm::terminal::disable_raw_mode();
 }
 
-async fn run(settings: ApplicationSettings, initial_room: Option<MatrixId>) -> IambResult<()> {
+async fn run(
+    settings: ApplicationSettings,
+    initial_room: Option<(MatrixId, Vec<OwnedServerName>)>,
+) -> IambResult<()> {
     // Get old keys the first time we run w/ the upgraded SDK.
     let import_keys = check_import_keys(&settings).await?;
 
@@ -1198,8 +1206,10 @@ fn main() -> IambResult<()> {
 
     let initial_room = if let Some(uri) = &iamb.uri {
         MatrixUri::parse(uri)
-            .map(|uri| uri.id().clone())
-            .or_else(|_| MatrixToUri::parse(uri).map(|uri| uri.id().clone()))
+            .map(|uri| (uri.id().clone(), uri.via().to_owned()))
+            .or_else(|_| {
+                MatrixToUri::parse(uri).map(|uri| (uri.id().clone(), uri.via().to_owned()))
+            })
             .ok()
     } else {
         None

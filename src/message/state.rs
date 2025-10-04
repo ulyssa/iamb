@@ -779,7 +779,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             ..
         }) => {
             let prefix = StyleTreeNode::Text("* upgraded the room; replacement room is ".into());
-            let room = StyleTreeNode::RoomId(content.replacement_room.clone(), Some('0'));
+            let room = StyleTreeNode::RoomId(content.replacement_room.clone(), vec![], Some('0'));
             vec![prefix, room]
         },
         AnyFullStateEventContent::RoomTopic(FullStateEventContent::Original {
@@ -793,7 +793,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let prefix = StyleTreeNode::Text("* added a space child: ".into());
 
             let room_id = if let Ok(room_id) = OwnedRoomId::from_str(ev.state_key()) {
-                StyleTreeNode::RoomId(room_id, Some('0'))
+                StyleTreeNode::RoomId(room_id, vec![], Some('0'))
             } else {
                 bold(ev.state_key().to_string())
             };
@@ -810,7 +810,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             };
 
             let room_id = if let Ok(room_id) = OwnedRoomId::from_str(ev.state_key()) {
-                StyleTreeNode::RoomId(room_id, Some('0'))
+                StyleTreeNode::RoomId(room_id, vec![], Some('0'))
             } else {
                 bold(ev.state_key().to_string())
             };

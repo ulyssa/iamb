@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
 use matrix_sdk::ruma::OwnedRoomAliasId;
+use matrix_sdk::OwnedServerName;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -637,7 +638,7 @@ pub enum WorkerTask {
     GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
     GetRoom(OwnedRoomId, ClientReply<IambResult<FetchedRoom>>),
     ResolveAlias(OwnedRoomAliasId, ClientReply<IambResult<OwnedRoomId>>),
-    JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
+    JoinRoom(String, Vec<OwnedServerName>, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     TypingNotice(OwnedRoomId),
@@ -678,9 +679,10 @@ impl Debug for WorkerTask {
                     .field(&format_args!("_"))
                     .finish()
             },
-            WorkerTask::JoinRoom(s, _) => {
+            WorkerTask::JoinRoom(s, via, _) => {
                 f.debug_tuple("WorkerTask::JoinRoom")
                     .field(s)
+                    .field(via)
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -822,10 +824,10 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn join_room(&self, name: String) -> IambResult<OwnedRoomId> {
+    pub fn join_room(&self, name: String, via: Vec<OwnedServerName>) -> IambResult<OwnedRoomId> {
         let (reply, response) = oneshot();
 
-        self.tx.send(WorkerTask::JoinRoom(name, reply)).unwrap();
+        self.tx.send(WorkerTask::JoinRoom(name, via, reply)).unwrap();
 
         return response.recv();
     }
@@ -922,9 +924,9 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.resolve_alias(alias_id).await);
             },
-            WorkerTask::JoinRoom(room_id, reply) => {
+            WorkerTask::JoinRoom(name, via, reply) => {
                 assert!(self.initialized);
-                reply.send(self.join_room(room_id).await);
+                reply.send(self.join_room(name, via).await);
             },
             WorkerTask::GetInviter(invited, reply) => {
                 assert!(self.initialized);
@@ -1448,9 +1450,13 @@ impl ClientWorker {
         }
     }
 
-    async fn join_room(&mut self, name: String) -> IambResult<OwnedRoomId> {
+    async fn join_room(
+        &mut self,
+        name: String,
+        via: Vec<OwnedServerName>,
+    ) -> IambResult<OwnedRoomId> {
         if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
-            match self.client.join_room_by_id_or_alias(&alias_id, &[]).await {
+            match self.client.join_room_by_id_or_alias(&alias_id, &via).await {
                 Ok(resp) => Ok(resp.room_id().to_owned()),
                 Err(e) => {
                     let msg = e.to_string();
