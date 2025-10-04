@@ -25,7 +25,7 @@ mod parse {
     use nom::{
         branch::alt,
         bytes::complete::{escaped_transform, is_not, tag},
-        character::complete::{char, space1},
+        character::complete::{char, space0, space1},
         combinator::{cut, eof, opt, value},
         error::{ErrorKind, ParseError},
         IResult,
@@ -144,7 +144,7 @@ mod parse {
     }
 
     fn parse_last_arg(input: &str) -> IResult<&str, (String, &str)> {
-        let (input, _) = space1(input)?;
+        let (input, _) = space0(input)?;
 
         let old_input = input;
         let (input, arg) = opt(parse_unclosed_quote)(input)?;
@@ -152,12 +152,24 @@ mod parse {
         Ok((input, (arg.unwrap_or_default(), old_input)))
     }
 
+    fn parse_trailing_last_arg(input: &str) -> IResult<&str, (String, &str)> {
+        let (input, _) = space1(input)?;
+
+        parse_last_arg(input)
+    }
+
     /// Returns a list with the parsed strings and a raw version of the last string to be stripped
     /// from the input before completing.
     pub fn parse_started_strings(input: &str) -> IResult<&str, (Vec<String>, &str)> {
         let (input, (mut args, mut last_arg_raw)) =
             separated_list0_last_raw(space1, parse_string)(input)?;
-        let (input, end_arg) = opt(parse_last_arg)(input)?;
+
+        let (input, end_arg) = if args.is_empty() {
+            opt(parse_last_arg)(input)?
+        } else {
+            opt(parse_trailing_last_arg)(input)?
+        };
+
         let (input, _) = eof(input)?;
 
         if let Some((arg, end_arg_raw)) = end_arg {
@@ -170,6 +182,45 @@ mod parse {
         }
 
         Ok((input, (args, last_arg_raw)))
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[test]
+        fn parse_strings() {
+            let text = "some normal args";
+            let parsed = parse_started_strings(text).unwrap();
+            assert_eq!(("", (vec!["some".into(), "normal".into(), "args".into()], "args")), parsed);
+
+            let text = "started ";
+            let parsed = parse_started_strings(text).unwrap();
+            assert_eq!(("", (vec!["started".into(), "".into()], "")), parsed);
+
+            let text = "args \"with quotes\"";
+            let parsed = parse_started_strings(text).unwrap();
+            assert_eq!(
+                ("", (vec!["args".into(), "with quotes".into()], "\"with quotes\"")),
+                parsed
+            );
+
+            let text = "and \"started ";
+            let parsed = parse_started_strings(text).unwrap();
+            assert_eq!(("", (vec!["and".into(), "started ".into()], "\"started ")), parsed);
+
+            let text = "\"only started ";
+            let parsed = parse_started_strings(text).unwrap();
+            assert_eq!(("", (vec!["only started ".into()], "\"only started ")), parsed);
+
+            let text = "   ";
+            let parsed = parse_started_strings(text).unwrap();
+            assert_eq!(("", (vec!["".into()], "")), parsed);
+
+            let text = "escaped\\ spaces here";
+            let parsed = parse_started_strings(text).unwrap();
+            assert_eq!(("", (vec!["escaped spaces".into(), "here".into()], "here")), parsed);
+        }
     }
 }
 
@@ -405,7 +456,7 @@ fn complete_cmdarg(
     let orig_cursor = cursor.clone();
     *cursor = new_cursor;
 
-    let completions = match cmd.name.as_str() {
+    let mut completions = match cmd.name.as_str() {
         "invite" => complete_iamb_invite(args, store),
 
         "keys" => complete_iamb_keys(args, input, orig_cursor, cursor),
@@ -443,8 +494,14 @@ fn complete_cmdarg(
         "space" => complete_iamb_space(args, store),
 
         "upload" | "download" | "open" => {
-            *cursor = orig_cursor;
-            complete_path(input, cursor)
+            if input.get_char_at_cursor(cursor) == Some('"') {
+                // Use the escaped instead of the qouted filename.
+                let mut args = args;
+                vec![args.pop().unwrap()]
+            } else {
+                *cursor = orig_cursor;
+                return complete_path(input, cursor);
+            }
         },
 
         "logout" => complete_iamb_logout(args, store),
@@ -458,11 +515,22 @@ fn complete_cmdarg(
             #[cfg(test)]
             panic!("trying to complete unknown subcommand `{}`", _cmd);
 
+            #[cfg(not(test))]
             vec![]
         },
     };
 
-    // TODO: escape stuff including with paths
+    completions.iter_mut().for_each(|completion| {
+        if completion.contains(['\\', ' ', '#', '%', '"', '|']) {
+            *completion = completion
+                .replace('\\', "\\\\")
+                .replace(' ', "\\ ")
+                .replace('#', "\\#")
+                .replace('%', "\\%")
+                .replace('"', "\\\"")
+                .replace('|', "\\|");
+        }
+    });
 
     completions
 }
