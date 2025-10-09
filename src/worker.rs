@@ -557,7 +557,7 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
     let mut filter = FilterDefinition::default();
     filter.room = room_ev;
 
-    let settings = SyncSettings::new().filter(filter.into());
+    let settings = SyncSettings::new().filter(filter.into()).timeout(Duration::from_secs(0));
 
     client.sync_once(settings).await?;
 
