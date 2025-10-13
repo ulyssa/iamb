@@ -965,7 +965,7 @@ fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand {
         name: "cancel".into(),
-        aliases: vec![],
+        aliases: vec!["ca".into()],
         f: iamb_cancel,
     });
     cmds.add_command(ProgramCommand {
@@ -975,17 +975,25 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand {
         name: "chats".into(),
-        aliases: vec![],
+        aliases: vec!["c".into()],
         f: iamb_chats,
     });
     cmds.add_command(ProgramCommand { name: "dms".into(), aliases: vec![], f: iamb_dms });
     cmds.add_command(ProgramCommand {
         name: "download".into(),
-        aliases: vec![],
+        aliases: vec!["d".into()],
         f: iamb_download,
     });
-    cmds.add_command(ProgramCommand { name: "open".into(), aliases: vec![], f: iamb_open });
-    cmds.add_command(ProgramCommand { name: "edit".into(), aliases: vec![], f: iamb_edit });
+    cmds.add_command(ProgramCommand {
+        name: "open".into(),
+        aliases: vec!["o".into()],
+        f: iamb_open,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "edit".into(),
+        aliases: vec!["e".into()],
+        f: iamb_edit,
+    });
     cmds.add_command(ProgramCommand {
         name: "follow".into(),
         aliases: vec![],
@@ -1015,22 +1023,22 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand {
         name: "members".into(),
-        aliases: vec![],
+        aliases: vec!["me".into()],
         f: iamb_members,
     });
     cmds.add_command(ProgramCommand {
         name: "react".into(),
-        aliases: vec![],
+        aliases: vec!["rc".into(), "reac".into(), "rct".into()],
         f: iamb_react,
     });
     cmds.add_command(ProgramCommand {
         name: "redact".into(),
-        aliases: vec![],
+        aliases: vec!["red".into()],
         f: iamb_redact,
     });
     cmds.add_command(ProgramCommand {
         name: "reply".into(),
-        aliases: vec![],
+        aliases: vec!["rep".into()],
         f: iamb_reply,
     });
     cmds.add_command(ProgramCommand {
@@ -1040,7 +1048,7 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand {
         name: "rooms".into(),
-        aliases: vec![],
+        aliases: vec!["r".into()],
         f: iamb_rooms,
     });
     cmds.add_command(ProgramCommand { name: "room".into(), aliases: vec![], f: iamb_room });
@@ -1051,12 +1059,12 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand {
         name: "spaces".into(),
-        aliases: vec![],
+        aliases: vec!["s".into()],
         f: iamb_spaces,
     });
     cmds.add_command(ProgramCommand {
         name: "unreads".into(),
-        aliases: vec![],
+        aliases: vec!["un".into()],
         f: iamb_unreads,
     });
     cmds.add_command(ProgramCommand {
@@ -1067,12 +1075,12 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { name: "self".into(), aliases: vec![], f: iamb_self });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),
-        aliases: vec![],
+        aliases: vec!["unr".into()],
         f: iamb_unreact,
     });
     cmds.add_command(ProgramCommand {
         name: "upload".into(),
-        aliases: vec![],
+        aliases: vec!["u".into()],
         f: iamb_upload,
     });
     cmds.add_command(ProgramCommand {
@@ -1087,7 +1095,7 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand {
         name: "editor".into(),
-        aliases: vec![],
+        aliases: vec!["ed".into()],
         f: iamb_editor,
     });
     cmds.add_command(ProgramCommand {
