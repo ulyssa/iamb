@@ -2074,7 +2074,7 @@ fn complete_cmdarg(
     match cmd.name.as_str() {
         "cancel" | "dms" | "edit" | "redact" | "reply" => vec![],
         "members" | "rooms" | "spaces" | "welcome" => vec![],
-        "download" | "keys" | "open" | "upload" => complete_path(text, cursor),
+        "download" | "d" | "keys" | "open" | "o" | "upload" | "up" => complete_path(text, cursor),
         "react" | "unreact" => complete_emoji(text, cursor, store),
 
         "invite" => complete_users(text, cursor, store),
