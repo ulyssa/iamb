@@ -707,11 +707,11 @@ impl DirectoryValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Directories {
-    pub cache: Option<PathBuf>,
-    pub data: Option<PathBuf>,
-    pub logs: Option<PathBuf>,
-    pub downloads: Option<PathBuf>,
-    pub image_previews: Option<PathBuf>,
+    pub cache: Option<String>,
+    pub data: Option<String>,
+    pub logs: Option<String>,
+    pub downloads: Option<String>,
+    pub image_previews: Option<String>,
 }
 
 impl Directories {
@@ -728,6 +728,11 @@ impl Directories {
     fn values(self) -> DirectoryValues {
         let cache = self
             .cache
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
             .or_else(|| {
                 let mut dir = dirs::cache_dir()?;
                 dir.push("iamb");
@@ -737,6 +742,11 @@ impl Directories {
 
         let data = self
             .data
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
             .or_else(|| {
                 let mut dir = dirs::data_dir()?;
                 dir.push("iamb");
@@ -744,19 +754,40 @@ impl Directories {
             })
             .expect("no dirs.data value configured!");
 
-        let logs = self.logs.unwrap_or_else(|| {
-            let mut dir = cache.clone();
-            dir.push("logs");
-            dir
-        });
+        let logs = self
+            .logs
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
+            .unwrap_or_else(|| {
+                let mut dir = cache.clone();
+                dir.push("logs");
+                dir
+            });
 
-        let downloads = self.downloads.or_else(dirs::download_dir);
+        let downloads = self
+            .downloads
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
+            .or_else(dirs::download_dir);
 
-        let image_previews = self.image_previews.unwrap_or_else(|| {
-            let mut dir = cache.clone();
-            dir.push("image_preview_downloads");
-            dir
-        });
+        let image_previews = self
+            .image_previews
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
+            .unwrap_or_else(|| {
+                let mut dir = cache.clone();
+                dir.push("image_preview_downloads");
+                dir
+            });
 
         DirectoryValues { cache, data, logs, downloads, image_previews }
     }
