@@ -45,3 +45,25 @@ jobs:
         reporter: 'github-check'
     - name: Run tests
       run: cargo test --locked
+
+  nix-flake-test:
+    name: Flake checks ❄️
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@v15
+        with:
+          name: iamb-ci
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+      - name: Flake check
+        run: |
+          nix flake show
+          nix flake check --print-build-logs
+
