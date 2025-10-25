@@ -51,16 +51,19 @@ url = "https://example.com"
 user_id = "@user:example.com"
 ```
 
-## Installation (building)
+## Installation (from source)
 
-Install Rust (1.83.0 or above) and Cargo, and then run:
+Install Rust and Cargo using [rustup], and then run from the directory
+containing the sources (ie: from a git clone):
 
-From the directory containing the sources (ie: from a git clone):
 ```
 cargo install --locked --path .
 ```
 
-Via `crates.io` (installs the latest tagged release on `crates.io`):
+## Installation (via `crates.io`)
+
+Install Rust (1.83.0 or above) and Cargo, and then run:
+
 ```
 cargo install --locked iamb
 ```
@@ -151,3 +154,4 @@ iamb is released under the [Apache License, Version 2.0].
 [crates-io-iamb]: https://crates.io/crates/iamb
 [iamb.chat]: https://iamb.chat
 [well_known_entry]: https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixclient
+[rustup]: https://rustup.rs/
