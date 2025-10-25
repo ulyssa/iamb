@@ -283,6 +283,9 @@ async fn load_older_one(
     limit: u32,
 ) -> MessageFetchResult {
     if let Some(room) = client.get_room(room_id) {
+        // Update cached encryption state. This is a noop if the state is already cached.
+        let _ = room.request_encryption_state().await;
+
         let mut opts = match &fetch_id {
             Some(id) => MessagesOptions::backward().from(id.as_str()),
             None => MessagesOptions::backward(),
