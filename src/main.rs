@@ -663,6 +663,13 @@ impl Application {
 
                 Err(UIError::NeedConfirm(prompt))
             },
+            HomeserverAction::Forget => {
+                let client = &store.application.worker.client;
+                for room in client.left_rooms() {
+                    room.forget().await.map_err(IambError::from)?;
+                }
+                Ok(vec![])
+            },
         }
     }
 

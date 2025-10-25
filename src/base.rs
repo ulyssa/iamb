@@ -491,6 +491,8 @@ pub enum HomeserverAction {
     /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
     Logout(String, bool),
+    /// Forget all left rooms
+    Forget,
 }
 
 /// An action performed against the user's room keys.
