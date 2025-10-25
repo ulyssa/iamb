@@ -392,6 +392,7 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_) => {
                         let msg = "Cannot react to a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -430,6 +431,7 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_) => {
                         let msg = "Cannot redact already redacted message";
                         let err = UIError::Failure(msg.into());
@@ -478,6 +480,7 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_) => {
                         let msg = "Cannot unreact to a redacted message";
                         let err = UIError::Failure(msg.into());

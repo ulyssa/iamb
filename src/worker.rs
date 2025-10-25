@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
+use matrix_sdk::ruma::events::sticker::StickerEventContent;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -360,6 +361,16 @@ fn load_insert(
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
                         info.insert_reaction(ev);
+                    },
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
+                        info.insert_sticker(
+                            room_id.clone(),
+                            store.clone(),
+                            picker.clone(),
+                            ev,
+                            settings,
+                            client.media(),
+                        );
                     },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
@@ -1036,6 +1047,38 @@ impl ClientWorker {
                     let info = locked.application.get_room_info(room_id.to_owned());
                     update_event_receipts(info, &room, ev.event_id()).await;
                     info.insert_reaction(ev.into_full_event(room_id.to_owned()));
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |ev: SyncMessageLikeEvent<StickerEventContent>,
+             room: MatrixRoom,
+             client: Client,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+
+                    let mut locked = store.lock().await;
+
+                    let sender = ev.sender().to_owned();
+                    let _ = locked.application.presences.get_or_default(sender);
+
+                    let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
+
+                    let info = rooms.get_or_default(room_id.to_owned());
+
+                    update_event_receipts(info, &room, ev.event_id()).await;
+
+                    let full_ev = ev.into_full_event(room_id.to_owned());
+                    info.insert_sticker(
+                        room_id.to_owned(),
+                        store.clone(),
+                        picker.clone(),
+                        full_ev,
+                        settings,
+                        client.media(),
+                    );
                 }
             },
         );
