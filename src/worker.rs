@@ -1087,11 +1087,15 @@ impl ClientWorker {
                 async move {
                     let room_id = room.room_id();
                     let room_info = room.clone_info();
-                    let room_version = room_info.room_version().unwrap_or(&RoomVersionId::V1);
+                    let rules = &room_info
+                        .room_version()
+                        .and_then(RoomVersionId::rules)
+                        .unwrap_or(RoomVersionId::V1.rules().unwrap())
+                        .redaction;
 
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
-                    info.redact(ev, room_version);
+                    info.redact(ev, rules);
                 }
             },
         );
@@ -1421,7 +1425,7 @@ impl ClientWorker {
 
         let resp = self.client.send(req).await.map_err(IambError::from)?;
 
-        let rooms = resp.rooms.into_iter().map(|chunk| chunk.room_id).collect();
+        let rooms = resp.rooms.into_iter().map(|chunk| chunk.summary.room_id).collect();
 
         Ok(rooms)
     }
