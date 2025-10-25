@@ -65,6 +65,7 @@ url = {version = "^2.2.2", features = ["serde"]}
 edit = "0.1.4"
 humansize = "2.0.0"
 linkify = "0.10.0"
+shellexpand = "3.1.1"
 
 [dependencies.comrak]
 version = "0.22.0"

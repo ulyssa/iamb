@@ -641,7 +641,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 state.set(items);
 
                 List::new(store)
-                    .empty_message("You do not have rooms or dms yet")
+                    .empty_message("You do not have any unreads yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
                     .render(area, buf, state);
