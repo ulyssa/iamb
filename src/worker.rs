@@ -2,7 +2,7 @@
 //!
 //! The worker thread handles asynchronous work, and can receive messages from the main thread that
 //! block on a reply from the async worker.
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
@@ -16,7 +16,7 @@ use gethostname::gethostname;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
-use tracing::{error, warn};
+use tracing::{error, info, warn};
 use url::Url;
 
 use matrix_sdk::{
@@ -51,7 +51,7 @@ use matrix_sdk::{
             room::{
                 encryption::RoomEncryptionEventContent,
                 member::OriginalSyncRoomMemberEvent,
-                message::{MessageType, RoomMessageEventContent},
+                message::{MessageType, Relation, RoomMessageEvent, RoomMessageEventContent},
                 name::RoomNameEventContent,
                 redaction::OriginalSyncRoomRedactionEvent,
             },
@@ -59,7 +59,9 @@ use matrix_sdk::{
             typing::SyncTypingEvent,
             AnyInitialStateEvent,
             AnyMessageLikeEvent,
+            AnySyncMessageLikeEvent,
             AnySyncStateEvent,
+            AnySyncTimelineEvent,
             AnyTimelineEvent,
             EmptyStateKey,
             InitialStateEvent,
@@ -71,6 +73,7 @@ use matrix_sdk::{
         serde::Raw,
         EventEncryptionAlgorithm,
         EventId,
+        MilliSecondsSinceUnixEpoch,
         OwnedEventId,
         OwnedRoomId,
         OwnedRoomOrAliasId,
@@ -116,7 +119,7 @@ const IAMB_DEVICE_NAME: &str = "iamb";
 const IAMB_USER_AGENT: &str = "iamb";
 const MIN_MSG_LOAD: u32 = 50;
 
-type MessageFetchResult = IambResult<(Option<String>, Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>)>;
+type MessageFetchResult = IambResult<(Option<String>, Vec<(AnyTimelineEvent, Vec<OwnedUserId>, bool)>)>;
 
 fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
@@ -292,11 +295,67 @@ async fn load_older_one(
         let Messages { end, chunk, .. } = room.messages(opts).await.map_err(IambError::from)?;
 
         let mut msgs = vec![];
+        // Track which events we've already seen the latest version of
+        // Since events come in reverse chronological order, the first edit we see is the latest
+        let mut seen_latest_edits: HashMap<OwnedEventId, OwnedEventId> = HashMap::new();
+        // Track original events that have bundled replacements
+        let mut has_bundled_replacement: HashSet<OwnedEventId> = HashSet::new();
 
         for ev in chunk.into_iter() {
-            let Ok(msg) = ev.into_raw().deserialize() else {
+            let raw = ev.into_raw();
+
+            // Check if this is a live message using centralized detection
+            let is_live = crate::message::live_detection::has_live_marker_in_raw(&raw);
+
+            // Check for bundled relations
+            let raw_json_str = raw.json().get();
+            if let Ok(json_value) = serde_json::from_str::<serde_json::Value>(raw_json_str) {
+                if let Some(unsigned) = json_value.get("unsigned") {
+                    if let Some(relations) = unsigned.get("m.relations") {
+                        if relations.get("m.replace").is_some() {
+                            // This event has bundled replacement - track it
+                            if let Some(event_id_val) = json_value.get("event_id") {
+                                if let Some(event_id_str) = event_id_val.as_str() {
+                                    if let Ok(event_id) = OwnedEventId::try_from(event_id_str) {
+                                        has_bundled_replacement.insert(event_id);
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            let Ok(msg) = raw.deserialize() else {
                 continue;
             };
+
+            // Skip obsolete edits
+            if let AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(ref room_msg)) = msg {
+                if let SyncMessageLikeEvent::Original(ref orig) = room_msg {
+                    if let Some(Relation::Replacement(ref repl)) = &orig.content.relates_to {
+                        let target_id = &repl.event_id;
+
+                        // Check if we already have a newer edit for this target
+                        if seen_latest_edits.contains_key(target_id) {
+                            // Skip this older edit
+                            tracing::debug!("Skipping obsolete edit {} for {}", msg.event_id(), target_id);
+                            continue;
+                        }
+
+                        // Check if the original has bundled replacement
+                        if has_bundled_replacement.contains(target_id) {
+                            // Skip this edit as the original already has bundled latest version
+                            tracing::debug!("Skipping edit {} - original {} has bundled replacement",
+                                msg.event_id(), target_id);
+                            continue;
+                        }
+
+                        // This is the latest edit we've seen for this target
+                        seen_latest_edits.insert(target_id.clone(), msg.event_id().to_owned());
+                    }
+                }
+            }
 
             let event_id = msg.event_id();
             let receipts = match room
@@ -311,7 +370,7 @@ async fn load_older_one(
             };
 
             let msg = msg.into_full_event(room_id.to_owned());
-            msgs.push((msg, receipts));
+            msgs.push((msg, receipts, is_live));
         }
 
         Ok((end, msgs))
@@ -333,7 +392,12 @@ fn load_insert(
 
     match res {
         Ok((fetch_id, msgs)) => {
-            for (msg, receipts) in msgs.into_iter() {
+            // First pass: collect all messages and categorize them
+            let mut normal_messages = Vec::new();
+            let mut replacement_messages = Vec::new();
+            let mut other_events = Vec::new();
+
+            for (msg, receipts, is_live) in msgs.into_iter() {
                 let sender = msg.sender().to_owned();
                 let _ = presences.get_or_default(sender);
 
@@ -343,29 +407,139 @@ fn load_insert(
 
                 match msg {
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
-                        info.insert_encrypted(msg);
+                        other_events.push(AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)));
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
-                        info.insert_with_preview(
-                            room_id.clone(),
-                            store.clone(),
-                            picker.clone(),
-                            msg,
-                            settings,
-                            client.media(),
-                        );
+                        // Check if this is a replacement/edit event
+                        if let RoomMessageEvent::Original(ref orig) = msg {
+                            if let Some(Relation::Replacement(_)) = &orig.content.relates_to {
+                                // This is an edit - save it for later processing
+                                // The is_live flag is already determined from the raw event
+                                replacement_messages.push((msg, is_live));
+                            } else {
+                                // Normal message
+                                normal_messages.push(msg);
+                            }
+                        } else {
+                            // Other message types (redacted, etc.)
+                            normal_messages.push(msg);
+                        }
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
-                        info.insert_reaction(ev);
+                        other_events.push(AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)));
                     },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
                     },
                     AnyTimelineEvent::State(msg) => {
                         if settings.tunables.state_event_display {
-                            info.insert_any_state(msg.into());
+                            other_events.push(AnyTimelineEvent::State(msg));
                         }
                     },
+                }
+            }
+
+            // Second pass: insert normal messages first
+            info!("[LOADING] Processing {} normal messages", normal_messages.len());
+            for msg in normal_messages {
+                let event_id = msg.event_id();
+                let body = if let RoomMessageEvent::Original(ref orig) = msg {
+                    Some(orig.content.body())
+                } else {
+                    None
+                };
+                info!(
+                    "[MESSAGE] Loading normal message {} with body: {:?}",
+                    event_id,
+                    body
+                );
+                info.insert_with_preview(
+                    room_id.clone(),
+                    store.clone(),
+                    picker.clone(),
+                    msg,
+                    settings,
+                    client.media(),
+                );
+            }
+
+            // Third pass: apply replacements after all messages are loaded
+            // Group replacements by the event they're replacing and keep only the latest
+            info!("[LOADING] Processing {} replacement messages", replacement_messages.len());
+
+            // Group replacements by target event ID, keeping only the latest one
+            let mut latest_replacements: HashMap<OwnedEventId, (MilliSecondsSinceUnixEpoch, RoomMessageEvent, bool)> = HashMap::new();
+
+            for (msg, is_live) in replacement_messages {
+                if let RoomMessageEvent::Original(ref orig) = msg {
+                    if let Some(Relation::Replacement(ref repl)) = &orig.content.relates_to {
+                        let target_id = repl.event_id.clone();
+                        let timestamp = orig.origin_server_ts;
+
+                        // Keep only the latest replacement for each target
+                        match latest_replacements.get(&target_id) {
+                            Some((existing_ts, _, _)) if existing_ts > &timestamp => {
+                                // Skip older replacement
+                                info!(
+                                    "[M.REPLACE] Skipping older replacement {} -> {} (ts: {:?}, is_live: {})",
+                                    msg.event_id(),
+                                    target_id,
+                                    timestamp,
+                                    is_live
+                                );
+                            }
+                            _ => {
+                                // This is newer or first, keep it
+                                info!(
+                                    "[M.REPLACE] Keeping replacement {} -> {} (ts: {:?}, is_live: {})",
+                                    msg.event_id(),
+                                    target_id,
+                                    timestamp,
+                                    is_live
+                                );
+                                latest_replacements.insert(target_id.clone(), (timestamp, msg.clone(), is_live));
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Apply only the latest replacement for each message
+            info!("[LOADING] Applying {} latest replacements", latest_replacements.len());
+            for (target_id, (_timestamp, msg, is_live)) in latest_replacements {
+                if let RoomMessageEvent::Original(ref orig) = msg {
+                    info!(
+                        "[M.REPLACE] Applying LATEST replacement {} -> {} with body: {:?}, is_live: {}",
+                        msg.event_id(),
+                        target_id,
+                        orig.content.body(),
+                        is_live
+                    );
+
+                    // Update live status based on the replacement's is_live flag
+                    // The is_live flag comes from centralized detection in load_older_one
+                    if is_live {
+                        info.live_message_ids.insert(target_id.clone());
+                    } else {
+                        info.live_message_ids.remove(&target_id);
+                    }
+                }
+                info.insert(msg);
+            }
+
+            // Fourth pass: handle other events
+            for event in other_events {
+                match event {
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
+                        info.insert_encrypted(msg);
+                    },
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
+                        info.insert_reaction(ev);
+                    },
+                    AnyTimelineEvent::State(msg) => {
+                        info.insert_any_state(msg.into());
+                    },
+                    _ => {}
                 }
             }
 
@@ -976,18 +1150,26 @@ impl ClientWorker {
         );
 
         let _ = self.client.add_event_handler(
-            |ev: SyncMessageLikeEvent<RoomMessageEventContent>,
+            |ev: Raw<SyncMessageLikeEvent<RoomMessageEventContent>>,
              room: MatrixRoom,
              client: Client,
              store: Ctx<AsyncProgramStore>| {
                 async move {
                     let room_id = room.room_id();
 
-                    if let Some(msg) = ev.as_original() {
-                        if let MessageType::VerificationRequest(_) = msg.content.msgtype {
+                    // Check for live marker in raw JSON
+                    let is_live = crate::message::live_detection::has_live_marker_in_raw(&ev);
+
+                    // Deserialize the event
+                    let Ok(msg_ev) = ev.deserialize() else {
+                        return;
+                    };
+
+                    if let Some(orig) = msg_ev.as_original() {
+                        if let MessageType::VerificationRequest(_) = orig.content.msgtype {
                             if let Some(request) = client
                                 .encryption()
-                                .get_verification_request(ev.sender(), ev.event_id())
+                                .get_verification_request(msg_ev.sender(), msg_ev.event_id())
                                 .await
                             {
                                 request.accept().await.expect("Failed to accept request");
@@ -997,15 +1179,30 @@ impl ClientWorker {
 
                     let mut locked = store.lock().await;
 
-                    let sender = ev.sender().to_owned();
+                    let sender = msg_ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
                     let info = rooms.get_or_default(room_id.to_owned());
 
-                    update_event_receipts(info, &room, ev.event_id()).await;
+                    update_event_receipts(info, &room, msg_ev.event_id()).await;
 
-                    let full_ev = ev.into_full_event(room_id.to_owned());
+                    // Update live_message_ids based on event type
+                    if let Some(orig) = msg_ev.as_original() {
+                        if let Some(Relation::Replacement(ref repl)) = &orig.content.relates_to {
+                            // Update live status for the target message
+                            if is_live {
+                                info.live_message_ids.insert(repl.event_id.clone());
+                            } else {
+                                info.live_message_ids.remove(&repl.event_id);
+                            }
+                        } else if is_live {
+                            // New live message
+                            info.live_message_ids.insert(msg_ev.event_id().to_owned());
+                        }
+                    }
+
+                    let full_ev = msg_ev.into_full_event(room_id.to_owned());
                     info.insert_with_preview(
                         room_id.to_owned(),
                         store.clone(),

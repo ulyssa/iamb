@@ -178,6 +178,7 @@ pub enum MessageAction {
     /// and error when it doesn't recognize it. The second [bool] argument forces it to be
     /// interpreted literally when it is `true`.
     Unreact(Option<String>, bool),
+
 }
 
 /// An action taken in the currently selected space.
@@ -900,6 +901,9 @@ pub struct RoomInfo {
     /// A map of message identifiers to thread replies.
     threads: HashMap<OwnedEventId, Messages>,
 
+    /// Set of event IDs for messages that are live (being typed)
+    pub live_message_ids: HashSet<OwnedEventId>,
+
     /// Whether the scrollback for this room is currently being fetched.
     pub fetching: bool,
 
@@ -931,6 +935,7 @@ impl Default for RoomInfo {
             user_receipts: Default::default(),
             reactions: Default::default(),
             threads: Default::default(),
+            live_message_ids: Default::default(),
             fetching: Default::default(),
             fetch_id: Default::default(),
             fetch_last: Default::default(),
@@ -1089,6 +1094,7 @@ impl RoomInfo {
         let event_id = msg.event_id;
         let new_msgtype = msg.new_content;
 
+
         let Some(EventLocation::Message(thread, key)) = self.keys.get(&event_id) else {
             return;
         };
@@ -1105,9 +1111,12 @@ impl RoomInfo {
             return;
         };
 
+        // Update live status based on live_message_ids
+        msg.is_live = self.live_message_ids.contains(&event_id);
+
         match &mut msg.event {
             MessageEvent::Original(orig) => {
-                orig.content.apply_replacement(new_msgtype);
+                orig.content.apply_replacement(new_msgtype.clone());
             },
             MessageEvent::Local(_, content) => {
                 content.apply_replacement(new_msgtype);
@@ -1187,22 +1196,37 @@ impl RoomInfo {
         let event_id = msg.event_id().to_owned();
         let key = (msg.origin_server_ts().into(), event_id.clone());
 
+        // Check if this is a live message
+        let is_live = self.live_message_ids.contains(&event_id);
+
         let loc = EventLocation::Message(None, key.clone());
-        self.keys.insert(event_id, loc);
-        self.messages.insert_message(key, msg);
+        self.keys.insert(event_id.clone(), loc);
+
+        // Convert to Message and set is_live flag if needed
+        let mut message: Message = msg.into();
+        message.is_live = is_live;
+
+        self.messages.insert_message(key, message);
     }
 
     fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
         let event_id = msg.event_id().to_owned();
         let key = (msg.origin_server_ts().into(), event_id.clone());
 
+        // Check if this is a live message
+        let is_live = self.live_message_ids.contains(&event_id);
+
         let replies = self
             .threads
             .entry(thread_root.clone())
             .or_insert_with(|| Messages::thread(thread_root.clone()));
         let loc = EventLocation::Message(Some(thread_root), key.clone());
-        self.keys.insert(event_id, loc);
-        replies.insert_message(key, msg);
+        self.keys.insert(event_id.clone(), loc);
+
+        let mut message: Message = msg.into();
+        message.is_live = is_live;
+
+        replies.insert_message(key, message);
     }
 
     /// Insert a new message event.

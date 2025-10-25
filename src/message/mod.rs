@@ -48,7 +48,7 @@ use matrix_sdk::ruma::{
 };
 
 use ratatui::{
-    style::{Modifier as StyleModifier, Style},
+    style::{Color, Modifier as StyleModifier, Style},
     symbols::line::THICK_VERTICAL,
     text::{Line, Span, Text},
 };
@@ -67,10 +67,18 @@ use crate::{
 
 mod compose;
 mod html;
+mod live;
+pub mod live_detection;
 mod printer;
 mod state;
 
-pub use self::compose::text_to_message;
+pub use self::compose::text_to_message_with_command;
+pub use self::live::{
+    LiveMessageManager,
+    LiveMessageSession,
+    send_live_message_with_custom_fields,
+    send_live_update_with_custom_fields,
+};
 use self::state::{body_cow_state, html_state};
 pub use html::TreeGenState;
 
@@ -479,6 +487,7 @@ impl MessageEvent {
         )
     }
 
+
     pub fn body(&self) -> Cow<'_, str> {
         match self {
             MessageEvent::EncryptedOriginal(_) => "[Unable to decrypt message]".into(),
@@ -851,12 +860,16 @@ pub struct Message {
     pub downloaded: bool,
     pub html: Option<StyleTree>,
     pub image_preview: ImageStatus,
+    pub is_live: bool,
 }
 
 impl Message {
     pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
         let html = event.html();
         let downloaded = false;
+
+        // The is_live flag will be set explicitly by the caller if needed
+        let is_live = false;
 
         Message {
             event,
@@ -865,8 +878,10 @@ impl Message {
             downloaded,
             html,
             image_preview: ImageStatus::None,
+            is_live,
         }
     }
+
 
     pub fn reply_to(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
@@ -921,9 +936,15 @@ impl Message {
             style = style.add_modifier(StyleModifier::ITALIC);
         }
 
+        // Apply user color first if enabled (but it will be overridden for live messages)
         if settings.tunables.message_user_color {
             let color = settings.get_user_color(&self.sender);
             style = style.fg(color);
+        }
+
+        // Make live messages appear gray to indicate they're still being composed
+        if self.is_live {
+            style = style.fg(Color::Rgb(100, 100, 100));
         }
 
         return style;
@@ -1075,6 +1096,7 @@ impl Message {
             if self.downloaded {
                 msg.to_mut().push_str(" \u{2705}");
             }
+
 
             let mut proto = None;
             let placeholder = match &self.image_preview {
