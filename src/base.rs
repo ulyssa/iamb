@@ -1155,11 +1155,7 @@ impl RoomInfo {
             }
         });
 
-        let last_receipt = if last_receipt >= last_unthreaded {
-            last_receipt
-        } else {
-            last_unthreaded
-        };
+        let last_receipt = std::cmp::max(last_receipt, last_unthreaded);
 
         match (last_message, last_receipt) {
             (Some(((ts, _), _)), Some((read_ts, _))) => {
