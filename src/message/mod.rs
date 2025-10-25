@@ -727,22 +727,28 @@ impl<'a> MessageFormatter<'a> {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Option<ProtocolPreview<'a>> {
+        let reply_style = if settings.tunables.message_user_color {
+            style.patch(settings.get_user_color(&msg.sender))
+        } else {
+            style
+        };
+
         let width = self.width();
         let w = width.saturating_sub(2);
-        let (mut replied, proto) = msg.show_msg(w, style, true, settings);
+        let (mut replied, proto) = msg.show_msg(w, reply_style, true, settings);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
 
-        sender.style = sender.style.patch(style);
+        sender.style = sender.style.patch(reply_style);
 
         self.push_spans(
             Line::from(vec![
                 Span::styled(" ", style),
                 Span::styled(THICK_VERTICAL, style),
                 sender,
-                Span::styled(":", style),
-                space_span(trailing, style),
+                Span::styled(":", reply_style),
+                space_span(trailing, reply_style),
             ]),
             style,
             text,
@@ -761,7 +767,7 @@ impl<'a> MessageFormatter<'a> {
             line.spans.insert(0, Span::styled(" ", style));
         }
 
-        self.push_text(replied, style, text);
+        self.push_text(replied, reply_style, text);
 
         proto
     }
