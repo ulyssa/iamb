@@ -663,6 +663,13 @@ impl Application {
 
                 Err(UIError::NeedConfirm(prompt))
             },
+            HomeserverAction::Forget => {
+                let client = &store.application.worker.client;
+                for room in client.left_rooms() {
+                    room.forget().await.map_err(IambError::from)?;
+                }
+                Ok(vec![])
+            },
         }
     }
 
@@ -1036,7 +1043,7 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     match res {
         Err(UIError::Application(IambError::Matrix(e))) => {
             if let Some(ErrorKind::UnknownToken { .. }) = e.client_api_error_kind() {
-                print_exit("Server did not recognize our API token; did you log out from this session elsewhere?")
+                print_exit(format!("Server did not recognize our API token; did you log out from this session elsewhere?\nTry deleting `{}` to force a clean login.", settings.session_json.display()))
             } else {
                 print_exit(e)
             }

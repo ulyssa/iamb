@@ -200,6 +200,17 @@ fn iamb_leave(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_forget(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let forget = IambAction::Homeserver(HomeserverAction::Forget);
+    let step = CommandStep::Continue(forget.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_cancel(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -730,6 +741,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "leave".into(),
         aliases: vec![],
         f: iamb_leave,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "forget".into(),
+        aliases: vec![],
+        f: iamb_forget,
     });
     cmds.add_command(ProgramCommand {
         name: "members".into(),
