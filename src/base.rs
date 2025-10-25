@@ -1133,14 +1133,34 @@ impl RoomInfo {
     /// Indicates whether this room has unread messages.
     pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
         let last_message = self.messages.last_key_value();
+
         let last_receipt = self
             .user_receipts
             .get(&ReceiptThread::Main)
             .and_then(|receipts| receipts.get(&settings.profile.user_id));
+        let last_receipt = last_receipt.as_ref().and_then(|event_id| {
+            match &self.keys.get(*event_id)? {
+                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
+                EventLocation::Reaction(_) => None,
+            }
+        });
+
+        let last_unthreaded = self
+            .user_receipts
+            .get(&ReceiptThread::Unthreaded)
+            .and_then(|receipts| receipts.get(&settings.profile.user_id));
+        let last_unthreaded = last_unthreaded.as_ref().and_then(|event_id| {
+            match &self.keys.get(*event_id)? {
+                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
+                EventLocation::Reaction(_) => None,
+            }
+        });
+
+        let last_receipt = std::cmp::max(last_receipt, last_unthreaded);
 
         match (last_message, last_receipt) {
-            (Some(((ts, recent), _)), Some(last_read)) => {
-                UnreadInfo { unread: last_read != recent, latest: Some(*ts) }
+            (Some(((ts, _), _)), Some((read_ts, _))) => {
+                UnreadInfo { unread: ts > read_ts, latest: Some(*ts) }
             },
             (Some(((ts, _), _)), None) => {
                 // If we've never loaded/generated a room's receipt (example,
