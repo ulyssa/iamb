@@ -34,16 +34,7 @@
             lockFile = ./Cargo.lock;
           };
           nativeBuildInputs = [ pkg-config ];
-          buildInputs =
-            [ openssl ]
-            ++ lib.optionals stdenv.isDarwin (
-              with darwin.apple_sdk.frameworks;
-              [
-                AppKit
-                Security
-                Cocoa
-              ]
-            );
+          buildInputs = [ openssl ];
         };
 
         devShell = mkShell {
