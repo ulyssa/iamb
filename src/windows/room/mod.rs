@@ -120,19 +120,19 @@ fn hist_visibility_mode(name: impl Into<String>) -> IambResult<HistoryVisibility
 /// that operations like sending and accepting invites, opening the members window, etc., all work
 /// similarly.
 pub enum RoomState {
-    Chat(ChatState),
-    Space(SpaceState),
+    Chat(Box<ChatState>),
+    Space(Box<SpaceState>),
 }
 
 impl From<ChatState> for RoomState {
     fn from(chat: ChatState) -> Self {
-        RoomState::Chat(chat)
+        RoomState::Chat(Box::new(chat))
     }
 }
 
 impl From<SpaceState> for RoomState {
     fn from(space: SpaceState) -> Self {
-        RoomState::Space(space)
+        RoomState::Space(Box::new(space))
     }
 }
 
@@ -776,8 +776,8 @@ impl WindowOps<IambInfo> for RoomState {
 
     fn dup(&self, store: &mut ProgramStore) -> Self {
         match self {
-            RoomState::Chat(chat) => RoomState::Chat(chat.dup(store)),
-            RoomState::Space(space) => RoomState::Space(space.dup(store)),
+            RoomState::Chat(chat) => RoomState::Chat(Box::new(chat.dup(store))),
+            RoomState::Space(space) => RoomState::Space(Box::new(space.dup(store))),
         }
     }
 
