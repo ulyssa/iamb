@@ -13,6 +13,8 @@ use std::time::{Duration, Instant};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
+use matrix_sdk::ruma::events::room::MediaSource;
+use ratatui_image::picker::Picker;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -89,7 +91,9 @@ use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
 use crate::base::MessageNeed;
+use crate::config::ImagePreviewSize;
 use crate::notifications::register_notifications;
+use crate::preview::PreviewKind;
 use crate::{
     base::{
         AsyncProgramStore,
@@ -256,11 +260,10 @@ async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permit
         Plan::Messages(room_id, fetch_id, message_need) => {
             let limit = MIN_MSG_LOAD;
             let client = client.clone();
-            let store_clone = store.clone();
 
             let res = load_older_one(&client, &room_id, fetch_id, limit).await;
             let mut locked = store.lock().await;
-            load_insert(room_id, res, locked.deref_mut(), store_clone, message_need);
+            load_insert(room_id, res, locked.deref_mut(), message_need);
         },
         Plan::Members(room_id) => {
             let res = members_load(client, &room_id).await;
@@ -322,13 +325,11 @@ fn load_insert(
     room_id: OwnedRoomId,
     res: MessageFetchResult,
     locked: &mut ProgramStore,
-    store: AsyncProgramStore,
     message_needs: Vec<MessageNeed>,
 ) {
-    let ChatStore { presences, rooms, worker, picker, settings, .. } = &mut locked.application;
+    let ChatStore { presences, rooms, previews, settings, worker, .. } = &mut locked.application;
     let info = rooms.get_or_default(room_id.clone());
     info.fetching = false;
-    let client = &worker.client;
 
     match res {
         Ok((fetch_id, msgs)) => {
@@ -345,17 +346,10 @@ fn load_insert(
                         info.insert_encrypted(msg);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
-                        info.insert_with_preview(
-                            room_id.clone(),
-                            store.clone(),
-                            picker.clone(),
-                            msg,
-                            settings,
-                            client.media(),
-                        );
+                        info.insert_with_preview(msg, settings, previews, worker);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
-                        info.insert_reaction(ev);
+                        info.insert_reaction_with_preview(ev, settings, previews, worker);
                     },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
@@ -637,6 +631,7 @@ pub enum WorkerTask {
     TypingNotice(OwnedRoomId),
     Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
     VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
+    LoadImage(MediaSource, PreviewKind, ImagePreviewSize, Arc<Picker>, Arc<Semaphore>),
 }
 
 impl Debug for WorkerTask {
@@ -700,6 +695,15 @@ impl Debug for WorkerTask {
                     .field(&format_args!("_"))
                     .finish()
             },
+            WorkerTask::LoadImage(source, kind, size, _, _) => {
+                f.debug_tuple("WorkerTask::RenderImage")
+                    .field(source)
+                    .field(kind)
+                    .field(size)
+                    .field(&format_args!("_"))
+                    .field(&format_args!("_"))
+                    .finish()
+            },
         }
     }
 }
@@ -720,7 +724,10 @@ async fn create_client_inner(
         .build()
         .unwrap();
 
-    let req_config = RequestConfig::new().timeout(req_timeout).max_retry_time(req_timeout);
+    let req_config = RequestConfig::new()
+        .timeout(req_timeout)
+        .max_retry_time(req_timeout)
+        .retry_limit(8);
 
     // Set up the Matrix client for the selected profile.
     let builder = Client::builder()
@@ -752,7 +759,15 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
         res => res,
     };
 
-    res.expect("Failed to instantiate client")
+    let client = res.expect("Failed to instantiate client");
+
+    client
+        .media()
+        .set_media_retention_policy(settings.tunables.cache_policy)
+        .await
+        .expect("Failed to set cache policy");
+
+    client
 }
 
 #[derive(Clone)]
@@ -845,6 +860,19 @@ impl Requester {
 
         return response.recv();
     }
+
+    pub fn load_image(
+        &self,
+        source: MediaSource,
+        kind: PreviewKind,
+        size: ImagePreviewSize,
+        picker: Arc<Picker>,
+        permits: Arc<Semaphore>,
+    ) {
+        self.tx
+            .send(WorkerTask::LoadImage(source, kind, size, picker, permits))
+            .unwrap();
+    }
 }
 
 pub struct ClientWorker {
@@ -853,6 +881,9 @@ pub struct ClientWorker {
     client: Client,
     load_handle: Option<JoinHandle<()>>,
     sync_handle: Option<JoinHandle<()>>,
+
+    /// Take care when locking since worker commands are sent with the lock already hold
+    store: Option<AsyncProgramStore>,
 }
 
 impl ClientWorker {
@@ -865,6 +896,7 @@ impl ClientWorker {
             client: client.clone(),
             load_handle: None,
             sync_handle: None,
+            store: None,
         };
 
         tokio::spawn(async move {
@@ -937,6 +969,18 @@ impl ClientWorker {
             WorkerTask::VerifyRequest(user_id, reply) => {
                 assert!(self.initialized);
                 reply.send(self.verify_request(user_id).await);
+            },
+            WorkerTask::LoadImage(source, kind, size, picker, permits) => {
+                assert!(self.initialized);
+                tokio::spawn(crate::preview::load_image(
+                    self.store.clone().unwrap(),
+                    self.client.media(),
+                    source,
+                    kind,
+                    picker,
+                    permits,
+                    size,
+                ));
             },
         }
     }
@@ -1012,20 +1056,14 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
+                    let ChatStore { rooms, previews, settings, worker, .. } =
+                        &mut locked.application;
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     update_event_receipts(info, &room, ev.event_id()).await;
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_with_preview(
-                        room_id.to_owned(),
-                        store.clone(),
-                        picker.clone(),
-                        full_ev,
-                        settings,
-                        client.media(),
-                    );
+                    info.insert_with_preview(full_ev, settings, previews, worker);
                 }
             },
         );
@@ -1042,9 +1080,18 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let info = locked.application.get_room_info(room_id.to_owned());
+                    let ChatStore { rooms, previews, settings, worker, .. } =
+                        &mut locked.application;
+                    let info = rooms.get_or_default(room_id.to_owned());
+
                     update_event_receipts(info, &room, ev.event_id()).await;
-                    info.insert_reaction(ev.into_full_event(room_id.to_owned()));
+
+                    info.insert_reaction_with_preview(
+                        ev.into_full_event(room_id.to_owned()),
+                        settings,
+                        previews,
+                        worker,
+                    );
                 }
             },
         );
@@ -1254,6 +1301,8 @@ impl ClientWorker {
                 }
             },
         );
+
+        self.store = Some(store.clone());
 
         self.load_handle = tokio::spawn({
             let client = self.client.clone();

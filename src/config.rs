@@ -12,6 +12,7 @@ use std::process;
 
 use clap::Parser;
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
@@ -489,12 +490,14 @@ pub struct Notifications {
 
 #[derive(Clone)]
 pub struct ImagePreviewValues {
+    pub lazy_load: bool,
     pub size: ImagePreviewSize,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct ImagePreview {
+    pub lazy_load: Option<bool>,
     pub size: Option<ImagePreviewSize>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
@@ -502,13 +505,14 @@ pub struct ImagePreview {
 impl ImagePreview {
     fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
+            lazy_load: self.lazy_load.unwrap_or(true),
             size: self.size.unwrap_or_default(),
             protocol: self.protocol,
         }
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Copy, Deserialize, Debug)]
 pub struct ImagePreviewSize {
     pub width: usize,
     pub height: usize,
@@ -581,6 +585,7 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub cache_policy: MediaRetentionPolicy,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -609,6 +614,7 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    pub cache_policy: Option<MediaRetentionPolicy>,
 }
 
 impl Tunables {
@@ -643,6 +649,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            cache_policy: self.cache_policy.or(other.cache_policy),
         }
     }
 
@@ -673,6 +680,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            cache_policy: self.cache_policy.unwrap_or_default(),
         }
     }
 }
@@ -683,19 +691,17 @@ pub struct DirectoryValues {
     pub data: PathBuf,
     pub logs: PathBuf,
     pub downloads: Option<PathBuf>,
-    pub image_previews: PathBuf,
 }
 
 impl DirectoryValues {
     fn create_dir_all(&self) -> std::io::Result<()> {
         use std::fs::create_dir_all;
 
-        let Self { cache, data, logs, downloads, image_previews } = self;
+        let Self { cache, data, logs, downloads } = self;
 
         create_dir_all(cache)?;
         create_dir_all(data)?;
         create_dir_all(logs)?;
-        create_dir_all(image_previews)?;
 
         if let Some(downloads) = downloads {
             create_dir_all(downloads)?;
@@ -711,7 +717,6 @@ pub struct Directories {
     pub data: Option<String>,
     pub logs: Option<String>,
     pub downloads: Option<String>,
-    pub image_previews: Option<String>,
 }
 
 impl Directories {
@@ -721,7 +726,6 @@ impl Directories {
             data: self.data.or(other.data),
             logs: self.logs.or(other.logs),
             downloads: self.downloads.or(other.downloads),
-            image_previews: self.image_previews.or(other.image_previews),
         }
     }
 
@@ -776,20 +780,7 @@ impl Directories {
             })
             .or_else(dirs::download_dir);
 
-        let image_previews = self
-            .image_previews
-            .map(|dir| {
-                let dir = shellexpand::full(&dir)
-                    .expect("unable to expand shell variables in dirs.cache");
-                Path::new(dir.as_ref()).to_owned()
-            })
-            .unwrap_or_else(|| {
-                let mut dir = cache.clone();
-                dir.push("image_preview_downloads");
-                dir
-            });
-
-        DirectoryValues { cache, data, logs, downloads, image_previews }
+        DirectoryValues { cache, data, logs, downloads }
     }
 }
 
