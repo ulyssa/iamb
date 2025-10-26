@@ -41,6 +41,7 @@ use crate::{
     util::{join_cell_text, space_text},
 };
 
+const CODE_BACKGROUND: Color = Color::Indexed(236);
 const QUOTE_COLOR: Color = Color::Indexed(236);
 
 /// Generate bullet points from a [ListStyle].
@@ -97,12 +98,14 @@ impl ListStyle {
 pub type StyleTreeChildren = Vec<StyleTreeNode>;
 
 /// Type of contents in a table cell.
+#[derive(Debug)]
 pub enum CellType {
     Data,
     Header,
 }
 
 /// A collection of cells for a single row in a table.
+#[derive(Debug)]
 pub struct TableRow {
     cells: Vec<(CellType, StyleTreeNode)>,
 }
@@ -120,6 +123,7 @@ impl TableRow {
 }
 
 /// A collection of rows in a table.
+#[derive(Debug)]
 pub struct TableSection {
     rows: Vec<TableRow>,
 }
@@ -137,6 +141,7 @@ impl TableSection {
 }
 
 /// A table.
+#[derive(Debug)]
 pub struct Table {
     caption: Option<Box<StyleTreeNode>>,
     sections: Vec<TableSection>,
@@ -266,6 +271,7 @@ impl Table {
 }
 
 /// A processed HTML element that we can render to the terminal.
+#[derive(Debug)]
 pub enum StyleTreeNode {
     Anchor(Box<StyleTreeNode>, char, Url),
     Blockquote(Box<StyleTreeNode>),
@@ -365,7 +371,10 @@ impl StyleTreeNode {
                 }
             },
             StyleTreeNode::Code(child, _) => {
+                let style = style.bg(CODE_BACKGROUND);
+                let old = printer.set_base_style(style);
                 child.print(printer, style);
+                printer.set_base_style(old);
             },
             StyleTreeNode::Header(child, level) => {
                 let style = style.add_modifier(StyleModifier::BOLD);
@@ -1443,6 +1452,7 @@ pub mod tests {
         );
         let tree = parse_matrix_html(s);
         let text = tree.to_text(25, Style::default(), true, &settings);
+        let code_style = Style::new().bg(CODE_BACKGROUND);
         assert_eq!(text.lines.len(), 6);
         assert_eq!(
             text.lines[0],
@@ -1456,19 +1466,19 @@ pub mod tests {
             text.lines[1],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("fn"),
-                Span::raw(" "),
-                Span::raw("hello"),
-                Span::raw("("),
-                Span::raw(")"),
-                Span::raw(" "),
-                Span::raw("-"),
-                Span::raw(">"),
-                Span::raw(" "),
-                Span::raw("usize"),
-                Span::raw(" "),
-                Span::raw("{"),
-                Span::raw("  "),
+                Span::styled("fn", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("hello", code_style),
+                Span::styled("(", code_style),
+                Span::styled(")", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("-", code_style),
+                Span::styled(">", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("usize", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("{", code_style),
+                Span::styled("  ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1476,13 +1486,13 @@ pub mod tests {
             text.lines[2],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw(" "),
-                Span::raw("   "),
-                Span::raw("/"),
-                Span::raw("/"),
-                Span::raw(" "),
-                Span::raw("weired"),
-                Span::raw("          "),
+                Span::styled(" ", code_style),
+                Span::styled("   ", code_style),
+                Span::styled("/", code_style),
+                Span::styled("/", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("weired", code_style),
+                Span::styled("          ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1490,12 +1500,12 @@ pub mod tests {
             text.lines[3],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("    "),
-                Span::raw("return"),
-                Span::raw(" "),
-                Span::raw("5"),
-                Span::raw(";"),
-                Span::raw("          "),
+                Span::styled("    ", code_style),
+                Span::styled("return", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("5", code_style),
+                Span::styled(";", code_style),
+                Span::styled("          ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1503,8 +1513,8 @@ pub mod tests {
             text.lines[4],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("}"),
-                Span::raw(" ".repeat(22)),
+                Span::styled("}", code_style),
+                Span::styled(" ".repeat(22), code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
