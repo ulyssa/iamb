@@ -273,9 +273,9 @@ impl ChatState {
                             let mut filename_incr = filename.clone();
                             for n in 1..=1000 {
                                 if let Some(ext) = ext.and_then(OsStr::to_str) {
-                                    filename_incr.set_file_name(format!("{}-{}.{}", stem, n, ext));
+                                    filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
                                 } else {
-                                    filename_incr.set_file_name(format!("{}-{}", stem, n));
+                                    filename_incr.set_file_name(format!("{stem}-{n}"));
                                 }
 
                                 if !filename_incr.exists() {
@@ -401,7 +401,7 @@ impl ChatState {
                 };
 
                 if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
-                    let msg = format!("You’ve already reacted to this message with {}", emoji);
+                    let msg = format!("You’ve already reacted to this message with {emoji}");
                     let err = UIError::Failure(msg);
 
                     return Err(err);

@@ -2049,7 +2049,7 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
         // Complete Emoji shortcodes.
         Some(':') => {
             let list = store.emojis.complete(&id[1..]);
-            let iter = list.into_iter().take(200).map(|s| format!(":{}:", s));
+            let iter = list.into_iter().take(200).map(|s| format!(":{s}:"));
 
             return iter.collect();
         },
@@ -2195,7 +2195,7 @@ pub mod tests {
         ));
 
         for i in 0..3 {
-            let event_id = format!("$house_{}", i);
+            let event_id = format!("$house_{i}");
             info.insert_reaction(MessageLikeEvent::Original(
                 matrix_sdk::ruma::events::OriginalMessageLikeEvent {
                     content: content.clone(),
@@ -2214,7 +2214,7 @@ pub mod tests {
         ));
 
         for i in 0..2 {
-            let event_id = format!("$smile_{}", i);
+            let event_id = format!("$smile_{i}");
             info.insert_reaction(MessageLikeEvent::Original(
                 matrix_sdk::ruma::events::OriginalMessageLikeEvent {
                     content: content.clone(),
@@ -2228,7 +2228,7 @@ pub mod tests {
         }
 
         for i in 2..4 {
-            let event_id = format!("$smile_{}", i);
+            let event_id = format!("$smile_{i}");
             info.insert_reaction(MessageLikeEvent::Original(
                 matrix_sdk::ruma::events::OriginalMessageLikeEvent {
                     content: content.clone(),

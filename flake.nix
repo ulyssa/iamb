@@ -30,16 +30,15 @@
         rustToolchain = fenix.packages.${system}.fromToolchainFile {
           file = ./rust-toolchain.toml;
           # When the file changes, this hash must be updated.
-          sha256 = "sha256-Hn2uaQzRLidAWpfmRwSRdImifGUCAb9HeAqTYFXWeQk=";
+          sha256 = "sha256-Qxt8XAuaUR2OMdKbN4u8dBJOhSHxS+uS06Wl9+flVEk=";
         };
 
         # Nightly toolchain for rustfmt (pinned to current flake lock)
         # Note that the github CI uses "current nightly" for formatting, it 's not pinned.
-        rustNightly = fenix.packages.${system}.latest.toolchain;
-        rustNightlyFmt = fenix.packages.${system}.latest.rustfmt;
+        rustNightly = fenix.packages.${system}.latest;
 
         craneLib = (crane.mkLib pkgs).overrideToolchain rustToolchain;
-        craneLibNightly = (crane.mkLib pkgs).overrideToolchain rustNightly;
+        craneLibNightly = (crane.mkLib pkgs).overrideToolchain rustNightly.toolchain;
 
         src = lib.fileset.toSource {
           root = ./.;
@@ -97,11 +96,15 @@
           checks = self.checks.${system};
 
           packages = with pkgs; [
-            rustNightlyFmt
             cargo-tarpaulin
             cargo-watch
             sqlite
           ];
+
+          shellHook = ''
+            # Prepend nightly rustfmt to PATH.
+            export PATH="${rustNightly.rustfmt}/bin:$PATH"
+          '';
         };
       }
     );

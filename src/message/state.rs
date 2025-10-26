@@ -121,11 +121,11 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 
             match (old_canon, new_canon) {
                 (None, Some(canon)) => {
-                    format!("* updated the canonical alias for the room to: {}", canon)
+                    format!("* updated the canonical alias for the room to: {canon}")
                 },
                 (Some(old), Some(new)) => {
                     if old != new {
-                        format!("* updated the canonical alias for the room to: {}", new)
+                        format!("* updated the canonical alias for the room to: {new}")
                     } else {
                         return Cow::Borrowed("* removed the canonical alias for the room");
                     }
@@ -187,10 +187,10 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 
             match change {
                 MembershipChange::None => {
-                    format!("* did nothing to {}", state_key)
+                    format!("* did nothing to {state_key}")
                 },
                 MembershipChange::Error => {
-                    format!("* failed to calculate membership change to {}", state_key)
+                    format!("* failed to calculate membership change to {state_key}")
                 },
                 MembershipChange::Joined => {
                     return Cow::Borrowed("* joined the room");
@@ -199,19 +199,19 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                     return Cow::Borrowed("* left the room");
                 },
                 MembershipChange::Banned => {
-                    format!("* banned {} from the room", state_key)
+                    format!("* banned {state_key} from the room")
                 },
                 MembershipChange::Unbanned => {
-                    format!("* unbanned {} from the room", state_key)
+                    format!("* unbanned {state_key} from the room")
                 },
                 MembershipChange::Kicked => {
-                    format!("* kicked {} from the room", state_key)
+                    format!("* kicked {state_key} from the room")
                 },
                 MembershipChange::Invited => {
-                    format!("* invited {} to the room", state_key)
+                    format!("* invited {state_key} to the room")
                 },
                 MembershipChange::KickedAndBanned => {
-                    format!("* kicked and banned {} from the room", state_key)
+                    format!("* kicked and banned {state_key} from the room")
                 },
                 MembershipChange::InvitationAccepted => {
                     return Cow::Borrowed("* accepted an invitation to join the room");
@@ -220,26 +220,26 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                     return Cow::Borrowed("* rejected an invitation to join the room");
                 },
                 MembershipChange::InvitationRevoked => {
-                    format!("* revoked an invitation for {} to join the room", state_key)
+                    format!("* revoked an invitation for {state_key} to join the room")
                 },
                 MembershipChange::Knocked => {
                     return Cow::Borrowed("* would like to join the room");
                 },
                 MembershipChange::KnockAccepted => {
-                    format!("* accepted the room knock from {}", state_key)
+                    format!("* accepted the room knock from {state_key}")
                 },
                 MembershipChange::KnockRetracted => {
                     return Cow::Borrowed("* retracted their room knock");
                 },
                 MembershipChange::KnockDenied => {
-                    format!("* rejected the room knock from {}", state_key)
+                    format!("* rejected the room knock from {state_key}")
                 },
                 MembershipChange::ProfileChanged { displayname_change, avatar_url_change } => {
                     match (displayname_change, avatar_url_change) {
                         (Some(change), avatar_change) => {
                             let mut m = match (change.old, change.new) {
                                 (None, Some(new)) => {
-                                    format!("* set their display name to {:?}", new)
+                                    format!("* set their display name to {new:?}")
                                 },
                                 (Some(old), Some(new)) => {
                                     format!("* changed their display name from {old} to {new}")
@@ -280,7 +280,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                     }
                 },
                 ev => {
-                    format!("* made an unknown membership change to {}: {:?}", state_key, ev)
+                    format!("* made an unknown membership change to {state_key}: {ev:?}")
                 },
             }
         },
@@ -727,7 +727,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                 ev => {
                     let prefix =
                         StyleTreeNode::Text("* made an unknown membership change to ".into());
-                    let suffix = StyleTreeNode::Text(format!(": {:?}", ev).into());
+                    let suffix = StyleTreeNode::Text(format!(": {ev:?}").into());
                     vec![prefix, user_id, suffix]
                 },
             }

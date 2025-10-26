@@ -932,10 +932,7 @@ impl ApplicationSettings {
         } else {
             loop {
                 println!("\nNo profile specified. Available profiles:");
-                profiles
-                    .keys()
-                    .enumerate()
-                    .for_each(|(i, name)| println!("{}: {}", i, name));
+                profiles.keys().enumerate().for_each(|(i, name)| println!("{i}: {name}"));
 
                 print!("Select a number or 'q' to quit: ");
                 let _ = std::io::stdout().flush();
