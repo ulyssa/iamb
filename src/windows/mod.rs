@@ -9,6 +9,7 @@
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::fmt::{self, Display};
 use std::ops::Deref;
+use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -856,8 +857,11 @@ impl Window<IambInfo> for IambWindow {
 
             IambWindow::open(id, store)
         } else {
-            let room_id = worker.join_room(name.clone())?;
-            names.insert(name, room_id.clone());
+            let room_id = worker.join_room(name.clone(), vec![])?;
+
+            if let Ok(alias) = OwnedRoomAliasId::from_str(&name) {
+                names.insert(alias, room_id.clone());
+            }
 
             let (room, name, tags) = store.application.worker.get_room(room_id)?;
             let room = RoomState::new(room, None, name, tags, store);
@@ -900,7 +904,7 @@ impl GenericChatItem {
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
-            store.application.names.insert(alias.to_string(), room_id.to_owned());
+            store.application.names.insert(alias.to_owned(), room_id.to_owned());
         }
 
         GenericChatItem { room_info, name, alias, is_dm, unread }
@@ -1019,7 +1023,7 @@ impl RoomItem {
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
-            store.application.names.insert(alias.to_string(), room_id.to_owned());
+            store.application.names.insert(alias.to_owned(), room_id.to_owned());
         }
 
         RoomItem { room_info, name, alias, unread }
@@ -1241,7 +1245,7 @@ impl SpaceItem {
         let alias = room_info.0.canonical_alias();
 
         if let Some(alias) = &alias {
-            store.application.names.insert(alias.to_string(), room_id.to_owned());
+            store.application.names.insert(alias.to_owned(), room_id.to_owned());
         }
 
         SpaceItem { room_info, name, alias }

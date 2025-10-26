@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use emojis::Emoji;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::room_version_rules::RedactionRules;
+use matrix_sdk::ruma::OwnedRoomAliasId;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -507,7 +508,7 @@ pub enum KeysAction {
     Import(String, String),
 }
 
-/// An action that the main program loop should.
+/// An action that the main program loop should execute.
 ///
 /// See [the commands module][super::commands] for where these are usually created.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -524,8 +525,8 @@ pub enum IambAction {
     /// Perform an action on the current space.
     Space(SpaceAction),
 
-    /// Open a URL.
-    OpenLink(String),
+    /// Open a URL (and specify whether to join linked matrix rooms).
+    OpenLink(String, bool),
 
     /// Perform an action on the currently focused room.
     Room(RoomAction),
@@ -920,7 +921,10 @@ pub struct RoomInfo {
     pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
 
     /// The display names for users in this room.
-    pub display_names: HashMap<OwnedUserId, String>,
+    pub display_names: CompletionMap<OwnedUserId, String>,
+
+    /// Tab completion for the display names in this room.
+    pub display_name_completion: CompletionMap<String, OwnedUserId>,
 
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
@@ -943,6 +947,7 @@ impl Default for RoomInfo {
             fetch_last: Default::default(),
             users_typing: Default::default(),
             display_names: Default::default(),
+            display_name_completion: Default::default(),
             draw_last: Default::default(),
         }
     }
@@ -1024,12 +1029,34 @@ impl RoomInfo {
 
     /// Get an event for an identifier.
     pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
-        self.messages.get(self.get_message_key(event_id)?)
+        let (thread_root, key) = match self.keys.get(event_id)? {
+            EventLocation::Message(thread_root, key) => (thread_root, key),
+            EventLocation::State(key) => (&None, key),
+            _ => return None,
+        };
+
+        let messages = if let Some(root) = thread_root {
+            self.threads.get(root)?
+        } else {
+            &self.messages
+        };
+        messages.get(key)
     }
 
     /// Get an event for an identifier as mutable.
     pub fn get_event_mut(&mut self, event_id: &EventId) -> Option<&mut Message> {
-        self.messages.get_mut(self.keys.get(event_id)?.to_message_key()?)
+        let (thread_root, key) = match self.keys.get(event_id)? {
+            EventLocation::Message(thread_root, key) => (thread_root, key),
+            EventLocation::State(key) => (&None, key),
+            _ => return None,
+        };
+
+        let messages = if let Some(root) = thread_root {
+            self.threads.get_mut(root)?
+        } else {
+            &mut self.messages
+        };
+        messages.get_mut(key)
     }
 
     pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent, rules: &RedactionRules) {
@@ -1581,7 +1608,7 @@ pub struct ChatStore {
     pub rooms: CompletionMap<OwnedRoomId, RoomInfo>,
 
     /// Map of room names.
-    pub names: CompletionMap<String, OwnedRoomId>,
+    pub names: CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
 
     /// Presence information for other users.
     pub presences: CompletionMap<OwnedUserId, PresenceState>,
@@ -1993,7 +2020,9 @@ impl Completer<IambInfo> for IambCompleter {
         match content {
             IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
             IambBufferId::Command(CommandType::Search) => vec![],
-            IambBufferId::Room(_, _, RoomFocus::MessageBar) => complete_msgbar(text, cursor, store),
+            IambBufferId::Room(room_id, _, RoomFocus::MessageBar) => {
+                complete_msgbar(text, cursor, store, room_id)
+            },
             IambBufferId::Room(_, _, RoomFocus::Scrollback) => vec![],
 
             IambBufferId::DirectList => vec![],
@@ -2024,26 +2053,38 @@ fn complete_users(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Ve
 }
 
 /// Tab completion within the message bar.
-fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+fn complete_msgbar(
+    text: &EditRope,
+    cursor: &mut Cursor,
+    store: &mut ChatStore,
+    room_id: &RoomId,
+) -> Vec<String> {
     let id = text
         .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
         .unwrap_or_else(EditRope::empty);
     let id = Cow::from(&id);
 
+    let info = store.rooms.get_or_default(room_id.to_owned());
+
     match id.chars().next() {
         // Complete room aliases.
         Some('#') => {
-            return store.names.complete(id.as_ref());
+            store
+                .names
+                .complete(id.as_ref())
+                .into_iter()
+                .map(|i| format!("[{}]({})", i, i.matrix_to_uri()))
+                .collect()
         },
 
         // Complete room identifiers.
         Some('!') => {
-            return store
+            store
                 .rooms
                 .complete(id.as_ref())
                 .into_iter()
-                .map(|i| i.to_string())
-                .collect();
+                .map(|i| format!("[{}]({})", i, i.matrix_to_uri()))
+                .collect()
         },
 
         // Complete Emoji shortcodes.
@@ -2051,26 +2092,43 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
             let list = store.emojis.complete(&id[1..]);
             let iter = list.into_iter().take(200).map(|s| format!(":{s}:"));
 
-            return iter.collect();
+            iter.collect()
         },
 
         // Complete usernames for @ and empty strings.
         Some('@') | None => {
-            return store
-                .presences
-                .complete(id.as_ref())
+            // spec says to mention with display name in anchor text
+            let mut users: HashSet<_> = info
+                .display_name_completion
+                .complete(id.strip_prefix('@').unwrap_or(&id))
                 .into_iter()
-                .map(|i| i.to_string())
+                .map(|n| {
+                    format!(
+                        "[{}]({})",
+                        n,
+                        info.display_name_completion.get(&n).unwrap().matrix_to_uri()
+                    )
+                })
                 .collect();
+
+            users.extend(info.display_names.complete(id.as_ref()).into_iter().map(|i| {
+                format!(
+                    "[{}]({})",
+                    info.display_names.get(&i).unwrap_or(&i.to_string()),
+                    i.matrix_to_uri()
+                )
+            }));
+
+            users.into_iter().collect()
         },
 
         // Unknown sigil.
-        Some(_) => return vec![],
+        Some(_) => vec![],
     }
 }
 
-/// Tab completion for Matrix identifiers (usernames, room aliases, etc.)
-fn complete_matrix_names(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+/// Tab completion for Matrix room aliases
+fn complete_matrix_aliases(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
     let id = text
         .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
         .unwrap_or_else(EditRope::empty);
@@ -2078,7 +2136,7 @@ fn complete_matrix_names(text: &EditRope, cursor: &mut Cursor, store: &ChatStore
 
     let list = store.names.complete(id.as_ref());
     if !list.is_empty() {
-        return list;
+        return list.into_iter().map(|i| i.to_string()).collect();
     }
 
     let list = store.presences.complete(id.as_ref());
@@ -2134,7 +2192,7 @@ fn complete_cmdarg(
         "react" | "unreact" => complete_emoji(text, cursor, store),
 
         "invite" => complete_users(text, cursor, store),
-        "join" | "split" | "vsplit" | "tabedit" => complete_matrix_names(text, cursor, store),
+        "join" | "split" | "vsplit" | "tabedit" => complete_matrix_aliases(text, cursor, store),
         "room" => vec![],
         "verify" => vec![],
         "vertical" | "horizontal" | "aboveleft" | "belowright" | "tab" => {
@@ -2342,24 +2400,25 @@ pub mod tests {
     #[tokio::test]
     async fn test_complete_msgbar() {
         let store = mock_store().await;
-        let store = store.application;
+        let mut store = store.application;
+        let room_id = TEST_ROOM1_ID.clone();
 
         let text = EditRope::from("going for a walk :walk ");
         let mut cursor = Cursor::new(0, 22);
-        let res = complete_msgbar(&text, &mut cursor, &store);
+        let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
         assert_eq!(res, vec![":walking:", ":walking_man:", ":walking_woman:"]);
         assert_eq!(cursor, Cursor::new(0, 17));
 
-        let text = EditRope::from("hello @user1 ");
+        let text = EditRope::from("hello @user2 ");
         let mut cursor = Cursor::new(0, 12);
-        let res = complete_msgbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec!["@user1:example.com"]);
+        let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
+        assert_eq!(res, vec!["[User 2](https://matrix.to/#/@user2:example.com)"]);
         assert_eq!(cursor, Cursor::new(0, 6));
 
         let text = EditRope::from("see #room ");
         let mut cursor = Cursor::new(0, 9);
-        let res = complete_msgbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec!["#room1:example.com"]);
+        let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
+        assert_eq!(res, vec!["[#room1:example.com](https://matrix.to/#/%23room1:example.com)"]);
         assert_eq!(cursor, Cursor::new(0, 4));
     }
 

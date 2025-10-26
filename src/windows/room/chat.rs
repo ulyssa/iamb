@@ -7,9 +7,14 @@ use std::path::{Path, PathBuf};
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
+use matrix_sdk::ruma::events::room::message::{MessageFormat, ReplacementMetadata};
+use matrix_sdk::ruma::events::Mentions;
+use matrix_sdk::ruma::matrix_uri::MatrixId;
+use matrix_sdk::ruma::MatrixToUri;
 use matrix_sdk::EncryptionState;
 use modalkit::editing::store::RegisterError;
 use ratatui::style::{Color, Style};
+use regex::Regex;
 use std::process::Command;
 use tokio;
 use url::Url;
@@ -20,13 +25,12 @@ use matrix_sdk::{
     room::Room as MatrixRoom,
     ruma::{
         events::reaction::ReactionEventContent,
-        events::relation::{Annotation, Replacement},
+        events::relation::Annotation,
         events::room::message::{
             AddMentions,
             ForwardThread,
             MessageType,
             OriginalRoomMessageEvent,
-            Relation,
             ReplyWithinThread,
             RoomMessageEventContent,
             TextMessageEventContent,
@@ -212,123 +216,98 @@ impl ChatState {
                 Err(UIError::NeedConfirm(prompt))
             },
             MessageAction::Download(filename, flags) => {
-                if let MessageEvent::Original(ev) = &msg.event {
-                    let media = client.media();
-
-                    let mut filename = match (filename, &settings.dirs.downloads) {
-                        (Some(f), _) => PathBuf::from(f),
-                        (None, Some(downloads)) => downloads.clone(),
-                        (None, None) => return Err(IambError::NoDownloadDir.into()),
-                    };
-
-                    let (source, msg_filename) = match &ev.content.msgtype {
-                        MessageType::Audio(c) => (c.source.clone(), c.filename()),
-                        MessageType::File(c) => (c.source.clone(), c.filename()),
-                        MessageType::Image(c) => (c.source.clone(), c.filename()),
-                        MessageType::Video(c) => (c.source.clone(), c.filename()),
-                        _ => {
-                            if !flags.contains(DownloadFlags::OPEN) {
-                                return Err(IambError::NoAttachment.into());
-                            }
-
-                            let links = if let Some(html) = &msg.html {
-                                html.get_links()
-                            } else {
-                                linkify::LinkFinder::new()
-                                    .links(&msg.event.body())
-                                    .filter_map(|u| Url::parse(u.as_str()).ok())
-                                    .scan(TreeGenState { link_num: 0 }, |state, u| {
-                                        state.next_link_char().map(|c| (c, u))
-                                    })
-                                    .collect()
-                            };
-
-                            if links.is_empty() {
-                                return Err(IambError::NoAttachment.into());
-                            }
-
-                            let choices = links
-                                .into_iter()
-                                .map(|l| {
-                                    let url = l.1.to_string();
-                                    let act = IambAction::OpenLink(url.clone()).into();
-                                    MultiChoiceItem::new(l.0, url, vec![act])
-                                })
-                                .collect();
-                            let dialog = MultiChoice::new(choices);
-                            let err = UIError::NeedConfirm(Box::new(dialog));
-
-                            return Err(err);
-                        },
-                    };
-
-                    if filename.is_dir() {
-                        filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
-                    }
-
-                    if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
-                        // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
-                        if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
-                            let ext = filename.extension();
-                            let mut filename_incr = filename.clone();
-                            for n in 1..=1000 {
-                                if let Some(ext) = ext.and_then(OsStr::to_str) {
-                                    filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
-                                } else {
-                                    filename_incr.set_file_name(format!("{stem}-{n}"));
+                match &msg.event {
+                    MessageEvent::Original(ev) => {
+                        let media = client.media();
+                        let mut filename = match (filename, &settings.dirs.downloads) {
+                            (Some(f), _) => PathBuf::from(f),
+                            (None, Some(downloads)) => downloads.clone(),
+                            (None, None) => return Err(IambError::NoDownloadDir.into()),
+                        };
+                        let (source, msg_filename) = match &ev.content.msgtype {
+                            MessageType::Audio(c) => (c.source.clone(), c.filename()),
+                            MessageType::File(c) => (c.source.clone(), c.filename()),
+                            MessageType::Image(c) => (c.source.clone(), c.filename()),
+                            MessageType::Video(c) => (c.source.clone(), c.filename()),
+                            _ => {
+                                if !flags.contains(DownloadFlags::OPEN) {
+                                    return Err(IambError::NoAttachment.into());
                                 }
-
-                                if !filename_incr.exists() {
-                                    filename = filename_incr;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
-                        let req = MediaRequestParameters { source, format: MediaFormat::File };
-
-                        let bytes =
-                            media.get_media_content(&req, true).await.map_err(IambError::from)?;
-
-                        fs::write(filename.as_path(), bytes.as_slice())?;
-
-                        msg.downloaded = true;
-                    } else if !flags.contains(DownloadFlags::OPEN) {
-                        let msg = format!(
-                            "The file {} already exists; add ! to end of command to overwrite it.",
-                            filename.display()
-                        );
-                        let err = UIError::Failure(msg);
-
-                        return Err(err);
-                    }
-
-                    let info = if flags.contains(DownloadFlags::OPEN) {
-                        let target = filename.clone().into_os_string();
-                        match open_command(
-                            store.application.settings.tunables.open_command.as_ref(),
-                            target,
-                        ) {
-                            Ok(_) => {
-                                InfoMessage::from(format!(
-                                    "Attachment downloaded to {} and opened",
-                                    filename.display()
-                                ))
-                            },
-                            Err(err) => {
+                                let err = open_links(msg);
                                 return Err(err);
                             },
+                        };
+                        if filename.is_dir() {
+                            filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
                         }
-                    } else {
-                        InfoMessage::from(format!(
-                            "Attachment downloaded to {}",
-                            filename.display()
-                        ))
-                    };
+                        if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
+                            // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
+                            if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
+                                let ext = filename.extension();
+                                let mut filename_incr = filename.clone();
+                                for n in 1..=1000 {
+                                    if let Some(ext) = ext.and_then(OsStr::to_str) {
+                                        filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
+                                    } else {
+                                        filename_incr.set_file_name(format!("{stem}-{n}"));
+                                    }
 
-                    return Ok(info.into());
+                                    if !filename_incr.exists() {
+                                        filename = filename_incr;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                        if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
+                            let req = MediaRequestParameters { source, format: MediaFormat::File };
+
+                            let bytes = media
+                                .get_media_content(&req, true)
+                                .await
+                                .map_err(IambError::from)?;
+
+                            fs::write(filename.as_path(), bytes.as_slice())?;
+
+                            msg.downloaded = true;
+                        } else if !flags.contains(DownloadFlags::OPEN) {
+                            let msg = format!(
+                                                "The file {} already exists; add ! to end of command to overwrite it.",
+                                                filename.display()
+                                            );
+                            let err = UIError::Failure(msg);
+
+                            return Err(err);
+                        }
+                        let info = if flags.contains(DownloadFlags::OPEN) {
+                            let target = filename.clone().into_os_string();
+                            match open_command(
+                                store.application.settings.tunables.open_command.as_ref(),
+                                target,
+                            ) {
+                                Ok(_) => {
+                                    InfoMessage::from(format!(
+                                        "Attachment downloaded to {} and opened",
+                                        filename.display()
+                                    ))
+                                },
+                                Err(err) => {
+                                    return Err(err);
+                                },
+                            }
+                        } else {
+                            InfoMessage::from(format!(
+                                "Attachment downloaded to {}",
+                                filename.display()
+                            ))
+                        };
+                        return Ok(info.into());
+                    },
+                    MessageEvent::State(_) => {
+                        let err = open_links(msg);
+                        return Err(err);
+                    },
+                    _ => (),
                 }
 
                 Err(IambError::NoAttachment.into())
@@ -564,23 +543,52 @@ impl ChatState {
 
                 let mut msg = text_to_message(msg);
 
+                // extract mentions from matrix links
+                let mut mentions = Mentions::new();
+                if let MessageType::Text(content) = &msg.msgtype {
+                    if let Some(formatted) = &content.formatted {
+                        if matches!(&formatted.format, MessageFormat::Html) {
+                            let html = formatted.body.as_str();
+
+                            let re = Regex::new(r#"<a href="(https://matrix.to/#/@[^"]*:[^"]*)">"#)
+                                .unwrap();
+
+                            let user_ids = re.captures_iter(html).map(|capture| {
+                                let link = capture.get(1).unwrap().as_str();
+                                let uri = MatrixToUri::parse(link).unwrap();
+                                let MatrixId::User(user_id) = uri.id() else {
+                                    unreachable!()
+                                };
+                                user_id.to_owned()
+                            });
+
+                            mentions = Mentions::with_user_ids(user_ids);
+                        }
+                    }
+                }
+                msg = msg.add_mentions(mentions);
+
                 if let Some((_, event_id)) = &self.editing {
-                    msg.relates_to = Some(Relation::Replacement(Replacement::new(
-                        event_id.clone(),
-                        msg.msgtype.clone().into(),
-                    )));
+                    let mut mentions = None;
+                    if let Some(message) = info.get_event(event_id) {
+                        if let MessageEvent::Original(ev) = &message.event {
+                            mentions = ev.content.mentions.clone();
+                        }
+                    }
+                    let metadata = ReplacementMetadata::new(event_id.to_owned(), mentions);
+                    msg = msg.make_replacement(metadata);
 
                     show_echo = false;
                 } else if let Some(thread_root) = self.scrollback.thread() {
                     if let Some(m) = self.get_reply_to(info) {
-                        msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::No);
+                        msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::Yes);
                     } else if let Some(m) = info.get_thread_last(thread_root) {
-                        msg = msg.make_for_thread(m, ReplyWithinThread::No, AddMentions::No);
+                        msg = msg.make_for_thread(m, ReplyWithinThread::No, AddMentions::Yes);
                     } else {
                         // Internal state is wonky?
                     }
                 } else if let Some(m) = self.get_reply_to(info) {
-                    msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
+                    msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::Yes);
                 }
 
                 // XXX: second parameter can be a locally unique transaction id.
@@ -698,6 +706,33 @@ impl ChatState {
 
         store.application.worker.typing_notice(self.room_id.clone());
     }
+}
+
+fn open_links(msg: &Message) -> UIError<IambInfo> {
+    let links = if let Some(html) = &msg.html {
+        html.get_links()
+    } else {
+        linkify::LinkFinder::new()
+            .links(&msg.event.body())
+            .filter_map(|u| Url::parse(u.as_str()).ok())
+            .scan(TreeGenState { link_num: 0 }, |state, u| state.next_link_char().map(|c| (c, u)))
+            .collect()
+    };
+
+    if links.is_empty() {
+        return IambError::NoAttachment.into();
+    }
+
+    let choices = links
+        .into_iter()
+        .map(|l| {
+            let url = l.1.to_string();
+            let act = IambAction::OpenLink(url.clone(), false).into();
+            MultiChoiceItem::new(l.0, url, vec![act])
+        })
+        .collect();
+    let dialog = MultiChoice::new(choices);
+    UIError::NeedConfirm(Box::new(dialog))
 }
 
 macro_rules! delegate {
