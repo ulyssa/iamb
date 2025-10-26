@@ -169,6 +169,9 @@ pub enum MessageAction {
     /// Reply to a message.
     Reply,
 
+    /// Go to the message the hovered message replied to.
+    Replied,
+
     /// Unreact to a message.
     ///
     /// If no specific Emoji to remove to is specified, then all reactions from the user on the
@@ -1503,14 +1506,19 @@ impl SyncInfo {
     }
 }
 
-bitflags::bitflags! {
-    /// Load-needs
-    #[derive(Debug, Default, PartialEq)]
-    pub struct Need: u32 {
-        const EMPTY = 0b00000000;
-        const MESSAGES = 0b00000001;
-        const MEMBERS =  0b00000010;
-    }
+static MESSAGE_NEED_TTL: u8 = 30;
+
+#[derive(Debug, PartialEq)]
+/// Load messages until the event is loaded or `ttl` loads are exceeded
+pub struct MessageNeed {
+    pub event_id: OwnedEventId,
+    pub ttl: u8,
+}
+
+#[derive(Default, Debug, PartialEq)]
+pub struct Need {
+    pub members: bool,
+    pub messages: Option<Vec<MessageNeed>>,
 }
 
 /// Things that need loading for different rooms.
@@ -1520,9 +1528,31 @@ pub struct RoomNeeds {
 }
 
 impl RoomNeeds {
-    /// Mark a room for needing something to be loaded.
-    pub fn insert(&mut self, room_id: OwnedRoomId, need: Need) {
-        self.needs.entry(room_id).or_default().insert(need);
+    /// Mark a room for needing to load members.
+    pub fn need_members(&mut self, room_id: OwnedRoomId) {
+        self.needs.entry(room_id).or_default().members = true;
+    }
+
+    /// Mark a room for needing to load messages.
+    pub fn need_messages(&mut self, room_id: OwnedRoomId) {
+        self.needs.entry(room_id).or_default().messages.get_or_insert_default();
+    }
+
+    /// Mark a room for needing to load messages until the given message is loaded or a retry limit
+    /// is exceeded.
+    pub fn need_message(&mut self, room_id: OwnedRoomId, event_id: OwnedEventId) {
+        let messages = &mut self.needs.entry(room_id).or_default().messages.get_or_insert_default();
+
+        messages.push(MessageNeed { event_id, ttl: MESSAGE_NEED_TTL });
+    }
+
+    pub fn need_messages_all(&mut self, room_id: OwnedRoomId, message_needs: Vec<MessageNeed>) {
+        self.needs
+            .entry(room_id)
+            .or_default()
+            .messages
+            .get_or_insert_default()
+            .extend(message_needs);
     }
 
     pub fn rooms(&self) -> usize {
@@ -2300,12 +2330,12 @@ pub mod tests {
 
         let mut need_load = RoomNeeds::default();
 
-        need_load.insert(room_id.clone(), Need::MESSAGES);
-        need_load.insert(room_id.clone(), Need::MEMBERS);
+        need_load.need_messages(room_id.clone());
+        need_load.need_members(room_id.clone());
 
         assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
             room_id,
-            Need::MESSAGES | Need::MEMBERS,
+            Need { members: true, messages: Some(Vec::new()) }
         )],);
     }
 
