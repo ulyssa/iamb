@@ -62,7 +62,7 @@ cargo install --locked --path .
 
 ## Installation (via `crates.io`)
 
-Install Rust (1.83.0 or above) and Cargo, and then run:
+Install Rust (1.89.0 or above) and Cargo, and then run:
 
 ```
 cargo install --locked iamb
