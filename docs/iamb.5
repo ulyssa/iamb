@@ -138,6 +138,13 @@ Enable image previews and configure it.
 An empty object will enable the feature with default settings, omitting it will disable the feature.
 The available fields in this object are:
 .Bl -tag -width Ds
+.It Sy lazy_load
+If
+.Sy true
+(the default), download and render image previews when viewing a message with an image.
+If
+.Sy false ,
+load previews as soon as a message with an image is received.
 .It Sy size
 An optional object with
 .Sy width
@@ -538,8 +545,6 @@ Configured as an object under the key
 .It Sy cache
 Specifies where to store assets and temporary data in.
 (For example,
-.Sy image_preview
-and
 .Sy logs
 will also go in here by default.)
 Defaults to
@@ -554,11 +559,6 @@ Defaults to
 Specifies where to store downloaded files.
 Defaults to
 .Ev $XDG_DOWNLOAD_DIR .
-
-.It Sy image_previews
-Specifies where to store automatically downloaded image previews.
-Defaults to
-.Ev ${cache}/image_preview_downloads .
 
 .It Sy logs
 Specifies where to store log files.
