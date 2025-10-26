@@ -126,7 +126,7 @@ const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
     Some(_) => concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")"),
 };
 
-#[derive(Parser)]
+#[derive(Parser, Debug, Clone, Default)]
 #[clap(version = VERSION, about, long_about = None)]
 #[clap(propagate_version = true)]
 pub struct Iamb {
@@ -872,6 +872,7 @@ pub struct ApplicationSettings {
     pub dirs: DirectoryValues,
     pub layout: Layout,
     pub macros: Macros,
+    pub cli: Iamb,
 }
 
 impl ApplicationSettings {
@@ -882,6 +883,7 @@ impl ApplicationSettings {
     pub fn load(cli: Iamb) -> Result<Self, Box<dyn std::error::Error>> {
         let mut config_dir = cli
             .config_directory
+            .clone()
             .or_else(Self::get_xdg_config_home)
             .or_else(dirs::config_dir)
             .unwrap_or_else(|| {
@@ -919,45 +921,46 @@ impl ApplicationSettings {
 
         validate_profile_names(&profiles);
 
-        let (profile_name, mut profile) = if let Some(profile) = cli.profile.or(default_profile) {
-            profiles.remove_entry(&profile).unwrap_or_else(|| {
-                usage!(
-                    "No configured profile with the name {:?} in {}",
-                    profile,
-                    config_json.display()
-                );
-            })
-        } else if profiles.len() == 1 {
-            profiles.into_iter().next().unwrap()
-        } else {
-            loop {
-                println!("\nNo profile specified. Available profiles:");
-                profiles
-                    .keys()
-                    .enumerate()
-                    .for_each(|(i, name)| println!("{}: {}", i, name));
-
-                print!("Select a number or 'q' to quit: ");
-                let _ = std::io::stdout().flush();
-
-                let mut input = String::new();
-                let _ = std::io::stdin().read_line(&mut input);
-
-                if input.trim() == "q" {
+        let (profile_name, mut profile) =
+            if let Some(profile) = cli.profile.clone().or(default_profile) {
+                profiles.remove_entry(&profile).unwrap_or_else(|| {
                     usage!(
-                        "No profile specified. \
+                        "No configured profile with the name {:?} in {}",
+                        profile,
+                        config_json.display()
+                    );
+                })
+            } else if profiles.len() == 1 {
+                profiles.into_iter().next().unwrap()
+            } else {
+                loop {
+                    println!("\nNo profile specified. Available profiles:");
+                    profiles
+                        .keys()
+                        .enumerate()
+                        .for_each(|(i, name)| println!("{}: {}", i, name));
+
+                    print!("Select a number or 'q' to quit: ");
+                    let _ = std::io::stdout().flush();
+
+                    let mut input = String::new();
+                    let _ = std::io::stdin().read_line(&mut input);
+
+                    if input.trim() == "q" {
+                        usage!(
+                            "No profile specified. \
                         Please use -P or add \"default_profile\" to your configuration.\n\n\
                         For more information try '--help'",
-                    );
-                }
-                if let Ok(i) = input.trim().parse::<usize>() {
-                    if i < profiles.len() {
-                        break profiles.into_iter().nth(i).unwrap();
+                        );
                     }
+                    if let Ok(i) = input.trim().parse::<usize>() {
+                        if i < profiles.len() {
+                            break profiles.into_iter().nth(i).unwrap();
+                        }
+                    }
+                    println!("\nInvalid index.");
                 }
-                println!("\nInvalid index.");
-            }
-        };
+            };
 
         let macros = merge_maps(profile.macros.take(), macros).unwrap_or_default();
         let layout = profile.layout.take().or(layout).unwrap_or_default();
@@ -1014,6 +1017,7 @@ impl ApplicationSettings {
             dirs,
             layout,
             macros,
+            cli,
         };
 
         Ok(settings)

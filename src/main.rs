@@ -573,6 +573,18 @@ impl Application {
                 None
             },
 
+            IambAction::ReloadConfig => {
+                let settings =
+                    ApplicationSettings::load(store.application.settings.cli.clone()).unwrap();
+                let mut bindings = crate::keybindings::setup_keybindings();
+                settings.setup(&mut bindings);
+                self.bindings = KeyManager::new(bindings);
+
+                store.application.settings = settings;
+
+                None
+            },
+
             IambAction::ToggleScrollbackFocus => {
                 self.screen.current_window_mut()?.focus_toggle();
 

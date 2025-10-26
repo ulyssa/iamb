@@ -706,6 +706,17 @@ fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_reload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let clear = IambAction::ReloadConfig;
+    let step = CommandStep::Continue(clear.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand {
         name: "cancel".into(),
@@ -817,6 +828,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "logout".into(),
         aliases: vec![],
         f: iamb_logout,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "reload".into(),
+        aliases: vec![],
+        f: iamb_reload,
     });
 }
 
