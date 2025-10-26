@@ -1477,7 +1477,8 @@ impl SyncInfo {
     }
 }
 
-static MESSAGE_NEED_TTL: u8 = 10;
+static MESSAGE_NEED_TTL: u8 = 30;
+
 #[derive(Debug, PartialEq)]
 /// Load messages until the event is loaded or `ttl` loads are exceeded
 pub struct MessageNeed {
