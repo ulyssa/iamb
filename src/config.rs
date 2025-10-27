@@ -1085,8 +1085,12 @@ impl ApplicationSettings {
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
             (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
             (None, UserDisplayStyle::DisplayName) => {
-                if let Some(display) = info.display_names.get(user_id) {
-                    Cow::Borrowed(display.as_str())
+                if let Some((name, ambiguous)) = info.display_names.get(user_id) {
+                    if *ambiguous {
+                        Cow::Owned(format!("{}({})", name, user_id))
+                    } else {
+                        Cow::Borrowed(name.as_str())
+                    }
                 } else {
                     Cow::Borrowed(user_id.as_str())
                 }

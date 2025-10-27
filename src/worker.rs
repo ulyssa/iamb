@@ -22,7 +22,6 @@ use url::Url;
 use matrix_sdk::{
     authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
-    deserialized_responses::DisplayName,
     encryption::verification::{SasVerification, Verification},
     encryption::{BackupDownloadStrategy, EncryptionSettings},
     event_handler::Ctx,
@@ -432,13 +431,47 @@ fn members_insert(
         let info = rooms.get_or_default(room_id);
 
         for member in members {
-            let user_id = member.user_id();
-            let display_name =
-                member.display_name().map_or(user_id.to_string(), |str| str.to_string());
-            info.display_names.insert(user_id.to_owned(), display_name);
+            let user_id = member.user_id().to_owned();
+            let name = member.display_name().map(|s| s.to_owned());
+            member_set_display_name(info, user_id, name);
         }
     }
     // else ???
+}
+
+fn member_set_display_name(info: &mut RoomInfo, user_id: OwnedUserId, name: Option<String>) {
+    let to_remove;
+    if let Some(display_name) = name {
+        let ambiguous = info.display_names.iter_mut().any(|(_, (name, is_ambiguous))| {
+            if name == &display_name {
+                *is_ambiguous = true;
+                true
+            } else {
+                false
+            }
+        });
+
+        to_remove = info.display_names.insert(user_id, (display_name, ambiguous));
+    } else {
+        to_remove = info.display_names.remove(&user_id);
+    }
+    if let Some((display_name, _)) = to_remove {
+        let mut names: Vec<_> = info
+            .display_names
+            .iter_mut()
+            .filter_map(|(_, (name, is_ambiguous))| {
+                if name == &display_name {
+                    Some(is_ambiguous)
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        if names.len() == 1 {
+            *names[0] = false;
+        }
+    }
 }
 
 async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
@@ -1110,34 +1143,15 @@ impl ClientWorker {
         );
 
         let _ = self.client.add_event_handler(
-            |ev: OriginalSyncRoomMemberEvent,
-             room: MatrixRoom,
-             client: Client,
-             store: Ctx<AsyncProgramStore>| {
+            |ev: OriginalSyncRoomMemberEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
                 async move {
                     let room_id = room.room_id();
                     let user_id = ev.state_key;
 
-                    let ambiguous_name = DisplayName::new(
-                        ev.content.displayname.as_deref().unwrap_or_else(|| user_id.as_str()),
-                    );
-                    let ambiguous = client
-                        .state_store()
-                        .get_users_with_display_name(room_id, &ambiguous_name)
-                        .await
-                        .map(|users| users.len() > 1)
-                        .unwrap_or_default();
-
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
 
-                    if ambiguous {
-                        info.display_names.remove(&user_id);
-                    } else if let Some(display) = ev.content.displayname {
-                        info.display_names.insert(user_id, display);
-                    } else {
-                        info.display_names.remove(&user_id);
-                    }
+                    member_set_display_name(info, user_id, ev.content.displayname);
                 }
             },
         );
