@@ -992,8 +992,11 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
     if settings.tunables.mouse.enabled {
         crossterm::execute!(stdout(), EnableMouseCapture)?;
     }
+    if settings.tunables.set_window_title {
+        crossterm::execute!(stdout(), SetTitle(title))?;
+    }
 
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
+    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange)
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.

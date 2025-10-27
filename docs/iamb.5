@@ -125,13 +125,13 @@ key and can be overridden as described in
 .Sx PROFILES .
 .Bl -tag -width Ds
 
-.It Sy external_edit_file_suffix
-Suffix to append to temporary file names when using the :editor command. Defaults to .md.
-
 .It Sy default_room
 The room to show by default instead of the
 .Sy :welcome
 window.
+
+.It Sy external_edit_file_suffix
+Suffix to append to temporary file names when using the :editor command. Defaults to .md.
 
 .It Sy image_preview
 Enable image previews and configure it.
@@ -237,6 +237,11 @@ Possible values are
 Specify the width of the column where usernames are displayed in a room.
 Usernames that are too long are truncated.
 Defaults to 30.
+
+.It Sy set_window_title
+Whether to set the title of the terminal window to
+.Dq Sy iamb (<user_id>) .
+Defaults to true.
 
 .It Sy tabstop
 Number of spaces that a <Tab> counts for.
