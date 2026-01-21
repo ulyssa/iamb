@@ -506,21 +506,22 @@ impl ChatState {
                     None => return Ok(None),
                 };
 
-                let reactions = reactions.iter().filter_map(|(event_id, (reaction, user_id))| {
-                    if user_id != &settings.profile.user_id {
-                        return None;
-                    }
-
-                    if let Some(emoji) = &emoji {
-                        if emoji == reaction {
-                            return Some(event_id);
-                        } else {
+                let reactions =
+                    reactions.iter().filter_map(|(event_id, (reaction, user_id, _))| {
+                        if user_id != &settings.profile.user_id {
                             return None;
                         }
-                    } else {
-                        return Some(event_id);
-                    }
-                });
+
+                        if let Some(emoji) = &emoji {
+                            if emoji == reaction {
+                                return Some(event_id);
+                            } else {
+                                return None;
+                            }
+                        } else {
+                            return Some(event_id);
+                        }
+                    });
 
                 for reaction in reactions {
                     let _ = room.redact(reaction, None, None).await.map_err(IambError::from)?;

@@ -57,6 +57,11 @@ impl<'a> TextPrinter<'a> {
         }
     }
 
+    /// The position where the next text will be printed. (x, y)
+    pub fn curosor_pos(&self) -> (usize, usize) {
+        (self.curr_width, self.text.lines.len().saturating_sub(1))
+    }
+
     /// Configure the alignment for each line.
     pub fn align(mut self, alignment: Alignment) -> Self {
         self.alignment = alignment;
