@@ -133,7 +133,7 @@ fn hist_visibility_mode(name: impl Into<String>) -> IambResult<HistoryVisibility
 pub enum RoomState {
     Chat(Box<ChatState>),
     Space(Box<SpaceState>),
-    Message(MessageState),
+    Message(Box<MessageState>),
 }
 
 impl From<ChatState> for RoomState {
@@ -150,7 +150,7 @@ impl From<SpaceState> for RoomState {
 
 impl From<MessageState> for RoomState {
     fn from(msg: MessageState) -> Self {
-        RoomState::Message(msg)
+        RoomState::Message(Box::new(msg))
     }
 }
 
@@ -819,7 +819,7 @@ impl WindowOps<IambInfo> for RoomState {
         match self {
             RoomState::Chat(chat) => RoomState::Chat(Box::new(chat.dup(store))),
             RoomState::Space(space) => RoomState::Space(Box::new(space.dup(store))),
-            RoomState::Message(msg) => RoomState::Message(msg.dup(store)),
+            RoomState::Message(msg) => RoomState::Message(Box::new(msg.dup(store))),
         }
     }
 
