@@ -565,6 +565,7 @@ pub struct TunableValues {
     pub reaction_shortcode_display: bool,
     pub read_receipt_send: bool,
     pub read_receipt_display: bool,
+    pub message_time_display: bool,
     pub request_timeout: u64,
     pub sort: SortValues,
     pub state_event_display: bool,
@@ -583,6 +584,70 @@ pub struct TunableValues {
     pub tabstop: usize,
 }
 
+impl TunableValues {
+    pub fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
+        let (color, c) = self
+            .users
+            .get(user_id)
+            .map(|user| {
+                (
+                    user.color.as_ref().map(|c| c.0),
+                    user.name.as_ref().and_then(|s| s.chars().next()),
+                )
+            })
+            .unwrap_or_default();
+
+        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
+        let style = user_style_from_color(color);
+
+        let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
+
+        Span::styled(String::from(c), style)
+    }
+
+    pub fn get_user_overrides(
+        &self,
+        user_id: &UserId,
+    ) -> (Option<Color>, Option<Cow<'static, str>>) {
+        self.users
+            .get(user_id)
+            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
+            .unwrap_or_default()
+    }
+
+    pub fn get_user_color(&self, user_id: &UserId) -> Color {
+        self.users
+            .get(user_id)
+            .and_then(|user| user.color.as_ref().map(|c| c.0))
+            .unwrap_or_else(|| user_color(user_id.as_str()))
+    }
+
+    pub fn get_user_style(&self, user_id: &UserId) -> Style {
+        user_style_from_color(self.get_user_color(user_id))
+    }
+
+    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
+        let (color, name) = self.get_user_overrides(user_id);
+
+        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
+        let style = user_style_from_color(color);
+        let name = match (name, &self.username_display) {
+            (Some(name), _) => name,
+            (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
+            (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
+            (None, UserDisplayStyle::DisplayName) => {
+                if let Some(display) = info.display_names.get(user_id) {
+                    Cow::Borrowed(display.as_str())
+                } else {
+                    Cow::Borrowed(user_id.as_str())
+                }
+            },
+        };
+
+        Span::styled(name, style)
+    }
+}
+
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
     pub log_level: Option<LogLevel>,
@@ -598,6 +663,7 @@ pub struct Tunables {
     pub state_event_display: Option<bool>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
+    pub message_time_display: Option<bool>,
     pub users: Option<UserOverrides>,
     pub username_display: Option<UserDisplayStyle>,
     pub message_user_color: Option<bool>,
@@ -625,6 +691,7 @@ impl Tunables {
                 .or(other.reaction_shortcode_display),
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
+            message_time_display: self.message_time_display.or(other.message_time_display),
             request_timeout: self.request_timeout.or(other.request_timeout),
             sort: merge_sorts(self.sort, other.sort),
             state_event_display: self.state_event_display.or(other.state_event_display),
@@ -646,7 +713,7 @@ impl Tunables {
         }
     }
 
-    fn values(self) -> TunableValues {
+    pub fn values(self) -> TunableValues {
         TunableValues {
             log_level: self.log_level.map(Level::from).unwrap_or(Level::INFO),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
@@ -655,6 +722,7 @@ impl Tunables {
             reaction_shortcode_display: self.reaction_shortcode_display.unwrap_or(false),
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
+            message_time_display: self.message_time_display.unwrap_or(true),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             sort: self.sort.values(),
             state_event_display: self.state_event_display.unwrap_or(true),
@@ -1029,71 +1097,6 @@ impl ApplicationSettings {
         let session = Session::from(session);
         serde_json::to_writer(writer, &session).map_err(IambError::from)?;
         Ok(())
-    }
-
-    pub fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
-        let (color, c) = self
-            .tunables
-            .users
-            .get(user_id)
-            .map(|user| {
-                (
-                    user.color.as_ref().map(|c| c.0),
-                    user.name.as_ref().and_then(|s| s.chars().next()),
-                )
-            })
-            .unwrap_or_default();
-
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
-
-        let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
-
-        Span::styled(String::from(c), style)
-    }
-
-    pub fn get_user_overrides(
-        &self,
-        user_id: &UserId,
-    ) -> (Option<Color>, Option<Cow<'static, str>>) {
-        self.tunables
-            .users
-            .get(user_id)
-            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
-            .unwrap_or_default()
-    }
-
-    pub fn get_user_color(&self, user_id: &UserId) -> Color {
-        self.tunables
-            .users
-            .get(user_id)
-            .and_then(|user| user.color.as_ref().map(|c| c.0))
-            .unwrap_or_else(|| user_color(user_id.as_str()))
-    }
-
-    pub fn get_user_style(&self, user_id: &UserId) -> Style {
-        user_style_from_color(self.get_user_color(user_id))
-    }
-
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
-        let (color, name) = self.get_user_overrides(user_id);
-
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
-        let name = match (name, &self.tunables.username_display) {
-            (Some(name), _) => name,
-            (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
-            (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
-            (None, UserDisplayStyle::DisplayName) => {
-                if let Some(display) = info.display_names.get(user_id) {
-                    Cow::Borrowed(display.as_str())
-                } else {
-                    Cow::Borrowed(user_id.as_str())
-                }
-            },
-        };
-
-        Span::styled(name, style)
     }
 }
 

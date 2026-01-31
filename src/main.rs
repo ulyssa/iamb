@@ -83,6 +83,7 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
+use crate::base::RoomView;
 use crate::{
     base::{
         AsyncProgramStore,
@@ -153,14 +154,14 @@ fn config_tab_to_desc(
                     let name = user_id.to_string();
                     let room_id = worker.join_room(name.clone())?;
                     names.insert(name, room_id.clone());
-                    IambId::Room(room_id, None)
+                    IambId::Room(room_id, RoomView::Main)
                 },
-                config::WindowPath::RoomId(room_id) => IambId::Room(room_id, None),
+                config::WindowPath::RoomId(room_id) => IambId::Room(room_id, RoomView::Main),
                 config::WindowPath::AliasId(alias) => {
                     let name = alias.to_string();
                     let room_id = worker.join_room(name.clone())?;
                     names.insert(name, room_id.clone());
-                    IambId::Room(room_id, None)
+                    IambId::Room(room_id, RoomView::Main)
                 },
                 config::WindowPath::Window(id) => id,
             };
@@ -587,7 +588,11 @@ impl Application {
             },
             IambAction::Keys(act) => self.keys_command(act, ctx, store).await?,
             IambAction::Message(act) => {
-                self.screen.current_window_mut()?.message_command(act, ctx, store).await?
+                let acts =
+                    self.screen.current_window_mut()?.message_command(act, ctx, store).await?;
+                self.action_prepend(acts);
+
+                None
             },
             IambAction::Space(act) => {
                 self.screen.current_window_mut()?.space_command(act, ctx, store).await?
@@ -642,7 +647,7 @@ impl Application {
             HomeserverAction::CreateRoom(alias, vis, flags) => {
                 let client = &store.application.worker.client;
                 let room_id = create_room(client, alias, vis, flags).await?;
-                let room = IambId::Room(room_id, None);
+                let room = IambId::Room(room_id, RoomView::Main);
                 let target = OpenTarget::Application(room);
                 let action = WindowAction::Switch(target);
 

@@ -52,8 +52,9 @@ use crate::{
         RoomFetchStatus,
         RoomFocus,
         RoomInfo,
+        RoomView,
     },
-    config::ApplicationSettings,
+    config::TunableValues,
     message::{Message, MessageCursor, MessageKey, Messages},
 };
 
@@ -139,7 +140,8 @@ pub struct ScrollbackState {
 
 impl ScrollbackState {
     pub fn new(room_id: OwnedRoomId, thread: Option<OwnedEventId>) -> ScrollbackState {
-        let id = IambBufferId::Room(room_id.to_owned(), thread.clone(), RoomFocus::Scrollback);
+        let id =
+            IambBufferId::Room(room_id.to_owned(), thread.clone().into(), RoomFocus::Scrollback);
         let cursor = MessageCursor::default();
         let viewctx = ViewportContext::default();
         let jumped = HistoryList::default();
@@ -180,6 +182,16 @@ impl ScrollbackState {
             .timestamp
             .clone()
             .or_else(|| self.get_thread(info)?.last_key_value().map(|kv| kv.0.clone()))
+    }
+
+    pub fn get<'a>(&self, info: &'a RoomInfo) -> Option<&'a Message> {
+        let thread = self.get_thread(info);
+
+        if let Some(k) = &self.cursor.timestamp {
+            thread.and_then(|t| t.get(k))
+        } else {
+            thread.and_then(|t| t.last_key_value()).map(|(_, v)| v)
+        }
     }
 
     pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
@@ -269,7 +281,7 @@ impl ScrollbackState {
         idx: MessageKey,
         pos: MovePosition,
         info: &RoomInfo,
-        settings: &ApplicationSettings,
+        tunables: &TunableValues,
     ) {
         let Some(thread) = self.get_thread(info) else {
             return;
@@ -292,7 +304,8 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = selidx == key;
                     let prev = prevmsg(key, thread);
-                    let len = item.show(prev, sel, &self.viewctx, info, settings).lines.len();
+                    let len =
+                        item.show(prev, sel, self.viewctx.get_width(), info, tunables).lines.len();
 
                     if key == &idx {
                         lines += len / 2;
@@ -315,7 +328,8 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = key == selidx;
                     let prev = prevmsg(key, thread);
-                    let len = item.show(prev, sel, &self.viewctx, info, settings).lines.len();
+                    let len =
+                        item.show(prev, sel, self.viewctx.get_width(), info, tunables).lines.len();
 
                     lines += len;
 
@@ -338,7 +352,7 @@ impl ScrollbackState {
         self.jumped.push(self.cursor.clone());
     }
 
-    fn shift_cursor(&mut self, info: &RoomInfo, settings: &ApplicationSettings) {
+    fn shift_cursor(&mut self, info: &RoomInfo, tunables: &TunableValues) {
         let Some(thread) = self.get_thread(info) else {
             return;
         };
@@ -368,7 +382,10 @@ impl ScrollbackState {
                 break;
             }
 
-            lines += item.show(prev, false, &self.viewctx, info, settings).height().max(1);
+            lines += item
+                .show(prev, false, self.viewctx.get_width(), info, tunables)
+                .height()
+                .max(1);
 
             if lines >= self.viewctx.get_height() {
                 // We've reached the end of the viewport; move cursor into it.
@@ -1037,7 +1054,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 } else {
                     let root = key.1.clone();
                     let room_id = self.room_id.clone();
-                    let id = IambId::Room(room_id, Some(root));
+                    let id = IambId::Room(room_id, RoomView::Thread(root));
                     let open = WindowAction::Switch(OpenTarget::Application(id));
                     Ok(vec![(open.into(), ctx.clone())])
                 }
@@ -1066,7 +1083,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
-        let settings = &store.application.settings;
+        let tunables = &store.application.settings.tunables;
         let mut corner = self.viewctx.corner.clone();
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
@@ -1094,7 +1111,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 for (key, item) in thread.range(..=&corner_key).rev() {
                     let sel = key == cursor_key;
                     let prev = prevmsg(key, thread);
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings);
+                    let txt = item.show(prev, sel, self.viewctx.get_width(), info, tunables);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1122,7 +1139,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in thread.range(&corner_key..) {
                     let sel = key == cursor_key;
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings);
+                    let txt = item.show(prev, sel, self.viewctx.get_width(), info, tunables);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1160,7 +1177,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         }
 
         self.viewctx.corner = corner;
-        self.shift_cursor(info, settings);
+        self.shift_cursor(info, tunables);
 
         Ok(None)
     }
@@ -1181,11 +1198,11 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             },
             Axis::Vertical => {
                 let info = store.application.rooms.get_or_default(self.room_id.clone());
-                let settings = &store.application.settings;
+                let tunables = &store.application.settings.tunables;
                 let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
                 if let Some(key) = self.cursor.to_key(thread).cloned() {
-                    self.scrollview(key, pos, info, settings);
+                    self.scrollview(key, pos, info, tunables);
                 }
 
                 Ok(None)
@@ -1303,7 +1320,7 @@ impl StatefulWidget for Scrollback<'_> {
         let area = if state.cursor.timestamp.is_some() {
             render_jump_to_recent(area, buf, self.focused)
         } else {
-            info.render_typing(area, buf, &self.store.application.settings)
+            info.render_typing(area, buf, &settings.tunables)
         };
 
         state.set_term_info(area);
@@ -1347,8 +1364,13 @@ impl StatefulWidget for Scrollback<'_> {
 
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
-            let (txt, [mut msg_preview, mut reply_preview]) =
-                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings);
+            let (txt, [mut msg_preview, mut reply_preview]) = item.show_with_preview(
+                prev,
+                foc && sel,
+                state.viewctx.get_width(),
+                info,
+                &settings.tunables,
+            );
 
             let incomplete_ok = !full || !sel;
 
@@ -1408,7 +1430,7 @@ impl StatefulWidget for Scrollback<'_> {
         // Render image previews after all text lines have been drawn, as the render might draw below the current
         // line.
         for (x, y, backend) in image_previews {
-            let image_widget = Image::new(backend);
+            let image_widget = Image::new(&backend);
             let mut rect = backend.area();
             rect.x = x;
             rect.y = y;
@@ -1486,7 +1508,11 @@ mod tests {
             std::mem::take(&mut store.application.need_load)
                 .into_iter()
                 .collect::<Vec<(OwnedRoomId, Need)>>(),
-            vec![(room_id.clone(), Need { messages: Some(Vec::new()), members: false })]
+            vec![(room_id.clone(), Need {
+                messages: Some(Vec::new()),
+                members: false,
+                events: Vec::new()
+            })]
         );
 
         // Search forward twice to MSG1.
