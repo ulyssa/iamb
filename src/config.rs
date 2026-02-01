@@ -875,14 +875,9 @@ pub struct ApplicationSettings {
 }
 
 impl ApplicationSettings {
-    fn get_xdg_config_home() -> Option<PathBuf> {
-        env::var("XDG_CONFIG_HOME").ok().map(PathBuf::from)
-    }
-
     pub fn load(cli: Iamb) -> Result<Self, Box<dyn std::error::Error>> {
         let mut config_dir = cli
             .config_directory
-            .or_else(Self::get_xdg_config_home)
             .or_else(dirs::config_dir)
             .unwrap_or_else(|| {
                 usage!(
