@@ -2133,7 +2133,6 @@ impl ClientWorker {
             .expect("client was started multiple times");
         self.load_handle = tokio::spawn({
             let client = self.client.clone();
-            let settings = self.settings.clone();
 
             async move {
                 while !client.is_active() {
@@ -2143,7 +2142,7 @@ impl ClientWorker {
                 let load = load_older_forever(&client, &store);
                 let rcpt = send_receipts_forever(&client, unspawned_receipt_stream);
                 let room = refresh_rooms_forever(&client, &store);
-                let notifications = register_notifications(&client, &settings, &store);
+                let notifications = register_notifications(&client, &store);
                 let sendqueue = subscribe_sendqueue_forever(&client, &store);
                 let spaces = load_space_children_forever(&client, &store);
                 let ((), (), (), (), (), ()) =
