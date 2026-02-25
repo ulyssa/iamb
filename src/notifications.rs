@@ -18,7 +18,6 @@ use matrix_sdk::ruma::events::{
 };
 use matrix_sdk::ruma::serde::Raw;
 
-use crate::config::NotifyVia;
 use crate::prelude::*;
 
 const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
@@ -41,15 +40,7 @@ impl Drop for NotificationHandle {
     }
 }
 
-pub async fn register_notifications(
-    client: &Client,
-    settings: &ApplicationSettings,
-    store: &AsyncProgramStore,
-) {
-    if !settings.tunables.notifications.enabled {
-        return;
-    }
-    let notify_via = settings.tunables.notifications.via;
+pub async fn register_notifications(client: &Client, store: &AsyncProgramStore) {
     let server_settings = client.notification_settings().await;
     let Some(startup_ts) = MilliSecondsSinceUnixEpoch::from_system_time(SystemTime::now()) else {
         return;
@@ -96,8 +87,13 @@ pub async fn register_notifications(
                                     return;
                                 }
 
-                                send_notification(&notify_via, &summary, &body, room_id, &store)
-                                    .await;
+                                let mut locked = store.lock().await;
+
+                                if !locked.application.settings.tunables.notifications.enabled {
+                                    return;
+                                }
+
+                                send_notification(&summary, &body, room_id, &mut locked).await;
                             },
                             Err(err) => {
                                 tracing::error!("Failed to extract notification data: {err}")
@@ -115,14 +111,13 @@ pub async fn register_notifications(
 }
 
 async fn send_notification(
-    via: &NotifyVia,
     summary: &str,
     body: &str,
     room_id: OwnedRoomId,
-    store: &AsyncProgramStore,
+    store: &mut ProgramStore,
 ) {
     #[cfg(feature = "desktop")]
-    if via.desktop {
+    if store.application.settings.tunables.notifications.via.desktop {
         send_notification_desktop(summary, body, room_id, store).await;
     }
     #[cfg(not(feature = "desktop"))]
@@ -130,14 +125,13 @@ async fn send_notification(
         let _ = (summary, body, IAMB_XDG_NAME);
     }
 
-    if via.bell {
+    if store.application.settings.tunables.notifications.via.bell {
         send_notification_bell(store).await;
     }
 }
 
-async fn send_notification_bell(store: &AsyncProgramStore) {
-    let mut locked = store.lock().await;
-    locked.application.ring_bell = true;
+async fn send_notification_bell(store: &mut ProgramStore) {
+    store.application.ring_bell = true;
 }
 
 #[cfg(feature = "desktop")]
@@ -146,10 +140,9 @@ async fn send_notification_desktop(
     summary: &str,
     body: &str,
     room_id: OwnedRoomId,
-    store: &AsyncProgramStore,
+    store: &mut ProgramStore,
 ) {
-    let mut locked = store.lock().await;
-    let settings = &locked.application.settings;
+    let settings = &store.application.settings;
 
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
@@ -178,7 +171,7 @@ async fn send_notification_desktop(
         Err(err) => tracing::error!("Failed to send notification: {err}"),
         Ok(handle) => {
             #[cfg(all(unix, not(target_os = "macos")))]
-            locked
+            store
                 .application
                 .open_notifications
                 .entry(room_id)
