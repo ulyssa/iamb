@@ -227,6 +227,7 @@ pub fn mock_settings() -> ApplicationSettings {
         layout: Default::default(),
         macros: HashMap::default(),
         enable_enhanced_keys: false,
+        log_level_handle: None,
     }
 }
 
