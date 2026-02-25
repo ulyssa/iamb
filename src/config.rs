@@ -192,6 +192,21 @@ pub enum ConfigError {
     InvalidJSON(#[from] serde_json::Error),
 }
 
+#[derive(thiserror::Error, Debug)]
+pub enum ReloadError {
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+
+    #[error("invalid `log_level`: {0}")]
+    LogLevel(#[from] tracing_subscriber::filter::ParseError),
+
+    #[error("The current profile is not in the new config file")]
+    ProfileNotFound,
+
+    #[error("The user_id in the new config is different")]
+    UserIdChanged,
+}
+
 macro_rules! deserialize_str_with_visitor {
     ($t: ident, $v: ident) => {
         impl<'de> Deserialize<'de> for $t {
@@ -1370,6 +1385,20 @@ impl IambConfig {
     }
 }
 
+#[derive(Clone)]
+pub enum SettingsFile {
+    Toml(PathBuf),
+    Json(PathBuf),
+}
+
+impl SettingsFile {
+    fn display(&self) -> std::path::Display<'_> {
+        match self {
+            Self::Toml(path) | Self::Json(path) => path.display(),
+        }
+    }
+}
+
 type ReloadHandle = tracing_subscriber::reload::Handle<
     EnvFilter,
     tracing_subscriber::layer::Layered<
@@ -1397,6 +1426,8 @@ pub struct ApplicationSettings {
     pub layout: Layout,
     pub macros: Macros,
     pub log_level_handle: Option<ReloadHandle>,
+    /// The file the settings were loaded from.
+    pub load_file: SettingsFile,
 }
 
 impl ApplicationSettings {
@@ -1404,7 +1435,7 @@ impl ApplicationSettings {
         env::var("XDG_CONFIG_HOME").ok().map(PathBuf::from)
     }
 
-    pub fn load(cli: Iamb) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load(cli: Iamb) -> Result<Self, ConfigError> {
         let mut config_dir = cli
             .config_directory
             .or_else(Self::get_xdg_config_home)
@@ -1421,10 +1452,10 @@ impl ApplicationSettings {
         let config_json = config_dir.join("config.json");
         let config_toml = config_dir.join("config.toml");
 
-        let config = if config_toml.is_file() {
-            IambConfig::load_toml(config_toml.as_path())?
+        let (config, load_file) = if config_toml.is_file() {
+            (IambConfig::load_toml(config_toml.as_path())?, SettingsFile::Toml(config_toml))
         } else if config_json.is_file() {
-            IambConfig::load_json(config_json.as_path())?
+            (IambConfig::load_json(config_json.as_path())?, SettingsFile::Json(config_json))
         } else {
             usage!(
                 "Please create a configuration file at {}\n\n\
@@ -1449,7 +1480,7 @@ impl ApplicationSettings {
                 usage!(
                     "No configured profile with the name {:?} in {}",
                     profile,
-                    config_json.display()
+                    load_file.display()
                 );
             })
         } else if profiles.len() == 1 {
@@ -1537,9 +1568,54 @@ impl ApplicationSettings {
             layout,
             macros,
             log_level_handle: None,
+            load_file,
         };
 
         Ok(settings)
+    }
+
+    pub fn reload(&mut self, path: Option<SettingsFile>) -> Result<(), ReloadError> {
+        let load_file = path.unwrap_or_else(|| self.load_file.clone());
+
+        let config = match &load_file {
+            SettingsFile::Toml(path) => IambConfig::load_toml(path.as_path())?,
+            SettingsFile::Json(path) => IambConfig::load_json(path.as_path())?,
+        };
+
+        let IambConfig { mut profiles, dirs, settings: global, .. } = config;
+
+        // TODO: validate profiles?
+
+        let mut profile =
+            profiles.remove(&self.profile_name).ok_or(ReloadError::ProfileNotFound)?;
+
+        if profile.user_id != self.profile.user_id {
+            return Err(ReloadError::UserIdChanged);
+        }
+
+        // TODO: update macros
+
+        let tunables = global.unwrap_or_default();
+        let tunables = profile.settings.take().unwrap_or_default().merge(tunables);
+        let tunables = tunables.values();
+
+        let dirs = dirs.unwrap_or_default();
+        let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
+        let dirs = dirs.values();
+
+        // update values
+        self.tunables = tunables;
+        self.profile = profile;
+        self.load_file = load_file;
+        self.dirs.downloads = dirs.downloads;
+
+        // apply changes that need more setup
+
+        self.update(TunablesUpdate::LogLevel(LogLevelUpdate::parse(
+            self.tunables.log_level.to_owned(),
+        )?));
+
+        Ok(())
     }
 
     /// Update [`self.tunables`](`Self::tunables`) with `new`.
