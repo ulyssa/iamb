@@ -743,6 +743,19 @@ fn iamb_set(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_reload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let iact = IambAction::from(SettingsAction::Reload(args.pop().map(Into::into)));
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand {
         name: "cancel".into(),
@@ -864,6 +877,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "set".into(),
         aliases: vec!["se".into()],
         f: iamb_set,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "reload".into(),
+        aliases: vec![],
+        f: iamb_reload,
     });
 }
 

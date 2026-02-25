@@ -8,6 +8,7 @@ use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::hash::Hash;
 use std::ops::Deref;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -91,7 +92,12 @@ use modalkit::{
     prelude::{CommandType, WordStyle},
 };
 
-use crate::config::{ImagePreviewProtocolValues, TunablesUpdate, TunablesUpdateDiscriminants};
+use crate::config::{
+    ImagePreviewProtocolValues,
+    ReloadError,
+    TunablesUpdate,
+    TunablesUpdateDiscriminants,
+};
 use crate::message::ImageStatus;
 use crate::notifications::NotificationHandle;
 use crate::preview::{source_from_event, spawn_insert_preview};
@@ -513,6 +519,9 @@ pub enum KeysAction {
 pub enum SettingsAction {
     /// Change some settings.
     Set(Vec<TunablesUpdate>),
+
+    /// Reload the (specified) config file.
+    Reload(Option<PathBuf>),
 }
 
 /// An action that the main program loop should.
@@ -835,6 +844,10 @@ pub enum IambError {
     /// A failure while trying to show an image preview.
     #[error("Preview error: {0}")]
     Preview(String),
+
+    /// Config couldn't be reloaded
+    #[error("Reload error: {0}")]
+    ConfigReload(#[from] ReloadError),
 }
 
 impl From<IambError> for UIError<IambInfo> {
@@ -2151,7 +2164,7 @@ fn complete_cmdarg(
     match cmd.name.as_str() {
         "cancel" | "dms" | "edit" | "redact" | "reply" => vec![],
         "members" | "rooms" | "spaces" | "welcome" => vec![],
-        "download" | "keys" | "open" | "upload" => complete_path(text, cursor),
+        "download" | "keys" | "open" | "upload" | "reload" => complete_path(text, cursor),
         "react" | "unreact" => complete_emoji(text, cursor, store),
 
         "invite" => complete_users(text, cursor, store),

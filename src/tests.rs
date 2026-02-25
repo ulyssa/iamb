@@ -30,6 +30,7 @@ use crate::{
         Notifications,
         NotifyVia,
         ProfileConfig,
+        SettingsFile,
         SortOverrides,
         TunableValues,
         UserColor,
@@ -229,6 +230,7 @@ pub fn mock_settings() -> ApplicationSettings {
         layout: Default::default(),
         macros: HashMap::default(),
         log_level_handle: None,
+        load_file: SettingsFile::Toml("/dev/null".into()),
     }
 }
 
