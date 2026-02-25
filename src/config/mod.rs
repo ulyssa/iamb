@@ -27,10 +27,15 @@ use ratatui_image::picker::ProtocolType;
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize};
+use strum::{EnumString, VariantNames};
+use tracing::level_filters::LevelFilter;
+use tracing_subscriber::EnvFilter;
+use tracing_subscriber::fmt::format::{DefaultFields, Format};
 
 use crate::base::{SortColumn, SortFieldRoom, SortFieldSpace, SortFieldUser, SortOrder};
 use crate::prelude::*;
 
+pub mod reload;
 pub mod theme;
 
 pub type Aliases = IndexMap<String, String>;
@@ -121,6 +126,14 @@ pub fn time_gutter_width(format: &str) -> usize {
 
     let rendered = time_gutter_sample().format(format).to_string();
     UnicodeWidthStr::width(rendered.as_str())
+}
+
+pub fn parse_env_logger(
+    directives: &str,
+) -> Result<EnvFilter, tracing_subscriber::filter::ParseError> {
+    EnvFilter::builder()
+        .with_default_directive(LevelFilter::OFF.into())
+        .parse(directives)
 }
 
 fn is_profile_char(c: char) -> bool {
@@ -504,8 +517,9 @@ where
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString, VariantNames)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "lowercase")]
 #[repr(u8)]
 pub enum ReadReceiptTrigger {
     /// Update read receipts for a room when a window for it is focused, and it is scrolled to the
@@ -537,8 +551,9 @@ impl ReadReceiptTrigger {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString, VariantNames)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u8)]
 pub enum EncryptionIndicator {
     /// Always indicate the room's encryption status.
@@ -592,8 +607,9 @@ impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
 }
 
 /// Types of room labels to display in room lists.
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, EnumString, VariantNames)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u8)]
 pub enum RoomLabel {
     Membership,
@@ -603,8 +619,9 @@ pub enum RoomLabel {
     Unread,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString, VariantNames)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum UserDisplayStyle {
     // The Matrix username for the sender (e.g., "@user:example.com").
     #[default]
@@ -621,8 +638,9 @@ pub enum UserDisplayStyle {
     DisplayName,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, EnumString, VariantNames)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum SplitDirection {
     #[default]
     Horizontal,
@@ -860,7 +878,7 @@ pub struct Notifications {
     pub sound_hint: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct ImagePreviewValues {
     pub enabled: bool,
     pub size: Size,
@@ -884,7 +902,7 @@ impl ImagePreview {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default, PartialEq)]
 pub struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,
     pub filter: Option<FilterType>,
@@ -1211,8 +1229,9 @@ impl Tunables {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString, VariantNames)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u8)]
 pub enum CursorShape {
     Default,
@@ -1237,8 +1256,9 @@ impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString, VariantNames)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u8)]
 pub enum MarkupFormat {
     Html,
@@ -1418,6 +1438,33 @@ impl IambConfig {
 }
 
 #[derive(Clone)]
+pub enum SettingsFile {
+    Toml(PathBuf),
+    Json(PathBuf),
+}
+
+impl SettingsFile {
+    fn display(&self) -> std::path::Display<'_> {
+        match self {
+            Self::Toml(path) | Self::Json(path) => path.display(),
+        }
+    }
+}
+
+type ReloadHandle = tracing_subscriber::reload::Handle<
+    EnvFilter,
+    tracing_subscriber::layer::Layered<
+        tracing_subscriber::fmt::Layer<
+            tracing_subscriber::Registry,
+            DefaultFields,
+            Format,
+            tracing_appender::non_blocking::NonBlocking,
+        >,
+        tracing_subscriber::Registry,
+    >,
+>;
+
+#[derive(Clone)]
 pub struct ApplicationSettings {
     pub layout_json: PathBuf,
     pub session_json: PathBuf,
@@ -1436,10 +1483,15 @@ pub struct ApplicationSettings {
     pub macros: Macros,
     pub aliases: Aliases,
 
+    pub log_level_handle: Option<ReloadHandle>,
+
     /// Whether to use the Kitty keyboard protocol. Resolved by
     /// [`ApplicationSettings::probe_enhanced_keys`] once the TUI starts, since
     /// it may require querying the terminal.
     pub enable_enhanced_keys: bool,
+
+    /// The file the settings were loaded from.
+    pub load_file: SettingsFile,
 }
 
 impl ApplicationSettings {
@@ -1464,10 +1516,10 @@ impl ApplicationSettings {
         let config_json = config_dir.join("config.json");
         let config_toml = config_dir.join("config.toml");
 
-        let config = if config_toml.is_file() {
-            IambConfig::load_toml(config_toml.as_path())?
+        let (config, load_file) = if config_toml.is_file() {
+            (IambConfig::load_toml(config_toml.as_path())?, SettingsFile::Toml(config_toml))
         } else if config_json.is_file() {
-            IambConfig::load_json(config_json.as_path())?
+            (IambConfig::load_json(config_json.as_path())?, SettingsFile::Json(config_json))
         } else {
             usage!(
                 "Please create a configuration file at {}\n\n\
@@ -1494,7 +1546,7 @@ impl ApplicationSettings {
                 usage!(
                     "No configured profile with the name {:?} in {}",
                     profile,
-                    config_json.display()
+                    load_file.display()
                 );
             })
         } else if profiles.len() == 1 {
@@ -1609,6 +1661,8 @@ impl ApplicationSettings {
             macros,
             aliases,
             enable_enhanced_keys: false,
+            log_level_handle: None,
+            load_file,
         };
 
         Ok(settings)
