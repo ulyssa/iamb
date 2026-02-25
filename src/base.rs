@@ -4,6 +4,7 @@
 
 use std::collections::hash_map::IntoIter;
 use std::collections::{BTreeSet, HashSet};
+use std::path::PathBuf;
 
 use emojis::Emoji;
 use matrix_sdk::Client;
@@ -43,7 +44,7 @@ use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
 
-use crate::config::TunablesUpdate;
+use crate::config::{ReloadError, TunablesUpdate};
 use crate::notifications::NotificationHandle;
 use crate::prelude::*;
 
@@ -572,6 +573,9 @@ pub enum KeysAction {
 pub enum SettingsAction {
     /// Change some settings.
     Set(Vec<TunablesUpdate>),
+
+    /// Reload the (specified) config file.
+    Reload(Option<PathBuf>),
 }
 
 /// An action that the main program loop should execute.
@@ -904,6 +908,10 @@ pub enum IambError {
     /// A generic error that doesn't need a specific error type.
     #[error("{0}")]
     Custom(String),
+
+    /// Config couldn't be reloaded
+    #[error("Reload error: {0}")]
+    ConfigReload(#[from] ReloadError),
 }
 
 impl From<IambError> for UIError<IambInfo> {

@@ -228,6 +228,7 @@ pub fn mock_settings() -> ApplicationSettings {
         macros: HashMap::default(),
         enable_enhanced_keys: false,
         log_level_handle: None,
+        load_file: SettingsFile::Toml("/dev/null".into()),
     }
 }
 
