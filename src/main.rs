@@ -37,7 +37,6 @@ use rand::RngExt as _;
 use rand::distr::Alphanumeric;
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
-use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use modalkit::crossterm::{
@@ -89,6 +88,8 @@ mod worker;
 mod tests;
 mod verifications;
 
+use crate::base::SettingsAction;
+use crate::config::parse_env_logger;
 use crate::{
     base::{
         AsyncProgramStore,
@@ -632,6 +633,11 @@ impl Application {
 
                 return verifications::iamb_verify_request(user_id, store).await;
             },
+
+            IambAction::Settings(act) => {
+                self.settings_command(act, store);
+                None
+            },
         };
 
         Ok(info)
@@ -733,6 +739,16 @@ impl Application {
                 };
 
                 Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)])
+            },
+        }
+    }
+
+    fn settings_command(&mut self, action: SettingsAction, store: &mut ProgramStore) {
+        match action {
+            SettingsAction::Set(tunables_updates) => {
+                for update in tunables_updates {
+                    store.application.settings.update(update);
+                }
             },
         }
     }
@@ -1162,7 +1178,9 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     Ok(())
 }
 
-fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocking::WorkerGuard {
+fn setup_logging(
+    settings: &mut ApplicationSettings,
+) -> tracing_appender::non_blocking::WorkerGuard {
     let log_prefix = format!("iamb-log-{}", settings.profile_name);
     let log_dir = settings.dirs.logs.as_path();
     let max_log_files = settings.tunables.max_log_files;
@@ -1173,27 +1191,27 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
         .filename_prefix(log_prefix)
         .max_log_files(max_log_files)
         .build(log_dir)
-        .expect("can build appending tracing logger");
+        .expect("cannot build appending tracing logger");
     let (appender, guard) = tracing_appender::non_blocking(appender);
 
-    let filter = if let Ok(dirs) = std::env::var(EnvFilter::DEFAULT_ENV) {
-        EnvFilter::builder()
-            .with_default_directive(Level::WARN.into())
-            .parse(dirs)
+    let filter = if let Ok(directives) = std::env::var(EnvFilter::DEFAULT_ENV) {
+        parse_env_logger(&directives)
             .map_err(|err| format!("Unable to parse {}: {err}", EnvFilter::DEFAULT_ENV))
             .unwrap_or_else(print_exit)
     } else {
-        EnvFilter::builder()
-            .with_default_directive(Level::WARN.into())
-            .parse(log_level)
+        parse_env_logger(log_level)
             .map_err(|err| format!("Unable to parse `log_level`: {err}"))
             .unwrap_or_else(print_exit)
     };
 
-    let subscriber = FmtSubscriber::builder()
+    let builder = FmtSubscriber::builder()
         .with_writer(appender)
         .with_env_filter(filter)
-        .finish();
+        .with_filter_reloading();
+
+    settings.log_level_handle = Some(builder.reload_handle());
+
+    let subscriber = builder.finish();
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
@@ -1210,7 +1228,7 @@ fn main() {
     }
 
     // Load configuration and set up the Matrix SDK.
-    let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);
+    let mut settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);
 
     // Set umask on Unix platforms so that tokens, keys, etc. are only readable by the user.
     #[cfg(unix)]
@@ -1218,7 +1236,7 @@ fn main() {
         libc::umask(0o077);
     };
 
-    let guard = setup_logging(&settings);
+    let guard = setup_logging(&mut settings);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
