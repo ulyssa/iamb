@@ -42,6 +42,7 @@ use modalkit::keybindings::SequenceStatus;
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use strum::VariantNames;
 use tokio::sync::Mutex as AsyncMutex;
 
 use crate::config::{ReloadError, TunablesUpdate};
@@ -192,7 +193,8 @@ bitflags::bitflags! {
 }
 
 /// Fields that rooms and spaces can be sorted by.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, VariantNames)]
+#[strum(serialize_all = "lowercase")]
 pub enum SortFieldRoom {
     /// Sort rooms by whether they have the Favorite tag.
     Favorite,
@@ -207,6 +209,7 @@ pub enum SortFieldRoom {
     Alias,
 
     /// Sort rooms by their Matrix room identifier.
+    #[strum(serialize = "id")]
     RoomId,
 
     /// Sort rooms by the server portion of their canonical room alias.
@@ -227,9 +230,12 @@ pub enum SortFieldRoom {
 }
 
 /// Fields that users can be sorted by.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, VariantNames)]
+#[strum(serialize_all = "lowercase")]
 pub enum SortFieldUser {
+    #[strum(serialize = "power")]
     PowerLevel,
+    #[strum(serialize = "id")]
     UserId,
     LocalPart,
     Server,
