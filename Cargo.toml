@@ -95,6 +95,11 @@ features = ["e2e-encryption", "sqlite", "sso-login"]
 [dependencies.matrix-sdk-crypto]
 version = "0.16.0"
 
+[dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["socks"]
+
 [dependencies.tokio]
 version = "1.24.1"
 features = ["macros", "net", "rt-multi-thread", "sync", "time"]
