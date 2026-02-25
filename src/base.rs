@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::hash::Hash;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -72,7 +73,7 @@ use matrix_sdk::{
     },
 };
 
-use crate::config::TunablesUpdate;
+use crate::config::{ReloadError, TunablesUpdate};
 use crate::preview::PreviewKind;
 use crate::{
     config::ApplicationSettings,
@@ -585,6 +586,9 @@ pub enum KeysAction {
 pub enum SettingsAction {
     /// Change some settings.
     Set(Vec<TunablesUpdate>),
+
+    /// Reload the (specified) config file.
+    Reload(Option<PathBuf>),
 }
 
 /// An action that the main program loop should.
@@ -917,6 +921,10 @@ pub enum IambError {
     /// A generic error that doesn't need a specific error type.
     #[error("{0}")]
     Custom(String),
+
+    /// Config couldn't be reloaded
+    #[error("Reload error: {0}")]
+    ConfigReload(#[from] ReloadError),
 }
 
 impl From<IambError> for UIError<IambInfo> {
