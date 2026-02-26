@@ -345,7 +345,13 @@ impl MessageCursor {
         if let Some(ref key) = self.timestamp {
             Some(key)
         } else {
-            Some(thread.last_key_value()?.0)
+            Some(
+                thread
+                    .iter()
+                    .rev()
+                    .find(|(_, msg)| !matches!(&msg.event, MessageEvent::Edit(_)))?
+                    .0,
+            )
         }
     }
 
