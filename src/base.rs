@@ -865,13 +865,15 @@ impl EventLocation {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnreadInfo {
-    pub(crate) unread: bool,
+    pub(crate) unread_messages: u64,
+    pub(crate) unread_notifications: u64,
+    pub(crate) unread_mentions: u64,
     pub(crate) latest: Option<MessageTimeStamp>,
 }
 
 impl UnreadInfo {
     pub fn is_unread(&self) -> bool {
-        self.unread
+        self.unread_notifications > 0 || self.unread_mentions > 0
     }
 
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
@@ -1140,43 +1142,17 @@ impl RoomInfo {
     }
 
     /// Indicates whether this room has unread messages.
-    pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
+    pub fn unreads(&self, room: &matrix_sdk::Room) -> UnreadInfo {
         let last_message = self.messages.last_key_value();
 
-        let last_receipt = self
-            .user_receipts
-            .get(&ReceiptThread::Main)
-            .and_then(|receipts| receipts.get(&settings.profile.user_id));
-        let last_receipt = last_receipt.as_ref().and_then(|event_id| {
-            match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
-                EventLocation::Reaction(_) => None,
-            }
-        });
-
-        let last_unthreaded = self
-            .user_receipts
-            .get(&ReceiptThread::Unthreaded)
-            .and_then(|receipts| receipts.get(&settings.profile.user_id));
-        let last_unthreaded = last_unthreaded.as_ref().and_then(|event_id| {
-            match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
-                EventLocation::Reaction(_) => None,
-            }
-        });
-
-        let last_receipt = std::cmp::max(last_receipt, last_unthreaded);
-
-        match (last_message, last_receipt) {
-            (Some(((ts, _), _)), Some((read_ts, _))) => {
-                UnreadInfo { unread: ts > read_ts, latest: Some(*ts) }
-            },
-            (Some(((ts, _), _)), None) => {
-                // If we've never loaded/generated a room's receipt (example,
-                // a newly joined but never viewed room), show it as unread.
-                UnreadInfo { unread: true, latest: Some(*ts) }
-            },
-            (None, _) => UnreadInfo::default(),
+        // for some reason the two methods diverge in different directions for different rooms so
+        // get the higer one to be safe.
+        let counts = room.unread_notification_counts();
+        UnreadInfo {
+            unread_messages: room.num_unread_messages(),
+            unread_notifications: room.num_unread_notifications().max(counts.notification_count),
+            unread_mentions: room.num_unread_mentions().max(counts.highlight_count),
+            latest: last_message.map(|((ts, _), _)| ts.to_owned()),
         }
     }
 
