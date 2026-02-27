@@ -124,19 +124,27 @@ fn selected_text(s: &str, selected: bool) -> Text<'_> {
     Text::from(selected_span(s, selected))
 }
 
-fn name_and_labels(name: &str, unread: bool, style: Style) -> (Span<'_>, Vec<Vec<Span<'_>>>) {
-    let name_style = if unread {
+fn name_and_labels<'a>(
+    name: &'a str,
+    unread: &UnreadInfo,
+    style: Style,
+) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
+    // TODO: use different colors for "mention", "notification", "muted room"
+    let name_style = if unread.is_unread() {
         style.add_modifier(StyleModifier::BOLD)
     } else {
         style
     };
 
     let name = Span::styled(name, name_style);
-    let labels = if unread {
-        vec![vec![Span::styled("Unread", style)]]
-    } else {
-        vec![]
-    };
+
+    let mut labels = vec![];
+
+    if unread.unread_mentions > 0 {
+        labels.push(vec![Span::styled("Unread Mention", style)]);
+    } else if unread.unread_notifications > 0 || unread.unread_messages > 0 {
+        labels.push(vec![Span::styled("Unread", style)]);
+    }
 
     (name, labels)
 }
@@ -896,7 +904,7 @@ impl GenericChatItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -964,9 +972,8 @@ impl ListItem<IambInfo> for GenericChatItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
         let mut spans = vec![name];
 
         labels.push(if self.is_dm {
@@ -1015,7 +1022,7 @@ impl RoomItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -1083,9 +1090,8 @@ impl ListItem<IambInfo> for RoomItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1123,12 +1129,13 @@ pub struct DirectItem {
 
 impl DirectItem {
     fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
+        let room = &room_info.deref().0;
         let room_id = room_info.0.room_id().to_owned();
         let alias = room_info.0.canonical_alias();
 
         let info = store.application.rooms.get_or_default(room_id);
         let name = info.name.clone().unwrap_or_default();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         DirectItem { room_info, name, alias, unread }
@@ -1192,9 +1199,8 @@ impl ListItem<IambInfo> for DirectItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1742,7 +1748,12 @@ mod tests {
             tags: vec![],
             alias: None,
             name: "Room 1",
-            unread: UnreadInfo { unread: false, latest: None },
+            unread: UnreadInfo {
+                latest: None,
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
+            },
             invite: false,
         };
 
@@ -1752,8 +1763,10 @@ mod tests {
             alias: None,
             name: "Room 2",
             unread: UnreadInfo {
-                unread: false,
                 latest: Some(MessageTimeStamp::OriginServer(40u32.into())),
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
             },
             invite: false,
         };
@@ -1764,8 +1777,10 @@ mod tests {
             alias: None,
             name: "Room 3",
             unread: UnreadInfo {
-                unread: false,
                 latest: Some(MessageTimeStamp::OriginServer(20u32.into())),
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
             },
             invite: false,
         };
