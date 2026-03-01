@@ -288,18 +288,29 @@ controls whether to show the message in the desktop notification, and defaults t
 Messages are truncated beyond a small length.
 The notification rules are stored server side, loaded once at startup, and are currently not configurable in iamb.
 In other words, you can simply change the rules with another client.
+
+.It Sy sound_hint
+Controls the notification sound name that is passed as a hint to the notification daemon.
 .El
 
 .Ss Example 1: Enable notifications with default options
 .Bd -literal -offset indent
-[settings]
-notifications = {}
+[settings.notifications]
+enabled = true
 .Ed
 .Ss Example 2: Enable notifications using terminal bell
 .Bd -literal -offset indent
 [settings.notifications]
+enabled = true
 via = "bell"
 show_message = false
+.Ed
+.Ss Example 3: Enable notifications using the instant message sound
+.Bd -literal -offset indent
+[settings.notifications]
+enabled = true
+sound_hint = "message-new-instant" # Linux
+sound_hint = "IM"                  # Windows
 .Ed
 
 .Sh "SORTING LISTS"
