@@ -366,10 +366,14 @@ Put invites before other rooms.
 .El
 .El
 
-.Ss Example 1: Group room members by their server first
+Add a
+.Dq Sy ~
+in front of any value to flip the order.
+
+.Ss Example 1: Group room members by their server first and descending localpart second
 .Bd -literal -offset indent
 [settings.sort]
-members = ["server", "localpart"]
+members = ["server", "~localpart"]
 .Ed
 
 .Sh "USER OVERRIDES"
