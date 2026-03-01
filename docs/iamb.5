@@ -166,6 +166,12 @@ Possible values are:
 .Dq Sy warn , and
 .Dq Sy error .
 
+.It Sy mouse
+Enable mouse support
+See
+.Sx MOUSE
+for more details.
+
 .It Sy message_shortcode_display
 Defines whether or not Emoji characters in messages should be replaced by their
 respective shortcodes.
@@ -256,6 +262,22 @@ reaction_shortcode_display = true
 [settings]
 request_timeout = 120
 .Ed
+
+.Sh MOUSE
+
+The
+.Sy settings.mouse
+subsection allows enabling mouse support.
+Currently the only difference is that scrolling moves the window view instead of changing the selection.
+
+The available fields in this subsection are:
+.Bl -tag -width Ds
+.It Sy enabled
+Defaults to
+.Sy false .
+Setting this field to
+.Sy true
+enables mouse support.
 
 .Sh NOTIFICATIONS
 
