@@ -258,7 +258,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldRoom> {
 }
 
 /// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
-struct SortRoomVisitor;
+pub(crate) struct SortRoomVisitor;
 
 impl Visitor<'_> for SortRoomVisitor {
     type Value = SortColumn<SortFieldRoom>;
@@ -312,7 +312,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldUser> {
 }
 
 /// [serde] visitor for deserializing [SortColumn] for users.
-struct SortUserVisitor;
+pub(crate) struct SortUserVisitor;
 
 impl Visitor<'_> for SortUserVisitor {
     type Value = SortColumn<SortFieldUser>;
