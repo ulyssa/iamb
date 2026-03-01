@@ -633,12 +633,57 @@ impl SortUpdate {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum NotificationsUpdate {
+    Enabled(bool),
+    Via(NotifyVia),
+    ShowMessage(bool),
+    SoundHint(Option<String>),
+}
+
+impl NotificationsUpdate {
+    fn new(option: &str, value: Option<&str>) -> Result<Self, TunablesUpdateError> {
+        let res = match option {
+            "via" => {
+                if let Some(value) = value {
+                    let via = NotifyViaVisitor.visit_str::<TunablesUpdateError>(value)?;
+                    Self::Via(via)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "soundhint" => {
+                if let Some(value) = value {
+                    if value.is_empty() {
+                        Self::SoundHint(None)
+                    } else {
+                        Self::SoundHint(Some(value.to_owned()))
+                    }
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+
+            "enabled" => Self::Enabled(true),
+            "noenabled" => Self::Enabled(false),
+            "showmessage" => Self::ShowMessage(true),
+            "noshowmessage" => Self::ShowMessage(false),
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
+    }
+}
+
 /// A update for the [`TunableValues`] after invoking the `:set` command.
 #[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
 #[strum_discriminants(derive(IntoStaticStr, EnumProperty, VariantArray))]
 pub enum TunablesUpdate {
     // multilevel options
     Sort(SortUpdate),
+    Notifications(NotificationsUpdate),
 
     // value options
     LogLevel(Box<LogLevelUpdate>),
@@ -675,9 +720,6 @@ pub enum TunablesUpdate {
     // TODO: this might be complicated with the panic hook
     // Mouse(Mouse),
 
-    // TODO: this will be complicated
-    // Notifications(Notifications),
-
     // TODO: This will be possible/easier after #464 lands
     // ImagePreview(Option<ImagePreviewValues>),
 
@@ -696,6 +738,9 @@ impl TunablesUpdate {
             };
 
             return Ok(Self::Sort(SortUpdate::new(sort_option, value)?));
+        }
+        if let Some(notification_option) = option.strip_prefix("notifications.") {
+            return Ok(Self::Notifications(NotificationsUpdate::new(notification_option, value)?));
         }
 
         let res = match option.as_str() {
@@ -1338,6 +1383,20 @@ impl ApplicationSettings {
                     SortUpdate::Rooms(order) => self.tunables.sort.rooms = order,
                     SortUpdate::Spaces(order) => self.tunables.sort.spaces = order,
                     SortUpdate::Members(order) => self.tunables.sort.members = order,
+                }
+            },
+            TunablesUpdate::Notifications(notify_update) => {
+                match notify_update {
+                    NotificationsUpdate::Enabled(value) => {
+                        self.tunables.notifications.enabled = value
+                    },
+                    NotificationsUpdate::Via(value) => self.tunables.notifications.via = value,
+                    NotificationsUpdate::ShowMessage(value) => {
+                        self.tunables.notifications.show_message = value
+                    },
+                    NotificationsUpdate::SoundHint(value) => {
+                        self.tunables.notifications.sound_hint = value
+                    },
                 }
             },
             TunablesUpdate::OpenCommand(open_command) => {
