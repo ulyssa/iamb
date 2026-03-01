@@ -17,12 +17,14 @@ use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use ratatui::crossterm::cursor::SetCursorStyle;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::FilterType;
 use ratatui_image::picker::ProtocolType;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as SerdeError, de::Visitor};
+use strum::{EnumDiscriminants, IntoStaticStr, VariantArray};
 use strum_macros::EnumString;
 use tracing::Level;
 use tracing_subscriber::EnvFilter;
@@ -33,6 +35,9 @@ use modalkit::env::vim::VimMode;
 use modalkit::key::TerminalKey;
 use modalkit::keybindings::InputKey;
 use modalkit::prelude::Axis;
+
+use crate::base::{SortRoomVisitor, SortUserVisitor};
+use crate::preview::PreviewManager;
 
 use super::base::{
     IambError,
@@ -388,8 +393,9 @@ where
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "lowercase")]
 #[repr(u8)]
 pub enum ReadReceiptTrigger {
     /// Update read receipts for a room when a window for it is focused, and it is scrolled to the
@@ -421,8 +427,9 @@ impl ReadReceiptTrigger {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u8)]
 pub enum EncryptionIndicator {
     /// Always indicate the room's encryption status.
@@ -494,8 +501,9 @@ pub enum UserDisplayStyle {
     DisplayName,
 }
 
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, EnumString)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum SplitDirection {
     #[default]
     Horizontal,
@@ -720,7 +728,7 @@ pub struct Notifications {
     pub sound_hint: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq)]
 pub struct ImagePreviewValues {
     pub enabled: bool,
     pub lazy_load: bool,
@@ -747,7 +755,7 @@ impl ImagePreview {
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Default)]
+#[derive(Clone, Debug, Deserialize, Default, PartialEq)]
 pub struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,
     pub filter: Option<FilterType>,
@@ -820,6 +828,9 @@ pub enum TunablesUpdateError {
     #[error("Unknown option")]
     UnknownOption,
 
+    #[error("Invalid argument")]
+    InvalidArgument,
+
     #[error(transparent)]
     LogLevel(#[from] tracing_subscriber::filter::ParseError),
 
@@ -831,13 +842,296 @@ pub enum TunablesUpdateError {
 
     #[error(transparent)]
     ParseInt(#[from] std::num::ParseIntError),
+
+    #[error("Invalid user id: {0}")]
+    UserId(#[from] matrix_sdk::IdParseError),
+
+    #[error("{0}")]
+    Custom(String),
+}
+
+impl serde::de::Error for TunablesUpdateError {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: fmt::Display,
+    {
+        Self::Custom(format!("{msg}"))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum SortUpdate {
+    Chats(Vec<SortColumn<SortFieldRoom>>),
+    Dms(Vec<SortColumn<SortFieldRoom>>),
+    Rooms(Vec<SortColumn<SortFieldRoom>>),
+    Spaces(Vec<SortColumn<SortFieldRoom>>),
+    Members(Vec<SortColumn<SortFieldUser>>),
+}
+
+impl SortUpdate {
+    fn new(option: &str, value: &str) -> Result<Self, TunablesUpdateError> {
+        if option == "members" {
+            let order: Result<Vec<_>, TunablesUpdateError> = value
+                .split(',')
+                .filter(|v| !v.is_empty())
+                .map(|v| SortUserVisitor.visit_str(v))
+                .collect();
+            return Ok(Self::Members(order?));
+        }
+
+        let order: Result<Vec<_>, TunablesUpdateError> = value
+            .split(',')
+            .filter(|v| !v.is_empty())
+            .map(|v| SortRoomVisitor.visit_str(v))
+            .collect();
+
+        Ok(match option {
+            "chats" => Self::Chats(order?),
+            "dms" => Self::Dms(order?),
+            "rooms" => Self::Rooms(order?),
+            "spaces" => Self::Spaces(order?),
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum NotificationsUpdate {
+    Enabled(bool),
+    Via(NotifyVia),
+    ShowMessage(bool),
+    SoundHint(Option<String>),
+}
+
+impl NotificationsUpdate {
+    fn new(option: &str, value: Option<&str>) -> Result<Self, TunablesUpdateError> {
+        let res = match option {
+            "via" => {
+                if let Some(value) = value {
+                    let via = NotifyViaVisitor.visit_str::<TunablesUpdateError>(value)?;
+                    Self::Via(via)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "soundhint" => {
+                if let Some(value) = value {
+                    if value.is_empty() {
+                        Self::SoundHint(None)
+                    } else {
+                        Self::SoundHint(Some(value.to_owned()))
+                    }
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+
+            "enabled" => Self::Enabled(true),
+            "noenabled" => Self::Enabled(false),
+            "showmessage" => Self::ShowMessage(true),
+            "noshowmessage" => Self::ShowMessage(false),
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum UserDisplayUpdate {
+    Name(Option<String>),
+    Color(Option<UserColor>),
+}
+
+impl UserDisplayUpdate {
+    fn new(option: &str, value: &str) -> Result<Self, TunablesUpdateError> {
+        let res = match option {
+            "name" => {
+                if value.is_empty() {
+                    Self::Name(None)
+                } else {
+                    Self::Name(Some(value.to_owned()))
+                }
+            },
+            "color" => {
+                if value.is_empty() {
+                    Self::Color(None)
+                } else {
+                    let color = UserColorVisitor.visit_str::<TunablesUpdateError>(value)?;
+                    Self::Color(Some(color))
+                }
+            },
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
+    }
+}
+
+/// This only exists because [`ProtocolType`] isn't [`Eq`].
+// XXX: replace this after https://github.com/ratatui/ratatui-image/pull/194 is merged and released.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IambProtocolType {
+    Halfblocks,
+    Sixel,
+    Kitty,
+    Iterm2,
+}
+
+impl From<IambProtocolType> for ProtocolType {
+    fn from(value: IambProtocolType) -> Self {
+        match value {
+            IambProtocolType::Halfblocks => Self::Halfblocks,
+            IambProtocolType::Sixel => Self::Sixel,
+            IambProtocolType::Kitty => Self::Kitty,
+            IambProtocolType::Iterm2 => Self::Iterm2,
+        }
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum ImagePreviewUpdate {
+    Enabled(bool),
+    Width(u16),
+    Height(u16),
+    ProtocolType(IambProtocolType),
+    ProtocolFilter(FilterType),
+
+    /// Reload the image previews without chaning a setting (used by `:reload`)
+    Reload,
+}
+
+impl ImagePreviewUpdate {
+    fn new(option: &str, value: Option<&str>) -> Result<Self, TunablesUpdateError> {
+        let res = match option {
+            "size.width" => {
+                if let Some(value) = value {
+                    let width = u16::from_str(value)?;
+                    Self::Width(width)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "size.height" => {
+                if let Some(value) = value {
+                    let height = u16::from_str(value)?;
+                    Self::Height(height)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "protocol.type" => {
+                let Some(value) = value else {
+                    return Err(TunablesUpdateError::NoArguments);
+                };
+                let protocol_type = match value {
+                    "sixel" => IambProtocolType::Sixel,
+                    "kitty" => IambProtocolType::Kitty,
+                    "iterm2" => IambProtocolType::Iterm2,
+                    "halfblocks" => IambProtocolType::Halfblocks,
+                    _ => return Err(TunablesUpdateError::InvalidArgument),
+                };
+
+                Self::ProtocolType(protocol_type)
+            },
+
+            "protocol.filter" => {
+                let Some(value) = value else {
+                    return Err(TunablesUpdateError::NoArguments);
+                };
+                let filter = match value {
+                    "Nearest" => FilterType::Nearest,
+                    "Triangle" => FilterType::Triangle,
+                    "CatmullRom" => FilterType::CatmullRom,
+                    "Gaussian" => FilterType::Gaussian,
+                    "Lanczos3" => FilterType::Lanczos3,
+                    _ => return Err(TunablesUpdateError::InvalidArgument),
+                };
+
+                Self::ProtocolFilter(filter)
+            },
+
+            "enabled" => Self::Enabled(true),
+            "noenabled" => Self::Enabled(false),
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum EncryptionUpdate {
+    Indicator(EncryptionIndicator),
+    IndicatorLocation(EncryptionIndicatorLocation),
+}
+
+impl EncryptionUpdate {
+    fn new(option: &str, value: &str) -> Result<Self, TunablesUpdateError> {
+        let res = match option {
+            "indicator" => Self::Indicator(EncryptionIndicator::from_str(value)?),
+            "indicatorlocation" => {
+                let via =
+                    EncryptionIndicatorLocationVisitor.visit_str::<TunablesUpdateError>(value)?;
+                Self::IndicatorLocation(via)
+            },
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum TerminalUpdate {
+    CursorShape(CursorShape),
+}
+
+impl TerminalUpdate {
+    fn new(option: &str, value: Option<&str>) -> Result<Self, TunablesUpdateError> {
+        let res = match option {
+            "cursorshape" => {
+                if let Some(value) = value {
+                    Self::CursorShape(CursorShape::from_str(value)?)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
+    }
 }
 
 /// A update for the [`TunableValues`] after invoking the `:set` command.
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub enum TunablesUpdate {
+    // multilevel options
+    Sort(SortUpdate),
+    Notifications(NotificationsUpdate),
+    Users(OwnedUserId, UserDisplayUpdate),
+    ImagePreview(ImagePreviewUpdate),
+    Encryption(EncryptionUpdate),
+    Terminal(TerminalUpdate),
+
     // value options
+    DefaultMarkup(MarkupFormat),
+    DefaultSplit(SplitDirection),
     LogLevel(Box<LogLevelUpdate>),
+    MembersSplit(Option<SplitDirection>),
+    ReadReceiptTrigger(ReadReceiptTrigger),
     UsernameDisplay(UserDisplayStyle),
     OpenCommand(Vec<String>),
     ExternalEditFileSuffix(String),
@@ -854,36 +1148,95 @@ pub enum TunablesUpdate {
     TypingNoticeSend(bool),
     TypingNoticeDisplay(bool),
     MessageUserColor(bool),
-    // These may need to be adapted
-
-    // TODO: still save state events if display is `false`
-    // StateEventDisplay(bool),
-
-    // TODO: this might be complicated with the panic hook
-    // Mouse(Mouse),
-
-    // TODO: this will be complicated
-    // Notifications(Notifications),
-
-    // TODO: This will be possible/easier after #464 lands
-    // ImagePreview(Option<ImagePreviewValues>),
-
-    // TODO: how do we do this?
-    // Users(UserOverrides),
-
-    // TODO: how do we parse these?
-    // Sort(SortValues),
+    Ignorecase(bool),
 }
 
 impl TunablesUpdate {
     pub fn new(mut option: String, value: Option<&str>) -> Result<Self, TunablesUpdateError> {
         option.retain(|c| c != '_');
 
+        // sort options
+        if let Some(sort_option) = option.strip_prefix("sort.") {
+            let Some(value) = value else {
+                return Err(TunablesUpdateError::NoArguments);
+            };
+
+            return Ok(Self::Sort(SortUpdate::new(sort_option, value)?));
+        }
+        // notifications
+        if let Some(notification_option) = option.strip_prefix("notifications.") {
+            return Ok(Self::Notifications(NotificationsUpdate::new(notification_option, value)?));
+        }
+        // user overrides
+        if let Some(users_option) = option.strip_prefix("users.") {
+            let Some((user_id, user_option)) = users_option.rsplit_once('.') else {
+                return Err(TunablesUpdateError::UnknownOption);
+            };
+
+            let user_id = OwnedUserId::from_str(user_id)?;
+
+            let Some(value) = value else {
+                return Err(TunablesUpdateError::NoArguments);
+            };
+
+            let update = UserDisplayUpdate::new(user_option, value)?;
+
+            return Ok(Self::Users(user_id, update));
+        }
+        // image previews
+        if let Some(image_preview_option) = option.strip_prefix("imagepreview.") {
+            return Ok(Self::ImagePreview(ImagePreviewUpdate::new(image_preview_option, value)?));
+        }
+        // encryption indicator
+        if let Some(encryption_option) = option.strip_prefix("encryption.") {
+            let Some(value) = value else {
+                return Err(TunablesUpdateError::NoArguments);
+            };
+
+            return Ok(Self::Encryption(EncryptionUpdate::new(encryption_option, value)?));
+        }
+        // terminal
+        if let Some(terminal_option) = option.strip_prefix("terminal.") {
+            return Ok(Self::Terminal(TerminalUpdate::new(terminal_option, value)?));
+        }
+
         let res = match option.as_str() {
             // value options
             "loglevel" => {
                 if let Some(value) = value {
                     Self::LogLevel(LogLevelUpdate::parse(value.to_owned())?)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "defaultmarkup" => {
+                if let Some(value) = value {
+                    Self::DefaultMarkup(MarkupFormat::from_str(value)?)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "defaultsplit" => {
+                if let Some(value) = value {
+                    Self::DefaultSplit(SplitDirection::from_str(value)?)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "memberssplit" => {
+                if let Some(value) = value {
+                    if value.is_empty() {
+                        Self::MembersSplit(None)
+                    } else {
+                        Self::MembersSplit(Some(SplitDirection::from_str(value)?))
+                    }
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "readreceipttrigger" => {
+                if let Some(value) = value {
+                    Self::ReadReceiptTrigger(ReadReceiptTrigger::from_str(value)?)
                 } else {
                     return Err(TunablesUpdateError::NoArguments);
                 }
@@ -952,6 +1305,8 @@ impl TunablesUpdate {
             "notypingnoticedisplay" => Self::TypingNoticeDisplay(false),
             "messageusercolor" => Self::MessageUserColor(true),
             "nomessageusercolor" => Self::MessageUserColor(false),
+            "ignorecase" => Self::Ignorecase(true),
+            "noignorecase" => Self::Ignorecase(false),
 
             _ => return Err(TunablesUpdateError::UnknownOption),
         };
@@ -1181,8 +1536,9 @@ impl Tunables {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u8)]
 pub enum CursorShape {
     #[default]
@@ -1203,8 +1559,9 @@ impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
     }
 }
 
-#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString)]
 #[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 #[repr(u8)]
 pub enum MarkupFormat {
     Html,
@@ -1568,7 +1925,11 @@ impl ApplicationSettings {
         Ok(settings)
     }
 
-    pub fn reload(&mut self, path: Option<SettingsFile>) -> Result<(), ReloadError> {
+    pub fn reload(
+        &mut self,
+        path: Option<SettingsFile>,
+        previews: &mut PreviewManager,
+    ) -> Result<(), ReloadError> {
         let load_file = path.unwrap_or_else(|| self.load_file.clone());
 
         let config = match &load_file {
@@ -1597,6 +1958,8 @@ impl ApplicationSettings {
         let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
         let dirs = dirs.values();
 
+        let image_preview_changed = tunables.image_preview != self.tunables.image_preview;
+
         // update values
         self.tunables = tunables;
         self.profile = profile;
@@ -1605,16 +1968,21 @@ impl ApplicationSettings {
 
         // apply changes that need more setup
 
-        self.update(TunablesUpdate::LogLevel(LogLevelUpdate::parse(
-            self.tunables.log_level.to_owned(),
-        )?));
+        self.update(
+            TunablesUpdate::LogLevel(LogLevelUpdate::parse(self.tunables.log_level.to_owned())?),
+            previews,
+        );
+
+        if image_preview_changed {
+            self.update(TunablesUpdate::ImagePreview(ImagePreviewUpdate::Reload), previews);
+        }
 
         Ok(())
     }
 
     /// Update [`self.tunables`](`Self::tunables`) with `new`.
     /// This will make sure that the updated value is applied.
-    pub fn update(&mut self, update: TunablesUpdate) {
+    pub fn update(&mut self, update: TunablesUpdate, previews: &mut PreviewManager) {
         match update {
             TunablesUpdate::LogLevel(update) => {
                 if let Some(handle) = &mut self.log_level_handle {
@@ -1624,6 +1992,62 @@ impl ApplicationSettings {
                     self.tunables.log_level = update.directives;
                 }
             },
+            TunablesUpdate::ImagePreview(image_preview_update) => {
+                let image_preview = &mut self.tunables.image_preview;
+                match image_preview_update {
+                    ImagePreviewUpdate::Width(width) => image_preview.size.width = width,
+                    ImagePreviewUpdate::Height(height) => image_preview.size.height = height,
+                    ImagePreviewUpdate::ProtocolType(protocol_type) => {
+                        image_preview.protocol.r#type = Some(protocol_type.into())
+                    },
+                    ImagePreviewUpdate::Enabled(enabled) => image_preview.enabled = enabled,
+                    ImagePreviewUpdate::ProtocolFilter(filter) => {
+                        image_preview.protocol.filter = Some(filter)
+                    },
+                    ImagePreviewUpdate::Reload => (),
+                }
+
+                if matches!(
+                    image_preview_update,
+                    ImagePreviewUpdate::Reload | ImagePreviewUpdate::ProtocolType(_)
+                ) && let Some(protocol_type) = image_preview.protocol.r#type
+                {
+                    previews.update_protocol_type(protocol_type);
+                }
+
+                previews.mark_all_queued(image_preview.size);
+            },
+            TunablesUpdate::Sort(sort_update) => {
+                match sort_update {
+                    SortUpdate::Chats(order) => self.tunables.sort.chats = order,
+                    SortUpdate::Dms(order) => self.tunables.sort.dms = order,
+                    SortUpdate::Rooms(order) => self.tunables.sort.rooms = order,
+                    SortUpdate::Spaces(order) => self.tunables.sort.spaces = order,
+                    SortUpdate::Members(order) => self.tunables.sort.members = order,
+                }
+            },
+            TunablesUpdate::Notifications(notify_update) => {
+                match notify_update {
+                    NotificationsUpdate::Enabled(value) => {
+                        self.tunables.notifications.enabled = value
+                    },
+                    NotificationsUpdate::Via(value) => self.tunables.notifications.via = value,
+                    NotificationsUpdate::ShowMessage(value) => {
+                        self.tunables.notifications.show_message = value
+                    },
+                    NotificationsUpdate::SoundHint(value) => {
+                        self.tunables.notifications.sound_hint = value
+                    },
+                }
+            },
+            TunablesUpdate::Users(user_id, user_update) => {
+                let user = self.tunables.users.entry(user_id).or_default();
+
+                match user_update {
+                    UserDisplayUpdate::Name(name) => user.name = name,
+                    UserDisplayUpdate::Color(color) => user.color = color,
+                }
+            },
             TunablesUpdate::OpenCommand(open_command) => {
                 if open_command.is_empty() {
                     self.tunables.open_command = None;
@@ -1631,7 +2055,30 @@ impl ApplicationSettings {
                     self.tunables.open_command = Some(open_command);
                 }
             },
+            TunablesUpdate::DefaultMarkup(format) => {
+                self.tunables.default_markup = format;
+            },
+            TunablesUpdate::DefaultSplit(direction) => {
+                self.tunables.default_split = direction;
+            },
+            TunablesUpdate::MembersSplit(direction) => {
+                self.tunables.members_split = direction;
+            },
+            TunablesUpdate::ReadReceiptTrigger(trigger) => {
+                self.tunables.read_receipt_trigger = trigger;
+            },
+            TunablesUpdate::Encryption(EncryptionUpdate::Indicator(indicator)) => {
+                self.tunables.encryption.indicator = indicator;
+            },
+            TunablesUpdate::Encryption(EncryptionUpdate::IndicatorLocation(indicator_location)) => {
+                self.tunables.encryption.indicator_location = indicator_location;
+            },
+            TunablesUpdate::Terminal(TerminalUpdate::CursorShape(shape)) => {
+                self.tunables.terminal.cursor_shape = shape;
 
+                let cursor_shape = SetCursorStyle::from(shape);
+                let _ = modalkit::crossterm::execute!(std::io::stdout(), cursor_shape);
+            },
             TunablesUpdate::UsernameDisplay(username_display) => {
                 self.tunables.username_display = username_display
             },
@@ -1668,6 +2115,9 @@ impl ApplicationSettings {
             },
             TunablesUpdate::MessageUserColor(message_user_color) => {
                 self.tunables.message_user_color = message_user_color
+            },
+            TunablesUpdate::Ignorecase(ic) => {
+                self.tunables.ignorecase = ic;
             },
         }
     }
