@@ -26,6 +26,8 @@ use url::Url;
 
 use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
 
+use crate::base::{SortRoomVisitor, SortUserVisitor};
+
 use super::base::{
     IambError,
     IambId,
@@ -580,12 +582,64 @@ pub enum TunablesUpdateError {
 
     #[error(transparent)]
     ParseInt(#[from] std::num::ParseIntError),
+
+    #[error("{0}")]
+    Custom(String),
+}
+
+impl serde::de::Error for TunablesUpdateError {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: fmt::Display,
+    {
+        Self::Custom(format!("{msg}"))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum SortUpdate {
+    Chats(Vec<SortColumn<SortFieldRoom>>),
+    Dms(Vec<SortColumn<SortFieldRoom>>),
+    Rooms(Vec<SortColumn<SortFieldRoom>>),
+    Spaces(Vec<SortColumn<SortFieldRoom>>),
+    Members(Vec<SortColumn<SortFieldUser>>),
+}
+
+impl SortUpdate {
+    fn new(option: &str, value: &str) -> Result<Self, TunablesUpdateError> {
+        if option == "members" {
+            let order: Result<Vec<_>, TunablesUpdateError> = value
+                .split(',')
+                .filter(|v| !v.is_empty())
+                .map(|v| SortUserVisitor.visit_str(v))
+                .collect();
+            return Ok(Self::Members(order?));
+        }
+
+        let order: Result<Vec<_>, TunablesUpdateError> = value
+            .split(',')
+            .filter(|v| !v.is_empty())
+            .map(|v| SortRoomVisitor.visit_str(v))
+            .collect();
+
+        Ok(match option {
+            "chats" => Self::Chats(order?),
+            "dms" => Self::Dms(order?),
+            "rooms" => Self::Rooms(order?),
+            "spaces" => Self::Spaces(order?),
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        })
+    }
 }
 
 /// A update for the [`TunableValues`] after invoking the `:set` command.
 #[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
 #[strum_discriminants(derive(IntoStaticStr, EnumProperty, VariantArray))]
 pub enum TunablesUpdate {
+    // multilevel options
+    Sort(SortUpdate),
+
     // value options
     LogLevel(Box<LogLevelUpdate>),
     UsernameDisplay(UserDisplayStyle),
@@ -629,14 +683,20 @@ pub enum TunablesUpdate {
 
     // TODO: how do we do this?
     // Users(UserOverrides),
-
-    // TODO: how do we parse these?
-    // Sort(SortValues),
 }
 
 impl TunablesUpdate {
     pub fn new(mut option: String, value: Option<&str>) -> Result<Self, TunablesUpdateError> {
         option.retain(|c| c != '_');
+
+        // multilevel options
+        if let Some(sort_option) = option.strip_prefix("sort.") {
+            let Some(value) = value else {
+                return Err(TunablesUpdateError::NoArguments);
+            };
+
+            return Ok(Self::Sort(SortUpdate::new(sort_option, value)?));
+        }
 
         let res = match option.as_str() {
             // value options
@@ -1271,6 +1331,15 @@ impl ApplicationSettings {
                     self.tunables.log_level = update.directives;
                 }
             },
+            TunablesUpdate::Sort(sort_update) => {
+                match sort_update {
+                    SortUpdate::Chats(order) => self.tunables.sort.chats = order,
+                    SortUpdate::Dms(order) => self.tunables.sort.dms = order,
+                    SortUpdate::Rooms(order) => self.tunables.sort.rooms = order,
+                    SortUpdate::Spaces(order) => self.tunables.sort.spaces = order,
+                    SortUpdate::Members(order) => self.tunables.sort.members = order,
+                }
+            },
             TunablesUpdate::OpenCommand(open_command) => {
                 if open_command.is_empty() {
                     self.tunables.open_command = None;
@@ -1278,7 +1347,6 @@ impl ApplicationSettings {
                     self.tunables.open_command = Some(open_command);
                 }
             },
-
             TunablesUpdate::UsernameDisplay(username_display) => {
                 self.tunables.username_display = username_display
             },
