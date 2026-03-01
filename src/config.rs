@@ -583,6 +583,9 @@ pub enum TunablesUpdateError {
     #[error(transparent)]
     ParseInt(#[from] std::num::ParseIntError),
 
+    #[error("Invalid user id: {0}")]
+    UserId(#[from] matrix_sdk::IdParseError),
+
     #[error("{0}")]
     Custom(String),
 }
@@ -677,6 +680,39 @@ impl NotificationsUpdate {
     }
 }
 
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum UserDisplayUpdate {
+    Name(Option<String>),
+    Color(Option<UserColor>),
+}
+
+impl UserDisplayUpdate {
+    fn new(option: &str, value: &str) -> Result<Self, TunablesUpdateError> {
+        let res = match option {
+            "name" => {
+                if value.is_empty() {
+                    Self::Name(None)
+                } else {
+                    Self::Name(Some(value.to_owned()))
+                }
+            },
+            "color" => {
+                if value.is_empty() {
+                    Self::Color(None)
+                } else {
+                    let color = UserColorVisitor.visit_str::<TunablesUpdateError>(value)?;
+                    Self::Color(Some(color))
+                }
+            },
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
+    }
+}
+
 /// A update for the [`TunableValues`] after invoking the `:set` command.
 #[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
 #[strum_discriminants(derive(IntoStaticStr, EnumProperty, VariantArray))]
@@ -684,6 +720,7 @@ pub enum TunablesUpdate {
     // multilevel options
     Sort(SortUpdate),
     Notifications(NotificationsUpdate),
+    Users(OwnedUserId, UserDisplayUpdate),
 
     // value options
     LogLevel(Box<LogLevelUpdate>),
@@ -722,9 +759,6 @@ pub enum TunablesUpdate {
 
     // TODO: This will be possible/easier after #464 lands
     // ImagePreview(Option<ImagePreviewValues>),
-
-    // TODO: how do we do this?
-    // Users(UserOverrides),
 }
 
 impl TunablesUpdate {
@@ -741,6 +775,21 @@ impl TunablesUpdate {
         }
         if let Some(notification_option) = option.strip_prefix("notifications.") {
             return Ok(Self::Notifications(NotificationsUpdate::new(notification_option, value)?));
+        }
+        if let Some(users_option) = option.strip_prefix("users.") {
+            let Some((user_id, user_option)) = users_option.rsplit_once('.') else {
+                return Err(TunablesUpdateError::UnknownOption);
+            };
+
+            let user_id = OwnedUserId::from_str(user_id)?;
+
+            let Some(value) = value else {
+                return Err(TunablesUpdateError::NoArguments);
+            };
+
+            let update = UserDisplayUpdate::new(user_option, value)?;
+
+            return Ok(Self::Users(user_id, update));
         }
 
         let res = match option.as_str() {
@@ -1397,6 +1446,14 @@ impl ApplicationSettings {
                     NotificationsUpdate::SoundHint(value) => {
                         self.tunables.notifications.sound_hint = value
                     },
+                }
+            },
+            TunablesUpdate::Users(user_id, user_update) => {
+                let user = self.tunables.users.entry(user_id).or_default();
+
+                match user_update {
+                    UserDisplayUpdate::Name(name) => user.name = name,
+                    UserDisplayUpdate::Color(color) => user.color = color,
                 }
             },
             TunablesUpdate::OpenCommand(open_command) => {
