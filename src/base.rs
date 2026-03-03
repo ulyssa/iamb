@@ -731,6 +731,10 @@ pub enum IambError {
     #[error("Matrix client error: {0}")]
     Matrix(#[from] matrix_sdk::Error),
 
+    /// A failure from the Timeline.
+    #[error("Room timeline error: {0}")]
+    Timeline(#[from] matrix_sdk_ui::timeline::Error),
+
     /// A failure in the sled storage.
     #[error("Matrix client storage error: {0}")]
     Store(#[from] matrix_sdk::StoreError),

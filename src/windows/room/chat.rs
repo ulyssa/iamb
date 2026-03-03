@@ -1,5 +1,4 @@
 //! Window for Matrix rooms
-use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::ops::Deref;
@@ -7,7 +6,10 @@ use std::path::{Path, PathBuf};
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
+use matrix_sdk::room::edit::EditedContent;
+use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
 use matrix_sdk::EncryptionState;
+use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource, TimelineEventItemId};
 use modalkit::editing::store::RegisterError;
 use ratatui::style::{Color, Style};
 use std::process::Command;
@@ -15,22 +17,12 @@ use tokio;
 use url::Url;
 
 use matrix_sdk::{
-    attachment::AttachmentConfig,
     media::{MediaFormat, MediaRequestParameters},
     room::Room as MatrixRoom,
     ruma::{
         events::reaction::ReactionEventContent,
-        events::relation::{Annotation, Replacement},
-        events::room::message::{
-            AddMentions,
-            ForwardThread,
-            MessageType,
-            OriginalRoomMessageEvent,
-            Relation,
-            ReplyWithinThread,
-            RoomMessageEventContent,
-            TextMessageEventContent,
-        },
+        events::relation::Annotation,
+        events::room::message::{MessageType, OriginalRoomMessageEvent, RoomMessageEventContent},
         OwnedEventId,
         OwnedRoomId,
         RoomId,
@@ -88,14 +80,7 @@ use crate::base::{
     SendAction,
 };
 
-use crate::message::{
-    text_to_message,
-    Message,
-    MessageEvent,
-    MessageKey,
-    MessageTimeStamp,
-    TreeGenState,
-};
+use crate::message::{text_to_message, MessageEvent, MessageKey, TreeGenState};
 use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
@@ -113,7 +98,7 @@ pub struct ChatState {
     focus: RoomFocus,
 
     reply_to: Option<MessageKey>,
-    editing: Option<MessageKey>,
+    editing: Option<TimelineEventItemId>,
 }
 
 impl ChatState {
@@ -364,7 +349,7 @@ impl ChatState {
 
                 self.tbox.set_text(text);
                 self.reply_to = msg.reply_to().and_then(|id| info.get_message_key(&id)).cloned();
-                self.editing = self.scrollback.get_key(info);
+                self.editing = todo!();
                 self.focus = RoomFocus::MessageBar;
 
                 Ok(None)
@@ -537,11 +522,14 @@ impl ChatState {
         _: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
-        let room = self.get_joined(&store.application.worker)?;
         let info = store.application.rooms.get_or_default(self.id().to_owned());
-        let mut show_echo = true;
+        // TODO: don't unwrap?
+        let timeline = info
+            .get_thread(self.scrollback.thread().map(|id| &**id))
+            .unwrap()
+            .timeline();
 
-        let (event_id, msg) = match act {
+        match act {
             SendAction::Submit | SendAction::SubmitFromEditor => {
                 let msg = self.tbox.get();
 
@@ -562,59 +550,37 @@ impl ChatState {
                     msg.trim_end().to_string()
                 };
 
-                let mut msg = text_to_message(msg);
+                let msg = text_to_message(msg);
 
                 if let Some(key) = &self.editing {
-                    msg.relates_to = Some(Relation::Replacement(Replacement::new(
-                        key.event_id().to_owned(),
-                        msg.msgtype.clone().into(),
-                    )));
-
-                    show_echo = false;
-                } else if let Some(thread_root) = self.scrollback.thread() {
-                    if let Some(m) = self.get_reply_to(info) {
-                        msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::No);
-                    } else if let Some(m) = info.get_thread_last(thread_root) {
-                        msg = msg.make_for_thread(m, ReplyWithinThread::No, AddMentions::No);
-                    } else {
-                        // Internal state is wonky?
-                    }
+                    timeline
+                        .edit(key, EditedContent::RoomMessage(msg))
+                        .await
+                        .map_err(IambError::from)?;
                 } else if let Some(m) = self.get_reply_to(info) {
-                    msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
+                    timeline
+                        .send_reply(msg, m.event_id.clone())
+                        .await
+                        .map_err(IambError::from)?;
+                } else {
+                    let msg = AnyMessageLikeEventContent::RoomMessage(
+                        RoomMessageEventContent::new(msg.msgtype),
+                    );
+                    timeline.send(msg).await.map_err(IambError::from)?;
                 }
-
-                // XXX: second parameter can be a locally unique transaction id.
-                // Useful for doing retries.
-                let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
-                let event_id = resp.event_id;
 
                 // Reset message bar state now that it's been sent.
                 self.reset();
-
-                (event_id, msg)
             },
             SendAction::Upload(file) => {
                 let path = Path::new(file.as_str());
                 let mime = mime_guess::from_path(path).first_or(mime::APPLICATION_OCTET_STREAM);
+                let config = AttachmentConfig::default();
 
-                let bytes = fs::read(path)?;
-                let name = path
-                    .file_name()
-                    .map(OsStr::to_string_lossy)
-                    .unwrap_or_else(|| Cow::from("Attachment"));
-                let config = AttachmentConfig::new();
-
-                let resp = room
-                    .send_attachment(name.as_ref(), &mime, bytes, config)
+                timeline
+                    .send_attachment(AttachmentSource::File(path.to_owned()), mime, config)
                     .await
                     .map_err(IambError::from)?;
-
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
             },
             SendAction::UploadImage(width, height, bytes) => {
                 // Convert to png because arboard does not give us the mime type.
@@ -630,30 +596,14 @@ impl ChatState {
                         })?;
                 let mime = mime::IMAGE_PNG;
 
-                let name = "Clipboard.png";
-                let config = AttachmentConfig::new();
+                let filename = "Clipboard.png".to_string();
+                let config = AttachmentConfig::default();
 
-                let resp = room
-                    .send_attachment(name, &mime, bytes, config)
+                timeline
+                    .send_attachment(AttachmentSource::Data { bytes, filename }, mime, config)
                     .await
                     .map_err(IambError::from)?;
-
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
             },
-        };
-
-        if show_echo {
-            let user = store.application.settings.profile.user_id.clone();
-            let key = MessageKey::new(MessageTimeStamp::LocalEcho, event_id.clone());
-            let msg = MessageEvent::Local(event_id, msg.into());
-            let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
-            let thread = self.scrollback.get_thread_mut(info);
-            thread.insert(key, msg);
         }
 
         // Jump to the end of the scrollback to show the message.

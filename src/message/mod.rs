@@ -108,6 +108,9 @@ pub struct Messages {
 }
 
 impl Messages {
+    pub fn timeline(&self) -> &Timeline {
+        &self.timeline
+    }
     pub fn receipt_thread(&self) -> &ReceiptThread {
         &self.thread
     }
