@@ -78,7 +78,23 @@ pub use html::TreeGenState;
 
 type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
-pub type MessageKey = (MessageTimeStamp, OwnedEventId);
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub struct MessageKey {
+    ts: MessageTimeStamp,
+    id: OwnedEventId,
+}
+
+impl MessageKey {
+    pub const fn new(ts: MessageTimeStamp, id: OwnedEventId) -> Self {
+        Self { ts, id }
+    }
+    pub fn event_id(&self) -> &EventId {
+        &self.id
+    }
+    pub fn ts(&self) -> &MessageTimeStamp {
+        &self.ts
+    }
+}
 
 pub struct Messages(BTreeMap<MessageKey, Message>, pub ReceiptThread);
 
@@ -110,13 +126,13 @@ impl Messages {
     }
 
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
-        let event_id = key.1.clone();
+        let event_id = key.event_id().to_owned();
         let msg = msg.into();
 
         self.0.insert(key, msg);
 
         // Remove any echo.
-        let key = (MessageTimeStamp::LocalEcho, event_id);
+        let key = MessageKey::new(MessageTimeStamp::LocalEcho, event_id);
         let _ = self.0.remove(&key);
     }
 }
@@ -356,30 +372,27 @@ impl MessageCursor {
         let ev_term = OwnedEventId::try_from("$").ok()?;
 
         let ts_start = MessageTimeStamp::try_from(cursor.get_y()).ok()?;
-        let start = (ts_start, ev_term);
+        let start = MessageKey::new(ts_start, ev_term);
 
-        for ((ts, event_id), _) in thread.range(&start..) {
-            if hash_event_id(event_id)? == ev_hash {
-                return Self::from((*ts, event_id.clone())).into();
+        for (key, _) in thread.range(&start..) {
+            if hash_event_id(key.event_id())? == ev_hash {
+                return Self::from(key.clone()).into();
             }
 
-            if ts > &ts_start {
+            if key.ts() > &ts_start {
                 break;
             }
         }
 
         // If we can't find the cursor, then go to the nearest timestamp.
-        thread
-            .range(start..)
-            .next()
-            .map(|((ts, ev), _)| Self::from((*ts, ev.clone())))
+        thread.range(start..).next().map(|(key, _)| Self::from(key.clone()))
     }
 
     pub fn to_cursor(&self, thread: &Messages) -> Option<Cursor> {
-        let (ts, event_id) = self.to_key(thread)?;
+        let key = self.to_key(thread)?;
 
-        let y = usize::try_from(ts).ok()?;
-        let x = hash_event_id(event_id)?;
+        let y = usize::try_from(key.ts()).ok()?;
+        let x = hash_event_id(key.event_id())?;
 
         Cursor::new(y, x).into()
     }

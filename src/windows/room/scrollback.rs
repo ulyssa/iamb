@@ -1047,7 +1047,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     let err = EditError::Failure(msg.into());
                     Err(err)
                 } else {
-                    let root = key.1.clone();
+                    let root = key.event_id().to_owned();
                     let room_id = self.room_id.clone();
                     let id = IambId::Room(room_id, Some(root));
                     let open = WindowAction::Switch(OpenTarget::Application(id));
@@ -1425,8 +1425,8 @@ impl StatefulWidget for Scrollback<'_> {
             let _ = lines.drain(..n);
         }
 
-        if let Some(((ts, event_id), row, _, _)) = lines.first() {
-            state.viewctx.corner.timestamp = Some((*ts, event_id.clone()));
+        if let Some((key, row, _, _)) = lines.first() {
+            state.viewctx.corner.timestamp = Some((*key).clone());
             state.viewctx.corner.text_row = *row;
         }
 
@@ -1434,7 +1434,7 @@ impl StatefulWidget for Scrollback<'_> {
         let x = area.left();
 
         let mut image_previews = vec![];
-        for ((_, _), _, txt, line_preview) in lines.into_iter() {
+        for (_, _, txt, line_preview) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
             if let Some((backend, msg_x, _)) = line_preview {
                 image_previews.push((x + msg_x, y, backend));
@@ -1461,7 +1461,11 @@ impl StatefulWidget for Scrollback<'_> {
         {
             // If the cursor is at the last message, then update the read marker.
             if let Some((k, _)) = thread.last_key_value() {
-                info.set_receipt(thread.1.clone(), settings.profile.user_id.clone(), k.1.clone());
+                info.set_receipt(
+                    thread.1.clone(),
+                    settings.profile.user_id.clone(),
+                    k.event_id().to_owned(),
+                );
             }
         }
 

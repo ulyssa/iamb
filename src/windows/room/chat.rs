@@ -564,9 +564,9 @@ impl ChatState {
 
                 let mut msg = text_to_message(msg);
 
-                if let Some((_, event_id)) = &self.editing {
+                if let Some(key) = &self.editing {
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(
-                        event_id.clone(),
+                        key.event_id().to_owned(),
                         msg.msgtype.clone().into(),
                     )));
 
@@ -649,7 +649,7 @@ impl ChatState {
 
         if show_echo {
             let user = store.application.settings.profile.user_id.clone();
-            let key = (MessageTimeStamp::LocalEcho, event_id.clone());
+            let key = MessageKey::new(MessageTimeStamp::LocalEcho, event_id.clone());
             let msg = MessageEvent::Local(event_id, msg.into());
             let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
             let thread = self.scrollback.get_thread_mut(info);

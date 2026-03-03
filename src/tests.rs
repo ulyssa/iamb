@@ -63,11 +63,15 @@ lazy_static! {
     pub static ref MSG4_EVID: OwnedEventId =
         event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned();
     pub static ref MSG5_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
-    pub static ref MSG1_KEY: MessageKey = (LocalEcho, MSG1_EVID.clone());
-    pub static ref MSG2_KEY: MessageKey = (OriginServer(UInt::new(1).unwrap()), MSG2_EVID.clone());
-    pub static ref MSG3_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG3_EVID.clone());
-    pub static ref MSG4_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG4_EVID.clone());
-    pub static ref MSG5_KEY: MessageKey = (OriginServer(UInt::new(8).unwrap()), MSG5_EVID.clone());
+    pub static ref MSG1_KEY: MessageKey = MessageKey::new(LocalEcho, MSG1_EVID.clone());
+    pub static ref MSG2_KEY: MessageKey =
+        MessageKey::new(OriginServer(UInt::new(1).unwrap()), MSG2_EVID.clone());
+    pub static ref MSG3_KEY: MessageKey =
+        MessageKey::new(OriginServer(UInt::new(2).unwrap()), MSG3_EVID.clone());
+    pub static ref MSG4_KEY: MessageKey =
+        MessageKey::new(OriginServer(UInt::new(2).unwrap()), MSG4_EVID.clone());
+    pub static ref MSG5_KEY: MessageKey =
+        MessageKey::new(OriginServer(UInt::new(8).unwrap()), MSG5_EVID.clone());
 }
 
 pub fn user_style(user: &str) -> Style {
@@ -79,8 +83,8 @@ pub fn mock_room1_message(
     sender: OwnedUserId,
     key: MessageKey,
 ) -> Message {
-    let origin_server_ts = key.0.as_millis().unwrap();
-    let event_id = key.1;
+    let origin_server_ts = key.ts().as_millis().unwrap();
+    let event_id = key.event_id().to_owned();
 
     let event = OriginalRoomMessageEvent {
         content,
@@ -98,7 +102,7 @@ pub fn mock_message1() -> Message {
     let content = RoomMessageEventContent::text_plain("writhe");
     let content = MessageEvent::Local(MSG1_EVID.clone(), content.into());
 
-    Message::new(content, TEST_USER1.clone(), MSG1_KEY.0)
+    Message::new(content, TEST_USER1.clone(), *MSG1_KEY.ts())
 }
 
 pub fn mock_message2() -> Message {
