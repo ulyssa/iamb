@@ -189,7 +189,7 @@ impl ScrollbackState {
         if let Some(k) = &self.cursor.timestamp {
             thread.get_mut(k)
         } else {
-            thread.last_entry().map(|o| o.into_mut())
+            thread.last_mut()
         }
     }
 
@@ -1462,7 +1462,7 @@ impl StatefulWidget for Scrollback<'_> {
             // If the cursor is at the last message, then update the read marker.
             if let Some((k, _)) = thread.last_key_value() {
                 info.set_receipt(
-                    thread.1.clone(),
+                    thread.receipt_thread().clone(),
                     settings.profile.user_id.clone(),
                     k.event_id().to_owned(),
                 );

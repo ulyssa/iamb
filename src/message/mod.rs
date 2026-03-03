@@ -6,7 +6,8 @@ use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
+use std::iter::FusedIterator;
+use std::ops::RangeBounds;
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
@@ -96,25 +97,51 @@ impl MessageKey {
     }
 }
 
-pub struct Messages(BTreeMap<MessageKey, Message>, pub ReceiptThread);
-
-impl Deref for Messages {
-    type Target = BTreeMap<MessageKey, Message>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
-    }
-}
-
-impl DerefMut for Messages {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
-    }
+pub struct Messages {
+    messages: BTreeMap<MessageKey, Message>,
+    thread: ReceiptThread,
 }
 
 impl Messages {
+    pub fn receipt_thread(&self) -> &ReceiptThread {
+        &self.thread
+    }
+    pub fn len(&self) -> usize {
+        self.messages.len()
+    }
+    pub fn get(&self, key: &MessageKey) -> Option<&Message> {
+        self.messages.get(key)
+    }
+    pub fn get_mut(&mut self, key: &MessageKey) -> Option<&mut Message> {
+        self.messages.get_mut(key)
+    }
+    pub fn insert(&mut self, key: MessageKey, value: Message) -> Option<Message> {
+        self.messages.insert(key, value)
+    }
+    pub fn first_key_value(&self) -> Option<(&MessageKey, &Message)> {
+        self.messages.first_key_value()
+    }
+    pub fn last_key_value(&self) -> Option<(&MessageKey, &Message)> {
+        self.messages.last_key_value()
+    }
+    pub fn last_mut(&mut self) -> Option<&mut Message> {
+        self.messages.last_entry().map(|o| o.into_mut())
+    }
+    pub fn iter(
+        &self,
+    ) -> impl DoubleEndedIterator<Item = (&MessageKey, &Message)> + FusedIterator + ExactSizeIterator
+    {
+        self.messages.iter()
+    }
+    pub fn range(
+        &self,
+        range: impl RangeBounds<MessageKey>,
+    ) -> std::collections::btree_map::Range<'_, MessageKey, Message> {
+        self.messages.range(range)
+    }
+
     pub fn new(thread: ReceiptThread) -> Self {
-        Self(Default::default(), thread)
+        Self { messages: Default::default(), thread }
     }
 
     pub fn main() -> Self {
@@ -129,11 +156,11 @@ impl Messages {
         let event_id = key.event_id().to_owned();
         let msg = msg.into();
 
-        self.0.insert(key, msg);
+        self.messages.insert(key, msg);
 
         // Remove any echo.
         let key = MessageKey::new(MessageTimeStamp::LocalEcho, event_id);
-        let _ = self.0.remove(&key);
+        let _ = self.messages.remove(&key);
     }
 }
 
