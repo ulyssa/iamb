@@ -334,7 +334,7 @@ impl ChatState {
                 Err(IambError::NoAttachment.into())
             },
             MessageAction::Edit => {
-                if msg.sender() != settings.profile.user_id {
+                if msg.sender() != Some(&settings.profile.user_id) {
                     let msg = "Cannot edit messages sent by someone else";
                     let err = UIError::Failure(msg.into());
 

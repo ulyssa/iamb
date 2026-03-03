@@ -8,6 +8,7 @@ use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::iter::FusedIterator;
 use std::ops::RangeBounds;
+use std::sync::Arc;
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
@@ -15,6 +16,8 @@ use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::room_version_rules::RedactionRules;
 use matrix_sdk::ruma::UserId;
+use matrix_sdk_ui::timeline::TimelineItem;
+use matrix_sdk_ui::Timeline;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
@@ -99,6 +102,7 @@ impl MessageKey {
 }
 
 pub struct Messages {
+    timeline: Timeline,
     messages: BTreeMap<MessageKey, Message>,
     thread: ReceiptThread,
 }
@@ -141,8 +145,10 @@ impl Messages {
         self.messages.range(range)
     }
 
+    #[allow(unused)]
     pub fn new(thread: ReceiptThread) -> Self {
-        Self { messages: Default::default(), thread }
+        let timeline = todo!();
+        Self { messages: Default::default(), thread, timeline }
     }
 
     pub fn main() -> Self {
@@ -777,7 +783,11 @@ impl<'a> MessageFormatter<'a> {
         previews: &'a PreviewManager,
     ) -> Option<ProtocolPreview<'a>> {
         let reply_style = if settings.tunables.message_user_color {
-            style.patch(settings.get_user_color(&msg.sender))
+            if let Some(user_id) = msg.sender() {
+                style.patch(settings.get_user_color(user_id))
+            } else {
+                style
+            }
         } else {
             style
         };
@@ -886,8 +896,9 @@ impl<'a> MessageFormatter<'a> {
 }
 
 pub struct Message {
+    item: Arc<TimelineItem>,
+
     event: MessageEvent,
-    sender: OwnedUserId,
     timestamp: MessageTimeStamp,
     downloaded: bool,
     html: Option<StyleTree>,
@@ -910,8 +921,8 @@ impl Message {
     pub fn event_mut(&mut self) -> &mut MessageEvent {
         &mut self.event
     }
-    pub fn sender(&self) -> &UserId {
-        &self.sender
+    pub fn sender(&self) -> Option<&UserId> {
+        self.item.as_event().map(|ev| ev.sender())
     }
     pub fn set_downloaded(&mut self) {
         self.downloaded = true;
@@ -923,13 +934,15 @@ impl Message {
         self.image_preview = Some(preview);
     }
 
+    #[allow(unused)]
     pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
         let html = event.html();
         let downloaded = false;
+        let item = todo!();
 
         Message {
+            item,
             event,
-            sender,
             timestamp,
             downloaded,
             html,
@@ -991,8 +1004,10 @@ impl Message {
         }
 
         if settings.tunables.message_user_color {
-            let color = settings.get_user_color(&self.sender);
-            style = style.fg(color);
+            if let Some(user_id) = self.sender() {
+                let color = settings.get_user_color(user_id);
+                style = style.fg(color);
+            }
         }
 
         return style;
@@ -1178,7 +1193,9 @@ impl Message {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Span<'a> {
-        settings.get_user_span(self.sender.as_ref(), info)
+        self.sender()
+            .map(|user_id| settings.get_user_span(user_id, info))
+            .unwrap_or_default()
     }
 
     fn show_sender<'a>(
@@ -1189,7 +1206,7 @@ impl Message {
         settings: &'a ApplicationSettings,
     ) -> Option<Span<'a>> {
         if let Some(prev) = prev {
-            if self.sender == prev.sender &&
+            if self.sender() == prev.sender() &&
                 self.timestamp.same_day(&prev.timestamp) &&
                 !self.event.is_emote()
             {
