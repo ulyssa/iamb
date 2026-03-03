@@ -7,9 +7,7 @@ use std::path::{Path, PathBuf};
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
-use matrix_sdk::EncryptionState;
 use modalkit::editing::store::RegisterError;
-use ratatui::style::{Color, Style};
 use std::process::Command;
 use tokio;
 use url::Url;
@@ -992,16 +990,7 @@ impl StatefulWidget for Chat<'_> {
             Paragraph::new(desc_spans).render(descarea, buf);
         }
 
-        let prompt = match (self.focused, state.room().encryption_state()) {
-            (false, _) => Span::raw("  "),
-            (_, EncryptionState::Encrypted) => {
-                Span::styled("\u{1F512}\u{FE0E} ", Style::new().fg(Color::LightGreen))
-            },
-            (_, EncryptionState::NotEncrypted) => {
-                Span::styled("\u{1F513}\u{FE0E} ", Style::new().fg(Color::Red))
-            },
-            (_, EncryptionState::Unknown) => Span::styled("> ", Style::new().fg(Color::Red)),
-        };
+        let prompt = if self.focused { "> " } else { "  " };
 
         let tbox = TextBox::new().prompt(prompt);
         tbox.render(textarea, buf, &mut state.tbox);

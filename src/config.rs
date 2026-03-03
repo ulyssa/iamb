@@ -342,6 +342,34 @@ where
     }
 }
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum EncryptionIndicator {
+    Enabled,
+    Disabled,
+    EncryptedOnly,
+    UnencryptedOnly,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct EncryptionIndicatorValues {
+    /// Show an indicator for encrypted rooms.
+    pub encrypted: bool,
+    /// Show an indicator for unencrypted rooms.
+    pub unencrypted: bool,
+}
+
+impl From<EncryptionIndicator> for EncryptionIndicatorValues {
+    fn from(value: EncryptionIndicator) -> Self {
+        match value {
+            EncryptionIndicator::Enabled => Self { encrypted: true, unencrypted: true },
+            EncryptionIndicator::Disabled => Self { encrypted: false, unencrypted: false },
+            EncryptionIndicator::EncryptedOnly => Self { encrypted: true, unencrypted: false },
+            EncryptionIndicator::UnencryptedOnly => Self { encrypted: false, unencrypted: true },
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum UserDisplayStyle {
@@ -516,6 +544,7 @@ impl SortOverrides {
 
 #[derive(Clone)]
 pub struct TunableValues {
+    pub encryption_indicator: EncryptionIndicatorValues,
     pub log_level: String,
     pub max_log_files: usize,
     pub message_shortcode_display: bool,
@@ -544,6 +573,7 @@ pub struct TunableValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
+    pub encryption_indicator: Option<EncryptionIndicator>,
     pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
@@ -574,6 +604,7 @@ pub struct Tunables {
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
+            encryption_indicator: self.encryption_indicator.or(other.encryption_indicator),
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
@@ -610,6 +641,10 @@ impl Tunables {
     fn values(self) -> TunableValues {
         TunableValues {
             log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
+            encryption_indicator: self
+                .encryption_indicator
+                .unwrap_or(EncryptionIndicator::EncryptedOnly)
+                .into(),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
