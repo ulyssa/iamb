@@ -161,7 +161,7 @@ impl ChatState {
         let key = self.reply_to.as_ref()?;
         let msg = thread.get(key)?;
 
-        if let MessageEvent::Original(ev) = &msg.event {
+        if let MessageEvent::Original(ev) = msg.event() {
             Some(ev)
         } else {
             None
@@ -212,7 +212,7 @@ impl ChatState {
                 Err(UIError::NeedConfirm(prompt))
             },
             MessageAction::Download(filename, flags) => {
-                if let MessageEvent::Original(ev) = &msg.event {
+                if let MessageEvent::Original(ev) = msg.event() {
                     let media = client.media();
 
                     let mut filename = match (filename, &settings.dirs.downloads) {
@@ -231,11 +231,11 @@ impl ChatState {
                                 return Err(IambError::NoAttachment.into());
                             }
 
-                            let links = if let Some(html) = &msg.html {
+                            let links = if let Some(html) = msg.html() {
                                 html.get_links()
                             } else {
                                 linkify::LinkFinder::new()
-                                    .links(&msg.event.body())
+                                    .links(&msg.event().body())
                                     .filter_map(|u| Url::parse(u.as_str()).ok())
                                     .scan(TreeGenState { link_num: 0 }, |state, u| {
                                         state.next_link_char().map(|c| (c, u))
@@ -294,7 +294,7 @@ impl ChatState {
 
                         fs::write(filename.as_path(), bytes.as_slice())?;
 
-                        msg.downloaded = true;
+                        msg.set_downloaded();
                     } else if !flags.contains(DownloadFlags::OPEN) {
                         let msg = format!(
                             "The file {} already exists; add ! to end of command to overwrite it.",
@@ -334,14 +334,14 @@ impl ChatState {
                 Err(IambError::NoAttachment.into())
             },
             MessageAction::Edit => {
-                if msg.sender != settings.profile.user_id {
+                if msg.sender() != settings.profile.user_id {
                     let msg = "Cannot edit messages sent by someone else";
                     let err = UIError::Failure(msg.into());
 
                     return Err(err);
                 }
 
-                let ev = match &msg.event {
+                let ev = match msg.event() {
                     MessageEvent::Original(ev) => &ev.content,
                     MessageEvent::Local(_, ev) => ev.deref(),
                     _ => {
@@ -386,7 +386,7 @@ impl ChatState {
                 };
 
                 let room = self.get_joined(&store.application.worker)?;
-                let event_id = match &msg.event {
+                let event_id = match msg.event() {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
@@ -424,7 +424,7 @@ impl ChatState {
                 }
 
                 let room = self.get_joined(&store.application.worker)?;
-                let event_id = match &msg.event {
+                let event_id = match msg.event() {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
@@ -487,7 +487,7 @@ impl ChatState {
                 };
 
                 let room = self.get_joined(&store.application.worker)?;
-                let event_id = match &msg.event {
+                let event_id = match msg.event() {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),

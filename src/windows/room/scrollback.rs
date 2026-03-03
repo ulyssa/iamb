@@ -542,7 +542,7 @@ impl ScrollbackState {
                 continue;
             }
 
-            if needle.is_match(msg.event.body().as_ref()) {
+            if needle.is_match(msg.event().body().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -569,7 +569,7 @@ impl ScrollbackState {
                 break;
             }
 
-            if needle.is_match(msg.event.body().as_ref()) {
+            if needle.is_match(msg.event().body().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -806,7 +806,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     let mut yanked = EditRope::from("");
 
                     for (_, msg) in self.messages(range, info) {
-                        yanked += EditRope::from(msg.event.body());
+                        yanked += EditRope::from(msg.event().body());
                         yanked += EditRope::from('\n');
                     }
 
@@ -1361,7 +1361,7 @@ impl StatefulWidget for Scrollback<'_> {
 
         // load image previews
         for (_, item) in thread.range(&corner_key..).rev() {
-            if let Some(source) = &item.image_preview {
+            if let Some(source) = item.image_preview() {
                 self.store
                     .application
                     .previews
@@ -1371,7 +1371,7 @@ impl StatefulWidget for Scrollback<'_> {
                 .reply_to()
                 .or_else(|| item.thread_root())
                 .and_then(|e| info.get_event(&e))
-                .and_then(|msg| msg.image_preview.as_ref());
+                .and_then(|msg| msg.image_preview());
             if let Some(source) = reply {
                 self.store
                     .application

@@ -14,6 +14,7 @@ use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::room_version_rules::RedactionRules;
+use matrix_sdk::ruma::UserId;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
@@ -885,15 +886,43 @@ impl<'a> MessageFormatter<'a> {
 }
 
 pub struct Message {
-    pub event: MessageEvent,
-    pub sender: OwnedUserId,
-    pub timestamp: MessageTimeStamp,
-    pub downloaded: bool,
-    pub html: Option<StyleTree>,
-    pub image_preview: Option<MediaSource>,
+    event: MessageEvent,
+    sender: OwnedUserId,
+    timestamp: MessageTimeStamp,
+    downloaded: bool,
+    html: Option<StyleTree>,
+    image_preview: Option<MediaSource>,
 }
 
 impl Message {
+    pub fn html(&self) -> Option<&StyleTree> {
+        self.html.as_ref()
+    }
+    pub fn set_html(&mut self, html: Option<StyleTree>) {
+        self.html = html;
+    }
+    pub fn body(&self) -> Cow<'_, str> {
+        self.event.body()
+    }
+    pub fn event(&self) -> &MessageEvent {
+        &self.event
+    }
+    pub fn event_mut(&mut self) -> &mut MessageEvent {
+        &mut self.event
+    }
+    pub fn sender(&self) -> &UserId {
+        &self.sender
+    }
+    pub fn set_downloaded(&mut self) {
+        self.downloaded = true;
+    }
+    pub fn image_preview(&self) -> Option<&MediaSource> {
+        self.image_preview.as_ref()
+    }
+    pub fn insert_image_preview(&mut self, preview: MediaSource) {
+        self.image_preview = Some(preview);
+    }
+
     pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
         let html = event.html();
         let downloaded = false;

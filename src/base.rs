@@ -977,10 +977,10 @@ impl RoomInfo {
         let last = self.threads.get(thread_root).and_then(|t| Some(t.last_key_value()?.1));
 
         let msg = if let Some(last) = last {
-            &last.event
+            last.event()
         } else if let EventLocation::Message(_, key) = self.keys.get(thread_root)? {
             let msg = self.messages.get(key)?;
-            &msg.event
+            msg.event()
         } else {
             return None;
         };
@@ -1111,7 +1111,7 @@ impl RoomInfo {
             return;
         };
 
-        match &mut msg.event {
+        match msg.event_mut() {
             MessageEvent::Original(orig) => {
                 orig.content.apply_replacement(new_msgtype);
             },
@@ -1126,7 +1126,7 @@ impl RoomInfo {
             },
         }
 
-        msg.html = msg.event.html();
+        msg.set_html(msg.event().html());
     }
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
@@ -1250,7 +1250,7 @@ impl RoomInfo {
             if let (Some(msg), Some(image_preview)) =
                 (self.get_event_mut(&event_id), &settings.tunables.image_preview)
             {
-                msg.image_preview = Some(source.clone());
+                msg.insert_image_preview(source.clone());
                 previews.register_preview(settings, source, image_preview.size, worker)
             }
         }
