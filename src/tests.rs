@@ -119,23 +119,15 @@ pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
 }
 
 pub fn mock_messages() -> Messages {
-    let mut messages = Messages::main();
-
-    messages.insert(MSG1_KEY.clone(), mock_message1());
-    messages.insert(MSG2_KEY.clone(), mock_message2());
-    messages.insert(MSG3_KEY.clone(), mock_message3());
-    messages.insert(MSG4_KEY.clone(), mock_message4());
-    messages.insert(MSG5_KEY.clone(), mock_message5());
-
-    messages
+    todo!()
 }
 
 pub fn mock_room() -> RoomInfo {
     let mut room = RoomInfo::default();
     room.name = Some("Watercooler Discussion".into());
     room.keys = mock_keys();
-    *room.get_thread_mut(None) = mock_messages();
-    room
+    // *room.get_thread_mut(None) = mock_messages();
+    todo!()
 }
 
 pub fn mock_dirs() -> DirectoryValues {

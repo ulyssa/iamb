@@ -72,6 +72,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923"
 
 [[package]]
+name = "alternating-iter"
+version = "0.3.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "38e7bb35addfa5b45ff1fa39992babbcd35dc05a9f8ff0d915fcf4e364d6e765"
+
+[[package]]
 name = "android-tzdata"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2351,6 +2357,7 @@ dependencies = [
 name = "iamb"
 version = "0.0.11-alpha.1"
 dependencies = [
+ "alternating-iter",
  "anyhow",
  "bitflags 2.9.4",
  "chrono",

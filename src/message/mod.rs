@@ -2,30 +2,35 @@
 use std::borrow::Cow;
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::hash::{Hash, Hasher};
-use std::ops::RangeBounds;
+use std::ops::{Bound, RangeBounds};
+use std::sync::Arc;
 
+use alternating_iter::AlternatingExt;
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::message::TextMessageEventContent;
 use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::UserId;
+use matrix_sdk_ui::eyeball_im::Vector;
 use matrix_sdk_ui::timeline::{
     EventTimelineItem,
     MsgLikeContent,
     MsgLikeKind,
     ReactionsByKeyBySender,
+    TimelineEventItemId,
+    TimelineItem,
     TimelineItemContent,
+    TimelineItemKind,
+    TimelineUniqueId,
 };
 use matrix_sdk_ui::Timeline;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
     events::room::message::{FormattedBody, MessageFormat, MessageType},
-    EventId,
     MilliSecondsSinceUnixEpoch,
     OwnedEventId,
     OwnedUserId,
@@ -63,81 +68,130 @@ pub use html::TreeGenState;
 
 type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageKey {
-    ts: MessageTimeStamp,
-    id: OwnedEventId,
+    offset: isize,
+    id: TimelineUniqueId,
 }
 
 impl MessageKey {
-    pub const fn new(ts: MessageTimeStamp, id: OwnedEventId) -> Self {
-        Self { ts, id }
+    pub const fn new(offset: isize, id: TimelineUniqueId) -> Self {
+        Self { offset, id }
     }
-    pub fn event_id(&self) -> &EventId {
+    pub fn id(&self) -> &TimelineUniqueId {
         &self.id
     }
-    pub fn ts(&self) -> &MessageTimeStamp {
-        &self.ts
+    pub fn offset(&self) -> isize {
+        self.offset
+    }
+}
+
+impl Ord for MessageKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.offset.cmp(&other.offset)
+    }
+}
+
+impl PartialOrd for MessageKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
     }
 }
 
 pub struct Messages {
     timeline: Timeline,
-    messages: BTreeMap<MessageKey, Message>,
-    thread: ReceiptThread,
-    htmls: HashMap<OwnedEventId, StyleTree>,
+    messages: Vector<Arc<TimelineItem>>,
+    htmls: HashMap<TimelineEventItemId, StyleTree>,
+
+    /// This is the index of the first element in the vector when this object was created. This is
+    /// used by [`MessageKey`] as a referenc because the vector can be extended in both directions.
+    start_element: usize,
 }
 
 impl Messages {
     pub fn timeline(&self) -> &Timeline {
         &self.timeline
     }
-    pub fn get_html(&self, event_id: Option<&EventId>) -> Option<&StyleTree> {
-        self.htmls.get(event_id?)
+    pub fn get_html(&self, id: &TimelineEventItemId) -> Option<&StyleTree> {
+        self.htmls.get(id)
     }
-    pub fn receipt_thread(&self) -> &ReceiptThread {
-        &self.thread
+    pub fn get_message(&self, key: &MessageKey) -> Option<&Message> {
+        let index = self.start_element.checked_add_signed(key.offset())?;
+        let item = self.messages.get(index)?;
+
+        if item.unique_id() != key.id() {
+            // TODO: search messages around?
+            return None;
+        }
+
+        item.as_event()
     }
-    pub fn len(&self) -> usize {
-        self.messages.len()
+    pub fn first_key(&self) -> Option<MessageKey> {
+        let id = self.messages.front()?.unique_id().to_owned();
+
+        let offset = 0isize.checked_sub_unsigned(self.start_element)?;
+
+        MessageKey::new(offset, id).into()
     }
-    pub fn get(&self, key: &MessageKey) -> Option<&Message> {
-        self.messages.get(key)
+    pub fn last_key(&self) -> Option<MessageKey> {
+        let id = self.messages.back()?.unique_id().to_owned();
+
+        let offset = self
+            .messages
+            .len()
+            .cast_signed()
+            .checked_sub_unsigned(self.start_element)?;
+
+        MessageKey::new(offset, id).into()
     }
-    pub fn get_mut(&mut self, key: &MessageKey) -> Option<&mut Message> {
-        self.messages.get_mut(key)
+    pub fn last_message(&self) -> Option<&Message> {
+        self.messages.iter().filter_map(|item| item.as_event()).next_back()
     }
-    pub fn insert(&mut self, key: MessageKey, value: Message) -> Option<Message> {
-        self.messages.insert(key, value)
+    pub fn range(&self, range: impl RangeBounds<MessageKey>) -> MessagesRange {
+        let mut next = match range.start_bound() {
+            Bound::Included(start) => self.start_element.saturating_add_signed(start.offset()),
+            Bound::Excluded(start) => self.start_element.saturating_add_signed(start.offset() + 1),
+            Bound::Unbounded => 0,
+        };
+        let last = match range.end_bound() {
+            Bound::Included(end) => self.start_element.saturating_add_signed(end.offset()).into(),
+            Bound::Excluded(end) => {
+                self.start_element.saturating_add_signed(end.offset()).checked_sub(1)
+            },
+            Bound::Unbounded => self.messages.len().checked_sub(1),
+        };
+
+        let last = match last {
+            Some(last) => last,
+            None => {
+                next = 1;
+                0
+            },
+        };
+
+        MessagesRange { messages: self, next, last }
     }
-    pub fn first_key_value(&self) -> Option<(&MessageKey, &Message)> {
-        self.messages.first_key_value()
-    }
-    pub fn last_key_value(&self) -> Option<(&MessageKey, &Message)> {
-        self.messages.last_key_value()
-    }
-    pub fn last(&self) -> Option<&Message> {
-        self.messages.last_key_value().map(|(_, m)| m)
-    }
-    pub fn last_mut(&mut self) -> Option<&mut Message> {
-        self.messages.last_entry().map(|o| o.into_mut())
-    }
-    pub fn range(
+    pub fn range_messages(
         &self,
         range: impl RangeBounds<MessageKey>,
-    ) -> std::collections::btree_map::Range<'_, MessageKey, Message> {
-        self.messages.range(range)
+    ) -> impl DoubleEndedIterator<Item = (MessageKey, &Message)> {
+        self.range(range)
+            .filter_map(|(key, item)| item.as_event().map(|event| (key, event)))
     }
 
     #[allow(unused)]
-    fn new(thread: ReceiptThread) -> Self {
+    fn new(_thread: ReceiptThread) -> Self {
         let timeline = todo!();
-        Self {
-            messages: Default::default(),
-            htmls: Default::default(),
-            thread,
-            timeline,
-        }
+
+        let messages: Vector<Arc<TimelineItem>> = todo!();
+
+        let htmls = messages
+            .iter()
+            .filter_map(|item| item.as_event())
+            .filter_map(|item| generate_html(item).map(|html| (item.identifier(), html)))
+            .collect();
+
+        Self { messages, htmls, timeline, start_element: 0 }
     }
 
     pub fn main() -> Self {
@@ -147,13 +201,60 @@ impl Messages {
     pub fn thread(root: OwnedEventId) -> Self {
         Self::new(ReceiptThread::Thread(root))
     }
+}
 
-    pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
-        let msg = msg.into();
+pub struct MessagesRange<'a> {
+    messages: &'a Messages,
+    next: usize,
+    last: usize,
+}
 
-        self.messages.insert(key, msg);
+impl<'a> Iterator for MessagesRange<'a> {
+    type Item = (MessageKey, &'a TimelineItem);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next > self.last {
+            return None;
+        }
+
+        let item = &self.messages.messages[self.next];
+
+        let offset = self.next.cast_signed().checked_sub_unsigned(self.messages.start_element)?;
+        let key = MessageKey::new(offset, item.unique_id().to_owned());
+
+        self.next += 1;
+
+        Some((key, &**item))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = (self.last + 1).saturating_sub(self.next);
+
+        (size, Some(size))
     }
 }
+
+impl DoubleEndedIterator for MessagesRange<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.next > self.last {
+            return None;
+        }
+
+        let item = &self.messages.messages[self.last];
+
+        let offset = self.last.cast_signed().checked_sub_unsigned(self.messages.start_element)?;
+        let key = MessageKey::new(offset, item.unique_id().to_owned());
+
+        if self.last == 0 {
+            self.next = 1;
+        } else {
+            self.last -= 1;
+        }
+
+        Some((key, &**item))
+    }
+}
+
+impl ExactSizeIterator for MessagesRange<'_> {}
 
 const fn span_static(s: &'static str) -> Span<'static> {
     Span {
@@ -194,8 +295,8 @@ fn hash_finish_usize(hasher: DefaultHasher) -> Option<usize> {
     }
 }
 
-/// Hash an [EventId] into a [usize].
-fn hash_event_id(event_id: &EventId) -> Option<usize> {
+/// Hash an [`TimelineUniqueId`] into a [usize].
+fn hash_event_id(event_id: &TimelineUniqueId) -> Option<usize> {
     let mut hasher = DefaultHasher::new();
     event_id.hash(&mut hasher);
     hash_finish_usize(hasher)
@@ -308,9 +409,9 @@ impl TryFrom<usize> for MessageTimeStamp {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MessageCursor {
-    /// When timestamp is None, the corner is determined by moving backwards from
+    /// When `key` is None, the corner is determined by moving backwards from
     /// the most recently received message.
-    pub timestamp: Option<MessageKey>,
+    pub key: Option<MessageKey>,
 
     /// A row within the [Text] representation of a [Message].
     pub text_row: usize,
@@ -318,7 +419,7 @@ pub struct MessageCursor {
 
 impl MessageCursor {
     pub fn new(timestamp: MessageKey, text_row: usize) -> Self {
-        MessageCursor { timestamp: Some(timestamp), text_row }
+        MessageCursor { key: Some(timestamp), text_row }
     }
 
     /// Get a cursor that refers to the most recent message.
@@ -326,27 +427,28 @@ impl MessageCursor {
         MessageCursor::default()
     }
 
-    pub fn to_key<'a>(&'a self, thread: &'a Messages) -> Option<&'a MessageKey> {
-        if let Some(ref key) = self.timestamp {
-            Some(key)
+    pub fn to_key<'a>(&'a self, thread: &'a Messages) -> Option<MessageKey> {
+        if let Some(key) = &self.key {
+            Some(key.clone())
         } else {
-            Some(thread.last_key_value()?.0)
+            Some(thread.last_key()?)
         }
     }
 
     pub fn from_cursor(cursor: &Cursor, thread: &Messages) -> Option<Self> {
         let ev_hash = cursor.get_x();
-        let ev_term = OwnedEventId::try_from("$").ok()?;
+        let ev_term = TimelineUniqueId(String::new());
 
-        let ts_start = MessageTimeStamp::try_from(cursor.get_y()).ok()?;
-        let start = MessageKey::new(ts_start, ev_term);
+        let offset_start = isize::MIN.wrapping_add_unsigned(cursor.get_y());
+        let start = MessageKey::new(offset_start, ev_term);
 
-        for (key, _) in thread.range(&start..) {
-            if hash_event_id(key.event_id())? == ev_hash {
-                return Self::from(key.clone()).into();
+        let iter = thread.range(&start..).alternate_with_all(thread.range(..&start).rev());
+        for (key, _) in iter {
+            if hash_event_id(key.id())? == ev_hash {
+                return Self::from(key.to_owned()).into();
             }
 
-            if key.ts() > &ts_start {
+            if key.offset() > offset_start {
                 break;
             }
         }
@@ -358,8 +460,8 @@ impl MessageCursor {
     pub fn to_cursor(&self, thread: &Messages) -> Option<Cursor> {
         let key = self.to_key(thread)?;
 
-        let y = usize::try_from(key.ts()).ok()?;
-        let x = hash_event_id(key.event_id())?;
+        let y = key.offset().abs_diff(isize::MIN);
+        let x = hash_event_id(key.id())?;
 
         Cursor::new(y, x).into()
     }
@@ -367,19 +469,19 @@ impl MessageCursor {
 
 impl From<Option<MessageKey>> for MessageCursor {
     fn from(key: Option<MessageKey>) -> Self {
-        MessageCursor { timestamp: key, text_row: 0 }
+        MessageCursor { key, text_row: 0 }
     }
 }
 
 impl From<MessageKey> for MessageCursor {
     fn from(key: MessageKey) -> Self {
-        MessageCursor { timestamp: Some(key), text_row: 0 }
+        MessageCursor { key: Some(key), text_row: 0 }
     }
 }
 
 impl Ord for MessageCursor {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (&self.timestamp, &other.timestamp) {
+        match (&self.key, &other.key) {
             (None, None) => self.text_row.cmp(&other.text_row),
             (None, Some(_)) => Ordering::Greater,
             (Some(_), None) => Ordering::Less,
@@ -766,9 +868,7 @@ pub trait MessageExt {
             },
         }
     }
-    fn sender(&self) -> &UserId {
-        self.item().sender()
-    }
+
     fn image_preview(&self) -> Option<&MediaSource> {
         if let MessageType::Image(c) = self.item().content().as_message()?.msgtype() {
             Some(&c.source)
@@ -776,6 +876,7 @@ pub trait MessageExt {
             None
         }
     }
+
     fn message_timestamp(&self) -> MessageTimeStamp {
         self.item().timestamp().into()
     }
@@ -807,7 +908,7 @@ pub trait MessageExt {
         }
 
         if settings.tunables.message_user_color {
-            let color = settings.get_user_color(self.sender());
+            let color = settings.get_user_color(self.item().sender());
             style = style.fg(color);
         }
 
@@ -940,20 +1041,6 @@ pub trait MessageExt {
         (text, [proto_main, proto_reply])
     }
 
-    fn show<'a>(
-        &'a self,
-        prev: Option<&Message>,
-        selected: bool,
-        vwctx: &ViewportContext<MessageCursor>,
-        info: &'a RoomInfo,
-        settings: &'a ApplicationSettings,
-        previews: &'a PreviewManager,
-        thread: &'a Messages,
-    ) -> Text<'a> {
-        self.show_with_preview(prev, selected, vwctx, info, settings, previews, thread)
-            .0
-    }
-
     fn show_msg<'a>(
         &'a self,
         width: usize,
@@ -963,7 +1050,7 @@ pub trait MessageExt {
         previews: &'a PreviewManager,
         thread: &'a Messages,
     ) -> (Text<'a>, Option<&'a Protocol>) {
-        if let Some(html) = thread.get_html(self.item().event_id()) {
+        if let Some(html) = thread.get_html(&self.item().identifier()) {
             (html.to_text(width, style, hide_reply, settings), None)
         } else {
             let mut msg = self.body();
@@ -1000,7 +1087,7 @@ pub trait MessageExt {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Span<'a> {
-        settings.get_user_span(self.sender(), info)
+        settings.get_user_span(self.item().sender(), info)
     }
 
     fn show_sender<'a>(
@@ -1011,7 +1098,7 @@ pub trait MessageExt {
         settings: &'a ApplicationSettings,
     ) -> Option<Span<'a>> {
         if let Some(prev) = prev {
-            if self.sender() == prev.sender() &&
+            if self.item().sender() == prev.sender() &&
                 self.message_timestamp().same_day(&prev.message_timestamp()) &&
                 !self.is_emote()
             {
@@ -1031,6 +1118,50 @@ pub trait MessageExt {
         };
 
         Span::styled(sender, style).into()
+    }
+}
+
+impl TimelineItemExt for TimelineItem {
+    fn item(&self) -> &TimelineItem {
+        self
+    }
+}
+
+pub trait TimelineItemExt {
+    fn item(&self) -> &TimelineItem;
+
+    /// Render the message as a [Text] object for the terminal.
+    ///
+    /// This will also get the image preview Protocol with an x/y offset.
+    fn show_with_preview<'a>(
+        &'a self,
+        prev: Option<&Message>,
+        selected: bool,
+        vwctx: &ViewportContext<MessageCursor>,
+        info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
+        thread: &'a Messages,
+    ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
+        match self.item().kind() {
+            TimelineItemKind::Event(item) => {
+                item.show_with_preview(prev, selected, vwctx, info, settings, previews, thread)
+            },
+            TimelineItemKind::Virtual(_item) => todo!(),
+        }
+    }
+    fn show<'a>(
+        &'a self,
+        prev: Option<&Message>,
+        selected: bool,
+        vwctx: &ViewportContext<MessageCursor>,
+        info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
+        thread: &'a Messages,
+    ) -> Text<'a> {
+        self.show_with_preview(prev, selected, vwctx, info, settings, previews, thread)
+            .0
     }
 }
 
@@ -1116,14 +1247,14 @@ pub mod tests {
         let k6 = mc6.to_key(&messages).unwrap();
 
         // These should all be equal to their MSGN_KEYs.
-        assert_eq!(k1, &MSG1_KEY.clone());
-        assert_eq!(k2, &MSG2_KEY.clone());
-        assert_eq!(k3, &MSG3_KEY.clone());
-        assert_eq!(k4, &MSG4_KEY.clone());
-        assert_eq!(k5, &MSG5_KEY.clone());
+        assert_eq!(k1, MSG1_KEY.clone());
+        assert_eq!(k2, MSG2_KEY.clone());
+        assert_eq!(k3, MSG3_KEY.clone());
+        assert_eq!(k4, MSG4_KEY.clone());
+        assert_eq!(k5, MSG5_KEY.clone());
 
         // MessageCursor::latest() turns into the largest key (our local echo message).
-        assert_eq!(k6, &MSG1_KEY.clone());
+        assert_eq!(k6, MSG1_KEY.clone());
 
         // MessageCursor::latest() fails to convert for a room w/o messages.
         let messages_empty = Messages::new(ReceiptThread::Main);

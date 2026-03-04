@@ -1,4 +1,5 @@
 //! Message scrollback
+use matrix_sdk_ui::timeline::TimelineItem;
 use ratatui_image::Image;
 use regex::Regex;
 
@@ -54,7 +55,7 @@ use crate::{
         RoomInfo,
     },
     config::ApplicationSettings,
-    message::{Message, MessageCursor, MessageExt, MessageKey, Messages},
+    message::{Message, MessageCursor, MessageExt, MessageKey, Messages, TimelineItemExt},
     preview::PreviewManager,
 };
 
@@ -64,8 +65,8 @@ fn no_msgs() -> EditError<IambInfo> {
 }
 
 fn nth_key_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageKey {
-    let mut end = &pos;
-    let iter = thread.range(..=&pos).rev().enumerate();
+    let mut end = pos;
+    let iter = thread.range(..=&end).rev().enumerate();
 
     for (i, (key, _)) in iter {
         end = key;
@@ -81,7 +82,7 @@ fn nth_key_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageKey {
 fn nth_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageCursor {
     let key = nth_key_before(pos, n, thread);
 
-    if matches!(thread.last_key_value(), Some((last, _)) if &key == last) {
+    if thread.last_key().is_some_and(|last| key == last) {
         MessageCursor::latest()
     } else {
         MessageCursor::from(key)
@@ -89,8 +90,8 @@ fn nth_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageCursor {
 }
 
 fn nth_key_after(pos: MessageKey, n: usize, thread: &Messages) -> Option<MessageKey> {
-    let mut end = &pos;
-    let mut iter = thread.range(&pos..).enumerate();
+    let mut end = pos;
+    let mut iter = thread.range(&end..).enumerate();
 
     for (i, (key, _)) in iter.by_ref() {
         end = key;
@@ -109,7 +110,7 @@ fn nth_after(pos: MessageKey, n: usize, thread: &Messages) -> MessageCursor {
 }
 
 fn prevmsg<'a>(key: &MessageKey, thread: &'a Messages) -> Option<&'a Message> {
-    thread.range(..key).next_back().map(|(_, v)| v)
+    thread.range_messages(..key).next_back().map(|(_, v)| v)
 }
 
 pub struct ScrollbackState {
@@ -158,7 +159,7 @@ impl ScrollbackState {
     }
 
     pub fn is_latest(&self) -> bool {
-        self.cursor.timestamp.is_none()
+        self.cursor.key.is_none()
     }
 
     pub fn goto_latest(&mut self) {
@@ -179,10 +180,10 @@ impl ScrollbackState {
     pub fn get<'a>(&self, info: &'a RoomInfo) -> Option<&'a Message> {
         let thread = self.get_thread(info)?;
 
-        if let Some(k) = &self.cursor.timestamp {
-            thread.get(k)
+        if let Some(k) = &self.cursor.key {
+            thread.get_message(k)
         } else {
-            thread.last()
+            thread.last_message()
         }
     }
 
@@ -198,9 +199,9 @@ impl ScrollbackState {
         &self,
         range: EditRange<MessageCursor>,
         info: &'a RoomInfo,
-    ) -> impl Iterator<Item = (&'a MessageKey, &'a Message)> {
+    ) -> impl Iterator<Item = (MessageKey, &'a TimelineItem)> {
         let Some(thread) = self.get_thread(info) else {
-            return Default::default();
+            todo!()
         };
 
         let start = range.start.to_key(thread);
@@ -208,8 +209,8 @@ impl ScrollbackState {
 
         let (start, end) = if let (Some(start), Some(end)) = (start, end) {
             (start, end)
-        } else if let Some((last, _)) = thread.last_key_value() {
-            (last, last)
+        } else if let Some(last) = thread.last_key() {
+            (last.clone(), last)
         } else {
             return thread.range(..);
         };
@@ -230,8 +231,8 @@ impl ScrollbackState {
             _ => {},
         }
 
-        let first_key = self.get_thread(info).and_then(|t| t.first_key_value()).map(|(k, _)| k);
-        let at_top = first_key == self.viewctx.corner.timestamp.as_ref();
+        let first_key = self.get_thread(info).and_then(|t| t.first_key());
+        let at_top = first_key == self.viewctx.corner.key;
 
         match (at_top, self.thread.as_ref()) {
             (false, _) => {
@@ -282,13 +283,13 @@ impl ScrollbackState {
 
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = selidx == key;
-                    let prev = prevmsg(key, thread);
+                    let prev = prevmsg(&key, thread);
                     let len = item
                         .show(prev, sel, &self.viewctx, info, settings, previews, thread)
                         .lines
                         .len();
 
-                    if key == &idx {
+                    if key == idx {
                         lines += len / 2;
                     } else {
                         lines += len;
@@ -296,7 +297,7 @@ impl ScrollbackState {
 
                     if lines >= target {
                         // We've moved back far enough.
-                        self.viewctx.corner.timestamp = key.clone().into();
+                        self.viewctx.corner.key = key.into();
                         self.viewctx.corner.text_row = lines - target;
                         break;
                     }
@@ -308,7 +309,7 @@ impl ScrollbackState {
 
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = key == selidx;
-                    let prev = prevmsg(key, thread);
+                    let prev = prevmsg(&key, thread);
                     let len = item
                         .show(prev, sel, &self.viewctx, info, settings, previews, thread)
                         .lines
@@ -318,7 +319,7 @@ impl ScrollbackState {
 
                     if lines >= target {
                         // We've moved back far enough.
-                        self.viewctx.corner.timestamp = key.clone().into();
+                        self.viewctx.corner.key = key.clone().into();
                         self.viewctx.corner.text_row = lines - target;
                         break;
                     }
@@ -345,13 +346,11 @@ impl ScrollbackState {
             return;
         };
 
-        let last_key = if let Some(k) = thread.last_key_value() {
-            k.0
-        } else {
+        let Some(last_key) = thread.last_key() else {
             return;
         };
 
-        let corner_key = self.viewctx.corner.timestamp.as_ref().unwrap_or(last_key);
+        let corner_key = self.viewctx.corner.key.as_ref().unwrap_or(&last_key);
 
         if self.cursor < self.viewctx.corner {
             // Cursor is above the viewport; move it inside.
@@ -361,11 +360,11 @@ impl ScrollbackState {
         // Check whether the cursor is below the viewport.
         let mut lines = 0;
 
-        let cursor_key = self.cursor.timestamp.as_ref().unwrap_or(last_key);
+        let cursor_key = self.cursor.key.as_ref().unwrap_or(&last_key);
         let mut prev = prevmsg(cursor_key, thread);
 
         for (idx, item) in thread.range(corner_key.clone()..) {
-            if idx == cursor_key {
+            if idx == *cursor_key {
                 // Cursor is already within the viewport.
                 break;
             }
@@ -381,6 +380,7 @@ impl ScrollbackState {
                 break;
             }
 
+            let item = todo!();
             prev = Some(item);
         }
     }
@@ -416,7 +416,7 @@ impl ScrollbackState {
             MoveType::BufferLineOffset => None,
             MoveType::BufferLinePercent => None,
             MoveType::BufferPos(MovePosition::Beginning) => {
-                let start = self.get_thread(info)?.first_key_value()?.0.clone();
+                let start = self.get_thread(info)?.first_key()?.clone();
 
                 Some(start.into())
             },
@@ -437,7 +437,7 @@ impl ScrollbackState {
                 }
             },
             MoveType::ViewportPos(MovePosition::Beginning) => {
-                return self.viewctx.corner.timestamp.as_ref().map(|k| k.clone().into());
+                return self.viewctx.corner.key.as_ref().map(|k| k.clone().into());
             },
             MoveType::ViewportPos(MovePosition::Middle) => {
                 // XXX: Need to calculate an accurate middle position.
@@ -483,8 +483,8 @@ impl ScrollbackState {
 
             RangeType::Buffer => {
                 let thread = self.get_thread(info)?;
-                let start = thread.first_key_value()?.0.clone();
-                let end = thread.last_key_value()?.0.clone();
+                let start = thread.first_key()?;
+                let end = thread.last_key()?;
 
                 Some(EditRange::inclusive(start.into(), end.into(), TargetShape::LineWise))
             },
@@ -496,7 +496,7 @@ impl ScrollbackState {
                     return None;
                 }
 
-                let mut end = &pos;
+                let mut end = pos.clone();
 
                 for (i, (key, _)) in thread.range(&pos..).enumerate() {
                     if i >= count {
@@ -526,12 +526,12 @@ impl ScrollbackState {
         let thread = self.get_thread(info)?;
         let mut mc = None;
 
-        for (key, msg) in thread.range(&start..) {
+        for (key, msg) in thread.range_messages(&start..) {
             if count == 0 {
                 break;
             }
 
-            if key == &start {
+            if key == start {
                 continue;
             }
 
@@ -557,7 +557,7 @@ impl ScrollbackState {
             return (None, false);
         };
 
-        for (key, msg) in thread.range(..&end).rev() {
+        for (key, msg) in thread.range_messages(..&end).rev() {
             if count == 0 {
                 break;
             }
@@ -798,7 +798,10 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 if let Some(range) = range {
                     let mut yanked = EditRope::from("");
 
-                    for (_, msg) in self.messages(range, info) {
+                    for (_, msg) in self
+                        .messages(range, info)
+                        .filter_map(|(key, item)| item.as_event().map(|event| (key, event)))
+                    {
                         yanked += EditRope::from(msg.body());
                         yanked += EditRope::from('\n');
                     }
@@ -1026,7 +1029,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         let info = store.application.get_room_info(self.room_id.clone());
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
-        let Some(key) = self.cursor.to_key(thread) else {
+        let Some(msg) = self.cursor.to_key(thread).and_then(|key| thread.get_message(&key)) else {
             let msg = "No message currently selected";
             let err = EditError::Failure(msg.into());
             return Err(err);
@@ -1039,12 +1042,15 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         "You are already in a thread. Use :reply to reply to a specific message.";
                     let err = EditError::Failure(msg.into());
                     Err(err)
-                } else {
-                    let root = key.event_id().to_owned();
+                } else if let Some(root) = msg.item().event_id() {
                     let room_id = self.room_id.clone();
-                    let id = IambId::Room(room_id, Some(root));
+                    let id = IambId::Room(room_id, Some(root.to_owned()));
                     let open = WindowAction::Switch(OpenTarget::Application(id));
                     Ok(vec![(open.into(), ctx.clone())])
+                } else {
+                    let msg = "Cannot create thread on local echo";
+                    let err = EditError::Failure(msg.into());
+                    Err(err)
                 }
             },
             PromptAction::Abort(..) => {
@@ -1076,14 +1082,12 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         let mut corner = self.viewctx.corner.clone();
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
-        let last_key = if let Some(k) = thread.last_key_value() {
-            k.0
-        } else {
+        let Some(last_key) = thread.last_key() else {
             return Ok(None);
         };
 
-        let corner_key = corner.timestamp.as_ref().unwrap_or(last_key).clone();
-        let cursor_key = self.cursor.timestamp.as_ref().unwrap_or(last_key);
+        let corner_key = corner.key.clone().unwrap_or(last_key.clone());
+        let cursor_key = self.cursor.key.as_ref().unwrap_or(&last_key);
 
         let count = ctx.resolve(count);
         let height = self.viewctx.get_height();
@@ -1095,27 +1099,27 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
         match dir {
             MoveDir2D::Up => {
-                let first_key = thread.first_key_value().map(|f| f.0.clone());
+                let first_key = thread.first_key();
 
                 for (key, item) in thread.range(..=&corner_key).rev() {
-                    let sel = key == cursor_key;
-                    let prev = prevmsg(key, thread);
+                    let sel = key == *cursor_key;
+                    let prev = prevmsg(&key, thread);
                     let txt = item.show(prev, sel, &self.viewctx, info, settings, previews, thread);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
-                    if key != &corner_key {
+                    if key != corner_key {
                         corner.text_row = max;
                     }
 
-                    corner.timestamp = key.clone().into();
+                    corner.key = key.clone().into();
 
                     if rows == 0 {
                         break;
                     } else if corner.text_row >= rows {
                         corner.text_row -= rows;
                         break;
-                    } else if corner.timestamp == first_key {
+                    } else if corner.key == first_key {
                         corner.text_row = 0;
                         break;
                     }
@@ -1127,18 +1131,19 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 let mut prev = prevmsg(&corner_key, thread);
 
                 for (key, item) in thread.range(&corner_key..) {
-                    let sel = key == cursor_key;
+                    let sel = key == *cursor_key;
                     let txt = item.show(prev, sel, &self.viewctx, info, settings, previews, thread);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
+                    let item = todo!();
                     prev = Some(item);
 
-                    if key != &corner_key {
+                    if key != corner_key {
                         corner.text_row = 0;
                     }
 
-                    corner.timestamp = key.clone().into();
+                    corner.key = key.clone().into();
 
                     if rows == 0 {
                         break;
@@ -1191,7 +1196,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 let previews = &store.application.previews;
                 let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
-                if let Some(key) = self.cursor.to_key(thread).cloned() {
+                if let Some(key) = self.cursor.to_key(thread) {
                     self.scrollview(key, pos, info, settings, previews);
                 }
 
@@ -1307,7 +1312,7 @@ impl StatefulWidget for Scrollback<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let info = self.store.application.rooms.get_or_default(state.room_id.clone());
         let settings = &self.store.application.settings;
-        let area = if state.cursor.timestamp.is_some() {
+        let area = if state.cursor.key.is_some() {
             render_jump_to_recent(area, buf, self.focused)
         } else {
             info.render_typing(area, buf, &self.store.application.settings)
@@ -1325,7 +1330,7 @@ impl StatefulWidget for Scrollback<'_> {
             return;
         };
 
-        if state.cursor.timestamp < state.viewctx.corner.timestamp {
+        if state.cursor.key < state.viewctx.corner.key {
             state.viewctx.corner = state.cursor.clone();
         }
 
@@ -1340,20 +1345,20 @@ impl StatefulWidget for Scrollback<'_> {
         };
 
         let corner = &state.viewctx.corner;
-        let corner_key = if let Some(k) = &corner.timestamp {
+        let corner_key = if let Some(k) = &corner.key {
             k.clone()
         } else {
             nth_key_before(cursor_key.clone(), height, thread)
         };
 
-        let foc = self.focused || cursor.timestamp.is_some();
-        let full = std::mem::take(&mut state.show_full_on_redraw) || cursor.timestamp.is_none();
+        let foc = self.focused || cursor.key.is_some();
+        let full = std::mem::take(&mut state.show_full_on_redraw) || cursor.key.is_none();
         let mut lines = vec![];
         let mut sawit = false;
         let mut prev = prevmsg(&corner_key, thread);
 
         // load image previews
-        for (_, item) in thread.range(&corner_key..).rev() {
+        for (_, item) in thread.range_messages(&corner_key..).rev() {
             if let Some(source) = item.image_preview() {
                 self.store
                     .application
@@ -1396,7 +1401,7 @@ impl StatefulWidget for Scrollback<'_> {
                     break;
                 }
 
-                if key == &corner_key && row < corner.text_row {
+                if key == corner_key && row < corner.text_row {
                     // Skip rows above the viewport corner.
                     continue;
                 }
@@ -1413,10 +1418,11 @@ impl StatefulWidget for Scrollback<'_> {
                     _ => None,
                 });
 
-                lines.push((key, row, line, line_preview));
+                lines.push((key.clone(), row, line, line_preview));
                 sawit |= sel;
             }
 
+            let item = todo!();
             prev = Some(item);
         }
 
@@ -1426,7 +1432,7 @@ impl StatefulWidget for Scrollback<'_> {
         }
 
         if let Some((key, row, _, _)) = lines.first() {
-            state.viewctx.corner.timestamp = Some((*key).clone());
+            state.viewctx.corner.key = Some((*key).clone());
             state.viewctx.corner.text_row = *row;
         }
 
@@ -1455,17 +1461,15 @@ impl StatefulWidget for Scrollback<'_> {
             }
         }
 
-        if self.room_focused &&
-            settings.tunables.read_receipt_send &&
-            state.cursor.timestamp.is_none()
-        {
+        if self.room_focused && settings.tunables.read_receipt_send && state.cursor.key.is_none() {
             // If the cursor is at the last message, then update the read marker.
-            if let Some((k, _)) = thread.last_key_value() {
-                info.set_receipt(
-                    thread.receipt_thread().clone(),
-                    settings.profile.user_id.clone(),
-                    k.event_id().to_owned(),
-                );
+            if let Some(_k) = thread.last_key() {
+                // info.set_receipt(
+                //     thread.receipt_thread().clone(),
+                //     settings.profile.user_id.clone(),
+                //     k.id().to_owned(),
+                // );
+                todo!()
             }
         }
 
