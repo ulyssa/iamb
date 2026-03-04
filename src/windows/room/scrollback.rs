@@ -176,13 +176,6 @@ impl ScrollbackState {
         self.viewctx.dimensions = (area.width as usize, area.height as usize);
     }
 
-    pub fn get_key(&self, info: &mut RoomInfo) -> Option<MessageKey> {
-        self.cursor
-            .timestamp
-            .clone()
-            .or_else(|| self.get_thread(info)?.last_key_value().map(|kv| kv.0.clone()))
-    }
-
     pub fn get<'a>(&self, info: &'a RoomInfo) -> Option<&'a Message> {
         let thread = self.get_thread(info)?;
 
@@ -552,7 +545,7 @@ impl ScrollbackState {
                 continue;
             }
 
-            if needle.is_match(msg.event().body().as_ref()) {
+            if needle.is_match(msg.body().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -579,7 +572,7 @@ impl ScrollbackState {
                 break;
             }
 
-            if needle.is_match(msg.event().body().as_ref()) {
+            if needle.is_match(msg.body().as_ref()) {
                 mc = MessageCursor::from(key.clone()).into();
                 count -= 1;
             }
@@ -816,7 +809,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     let mut yanked = EditRope::from("");
 
                     for (_, msg) in self.messages(range, info) {
-                        yanked += EditRope::from(msg.event().body());
+                        yanked += EditRope::from(msg.body());
                         yanked += EditRope::from('\n');
                     }
 

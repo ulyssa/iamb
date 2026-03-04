@@ -932,7 +932,7 @@ pub struct RoomInfo {
 impl Default for RoomInfo {
     fn default() -> Self {
         Self {
-            messages: Messages::new(ReceiptThread::Main),
+            messages: Messages::main(),
 
             name: Default::default(),
             tags: Default::default(),
@@ -967,32 +967,6 @@ impl RoomInfo {
                 .or_insert_with(|| Messages::thread(thread_root))
         } else {
             &mut self.messages
-        }
-    }
-
-    /// Get the event for the last message in a thread (or the thread root if there are no
-    /// in-thread replies yet).
-    ///
-    /// This returns `None` if the event identifier isn't in the room.
-    pub fn get_thread_last<'a>(
-        &'a self,
-        thread_root: &OwnedEventId,
-    ) -> Option<&'a OriginalRoomMessageEvent> {
-        let last = self.threads.get(thread_root).and_then(|t| Some(t.last_key_value()?.1));
-
-        let msg = if let Some(last) = last {
-            last.event()
-        } else if let EventLocation::Message(_, key) = self.keys.get(thread_root)? {
-            let msg = self.messages.get(key)?;
-            msg.event()
-        } else {
-            return None;
-        };
-
-        if let MessageEvent::Original(ev) = &msg {
-            Some(ev)
-        } else {
-            None
         }
     }
 
@@ -1247,6 +1221,7 @@ impl RoomInfo {
         previews: &mut PreviewManager,
         worker: &Requester,
     ) {
+        // TODO: also register stickers
         let source = source_from_event(&ev);
         self.insert(ev);
 
@@ -1400,22 +1375,6 @@ impl RoomInfo {
             .render(bar, buf);
 
         return top;
-    }
-
-    /// Checks if a given user has reacted with the given emoji on the given event
-    pub fn user_reactions_contains(
-        &mut self,
-        user_id: &UserId,
-        event_id: &EventId,
-        emoji: &str,
-    ) -> bool {
-        if let Some(reactions) = self.reactions.get(event_id) {
-            reactions
-                .values()
-                .any(|(annotation, user)| annotation == emoji && user == user_id)
-        } else {
-            false
-        }
     }
 }
 

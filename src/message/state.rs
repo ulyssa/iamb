@@ -2,15 +2,18 @@
 use std::borrow::Cow;
 use std::str::FromStr;
 
-use matrix_sdk::ruma::{
-    events::{
-        room::member::MembershipChange,
-        AnyFullStateEventContent,
-        AnySyncStateEvent,
-        FullStateEventContent,
-    },
-    OwnedRoomId,
-    UserId,
+use matrix_sdk::ruma::events::{
+    AnyFullStateEventContent,
+    AnySyncStateEvent,
+    FullStateEventContent,
+};
+use matrix_sdk::ruma::{OwnedRoomId, UserId};
+use matrix_sdk_ui::timeline::{
+    AnyOtherFullStateEventContent,
+    MemberProfileChange,
+    MembershipChange,
+    OtherState,
+    RoomMembershipChange,
 };
 
 use super::html::{StyleTree, StyleTreeNode};
@@ -22,9 +25,102 @@ fn bold(s: impl Into<Cow<'static, str>>) -> StyleTreeNode {
     StyleTreeNode::Style(Box::new(text), bold)
 }
 
-pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
-    let event = match ev.content() {
-        AnyFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Original {
+pub fn body_cow_membership(change: &RoomMembershipChange) -> Cow<'static, str> {
+    let user = change.user_id();
+    let change = match change.change() {
+        None => {
+            format!("* changed {user} in unknown ways")
+        },
+        Some(MembershipChange::None) => {
+            format!("* did nothing to {user}")
+        },
+        Some(MembershipChange::Error) => {
+            format!("* failed to calculate membership change to {user}")
+        },
+        Some(MembershipChange::NotImplemented) => {
+            format!("* changed {user} in unknown ways")
+        },
+
+        Some(MembershipChange::Joined) => {
+            return Cow::Borrowed("* joined the room");
+        },
+        Some(MembershipChange::Left) => {
+            return Cow::Borrowed("* left the room");
+        },
+        Some(MembershipChange::Banned) => {
+            format!("* banned {user} from the room")
+        },
+        Some(MembershipChange::Unbanned) => {
+            format!("* unbanned {user} from the room")
+        },
+        Some(MembershipChange::Kicked) => {
+            format!("* kicked {user} from the room")
+        },
+        Some(MembershipChange::Invited) => {
+            format!("* invited {user} to the room")
+        },
+        Some(MembershipChange::KickedAndBanned) => {
+            format!("* kicked and banned {user} from the room")
+        },
+        Some(MembershipChange::InvitationAccepted) => {
+            return Cow::Borrowed("* accepted an invitation to join the room");
+        },
+        Some(MembershipChange::InvitationRejected) => {
+            return Cow::Borrowed("* rejected an invitation to join the room");
+        },
+        Some(MembershipChange::InvitationRevoked) => {
+            format!("* revoked an invitation for {user} to join the room")
+        },
+        Some(MembershipChange::Knocked) => {
+            return Cow::Borrowed("* would like to join the room");
+        },
+        Some(MembershipChange::KnockAccepted) => {
+            format!("* accepted the room knock from {user}")
+        },
+        Some(MembershipChange::KnockRetracted) => {
+            return Cow::Borrowed("* retracted their room knock");
+        },
+        Some(MembershipChange::KnockDenied) => {
+            format!("* rejected the room knock from {user}")
+        },
+    };
+
+    Cow::Owned(change)
+}
+
+pub fn body_cow_profile(change: &MemberProfileChange) -> Cow<'static, str> {
+    match (change.displayname_change(), change.avatar_url_change()) {
+        (Some(change), avatar_change) => {
+            let mut m = match (&change.old, &change.new) {
+                (None, Some(new)) => Cow::Owned(format!("* set their display name to {new:?}")),
+                (Some(old), Some(new)) => {
+                    Cow::Owned(format!("* changed their display name from {old} to {new}"))
+                },
+                (Some(_), None) => Cow::Borrowed("* unset their display name"),
+                (None, None) => Cow::Borrowed("* made an unknown change to their display name"),
+            };
+
+            if avatar_change.is_some() {
+                m.to_mut().push_str(" and changed their user avatar");
+            }
+
+            m
+        },
+        (None, Some(change)) => {
+            match (&change.old, &change.new) {
+                (None, Some(_)) => Cow::Borrowed("* added a user avatar"),
+                (Some(_), Some(_)) => Cow::Borrowed("* changed their user avatar"),
+                (Some(_), None) => Cow::Borrowed("* removed their user avatar"),
+                (None, None) => Cow::Borrowed("* made an unknown change to their user avatar"),
+            }
+        },
+        (None, None) => Cow::Borrowed("* changed their user profile"),
+    }
+}
+
+pub fn body_cow_state(change: &OtherState) -> Cow<'static, str> {
+    let event = match change.content() {
+        AnyOtherFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -42,7 +138,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 
             m
         },
-        AnyFullStateEventContent::PolicyRuleServer(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::PolicyRuleServer(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -60,7 +156,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 
             m
         },
-        AnyFullStateEventContent::PolicyRuleUser(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::PolicyRuleUser(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -78,8 +174,9 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 
             m
         },
-        AnyFullStateEventContent::RoomAliases(FullStateEventContent::Original {
-            content, ..
+        AnyOtherFullStateEventContent::RoomAliases(FullStateEventContent::Original {
+            content,
+            ..
         }) => {
             let mut m = String::from("* set the room aliases to: ");
 
@@ -93,16 +190,16 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 
             m
         },
-        AnyFullStateEventContent::RoomAvatar(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomAvatar(FullStateEventContent::Original {
             content,
             prev_content,
         }) => {
             let prev_url = prev_content.as_ref().and_then(|p| p.url.as_ref());
 
-            match (prev_url, content.url) {
+            match (prev_url, &content.url) {
                 (None, Some(_)) => return Cow::Borrowed("* added a room avatar"),
                 (Some(old), Some(new)) => {
-                    if old != &new {
+                    if old != new {
                         return Cow::Borrowed("* replaced the room avatar");
                     }
 
@@ -112,7 +209,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 (None, None) => return Cow::Borrowed("* updated the room avatar state"),
             }
         },
-        AnyFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Original {
             content,
             prev_content,
         }) => {
@@ -138,8 +235,9 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 },
             }
         },
-        AnyFullStateEventContent::RoomCreate(FullStateEventContent::Original {
-            content, ..
+        AnyOtherFullStateEventContent::RoomCreate(FullStateEventContent::Original {
+            content,
+            ..
         }) => {
             if content.federate {
                 return Cow::Borrowed("* created a federated room");
@@ -147,16 +245,18 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 return Cow::Borrowed("* created a non-federated room");
             }
         },
-        AnyFullStateEventContent::RoomEncryption(FullStateEventContent::Original { .. }) => {
+        AnyOtherFullStateEventContent::RoomEncryption(FullStateEventContent::Original {
+            ..
+        }) => {
             return Cow::Borrowed("* updated the encryption settings for the room");
         },
-        AnyFullStateEventContent::RoomGuestAccess(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomGuestAccess(FullStateEventContent::Original {
             content,
             ..
         }) => {
             format!("* set guest access for the room to {:?}", content.guest_access.as_str())
         },
-        AnyFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -165,144 +265,40 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 content.history_visibility.as_str()
             )
         },
-        AnyFullStateEventContent::RoomJoinRules(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomJoinRules(FullStateEventContent::Original {
             content,
             ..
         }) => {
             format!("* update the join rules for the room to {:?}", content.join_rule.as_str())
         },
-        AnyFullStateEventContent::RoomMember(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomName(FullStateEventContent::Original {
             content,
-            prev_content,
+            ..
         }) => {
-            let Ok(state_key) = UserId::parse(ev.state_key()) else {
-                return Cow::Owned(format!(
-                    "* failed to calculate membership change for {:?}",
-                    ev.state_key()
-                ));
-            };
-
-            let prev_details = prev_content.as_ref().map(|p| p.details());
-            let change = content.membership_change(prev_details, ev.sender(), &state_key);
-
-            match change {
-                MembershipChange::None => {
-                    format!("* did nothing to {state_key}")
-                },
-                MembershipChange::Error => {
-                    format!("* failed to calculate membership change to {state_key}")
-                },
-                MembershipChange::Joined => {
-                    return Cow::Borrowed("* joined the room");
-                },
-                MembershipChange::Left => {
-                    return Cow::Borrowed("* left the room");
-                },
-                MembershipChange::Banned => {
-                    format!("* banned {state_key} from the room")
-                },
-                MembershipChange::Unbanned => {
-                    format!("* unbanned {state_key} from the room")
-                },
-                MembershipChange::Kicked => {
-                    format!("* kicked {state_key} from the room")
-                },
-                MembershipChange::Invited => {
-                    format!("* invited {state_key} to the room")
-                },
-                MembershipChange::KickedAndBanned => {
-                    format!("* kicked and banned {state_key} from the room")
-                },
-                MembershipChange::InvitationAccepted => {
-                    return Cow::Borrowed("* accepted an invitation to join the room");
-                },
-                MembershipChange::InvitationRejected => {
-                    return Cow::Borrowed("* rejected an invitation to join the room");
-                },
-                MembershipChange::InvitationRevoked => {
-                    format!("* revoked an invitation for {state_key} to join the room")
-                },
-                MembershipChange::Knocked => {
-                    return Cow::Borrowed("* would like to join the room");
-                },
-                MembershipChange::KnockAccepted => {
-                    format!("* accepted the room knock from {state_key}")
-                },
-                MembershipChange::KnockRetracted => {
-                    return Cow::Borrowed("* retracted their room knock");
-                },
-                MembershipChange::KnockDenied => {
-                    format!("* rejected the room knock from {state_key}")
-                },
-                MembershipChange::ProfileChanged { displayname_change, avatar_url_change } => {
-                    match (displayname_change, avatar_url_change) {
-                        (Some(change), avatar_change) => {
-                            let mut m = match (change.old, change.new) {
-                                (None, Some(new)) => {
-                                    format!("* set their display name to {new:?}")
-                                },
-                                (Some(old), Some(new)) => {
-                                    format!("* changed their display name from {old} to {new}")
-                                },
-                                (Some(_), None) => "* unset their display name".to_string(),
-                                (None, None) => {
-                                    "* made an unknown change to their display name".to_string()
-                                },
-                            };
-
-                            if avatar_change.is_some() {
-                                m.push_str(" and changed their user avatar");
-                            }
-
-                            m
-                        },
-                        (None, Some(change)) => {
-                            match (change.old, change.new) {
-                                (None, Some(_)) => {
-                                    return Cow::Borrowed("* added a user avatar");
-                                },
-                                (Some(_), Some(_)) => {
-                                    return Cow::Borrowed("* changed their user avatar");
-                                },
-                                (Some(_), None) => {
-                                    return Cow::Borrowed("* removed their user avatar");
-                                },
-                                (None, None) => {
-                                    return Cow::Borrowed(
-                                        "* made an unknown change to their user avatar",
-                                    );
-                                },
-                            }
-                        },
-                        (None, None) => {
-                            return Cow::Borrowed("* changed their user profile");
-                        },
-                    }
-                },
-                ev => {
-                    format!("* made an unknown membership change to {state_key}: {ev:?}")
-                },
-            }
-        },
-        AnyFullStateEventContent::RoomName(FullStateEventContent::Original { content, .. }) => {
             format!("* updated the room name to {:?}", content.name)
         },
-        AnyFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Original { .. }) => {
+        AnyOtherFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Original {
+            ..
+        }) => {
             return Cow::Borrowed("* updated the pinned events for the room");
         },
-        AnyFullStateEventContent::RoomPowerLevels(FullStateEventContent::Original { .. }) => {
+        AnyOtherFullStateEventContent::RoomPowerLevels(FullStateEventContent::Original {
+            ..
+        }) => {
             return Cow::Borrowed("* updated the power levels for the room");
         },
-        AnyFullStateEventContent::RoomServerAcl(FullStateEventContent::Original { .. }) => {
+        AnyOtherFullStateEventContent::RoomServerAcl(FullStateEventContent::Original {
+            ..
+        }) => {
             return Cow::Borrowed("* updated the room's server ACLs");
         },
-        AnyFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Original {
             content,
             ..
         }) => {
             format!("* sent a third-party invite to {:?}", content.display_name)
         },
-        AnyFullStateEventContent::RoomTombstone(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomTombstone(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -311,119 +307,90 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 content.replacement_room.as_str()
             )
         },
-        AnyFullStateEventContent::RoomTopic(FullStateEventContent::Original {
-            content, ..
+        AnyOtherFullStateEventContent::RoomTopic(FullStateEventContent::Original {
+            content,
+            ..
         }) => {
             format!("* set the room topic to {:?}", content.topic)
         },
-        AnyFullStateEventContent::SpaceChild(FullStateEventContent::Original { .. }) => {
-            format!("* added a space child: {}", ev.state_key())
+        AnyOtherFullStateEventContent::SpaceChild(FullStateEventContent::Original { .. }) => {
+            format!("* added a space child: {}", change.state_key())
         },
-        AnyFullStateEventContent::SpaceParent(FullStateEventContent::Original {
-            content, ..
+        AnyOtherFullStateEventContent::SpaceParent(FullStateEventContent::Original {
+            content,
+            ..
         }) => {
             if content.canonical {
-                format!("* added a canonical parent space: {}", ev.state_key())
+                format!("* added a canonical parent space: {}", change.state_key())
             } else {
-                format!("* added a parent space: {}", ev.state_key())
+                format!("* added a parent space: {}", change.state_key())
             }
-        },
-        AnyFullStateEventContent::BeaconInfo(FullStateEventContent::Original { .. }) => {
-            return Cow::Borrowed("* shared beacon information");
-        },
-        AnyFullStateEventContent::CallMember(FullStateEventContent::Original { .. }) => {
-            return Cow::Borrowed("* updated membership for room call");
-        },
-        AnyFullStateEventContent::MemberHints(FullStateEventContent::Original {
-            content, ..
-        }) => {
-            let mut m = String::from("* updated the list of service members in the room hints: ");
-
-            for (i, member) in content.service_members.iter().enumerate() {
-                if i != 0 {
-                    m.push_str(", ");
-                }
-
-                m.push_str(member.as_str());
-            }
-
-            m
         },
 
         // Redacted variants of state events:
-        AnyFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated a room policy rule (redacted)");
         },
-        AnyFullStateEventContent::PolicyRuleServer(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::PolicyRuleServer(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated a server policy rule (redacted)");
         },
-        AnyFullStateEventContent::PolicyRuleUser(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::PolicyRuleUser(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated a user policy rule (redacted)");
         },
-        AnyFullStateEventContent::RoomAliases(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomAliases(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the room aliases for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomAvatar(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomAvatar(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the room avatar (redacted)");
         },
-        AnyFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the canonical alias for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomCreate(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomCreate(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* created the room (redacted)");
         },
-        AnyFullStateEventContent::RoomEncryption(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomEncryption(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the encryption settings for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomGuestAccess(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomGuestAccess(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed(
                 "* updated the guest access configuration for the room (redacted)",
             );
         },
-        AnyFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Redacted(
+            _,
+        )) => {
             return Cow::Borrowed("* updated history visilibity for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomJoinRules(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomJoinRules(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the join rules for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomMember(FullStateEventContent::Redacted(_)) => {
-            return Cow::Borrowed("* updated the room membership (redacted)");
-        },
-        AnyFullStateEventContent::RoomName(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomName(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the room name (redacted)");
         },
-        AnyFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the pinned events for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomPowerLevels(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomPowerLevels(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the power levels for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomServerAcl(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomServerAcl(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the room's server ACLs (redacted)");
         },
-        AnyFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* sent a third-party invite (redacted)");
         },
-        AnyFullStateEventContent::RoomTombstone(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomTombstone(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* upgraded the room (redacted)");
         },
-        AnyFullStateEventContent::RoomTopic(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomTopic(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* updated the room topic (redacted)");
         },
-        AnyFullStateEventContent::SpaceChild(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::SpaceChild(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* added a space child (redacted)");
         },
-        AnyFullStateEventContent::SpaceParent(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::SpaceParent(FullStateEventContent::Redacted(_)) => {
             return Cow::Borrowed("* added a parent space (redacted)");
-        },
-        AnyFullStateEventContent::BeaconInfo(FullStateEventContent::Redacted(_)) => {
-            return Cow::Borrowed("* shared beacon information (redacted)");
-        },
-        AnyFullStateEventContent::CallMember(FullStateEventContent::Redacted(_)) => {
-            return Cow::Borrowed("Call membership changed");
-        },
-        AnyFullStateEventContent::MemberHints(FullStateEventContent::Redacted(_)) => {
-            return Cow::Borrowed("Member hints changed");
         },
 
         // Handle unknown events:
@@ -432,7 +399,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
         },
     };
 
-    return Cow::Owned(event);
+    Cow::Owned(event)
 }
 
 pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
@@ -586,6 +553,8 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             content,
             prev_content,
         }) => {
+            use matrix_sdk::ruma::events::room::member::MembershipChange;
+
             let Ok(state_key) = UserId::parse(ev.state_key()) else {
                 let prefix =
                     StyleTreeNode::Text("* failed to calculate membership change for ".into());

@@ -6,9 +6,7 @@ use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
-use std::iter::FusedIterator;
 use std::ops::RangeBounds;
-use std::sync::Arc;
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
@@ -16,14 +14,19 @@ use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::room_version_rules::RedactionRules;
 use matrix_sdk::ruma::UserId;
-use matrix_sdk_ui::timeline::TimelineItem;
+use matrix_sdk_ui::timeline::{
+    EventTimelineItem,
+    MsgLikeContent,
+    MsgLikeKind,
+    ReactionsByKeyBySender,
+    TimelineItemContent,
+};
 use matrix_sdk_ui::Timeline;
 use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
     events::{
-        relation::Thread,
         room::{
             encrypted::{
                 OriginalRoomEncryptedEvent,
@@ -36,7 +39,6 @@ use matrix_sdk::ruma::{
                 MessageType,
                 OriginalRoomMessageEvent,
                 RedactedRoomMessageEvent,
-                Relation,
                 RoomMessageEvent,
                 RoomMessageEventContent,
             },
@@ -64,6 +66,7 @@ use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
 use crate::config::ImagePreviewSize;
+use crate::message::state::{body_cow_membership, body_cow_profile};
 use crate::preview::{ImageStatus, PreviewManager};
 use crate::{
     base::RoomInfo,
@@ -138,12 +141,6 @@ impl Messages {
     pub fn last_mut(&mut self) -> Option<&mut Message> {
         self.messages.last_entry().map(|o| o.into_mut())
     }
-    pub fn iter(
-        &self,
-    ) -> impl DoubleEndedIterator<Item = (&MessageKey, &Message)> + FusedIterator + ExactSizeIterator
-    {
-        self.messages.iter()
-    }
     pub fn range(
         &self,
         range: impl RangeBounds<MessageKey>,
@@ -152,7 +149,7 @@ impl Messages {
     }
 
     #[allow(unused)]
-    pub fn new(thread: ReceiptThread) -> Self {
+    fn new(thread: ReceiptThread) -> Self {
         let timeline = todo!();
         Self { messages: Default::default(), thread, timeline }
     }
@@ -516,35 +513,6 @@ impl MessageEvent {
         }
     }
 
-    pub fn content(&self) -> Option<&RoomMessageEventContent> {
-        match self {
-            MessageEvent::EncryptedOriginal(_) => None,
-            MessageEvent::Original(ev) => Some(&ev.content),
-            MessageEvent::EncryptedRedacted(_) => None,
-            MessageEvent::Redacted(_) => None,
-            MessageEvent::State(_) => None,
-            MessageEvent::Local(_, content) => Some(content),
-        }
-    }
-
-    pub fn is_emote(&self) -> bool {
-        matches!(
-            self.content(),
-            Some(RoomMessageEventContent { msgtype: MessageType::Emote(_), .. })
-        )
-    }
-
-    pub fn body(&self) -> Cow<'_, str> {
-        match self {
-            MessageEvent::EncryptedOriginal(_) => "[Unable to decrypt message]".into(),
-            MessageEvent::Original(ev) => body_cow_content(&ev.content),
-            MessageEvent::EncryptedRedacted(ev) => body_cow_reason(&ev.unsigned),
-            MessageEvent::Redacted(ev) => body_cow_reason(&ev.unsigned),
-            MessageEvent::State(ev) => body_cow_state(ev),
-            MessageEvent::Local(_, content) => body_cow_content(content),
-        }
-    }
-
     pub fn html(&self) -> Option<StyleTree> {
         let content = match self {
             MessageEvent::EncryptedOriginal(_) => return None,
@@ -609,8 +577,21 @@ macro_rules! display_file_to_text {
     };
 }
 
-fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
-    let s = match &content.msgtype {
+fn body_cow_msglike(content: &MsgLikeContent) -> Cow<'_, str> {
+    match &content.kind {
+        MsgLikeKind::Message(message) => body_cow_content(message.msgtype()),
+        MsgLikeKind::Sticker(sticker) => Cow::Owned(format!("Alt: {}", sticker.content().body)),
+        MsgLikeKind::Poll(_) => {
+            // TODO: implement
+            Cow::Borrowed("[Poll]")
+        },
+        MsgLikeKind::Redacted => Cow::Borrowed("[Redacted]"),
+        MsgLikeKind::UnableToDecrypt(_) => Cow::Borrowed("[Unable to decrypt message]"),
+    }
+}
+
+fn body_cow_content(msgtype: &MessageType) -> Cow<'_, str> {
+    let s = match msgtype {
         MessageType::Text(content) => content.body.as_str(),
         MessageType::VerificationRequest(_) => "[Verification Request]",
         MessageType::Emote(content) => content.body.as_ref(),
@@ -629,24 +610,10 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
         MessageType::Video(content) => {
             display_file_to_text!(Video, content);
         },
-        _ => content.body(),
+        _ => msgtype.body(),
     };
 
     Cow::Borrowed(s)
-}
-
-fn body_cow_reason(unsigned: &RedactedUnsigned) -> Cow<'_, str> {
-    let reason = unsigned
-        .redacted_because
-        .deserialize()
-        .ok()
-        .and_then(|ev| ev.content.reason);
-
-    if let Some(r) = reason {
-        Cow::Owned(format!("[Redacted: {r:?}]"))
-    } else {
-        Cow::Borrowed("[Redacted]")
-    }
 }
 
 enum MessageColumns {
@@ -789,11 +756,7 @@ impl<'a> MessageFormatter<'a> {
         previews: &'a PreviewManager,
     ) -> Option<ProtocolPreview<'a>> {
         let reply_style = if settings.tunables.message_user_color {
-            if let Some(user_id) = msg.sender() {
-                style.patch(settings.get_user_color(user_id))
-            } else {
-                style
-            }
+            style.patch(settings.get_user_color(msg.sender()))
         } else {
             style
         };
@@ -837,12 +800,17 @@ impl<'a> MessageFormatter<'a> {
         proto
     }
 
-    fn push_reactions(&mut self, counts: Vec<(&'a str, usize)>, style: Style, text: &mut Text<'a>) {
+    fn push_reactions(
+        &mut self,
+        reactions: &'a ReactionsByKeyBySender,
+        style: Style,
+        text: &mut Text<'a>,
+    ) {
         let mut emojis = printer::TextPrinter::new(self.width(), style, false, self.settings);
-        let mut reactions = 0;
+        let mut n_pushed = 0;
 
-        for (key, count) in counts {
-            if reactions != 0 {
+        for (key, counts) in reactions.iter() {
+            if n_pushed != 0 {
                 emojis.push_str(" ", style);
             }
 
@@ -867,18 +835,18 @@ impl<'a> MessageFormatter<'a> {
             emojis.push_str("[", style);
             emojis.push_str(name, style);
             emojis.push_str(" ", style);
-            emojis.push_span_nobreak(Span::styled(count.to_string(), style));
+            emojis.push_span_nobreak(Span::styled(counts.len().to_string(), style));
             emojis.push_str("]", style);
 
-            reactions += 1;
+            n_pushed += 1;
         }
 
-        if reactions > 0 {
+        if n_pushed > 0 {
             self.push_text(emojis.finish(), style, text);
         }
     }
 
-    fn push_thread_reply_count(&mut self, len: usize, text: &mut Text<'a>) {
+    fn push_thread_reply_count(&mut self, len: u32, text: &mut Text<'a>) {
         if len == 0 {
             return;
         }
@@ -902,7 +870,7 @@ impl<'a> MessageFormatter<'a> {
 }
 
 pub struct Message {
-    item: Arc<TimelineItem>,
+    item: EventTimelineItem,
 
     event: MessageEvent,
     timestamp: MessageTimeStamp,
@@ -912,7 +880,8 @@ pub struct Message {
 }
 
 impl Message {
-    pub fn item(&self) -> &Arc<TimelineItem> {
+    #[inline]
+    pub fn item(&self) -> &EventTimelineItem {
         &self.item
     }
     pub fn html(&self) -> Option<&StyleTree> {
@@ -922,7 +891,18 @@ impl Message {
         self.html = html;
     }
     pub fn body(&self) -> Cow<'_, str> {
-        self.event.body()
+        #[allow(unused)]
+        match self.item().content() {
+            TimelineItemContent::MsgLike(content) => body_cow_msglike(content),
+            TimelineItemContent::MembershipChange(change) => body_cow_membership(change),
+            TimelineItemContent::ProfileChange(change) => body_cow_profile(change),
+            TimelineItemContent::OtherState(change) => body_cow_state(change),
+            TimelineItemContent::FailedToParseMessageLike { event_type, error } => todo!(),
+            TimelineItemContent::FailedToParseState { event_type, state_key, error } => todo!(),
+            TimelineItemContent::CallInvite | TimelineItemContent::CallNotify => {
+                Cow::Borrowed("* started a call")
+            },
+        }
     }
     pub fn event(&self) -> &MessageEvent {
         &self.event
@@ -930,8 +910,8 @@ impl Message {
     pub fn event_mut(&mut self) -> &mut MessageEvent {
         &mut self.event
     }
-    pub fn sender(&self) -> Option<&UserId> {
-        self.item.as_event().map(|ev| ev.sender())
+    pub fn sender(&self) -> &UserId {
+        self.item().sender()
     }
     pub fn set_downloaded(&mut self) {
         self.downloaded = true;
@@ -941,6 +921,13 @@ impl Message {
     }
     pub fn insert_image_preview(&mut self, preview: MediaSource) {
         self.image_preview = Some(preview);
+    }
+
+    pub fn is_emote(&self) -> bool {
+        self.item()
+            .content()
+            .as_message()
+            .is_some_and(|msg| matches!(msg.msgtype(), MessageType::Emote(_)))
     }
 
     #[allow(unused)]
@@ -960,45 +947,11 @@ impl Message {
     }
 
     pub fn reply_to(&self) -> Option<OwnedEventId> {
-        let content = match &self.event {
-            MessageEvent::EncryptedOriginal(_) => return None,
-            MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, content) => content,
-            MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_) => return None,
-            MessageEvent::State(_) => return None,
-        };
-
-        match &content.relates_to {
-            Some(Relation::Reply { in_reply_to }) => Some(in_reply_to.event_id.clone()),
-            Some(Relation::Thread(Thread {
-                in_reply_to: Some(in_reply_to),
-                is_falling_back: false,
-                ..
-            })) => Some(in_reply_to.event_id.clone()),
-            Some(_) | None => None,
-        }
+        Some(self.item().content().as_msglike()?.in_reply_to.as_ref()?.event_id.clone())
     }
 
     pub fn thread_root(&self) -> Option<OwnedEventId> {
-        let content = match &self.event {
-            MessageEvent::EncryptedOriginal(_) => return None,
-            MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, content) => content,
-            MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_) => return None,
-            MessageEvent::State(_) => return None,
-        };
-
-        match &content.relates_to {
-            Some(Relation::Thread(Thread {
-                event_id,
-                in_reply_to: Some(in_reply_to),
-                is_falling_back: true,
-                ..
-            })) if event_id == &in_reply_to.event_id => Some(event_id.clone()),
-            Some(_) | None => None,
-        }
+        self.item().content().as_msglike()?.thread_root.clone()
     }
 
     fn get_render_style(&self, selected: bool, settings: &ApplicationSettings) -> Style {
@@ -1013,10 +966,8 @@ impl Message {
         }
 
         if settings.tunables.message_user_color {
-            if let Some(user_id) = self.sender() {
-                let color = settings.get_user_color(user_id);
-                style = style.fg(color);
-            }
+            let color = settings.get_user_color(self.sender());
+            style = style.fg(color);
         }
 
         return style;
@@ -1043,12 +994,12 @@ impl Message {
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
             let time = self.timestamp.show_time();
-            let read = info
-                .event_receipts
-                .values()
-                .filter_map(|receipts| receipts.get(self.event.event_id()))
-                .flat_map(|read| read.iter())
-                .map(|user_id| user_id.to_owned())
+            let read = self
+                .item()
+                .read_receipts()
+                .iter()
+                .filter(|(_, receipt)| !matches!(receipt.thread, ReceiptThread::Unthreaded))
+                .map(|(user_id, _)| user_id.to_owned())
                 .collect();
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
@@ -1099,6 +1050,7 @@ impl Message {
         let width = fmt.width();
 
         // Show the message that this one replied to, if any.
+        // TODO: use `InReplyToDetails::event`
         let reply = self
             .reply_to()
             .or_else(|| self.thread_root())
@@ -1129,12 +1081,18 @@ impl Message {
         }
 
         if settings.tunables.reaction_display {
-            let reactions = info.get_reactions(self.event.event_id());
-            fmt.push_reactions(reactions, style, &mut text);
+            if let Some(msg) = self.item().content().as_msglike() {
+                fmt.push_reactions(&msg.reactions, style, &mut text);
+            }
         }
 
-        if let Some(thread) = info.get_thread(Some(self.event.event_id())) {
-            fmt.push_thread_reply_count(thread.len(), &mut text);
+        if let Some(thread) = self
+            .item()
+            .content()
+            .as_msglike()
+            .and_then(|msg| msg.thread_summary.as_ref())
+        {
+            fmt.push_thread_reply_count(thread.num_replies, &mut text);
         }
 
         (text, [proto_main, proto_reply])
@@ -1163,7 +1121,7 @@ impl Message {
         if let Some(html) = &self.html {
             (html.to_text(width, style, hide_reply, settings), None)
         } else {
-            let mut msg = self.event.body();
+            let mut msg = self.body();
             if settings.tunables.message_shortcode_display {
                 msg = Cow::Owned(replace_emojis_in_str(msg.as_ref()));
             }
@@ -1202,9 +1160,7 @@ impl Message {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Span<'a> {
-        self.sender()
-            .map(|user_id| settings.get_user_span(user_id, info))
-            .unwrap_or_default()
+        settings.get_user_span(self.sender(), info)
     }
 
     fn show_sender<'a>(
@@ -1217,7 +1173,7 @@ impl Message {
         if let Some(prev) = prev {
             if self.sender() == prev.sender() &&
                 self.timestamp.same_day(&prev.timestamp) &&
-                !self.event.is_emote()
+                !self.is_emote()
             {
                 return None;
             }
@@ -1238,7 +1194,7 @@ impl Message {
     }
 
     pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, rules: &RedactionRules) {
-        self.event.redact(redaction, rules);
+        self.event_mut().redact(redaction, rules);
         self.html = None;
         self.downloaded = false;
         self.image_preview = None;
@@ -1299,7 +1255,7 @@ impl From<AnySyncStateEvent> for Message {
 
 impl Display for Message {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.event.body())
+        write!(f, "{}", self.body())
     }
 }
 
@@ -1532,78 +1488,78 @@ pub mod tests {
     #[test]
     fn test_display_attachment_size() {
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            body_cow_content(&MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::default()))
-            ))),
+            )),
             "[Attached Image: Alt text]".to_string()
         );
 
         let mut info = ImageInfo::default();
         info.size = Some(442630_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            body_cow_content(&MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Image: Alt text (442.63 kB)]".to_string()
         );
 
         let mut info = ImageInfo::default();
         info.size = Some(12_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            body_cow_content(&MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Image: Alt text (12 B)]".to_string()
         );
 
         let mut info = AudioInfo::default();
         info.size = Some(4294967295_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Audio(
+            body_cow_content(&MessageType::Audio(
                 AudioMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Audio: Alt text (4.29 GB)]".to_string()
         );
 
         let mut info = FileInfo::default();
         info.size = Some(4426300_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::File(
+            body_cow_content(&MessageType::File(
                 FileMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached File: Alt text (4.43 MB)]".to_string()
         );
 
         let mut info = VideoInfo::default();
         info.size = Some(44000_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Video(
+            body_cow_content(&MessageType::Video(
                 VideoMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Video: Alt text (44 kB)]".to_string()
         );
     }
