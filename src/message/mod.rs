@@ -144,14 +144,9 @@ impl Messages {
     }
 
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
-        let event_id = key.event_id().to_owned();
         let msg = msg.into();
 
         self.messages.insert(key, msg);
-
-        // Remove any echo.
-        let key = MessageKey::new(MessageTimeStamp::LocalEcho, event_id);
-        let _ = self.messages.remove(&key);
     }
 }
 
@@ -233,13 +228,6 @@ fn placeholder_frame(
     Some(placeholder)
 }
 
-#[inline]
-fn millis_to_datetime(ms: UInt) -> DateTime<LocalTz> {
-    let time = i64::from(ms) / 1000;
-    let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
-    time.into()
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum TimeStampIntError {
     #[error("Integer conversion error: {0}")]
@@ -249,18 +237,14 @@ pub enum TimeStampIntError {
     UIntError(<UInt as TryFrom<u64>>::Error),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MessageTimeStamp {
-    OriginServer(UInt),
-    LocalEcho,
-}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub struct MessageTimeStamp(UInt);
 
 impl MessageTimeStamp {
     fn as_datetime(&self) -> DateTime<LocalTz> {
-        match self {
-            MessageTimeStamp::OriginServer(ms) => millis_to_datetime(*ms),
-            MessageTimeStamp::LocalEcho => LocalTz::now(),
-        }
+        let time = i64::from(self.0) / 1000;
+        let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
+        time.into()
     }
 
     fn same_day(&self, other: &Self) -> bool {
@@ -270,62 +254,29 @@ impl MessageTimeStamp {
         dt1.date_naive() == dt2.date_naive()
     }
 
-    fn show_date(&self) -> Option<Span<'_>> {
+    fn show_date(&self) -> Option<Span<'static>> {
         let time = self.as_datetime().format("%A, %B %d %Y").to_string();
 
         Span::styled(time, BOLD_STYLE).into()
     }
 
-    fn show_time(&self) -> Option<Span<'_>> {
-        match self {
-            MessageTimeStamp::OriginServer(ms) => {
-                let time = millis_to_datetime(*ms).format("%T");
-                let time = format!("  [{time}]");
+    fn show_time(&self) -> Span<'static> {
+        let time = self.as_datetime().format("%T");
+        let time = format!("  [{time}]");
 
-                Span::raw(time).into()
-            },
-            MessageTimeStamp::LocalEcho => None,
-        }
-    }
-
-    fn is_local_echo(&self) -> bool {
-        matches!(self, MessageTimeStamp::LocalEcho)
-    }
-
-    pub fn as_millis(&self) -> Option<MilliSecondsSinceUnixEpoch> {
-        match self {
-            MessageTimeStamp::OriginServer(ms) => MilliSecondsSinceUnixEpoch(*ms).into(),
-            MessageTimeStamp::LocalEcho => None,
-        }
-    }
-}
-
-impl Ord for MessageTimeStamp {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (MessageTimeStamp::OriginServer(_), MessageTimeStamp::LocalEcho) => Ordering::Less,
-            (MessageTimeStamp::OriginServer(a), MessageTimeStamp::OriginServer(b)) => a.cmp(b),
-            (MessageTimeStamp::LocalEcho, MessageTimeStamp::OriginServer(_)) => Ordering::Greater,
-            (MessageTimeStamp::LocalEcho, MessageTimeStamp::LocalEcho) => Ordering::Equal,
-        }
-    }
-}
-
-impl PartialOrd for MessageTimeStamp {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+        Span::raw(time)
     }
 }
 
 impl From<UInt> for MessageTimeStamp {
     fn from(millis: UInt) -> Self {
-        MessageTimeStamp::OriginServer(millis)
+        Self(millis)
     }
 }
 
 impl From<MilliSecondsSinceUnixEpoch> for MessageTimeStamp {
     fn from(millis: MilliSecondsSinceUnixEpoch) -> Self {
-        MessageTimeStamp::OriginServer(millis.0)
+        Self(millis.0)
     }
 }
 
@@ -333,10 +284,7 @@ impl TryFrom<&MessageTimeStamp> for usize {
     type Error = TimeStampIntError;
 
     fn try_from(ts: &MessageTimeStamp) -> Result<Self, Self::Error> {
-        let n = match ts {
-            MessageTimeStamp::LocalEcho => 0,
-            MessageTimeStamp::OriginServer(u) => usize::try_from(u64::from(*u))?,
-        };
+        let n = usize::try_from(u64::from(ts.0))?;
 
         Ok(n)
     }
@@ -346,14 +294,10 @@ impl TryFrom<usize> for MessageTimeStamp {
     type Error = TimeStampIntError;
 
     fn try_from(u: usize) -> Result<Self, Self::Error> {
-        if u == 0 {
-            Ok(MessageTimeStamp::LocalEcho)
-        } else {
-            let n = u64::try_from(u)?;
-            let n = UInt::try_from(n).map_err(TimeStampIntError::UIntError)?;
+        let n = u64::try_from(u)?;
+        let n = UInt::try_from(n).map_err(TimeStampIntError::UIntError)?;
 
-            Ok(MessageTimeStamp::from(n))
-        }
+        Ok(Self::from(n))
     }
 }
 
@@ -793,8 +737,6 @@ impl<'a> MessageFormatter<'a> {
 
 pub struct Message {
     item: EventTimelineItem,
-
-    timestamp: MessageTimeStamp,
     downloaded: bool,
     html: Option<StyleTree>,
     image_preview: Option<MediaSource>,
@@ -807,9 +749,6 @@ impl Message {
     }
     pub fn html(&self) -> Option<&StyleTree> {
         self.html.as_ref()
-    }
-    pub fn set_html(&mut self, html: Option<StyleTree>) {
-        self.html = html;
     }
     pub fn body(&self) -> Cow<'_, str> {
         #[allow(unused)]
@@ -837,6 +776,9 @@ impl Message {
     pub fn insert_image_preview(&mut self, preview: MediaSource) {
         self.image_preview = Some(preview);
     }
+    pub fn timestamp(&self) -> MessageTimeStamp {
+        self.item().timestamp().into()
+    }
 
     pub fn is_emote(&self) -> bool {
         self.item()
@@ -845,19 +787,10 @@ impl Message {
             .is_some_and(|msg| matches!(msg.msgtype(), MessageType::Emote(_)))
     }
 
-    #[allow(unused)]
-    pub fn new(sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
-        let downloaded = false;
-        let item = todo!();
+    pub fn new(item: EventTimelineItem) -> Self {
         let html = generate_html(&item);
 
-        Message {
-            item,
-            timestamp,
-            downloaded,
-            html,
-            image_preview: None,
-        }
+        Message { item, downloaded: false, html, image_preview: None }
     }
 
     pub fn reply_to(&self) -> Option<OwnedEventId> {
@@ -875,7 +808,7 @@ impl Message {
             style = style.add_modifier(StyleModifier::REVERSED)
         }
 
-        if self.timestamp.is_local_echo() {
+        if self.item().is_local_echo() {
             style = style.add_modifier(StyleModifier::ITALIC);
         }
 
@@ -896,8 +829,8 @@ impl Message {
     ) -> MessageFormatter<'a> {
         let orig = width;
         let date = match &prev {
-            Some(prev) if prev.timestamp.same_day(&self.timestamp) => None,
-            _ => self.timestamp.show_date(),
+            Some(prev) if prev.timestamp().same_day(&self.timestamp()) => None,
+            _ => self.timestamp().show_date(),
         };
         let user_gutter = settings.tunables.user_gutter_width;
 
@@ -907,7 +840,7 @@ impl Message {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
-            let time = self.timestamp.show_time();
+            let time = Some(self.timestamp().show_time());
             let read = self
                 .item()
                 .read_receipts()
@@ -921,7 +854,7 @@ impl Message {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
-            let time = self.timestamp.show_time();
+            let time = Some(self.timestamp().show_time());
             let read = Vec::new();
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
@@ -1086,7 +1019,7 @@ impl Message {
     ) -> Option<Span<'a>> {
         if let Some(prev) = prev {
             if self.sender() == prev.sender() &&
-                self.timestamp.same_day(&prev.timestamp) &&
+                self.timestamp().same_day(&prev.timestamp()) &&
                 !self.is_emote()
             {
                 return None;

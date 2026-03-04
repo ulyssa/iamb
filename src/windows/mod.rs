@@ -1622,6 +1622,8 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 
 #[cfg(test)]
 mod tests {
+    use std::convert::TryInto as _;
+
     use super::*;
     use matrix_sdk::ruma::{room_alias_id, server_name};
 
@@ -1753,7 +1755,7 @@ mod tests {
             name: "Room 2",
             unread: UnreadInfo {
                 unread: false,
-                latest: Some(MessageTimeStamp::OriginServer(40u32.into())),
+                latest: Some(40usize.try_into().unwrap()),
             },
             invite: false,
         };
@@ -1765,7 +1767,7 @@ mod tests {
             name: "Room 3",
             unread: UnreadInfo {
                 unread: false,
-                latest: Some(MessageTimeStamp::OriginServer(20u32.into())),
+                latest: Some(20usize.try_into().unwrap()),
             },
             invite: false,
         };

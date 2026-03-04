@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use matrix_sdk::ruma::{
     event_id,
-    events::room::message::{OriginalRoomMessageEvent, RoomMessageEventContent},
+    events::room::message::RoomMessageEventContent,
     server_name,
     user_id,
     EventId,
@@ -11,7 +11,6 @@ use matrix_sdk::ruma::{
     OwnedRoomId,
     OwnedUserId,
     RoomId,
-    UInt,
 };
 
 use lazy_static::lazy_static;
@@ -36,12 +35,7 @@ use crate::{
         UserDisplayStyle,
         UserDisplayTunables,
     },
-    message::{
-        Message,
-        MessageKey,
-        MessageTimeStamp::{LocalEcho, OriginServer},
-        Messages,
-    },
+    message::{Message, MessageKey, Messages},
     worker::Requester,
 };
 
@@ -62,15 +56,11 @@ lazy_static! {
     pub static ref MSG4_EVID: OwnedEventId =
         event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned();
     pub static ref MSG5_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
-    pub static ref MSG1_KEY: MessageKey = MessageKey::new(LocalEcho, MSG1_EVID.clone());
-    pub static ref MSG2_KEY: MessageKey =
-        MessageKey::new(OriginServer(UInt::new(1).unwrap()), MSG2_EVID.clone());
-    pub static ref MSG3_KEY: MessageKey =
-        MessageKey::new(OriginServer(UInt::new(2).unwrap()), MSG3_EVID.clone());
-    pub static ref MSG4_KEY: MessageKey =
-        MessageKey::new(OriginServer(UInt::new(2).unwrap()), MSG4_EVID.clone());
-    pub static ref MSG5_KEY: MessageKey =
-        MessageKey::new(OriginServer(UInt::new(8).unwrap()), MSG5_EVID.clone());
+    pub static ref MSG1_KEY: MessageKey = todo!();
+    pub static ref MSG2_KEY: MessageKey = todo!();
+    pub static ref MSG3_KEY: MessageKey = todo!();
+    pub static ref MSG4_KEY: MessageKey = todo!();
+    pub static ref MSG5_KEY: MessageKey = todo!();
 }
 
 pub fn user_style(user: &str) -> Style {
@@ -78,22 +68,10 @@ pub fn user_style(user: &str) -> Style {
 }
 
 pub fn mock_room1_message(
-    content: RoomMessageEventContent,
-    sender: OwnedUserId,
-    key: MessageKey,
+    _content: RoomMessageEventContent,
+    _sender: OwnedUserId,
+    _key: MessageKey,
 ) -> Message {
-    let origin_server_ts = key.ts().as_millis().unwrap();
-    let event_id = key.event_id().to_owned();
-
-    let _event = OriginalRoomMessageEvent {
-        content,
-        event_id,
-        sender,
-        origin_server_ts,
-        room_id: TEST_ROOM1_ID.clone(),
-        unsigned: Default::default(),
-    };
-
     todo!()
 }
 
