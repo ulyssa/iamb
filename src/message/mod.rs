@@ -4,13 +4,13 @@ use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
 use std::convert::{TryFrom, TryInto};
-use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::RangeBounds;
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::room::message::TextMessageEventContent;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::room_version_rules::RedactionRules;
 use matrix_sdk::ruma::UserId;
@@ -22,31 +22,12 @@ use matrix_sdk_ui::timeline::{
     TimelineItemContent,
 };
 use matrix_sdk_ui::Timeline;
-use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
-    events::{
-        room::{
-            encrypted::{
-                OriginalRoomEncryptedEvent,
-                RedactedRoomEncryptedEvent,
-                RoomEncryptedEvent,
-            },
-            message::{
-                FormattedBody,
-                MessageFormat,
-                MessageType,
-                OriginalRoomMessageEvent,
-                RedactedRoomMessageEvent,
-                RoomMessageEvent,
-                RoomMessageEventContent,
-            },
-            redaction::SyncRoomRedactionEvent,
-        },
-        AnySyncStateEvent,
-        RedactContent,
-        RedactedUnsigned,
+    events::room::{
+        message::{FormattedBody, MessageFormat, MessageType},
+        redaction::SyncRoomRedactionEvent,
     },
     EventId,
     MilliSecondsSinceUnixEpoch,
@@ -66,7 +47,7 @@ use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
 use crate::config::ImagePreviewSize;
-use crate::message::state::{body_cow_membership, body_cow_profile};
+use crate::message::state::{body_cow_membership, body_cow_profile, html_membership, html_profile};
 use crate::preview::{ImageStatus, PreviewManager};
 use crate::{
     base::RoomInfo,
@@ -469,93 +450,6 @@ impl PartialOrd for MessageCursor {
     }
 }
 
-fn redaction_reason(ev: &SyncRoomRedactionEvent) -> Option<&str> {
-    let SyncRoomRedactionEvent::Original(ev) = ev else {
-        return None;
-    };
-
-    return ev.content.reason.as_deref();
-}
-
-fn redaction_unsigned(ev: SyncRoomRedactionEvent) -> RedactedUnsigned {
-    let reason = redaction_reason(&ev);
-    let redacted_because = json!({
-        "content": {
-            "reason": reason
-        },
-        "event_id": ev.event_id(),
-        "sender": ev.sender(),
-        "origin_server_ts": ev.origin_server_ts(),
-        "unsigned": {},
-    });
-    RedactedUnsigned::new(serde_json::from_value(redacted_because).unwrap())
-}
-
-#[derive(Clone)]
-pub enum MessageEvent {
-    EncryptedOriginal(Box<OriginalRoomEncryptedEvent>),
-    EncryptedRedacted(Box<RedactedRoomEncryptedEvent>),
-    Original(Box<OriginalRoomMessageEvent>),
-    Redacted(Box<RedactedRoomMessageEvent>),
-    State(Box<AnySyncStateEvent>),
-    Local(OwnedEventId, Box<RoomMessageEventContent>),
-}
-
-impl MessageEvent {
-    pub fn event_id(&self) -> &EventId {
-        match self {
-            MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
-            MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
-            MessageEvent::Original(ev) => ev.event_id.as_ref(),
-            MessageEvent::Redacted(ev) => ev.event_id.as_ref(),
-            MessageEvent::State(ev) => ev.event_id(),
-            MessageEvent::Local(event_id, _) => event_id.as_ref(),
-        }
-    }
-
-    pub fn html(&self) -> Option<StyleTree> {
-        let content = match self {
-            MessageEvent::EncryptedOriginal(_) => return None,
-            MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_) => return None,
-            MessageEvent::State(ev) => return Some(html_state(ev)),
-            MessageEvent::Local(_, content) => content,
-        };
-
-        if let MessageType::Text(content) = &content.msgtype {
-            if let Some(FormattedBody { format: MessageFormat::Html, body }) = &content.formatted {
-                Some(parse_matrix_html(body.as_str()))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    fn redact(&mut self, redaction: SyncRoomRedactionEvent, rules: &RedactionRules) {
-        match self {
-            MessageEvent::EncryptedOriginal(_) => return,
-            MessageEvent::EncryptedRedacted(_) => return,
-            MessageEvent::Redacted(_) => return,
-            MessageEvent::State(_) => return,
-            MessageEvent::Local(_, _) => return,
-            MessageEvent::Original(ev) => {
-                let redacted = RedactedRoomMessageEvent {
-                    content: ev.content.clone().redact(rules),
-                    event_id: ev.event_id.clone(),
-                    sender: ev.sender.clone(),
-                    origin_server_ts: ev.origin_server_ts,
-                    room_id: ev.room_id.clone(),
-                    unsigned: redaction_unsigned(redaction),
-                };
-                *self = MessageEvent::Redacted(Box::new(redacted));
-            },
-        }
-    }
-}
-
 /// Macro rule converting a File / Image / Audio / Video to its text content with the shape:
 /// `[Attached <type>: <content>[ (<human readable file size>)]]`
 macro_rules! display_file_to_text {
@@ -614,6 +508,34 @@ fn body_cow_content(msgtype: &MessageType) -> Cow<'_, str> {
     };
 
     Cow::Borrowed(s)
+}
+
+#[allow(unused)]
+fn generate_html(item: &EventTimelineItem) -> Option<StyleTree> {
+    match item.content() {
+        TimelineItemContent::MsgLike(content) => {
+            if let MsgLikeKind::Message(message) = &content.kind {
+                if let MessageType::Text(TextMessageEventContent {
+                    formatted: Some(FormattedBody { format: MessageFormat::Html, body }),
+                    ..
+                }) = message.msgtype()
+                {
+                    Some(parse_matrix_html(body))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        },
+        TimelineItemContent::MembershipChange(change) => Some(html_membership(change)),
+        TimelineItemContent::ProfileChange(change) => Some(html_profile(change)),
+        TimelineItemContent::OtherState(change) => Some(html_state(change)),
+
+        TimelineItemContent::FailedToParseMessageLike { event_type, error } => todo!(),
+        TimelineItemContent::FailedToParseState { event_type, state_key, error } => todo!(),
+        TimelineItemContent::CallInvite | TimelineItemContent::CallNotify => None,
+    }
 }
 
 enum MessageColumns {
@@ -872,7 +794,6 @@ impl<'a> MessageFormatter<'a> {
 pub struct Message {
     item: EventTimelineItem,
 
-    event: MessageEvent,
     timestamp: MessageTimeStamp,
     downloaded: bool,
     html: Option<StyleTree>,
@@ -904,12 +825,6 @@ impl Message {
             },
         }
     }
-    pub fn event(&self) -> &MessageEvent {
-        &self.event
-    }
-    pub fn event_mut(&mut self) -> &mut MessageEvent {
-        &mut self.event
-    }
     pub fn sender(&self) -> &UserId {
         self.item().sender()
     }
@@ -931,14 +846,13 @@ impl Message {
     }
 
     #[allow(unused)]
-    pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
-        let html = event.html();
+    pub fn new(sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
         let downloaded = false;
         let item = todo!();
+        let html = generate_html(&item);
 
         Message {
             item,
-            event,
             timestamp,
             downloaded,
             html,
@@ -1193,69 +1107,11 @@ impl Message {
         Span::styled(sender, style).into()
     }
 
+    #[allow(unused)]
     pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, rules: &RedactionRules) {
-        self.event_mut().redact(redaction, rules);
         self.html = None;
         self.downloaded = false;
         self.image_preview = None;
-    }
-}
-
-impl From<RoomEncryptedEvent> for Message {
-    fn from(event: RoomEncryptedEvent) -> Self {
-        let timestamp = event.origin_server_ts().into();
-        let user_id = event.sender().to_owned();
-        let content = match event {
-            RoomEncryptedEvent::Original(ev) => MessageEvent::EncryptedOriginal(ev.into()),
-            RoomEncryptedEvent::Redacted(ev) => MessageEvent::EncryptedRedacted(ev.into()),
-        };
-
-        Message::new(content, user_id, timestamp)
-    }
-}
-
-impl From<OriginalRoomMessageEvent> for Message {
-    fn from(event: OriginalRoomMessageEvent) -> Self {
-        let timestamp = event.origin_server_ts.into();
-        let user_id = event.sender.clone();
-        let content = MessageEvent::Original(event.into());
-
-        Message::new(content, user_id, timestamp)
-    }
-}
-
-impl From<RedactedRoomMessageEvent> for Message {
-    fn from(event: RedactedRoomMessageEvent) -> Self {
-        let timestamp = event.origin_server_ts.into();
-        let user_id = event.sender.clone();
-        let content = MessageEvent::Redacted(event.into());
-
-        Message::new(content, user_id, timestamp)
-    }
-}
-
-impl From<RoomMessageEvent> for Message {
-    fn from(event: RoomMessageEvent) -> Self {
-        match event {
-            RoomMessageEvent::Original(ev) => ev.into(),
-            RoomMessageEvent::Redacted(ev) => ev.into(),
-        }
-    }
-}
-
-impl From<AnySyncStateEvent> for Message {
-    fn from(event: AnySyncStateEvent) -> Self {
-        let timestamp = event.origin_server_ts().into();
-        let user_id = event.sender().to_owned();
-        let event = MessageEvent::State(event.into());
-
-        Message::new(event, user_id, timestamp)
-    }
-}
-
-impl Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.body())
     }
 }
 

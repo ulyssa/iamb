@@ -61,7 +61,6 @@ use matrix_sdk::{
             typing::SyncTypingEvent,
             AnyInitialStateEvent,
             AnyMessageLikeEvent,
-            AnySyncStateEvent,
             AnyTimelineEvent,
             EmptyStateKey,
             InitialStateEvent,
@@ -342,8 +341,8 @@ fn load_insert(
                 }
 
                 match msg {
-                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
-                        info.insert_encrypted(msg);
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(_)) => {
+                        todo!()
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
                         info.insert_with_preview(msg, settings, previews, worker);
@@ -354,10 +353,8 @@ fn load_insert(
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
                     },
-                    AnyTimelineEvent::State(msg) => {
-                        if settings.tunables.state_event_display {
-                            info.insert_any_state(msg.into());
-                        }
+                    AnyTimelineEvent::State(_) => {
+                        todo!()
                     },
                 }
             }
@@ -1096,20 +1093,6 @@ impl ClientWorker {
                 }
             },
         );
-
-        if self.settings.tunables.state_event_display {
-            let _ = self.client.add_event_handler(
-                |ev: AnySyncStateEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
-                    async move {
-                        let room_id = room.room_id();
-                        let mut locked = store.lock().await;
-
-                        let info = locked.application.get_room_info(room_id.to_owned());
-                        info.insert_any_state(ev);
-                    }
-                },
-            );
-        }
 
         let _ = self.client.add_event_handler(
             |ev: OriginalSyncRoomRedactionEvent,

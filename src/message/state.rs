@@ -2,12 +2,8 @@
 use std::borrow::Cow;
 use std::str::FromStr;
 
-use matrix_sdk::ruma::events::{
-    AnyFullStateEventContent,
-    AnySyncStateEvent,
-    FullStateEventContent,
-};
-use matrix_sdk::ruma::{OwnedRoomId, UserId};
+use matrix_sdk::ruma::events::FullStateEventContent;
+use matrix_sdk::ruma::OwnedRoomId;
 use matrix_sdk_ui::timeline::{
     AnyOtherFullStateEventContent,
     MemberProfileChange,
@@ -26,19 +22,19 @@ fn bold(s: impl Into<Cow<'static, str>>) -> StyleTreeNode {
 }
 
 pub fn body_cow_membership(change: &RoomMembershipChange) -> Cow<'static, str> {
-    let user = change.user_id();
+    let user_id = change.user_id();
     let change = match change.change() {
         None => {
-            format!("* changed {user} in unknown ways")
+            format!("* changed {user_id} in unknown ways")
         },
         Some(MembershipChange::None) => {
-            format!("* did nothing to {user}")
+            format!("* did nothing to {user_id}")
         },
         Some(MembershipChange::Error) => {
-            format!("* failed to calculate membership change to {user}")
+            format!("* failed to calculate membership change to {user_id}")
         },
         Some(MembershipChange::NotImplemented) => {
-            format!("* changed {user} in unknown ways")
+            format!("* changed {user_id} in unknown ways")
         },
 
         Some(MembershipChange::Joined) => {
@@ -48,19 +44,19 @@ pub fn body_cow_membership(change: &RoomMembershipChange) -> Cow<'static, str> {
             return Cow::Borrowed("* left the room");
         },
         Some(MembershipChange::Banned) => {
-            format!("* banned {user} from the room")
+            format!("* banned {user_id} from the room")
         },
         Some(MembershipChange::Unbanned) => {
-            format!("* unbanned {user} from the room")
+            format!("* unbanned {user_id} from the room")
         },
         Some(MembershipChange::Kicked) => {
-            format!("* kicked {user} from the room")
+            format!("* kicked {user_id} from the room")
         },
         Some(MembershipChange::Invited) => {
-            format!("* invited {user} to the room")
+            format!("* invited {user_id} to the room")
         },
         Some(MembershipChange::KickedAndBanned) => {
-            format!("* kicked and banned {user} from the room")
+            format!("* kicked and banned {user_id} from the room")
         },
         Some(MembershipChange::InvitationAccepted) => {
             return Cow::Borrowed("* accepted an invitation to join the room");
@@ -69,19 +65,19 @@ pub fn body_cow_membership(change: &RoomMembershipChange) -> Cow<'static, str> {
             return Cow::Borrowed("* rejected an invitation to join the room");
         },
         Some(MembershipChange::InvitationRevoked) => {
-            format!("* revoked an invitation for {user} to join the room")
+            format!("* revoked an invitation for {user_id} to join the room")
         },
         Some(MembershipChange::Knocked) => {
             return Cow::Borrowed("* would like to join the room");
         },
         Some(MembershipChange::KnockAccepted) => {
-            format!("* accepted the room knock from {user}")
+            format!("* accepted the room knock from {user_id}")
         },
         Some(MembershipChange::KnockRetracted) => {
             return Cow::Borrowed("* retracted their room knock");
         },
         Some(MembershipChange::KnockDenied) => {
-            format!("* rejected the room knock from {user}")
+            format!("* rejected the room knock from {user_id}")
         },
     };
 
@@ -402,9 +398,150 @@ pub fn body_cow_state(change: &OtherState) -> Cow<'static, str> {
     Cow::Owned(event)
 }
 
-pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
-    let children = match ev.content() {
-        AnyFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Original {
+pub fn html_membership(change: &RoomMembershipChange) -> StyleTree {
+    let user_id = StyleTreeNode::UserId(change.user_id().to_owned());
+
+    let children = match change.change() {
+        None => {
+            let prefix = StyleTreeNode::Text("* changed ".into());
+            let suffix = StyleTreeNode::Text(" in unknown ways".into());
+            vec![prefix, user_id, suffix]
+        },
+        Some(MembershipChange::None) => {
+            let prefix = StyleTreeNode::Text("* did nothing to ".into());
+            vec![prefix, user_id]
+        },
+        Some(MembershipChange::Error) => {
+            let prefix = StyleTreeNode::Text("* failed to calculate membership change to ".into());
+            vec![prefix, user_id]
+        },
+        Some(MembershipChange::NotImplemented) => {
+            let prefix = StyleTreeNode::Text("* changed ".into());
+            let suffix = StyleTreeNode::Text(" in unknown ways".into());
+            vec![prefix, user_id, suffix]
+        },
+
+        Some(MembershipChange::Joined) => {
+            vec![StyleTreeNode::Text("* joined the room".into())]
+        },
+        Some(MembershipChange::Left) => {
+            vec![StyleTreeNode::Text("* left the room".into())]
+        },
+        Some(MembershipChange::Banned) => {
+            let prefix = StyleTreeNode::Text("* banned ".into());
+            let suffix = StyleTreeNode::Text(" from the room".into());
+            vec![prefix, user_id, suffix]
+        },
+        Some(MembershipChange::Unbanned) => {
+            let prefix = StyleTreeNode::Text("* unbanned ".into());
+            let suffix = StyleTreeNode::Text(" from the room".into());
+            vec![prefix, user_id, suffix]
+        },
+        Some(MembershipChange::Kicked) => {
+            let prefix = StyleTreeNode::Text("* kicked ".into());
+            let suffix = StyleTreeNode::Text(" from the room".into());
+            vec![prefix, user_id, suffix]
+        },
+        Some(MembershipChange::Invited) => {
+            let prefix = StyleTreeNode::Text("* invited ".into());
+            let suffix = StyleTreeNode::Text(" to the room".into());
+            vec![prefix, user_id, suffix]
+        },
+        Some(MembershipChange::KickedAndBanned) => {
+            let prefix = StyleTreeNode::Text("* kicked and banned ".into());
+            let suffix = StyleTreeNode::Text(" from the room".into());
+            vec![prefix, user_id, suffix]
+        },
+        Some(MembershipChange::InvitationAccepted) => {
+            vec![StyleTreeNode::Text(
+                "* accepted an invitation to join the room".into(),
+            )]
+        },
+        Some(MembershipChange::InvitationRejected) => {
+            vec![StyleTreeNode::Text(
+                "* rejected an invitation to join the room".into(),
+            )]
+        },
+        Some(MembershipChange::InvitationRevoked) => {
+            let prefix = StyleTreeNode::Text("* revoked an invitation for ".into());
+            let suffix = StyleTreeNode::Text(" to join the room".into());
+            vec![prefix, user_id, suffix]
+        },
+        Some(MembershipChange::Knocked) => {
+            vec![StyleTreeNode::Text("* would like to join the room".into())]
+        },
+        Some(MembershipChange::KnockAccepted) => {
+            let prefix = StyleTreeNode::Text("* accepted the room knock from ".into());
+            vec![prefix, user_id]
+        },
+        Some(MembershipChange::KnockRetracted) => {
+            vec![StyleTreeNode::Text("* retracted their room knock".into())]
+        },
+        Some(MembershipChange::KnockDenied) => {
+            let prefix = StyleTreeNode::Text("* rejected the room knock from ".into());
+            vec![prefix, user_id]
+        },
+    };
+
+    StyleTree { children }
+}
+
+pub fn html_profile(change: &MemberProfileChange) -> StyleTree {
+    let user_id = change.user_id().to_owned();
+
+    let children = match (change.displayname_change(), change.avatar_url_change()) {
+        (Some(change), avatar_change) => {
+            let mut m = match (&change.old, &change.new) {
+                (None, Some(new)) => {
+                    vec![
+                        StyleTreeNode::Text("* set their display name to ".into()),
+                        StyleTreeNode::DisplayName(new.into(), user_id),
+                    ]
+                },
+                (Some(old), Some(new)) => {
+                    vec![
+                        StyleTreeNode::Text("* changed their display name from ".into()),
+                        StyleTreeNode::DisplayName(old.into(), user_id.clone()),
+                        StyleTreeNode::Text(" to ".into()),
+                        StyleTreeNode::DisplayName(new.into(), user_id),
+                    ]
+                },
+                (Some(_), None) => {
+                    vec![StyleTreeNode::Text("* unset their display name".into())]
+                },
+                (None, None) => {
+                    vec![StyleTreeNode::Text(
+                        "* made an unknown change to their display name".into(),
+                    )]
+                },
+            };
+
+            if avatar_change.is_some() {
+                m.push(StyleTreeNode::Text(" and changed their user avatar".into()));
+            }
+
+            m
+        },
+        (None, Some(change)) => {
+            let m = match (&change.old, &change.new) {
+                (None, Some(_)) => Cow::Borrowed("* added a user avatar"),
+                (Some(_), Some(_)) => Cow::Borrowed("* changed their user avatar"),
+                (Some(_), None) => Cow::Borrowed("* removed their user avatar"),
+                (None, None) => Cow::Borrowed("* made an unknown change to their user avatar"),
+            };
+
+            vec![StyleTreeNode::Text(m)]
+        },
+        (None, None) => {
+            vec![StyleTreeNode::Text("* changed their user profile".into())]
+        },
+    };
+    StyleTree { children }
+}
+
+pub fn html_state(change: &OtherState) -> StyleTree {
+    let children = match change.content() {
+        AnyOtherFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -422,7 +559,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             cs
         },
-        AnyFullStateEventContent::PolicyRuleServer(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::PolicyRuleServer(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -440,7 +577,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             cs
         },
-        AnyFullStateEventContent::PolicyRuleUser(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::PolicyRuleUser(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -458,8 +595,9 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             cs
         },
-        AnyFullStateEventContent::RoomAliases(FullStateEventContent::Original {
-            content, ..
+        AnyOtherFullStateEventContent::RoomAliases(FullStateEventContent::Original {
+            content,
+            ..
         }) => {
             let prefix = StyleTreeNode::Text("* set the room aliases to: ".into());
             let mut cs = vec![prefix];
@@ -474,16 +612,16 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             cs
         },
-        AnyFullStateEventContent::RoomAvatar(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomAvatar(FullStateEventContent::Original {
             content,
             prev_content,
         }) => {
             let prev_url = prev_content.as_ref().and_then(|p| p.url.as_ref());
 
-            let node = match (prev_url, content.url) {
+            let node = match (prev_url, &content.url) {
                 (None, Some(_)) => StyleTreeNode::Text("* added a room avatar".into()),
                 (Some(old), Some(new)) => {
-                    if old != &new {
+                    if old != new {
                         StyleTreeNode::Text("* replaced the room avatar".into())
                     } else {
                         StyleTreeNode::Text("* updated the room avatar state".into())
@@ -495,7 +633,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             vec![node]
         },
-        AnyFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -510,8 +648,9 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                 )]
             }
         },
-        AnyFullStateEventContent::RoomCreate(FullStateEventContent::Original {
-            content, ..
+        AnyOtherFullStateEventContent::RoomCreate(FullStateEventContent::Original {
+            content,
+            ..
         }) => {
             if content.federate {
                 vec![StyleTreeNode::Text("* created a federated room".into())]
@@ -519,12 +658,14 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                 vec![StyleTreeNode::Text("* created a non-federated room".into())]
             }
         },
-        AnyFullStateEventContent::RoomEncryption(FullStateEventContent::Original { .. }) => {
+        AnyOtherFullStateEventContent::RoomEncryption(FullStateEventContent::Original {
+            ..
+        }) => {
             vec![StyleTreeNode::Text(
                 "* updated the encryption settings for the room".into(),
             )]
         },
-        AnyFullStateEventContent::RoomGuestAccess(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomGuestAccess(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -532,7 +673,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let prefix = StyleTreeNode::Text("* set guest access for the room to ".into());
             vec![prefix, access]
         },
-        AnyFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -541,7 +682,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let vis = bold(format!("{:?}", content.history_visibility.as_str()));
             vec![prefix, vis]
         },
-        AnyFullStateEventContent::RoomJoinRules(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomJoinRules(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -549,179 +690,36 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let rule = bold(format!("{:?}", content.join_rule.as_str()));
             vec![prefix, rule]
         },
-        AnyFullStateEventContent::RoomMember(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomName(FullStateEventContent::Original {
             content,
-            prev_content,
+            ..
         }) => {
-            use matrix_sdk::ruma::events::room::member::MembershipChange;
-
-            let Ok(state_key) = UserId::parse(ev.state_key()) else {
-                let prefix =
-                    StyleTreeNode::Text("* failed to calculate membership change for ".into());
-                let user_id = bold(format!("{:?}", ev.state_key()));
-                let children = vec![prefix, user_id];
-
-                return StyleTree { children };
-            };
-
-            let prev_details = prev_content.as_ref().map(|p| p.details());
-            let change = content.membership_change(prev_details, ev.sender(), &state_key);
-            let user_id = StyleTreeNode::UserId(state_key.clone());
-
-            match change {
-                MembershipChange::None => {
-                    let prefix = StyleTreeNode::Text("* did nothing to ".into());
-                    vec![prefix, user_id]
-                },
-                MembershipChange::Error => {
-                    let prefix =
-                        StyleTreeNode::Text("* failed to calculate membership change to ".into());
-                    vec![prefix, user_id]
-                },
-                MembershipChange::Joined => {
-                    vec![StyleTreeNode::Text("* joined the room".into())]
-                },
-                MembershipChange::Left => {
-                    vec![StyleTreeNode::Text("* left the room".into())]
-                },
-                MembershipChange::Banned => {
-                    let prefix = StyleTreeNode::Text("* banned ".into());
-                    let suffix = StyleTreeNode::Text(" from the room".into());
-                    vec![prefix, user_id, suffix]
-                },
-                MembershipChange::Unbanned => {
-                    let prefix = StyleTreeNode::Text("* unbanned ".into());
-                    let suffix = StyleTreeNode::Text(" from the room".into());
-                    vec![prefix, user_id, suffix]
-                },
-                MembershipChange::Kicked => {
-                    let prefix = StyleTreeNode::Text("* kicked ".into());
-                    let suffix = StyleTreeNode::Text(" from the room".into());
-                    vec![prefix, user_id, suffix]
-                },
-                MembershipChange::Invited => {
-                    let prefix = StyleTreeNode::Text("* invited ".into());
-                    let suffix = StyleTreeNode::Text(" to the room".into());
-                    vec![prefix, user_id, suffix]
-                },
-                MembershipChange::KickedAndBanned => {
-                    let prefix = StyleTreeNode::Text("* kicked and banned ".into());
-                    let suffix = StyleTreeNode::Text(" from the room".into());
-                    vec![prefix, user_id, suffix]
-                },
-                MembershipChange::InvitationAccepted => {
-                    vec![StyleTreeNode::Text(
-                        "* accepted an invitation to join the room".into(),
-                    )]
-                },
-                MembershipChange::InvitationRejected => {
-                    vec![StyleTreeNode::Text(
-                        "* rejected an invitation to join the room".into(),
-                    )]
-                },
-                MembershipChange::InvitationRevoked => {
-                    let prefix = StyleTreeNode::Text("* revoked an invitation for ".into());
-                    let suffix = StyleTreeNode::Text(" to join the room".into());
-                    vec![prefix, user_id, suffix]
-                },
-                MembershipChange::Knocked => {
-                    vec![StyleTreeNode::Text("* would like to join the room".into())]
-                },
-                MembershipChange::KnockAccepted => {
-                    let prefix = StyleTreeNode::Text("* accepted the room knock from ".into());
-                    vec![prefix, user_id]
-                },
-                MembershipChange::KnockRetracted => {
-                    vec![StyleTreeNode::Text("* retracted their room knock".into())]
-                },
-                MembershipChange::KnockDenied => {
-                    let prefix = StyleTreeNode::Text("* rejected the room knock from ".into());
-                    vec![prefix, user_id]
-                },
-                MembershipChange::ProfileChanged { displayname_change, avatar_url_change } => {
-                    match (displayname_change, avatar_url_change) {
-                        (Some(change), avatar_change) => {
-                            let mut m = match (change.old, change.new) {
-                                (None, Some(new)) => {
-                                    vec![
-                                        StyleTreeNode::Text("* set their display name to ".into()),
-                                        StyleTreeNode::DisplayName(new.into(), state_key),
-                                    ]
-                                },
-                                (Some(old), Some(new)) => {
-                                    vec![
-                                        StyleTreeNode::Text(
-                                            "* changed their display name from ".into(),
-                                        ),
-                                        StyleTreeNode::DisplayName(old.into(), state_key.clone()),
-                                        StyleTreeNode::Text(" to ".into()),
-                                        StyleTreeNode::DisplayName(new.into(), state_key),
-                                    ]
-                                },
-                                (Some(_), None) => {
-                                    vec![StyleTreeNode::Text("* unset their display name".into())]
-                                },
-                                (None, None) => {
-                                    vec![StyleTreeNode::Text(
-                                        "* made an unknown change to their display name".into(),
-                                    )]
-                                },
-                            };
-
-                            if avatar_change.is_some() {
-                                m.push(StyleTreeNode::Text(
-                                    " and changed their user avatar".into(),
-                                ));
-                            }
-
-                            m
-                        },
-                        (None, Some(change)) => {
-                            let m = match (change.old, change.new) {
-                                (None, Some(_)) => Cow::Borrowed("* added a user avatar"),
-                                (Some(_), Some(_)) => Cow::Borrowed("* changed their user avatar"),
-                                (Some(_), None) => Cow::Borrowed("* removed their user avatar"),
-                                (None, None) => {
-                                    Cow::Borrowed("* made an unknown change to their user avatar")
-                                },
-                            };
-
-                            vec![StyleTreeNode::Text(m)]
-                        },
-                        (None, None) => {
-                            vec![StyleTreeNode::Text("* changed their user profile".into())]
-                        },
-                    }
-                },
-                ev => {
-                    let prefix =
-                        StyleTreeNode::Text("* made an unknown membership change to ".into());
-                    let suffix = StyleTreeNode::Text(format!(": {ev:?}").into());
-                    vec![prefix, user_id, suffix]
-                },
-            }
-        },
-        AnyFullStateEventContent::RoomName(FullStateEventContent::Original { content, .. }) => {
             let prefix = StyleTreeNode::Text("* updated the room name to ".into());
             let name = bold(format!("{:?}", content.name));
             vec![prefix, name]
         },
-        AnyFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Original { .. }) => {
+        AnyOtherFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Original {
+            ..
+        }) => {
             vec![StyleTreeNode::Text(
                 "* updated the pinned events for the room".into(),
             )]
         },
-        AnyFullStateEventContent::RoomPowerLevels(FullStateEventContent::Original { .. }) => {
+        AnyOtherFullStateEventContent::RoomPowerLevels(FullStateEventContent::Original {
+            ..
+        }) => {
             vec![StyleTreeNode::Text(
                 "* updated the power levels for the room".into(),
             )]
         },
-        AnyFullStateEventContent::RoomServerAcl(FullStateEventContent::Original { .. }) => {
+        AnyOtherFullStateEventContent::RoomServerAcl(FullStateEventContent::Original {
+            ..
+        }) => {
             vec![StyleTreeNode::Text(
                 "* updated the room's server ACLs".into(),
             )]
         },
-        AnyFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -729,7 +727,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let name = bold(format!("{:?}", content.display_name));
             vec![prefix, name]
         },
-        AnyFullStateEventContent::RoomTombstone(FullStateEventContent::Original {
+        AnyOtherFullStateEventContent::RoomTombstone(FullStateEventContent::Original {
             content,
             ..
         }) => {
@@ -737,26 +735,28 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let room = StyleTreeNode::RoomId(content.replacement_room.clone());
             vec![prefix, room]
         },
-        AnyFullStateEventContent::RoomTopic(FullStateEventContent::Original {
-            content, ..
+        AnyOtherFullStateEventContent::RoomTopic(FullStateEventContent::Original {
+            content,
+            ..
         }) => {
             let prefix = StyleTreeNode::Text("* set the room topic to ".into());
             let topic = bold(format!("{:?}", content.topic));
             vec![prefix, topic]
         },
-        AnyFullStateEventContent::SpaceChild(FullStateEventContent::Original { .. }) => {
+        AnyOtherFullStateEventContent::SpaceChild(FullStateEventContent::Original { .. }) => {
             let prefix = StyleTreeNode::Text("* added a space child: ".into());
 
-            let room_id = if let Ok(room_id) = OwnedRoomId::from_str(ev.state_key()) {
+            let room_id = if let Ok(room_id) = OwnedRoomId::from_str(change.state_key()) {
                 StyleTreeNode::RoomId(room_id)
             } else {
-                bold(ev.state_key().to_string())
+                bold(change.state_key().to_string())
             };
 
             vec![prefix, room_id]
         },
-        AnyFullStateEventContent::SpaceParent(FullStateEventContent::Original {
-            content, ..
+        AnyOtherFullStateEventContent::SpaceParent(FullStateEventContent::Original {
+            content,
+            ..
         }) => {
             let prefix = if content.canonical {
                 StyleTreeNode::Text("* added a canonical parent space: ".into())
@@ -764,153 +764,113 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                 StyleTreeNode::Text("* added a parent space: ".into())
             };
 
-            let room_id = if let Ok(room_id) = OwnedRoomId::from_str(ev.state_key()) {
+            let room_id = if let Ok(room_id) = OwnedRoomId::from_str(change.state_key()) {
                 StyleTreeNode::RoomId(room_id)
             } else {
-                bold(ev.state_key().to_string())
+                bold(change.state_key().to_string())
             };
 
             vec![prefix, room_id]
         },
-        AnyFullStateEventContent::BeaconInfo(FullStateEventContent::Original { .. }) => {
-            vec![StyleTreeNode::Text("* shared beacon information".into())]
-        },
-        AnyFullStateEventContent::CallMember(FullStateEventContent::Original { .. }) => {
-            vec![StyleTreeNode::Text(
-                "* updated membership for room call".into(),
-            )]
-        },
-        AnyFullStateEventContent::MemberHints(FullStateEventContent::Original {
-            content, ..
-        }) => {
-            let prefix = StyleTreeNode::Text(
-                "* updated the list of service members in the room hints: ".into(),
-            );
-            let mut cs = vec![prefix];
-
-            for (i, member) in content.service_members.iter().enumerate() {
-                if i != 0 {
-                    cs.push(StyleTreeNode::Text(", ".into()));
-                }
-
-                cs.push(StyleTreeNode::UserId(member.clone()));
-            }
-
-            cs
-        },
 
         // Redacted variants of state events:
-        AnyFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated a room policy rule (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::PolicyRuleServer(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::PolicyRuleServer(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated a server policy rule (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::PolicyRuleUser(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::PolicyRuleUser(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated a user policy rule (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomAliases(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomAliases(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room aliases for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomAvatar(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomAvatar(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room avatar (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the canonical alias for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomCreate(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomCreate(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text("* created the room (redacted)".into())]
         },
-        AnyFullStateEventContent::RoomEncryption(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomEncryption(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the encryption settings for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomGuestAccess(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomGuestAccess(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the guest access configuration for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Redacted(
+            _,
+        )) => {
             vec![StyleTreeNode::Text(
                 "* updated history visilibity for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomJoinRules(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomJoinRules(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the join rules for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomMember(FullStateEventContent::Redacted(_)) => {
-            vec![StyleTreeNode::Text(
-                "* updated the room membership (redacted)".into(),
-            )]
-        },
-        AnyFullStateEventContent::RoomName(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomName(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room name (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the pinned events for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomPowerLevels(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomPowerLevels(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the power levels for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomServerAcl(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomServerAcl(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room's server ACLs (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* sent a third-party invite (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomTombstone(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomTombstone(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text("* upgraded the room (redacted)".into())]
         },
-        AnyFullStateEventContent::RoomTopic(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::RoomTopic(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room topic (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::SpaceChild(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::SpaceChild(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* added a space child (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::SpaceParent(FullStateEventContent::Redacted(_)) => {
+        AnyOtherFullStateEventContent::SpaceParent(FullStateEventContent::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* added a parent space (redacted)".into(),
             )]
-        },
-        AnyFullStateEventContent::BeaconInfo(FullStateEventContent::Redacted(_)) => {
-            vec![StyleTreeNode::Text(
-                "* shared beacon information (redacted)".into(),
-            )]
-        },
-        AnyFullStateEventContent::CallMember(FullStateEventContent::Redacted(_)) => {
-            vec![StyleTreeNode::Text("Call membership changed".into())]
-        },
-        AnyFullStateEventContent::MemberHints(FullStateEventContent::Redacted(_)) => {
-            vec![StyleTreeNode::Text("Member hints changed".into())]
         },
 
         // Handle unknown events:

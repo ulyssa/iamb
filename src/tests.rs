@@ -38,7 +38,6 @@ use crate::{
     },
     message::{
         Message,
-        MessageEvent,
         MessageKey,
         MessageTimeStamp::{LocalEcho, OriginServer},
         Messages,
@@ -86,7 +85,7 @@ pub fn mock_room1_message(
     let origin_server_ts = key.ts().as_millis().unwrap();
     let event_id = key.event_id().to_owned();
 
-    let event = OriginalRoomMessageEvent {
+    let _event = OriginalRoomMessageEvent {
         content,
         event_id,
         sender,
@@ -95,14 +94,14 @@ pub fn mock_room1_message(
         unsigned: Default::default(),
     };
 
-    event.into()
+    todo!()
 }
 
 pub fn mock_message1() -> Message {
-    let content = RoomMessageEventContent::text_plain("writhe");
-    let content = MessageEvent::Local(MSG1_EVID.clone(), content.into());
+    // let content = RoomMessageEventContent::text_plain("writhe");
+    // let content = MessageEvent::Local(MSG1_EVID.clone(), content.into());
 
-    Message::new(content, TEST_USER1.clone(), *MSG1_KEY.ts())
+    todo!()
 }
 
 pub fn mock_message2() -> Message {

@@ -38,18 +38,15 @@ use matrix_sdk::{
     ruma::{
         events::{
             reaction::ReactionEvent,
-            relation::{Replacement, Thread},
-            room::encrypted::RoomEncryptedEvent,
+            relation::Thread,
             room::message::{
                 OriginalRoomMessageEvent,
                 Relation,
                 RoomMessageEvent,
                 RoomMessageEventContent,
-                RoomMessageEventContentWithoutRelation,
             },
             room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
             tag::{TagName, Tags},
-            AnySyncStateEvent,
             MessageLikeEvent,
         },
         presence::PresenceState,
@@ -94,7 +91,7 @@ use crate::config::ImagePreviewProtocolValues;
 use crate::notifications::NotificationHandle;
 use crate::preview::{source_from_event, PreviewManager};
 use crate::{
-    message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
+    message::{Message, MessageKey, MessageTimeStamp, Messages},
     worker::Requester,
     ApplicationSettings,
 };
@@ -1068,54 +1065,6 @@ impl RoomInfo {
         }
     }
 
-    /// Insert an edit.
-    pub fn insert_edit(&mut self, msg: Replacement<RoomMessageEventContentWithoutRelation>) {
-        let event_id = msg.event_id;
-        let new_msgtype = msg.new_content;
-
-        let Some(EventLocation::Message(thread, key)) = self.keys.get(&event_id) else {
-            return;
-        };
-
-        let source = if let Some(thread) = thread {
-            self.threads
-                .entry(thread.clone())
-                .or_insert_with(|| Messages::thread(thread.clone()))
-        } else {
-            &mut self.messages
-        };
-
-        let Some(msg) = source.get_mut(key) else {
-            return;
-        };
-
-        match msg.event_mut() {
-            MessageEvent::Original(orig) => {
-                orig.content.apply_replacement(new_msgtype);
-            },
-            MessageEvent::Local(_, content) => {
-                content.apply_replacement(new_msgtype);
-            },
-            MessageEvent::Redacted(_) |
-            MessageEvent::State(_) |
-            MessageEvent::EncryptedOriginal(_) |
-            MessageEvent::EncryptedRedacted(_) => {
-                return;
-            },
-        }
-
-        msg.set_html(msg.event().html());
-    }
-
-    pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
-        let event_id = msg.event_id().to_owned();
-        let key = MessageKey::new(msg.origin_server_ts().into(), event_id.clone());
-
-        let loc = EventLocation::State(key.clone());
-        self.keys.insert(event_id, loc);
-        self.messages.insert_message(key, msg);
-    }
-
     /// Indicates whether this room has unread messages.
     pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
         let last_message = self.messages.last_key_value();
@@ -1160,15 +1109,6 @@ impl RoomInfo {
         }
     }
 
-    /// Inserts events that couldn't be decrypted into the scrollback.
-    pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
-        let event_id = msg.event_id().to_owned();
-        let key = MessageKey::new(msg.origin_server_ts().into(), event_id.clone());
-
-        self.keys.insert(event_id, EventLocation::Message(None, key.clone()));
-        self.messages.insert(key, msg.into());
-    }
-
     /// Insert a new message.
     pub fn insert_message(&mut self, msg: RoomMessageEvent) {
         let event_id = msg.event_id().to_owned();
@@ -1176,20 +1116,22 @@ impl RoomInfo {
 
         let loc = EventLocation::Message(None, key.clone());
         self.keys.insert(event_id, loc);
-        self.messages.insert_message(key, msg);
+        // self.messages.insert_message(key, msg);
+        todo!()
     }
 
     fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
         let event_id = msg.event_id().to_owned();
         let key = MessageKey::new(msg.origin_server_ts().into(), event_id.clone());
 
-        let replies = self
-            .threads
-            .entry(thread_root.clone())
-            .or_insert_with(|| Messages::thread(thread_root.clone()));
+        // let replies = self
+        //     .threads
+        //     .entry(thread_root.clone())
+        //     .or_insert_with(|| Messages::thread(thread_root.clone()));
         let loc = EventLocation::Message(Some(thread_root), key.clone());
         self.keys.insert(event_id, loc);
-        replies.insert_message(key, msg);
+        // replies.insert_message(key, msg);
+        todo!()
     }
 
     /// Insert a new message event.
@@ -1200,7 +1142,7 @@ impl RoomInfo {
                 ..
             }) => {
                 match relates_to {
-                    Relation::Replacement(repl) => self.insert_edit(repl.clone()),
+                    Relation::Replacement(_) => todo!(),
                     Relation::Thread(Thread { event_id, .. }) => {
                         let event_id = event_id.clone();
                         self.insert_thread(msg, event_id);
