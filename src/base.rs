@@ -45,7 +45,7 @@ use matrix_sdk::{
                 RoomMessageEvent,
                 RoomMessageEventContent,
             },
-            room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
+            room::redaction::OriginalSyncRoomRedactionEvent,
             tag::{TagName, Tags},
             MessageLikeEvent,
         },
@@ -1007,40 +1007,12 @@ impl RoomInfo {
     }
 
     pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent, rules: &RedactionRules) {
-        let Some(redacts) = &ev.redacts else {
+        let _ = rules;
+        let Some(_redacts) = &ev.redacts else {
             return;
         };
 
-        match self.keys.get(redacts) {
-            None => return,
-            Some(EventLocation::State(key)) => {
-                if let Some(msg) = self.messages.get_mut(key) {
-                    let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev, rules);
-                }
-            },
-            Some(EventLocation::Message(None, key)) => {
-                if let Some(msg) = self.messages.get_mut(key) {
-                    let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev, rules);
-                }
-            },
-            Some(EventLocation::Message(Some(root), key)) => {
-                if let Some(thread) = self.threads.get_mut(root) {
-                    if let Some(msg) = thread.get_mut(key) {
-                        let ev = SyncRoomRedactionEvent::Original(ev);
-                        msg.redact(ev, rules);
-                    }
-                }
-            },
-            Some(EventLocation::Reaction(event_id)) => {
-                if let Some(reactions) = self.reactions.get_mut(event_id) {
-                    reactions.remove(redacts);
-                }
-
-                self.keys.remove(redacts);
-            },
-        }
+        todo!()
     }
 
     /// Insert a reaction to a message.
@@ -1168,10 +1140,10 @@ impl RoomInfo {
         self.insert(ev);
 
         if let Some((event_id, source)) = source {
-            if let (Some(msg), Some(image_preview)) =
+            if let (Some(_msg), Some(image_preview)) =
                 (self.get_event_mut(&event_id), &settings.tunables.image_preview)
             {
-                msg.insert_image_preview(source.clone());
+                // msg.insert_image_preview(source.clone());
                 previews.register_preview(settings, source, image_preview.size, worker)
             }
         }

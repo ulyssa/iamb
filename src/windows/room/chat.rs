@@ -76,7 +76,7 @@ use crate::base::{
     SendAction,
 };
 
-use crate::message::{text_to_message, TreeGenState};
+use crate::message::{text_to_message, MessageExt, TreeGenState};
 
 use super::scrollback::{Scrollback, ScrollbackState};
 
@@ -188,7 +188,7 @@ impl ChatState {
                             return Err(IambError::NoAttachment.into());
                         }
 
-                        let links = if let Some(html) = msg.html() {
+                        let links = if let Some(html) = thread.get_html(msg.item().event_id()) {
                             html.get_links()
                         } else {
                             linkify::LinkFinder::new()
@@ -250,9 +250,6 @@ impl ChatState {
                         media.get_media_content(&req, true).await.map_err(IambError::from)?;
 
                     fs::write(filename.as_path(), bytes.as_slice())?;
-
-                    let msg = self.scrollback.get_mut(info).ok_or(IambError::NoSelectedMessage)?;
-                    msg.set_downloaded();
                 } else if !flags.contains(DownloadFlags::OPEN) {
                     let msg = format!(
                         "The file {} already exists; add ! to end of command to overwrite it.",

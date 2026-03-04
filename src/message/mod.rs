@@ -2,7 +2,7 @@
 use std::borrow::Cow;
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap};
 use std::convert::{TryFrom, TryInto};
 use std::hash::{Hash, Hasher};
 use std::ops::RangeBounds;
@@ -12,7 +12,6 @@ use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::message::TextMessageEventContent;
 use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::room_version_rules::RedactionRules;
 use matrix_sdk::ruma::UserId;
 use matrix_sdk_ui::timeline::{
     EventTimelineItem,
@@ -25,10 +24,7 @@ use matrix_sdk_ui::Timeline;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
-    events::room::{
-        message::{FormattedBody, MessageFormat, MessageType},
-        redaction::SyncRoomRedactionEvent,
-    },
+    events::room::message::{FormattedBody, MessageFormat, MessageType},
     EventId,
     MilliSecondsSinceUnixEpoch,
     OwnedEventId,
@@ -89,11 +85,15 @@ pub struct Messages {
     timeline: Timeline,
     messages: BTreeMap<MessageKey, Message>,
     thread: ReceiptThread,
+    htmls: HashMap<OwnedEventId, StyleTree>,
 }
 
 impl Messages {
     pub fn timeline(&self) -> &Timeline {
         &self.timeline
+    }
+    pub fn get_html(&self, event_id: Option<&EventId>) -> Option<&StyleTree> {
+        self.htmls.get(event_id?)
     }
     pub fn receipt_thread(&self) -> &ReceiptThread {
         &self.thread
@@ -132,7 +132,12 @@ impl Messages {
     #[allow(unused)]
     fn new(thread: ReceiptThread) -> Self {
         let timeline = todo!();
-        Self { messages: Default::default(), thread, timeline }
+        Self {
+            messages: Default::default(),
+            htmls: Default::default(),
+            thread,
+            timeline,
+        }
     }
 
     pub fn main() -> Self {
@@ -506,7 +511,7 @@ impl MessageColumns {
     }
 }
 
-struct MessageFormatter<'a> {
+pub struct MessageFormatter<'a> {
     settings: &'a ApplicationSettings,
 
     /// How many columns to print.
@@ -620,6 +625,7 @@ impl<'a> MessageFormatter<'a> {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
+        thread: &'a Messages,
     ) -> Option<ProtocolPreview<'a>> {
         let reply_style = if settings.tunables.message_user_color {
             style.patch(settings.get_user_color(msg.sender()))
@@ -629,7 +635,7 @@ impl<'a> MessageFormatter<'a> {
 
         let width = self.width();
         let w = width.saturating_sub(2);
-        let (mut replied, proto) = msg.show_msg(w, reply_style, true, settings, previews);
+        let (mut replied, proto) = msg.show_msg(w, reply_style, true, settings, previews, thread);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -735,22 +741,18 @@ impl<'a> MessageFormatter<'a> {
     }
 }
 
-pub struct Message {
-    item: EventTimelineItem,
-    downloaded: bool,
-    html: Option<StyleTree>,
-    image_preview: Option<MediaSource>,
+pub type Message = EventTimelineItem;
+
+impl MessageExt for Message {
+    #[inline]
+    fn item(&self) -> &EventTimelineItem {
+        self
+    }
 }
 
-impl Message {
-    #[inline]
-    pub fn item(&self) -> &EventTimelineItem {
-        &self.item
-    }
-    pub fn html(&self) -> Option<&StyleTree> {
-        self.html.as_ref()
-    }
-    pub fn body(&self) -> Cow<'_, str> {
+pub trait MessageExt {
+    fn item(&self) -> &EventTimelineItem;
+    fn body(&self) -> Cow<'_, str> {
         #[allow(unused)]
         match self.item().content() {
             TimelineItemContent::MsgLike(content) => body_cow_msglike(content),
@@ -764,40 +766,32 @@ impl Message {
             },
         }
     }
-    pub fn sender(&self) -> &UserId {
+    fn sender(&self) -> &UserId {
         self.item().sender()
     }
-    pub fn set_downloaded(&mut self) {
-        self.downloaded = true;
+    fn image_preview(&self) -> Option<&MediaSource> {
+        if let MessageType::Image(c) = self.item().content().as_message()?.msgtype() {
+            Some(&c.source)
+        } else {
+            None
+        }
     }
-    pub fn image_preview(&self) -> Option<&MediaSource> {
-        self.image_preview.as_ref()
-    }
-    pub fn insert_image_preview(&mut self, preview: MediaSource) {
-        self.image_preview = Some(preview);
-    }
-    pub fn timestamp(&self) -> MessageTimeStamp {
+    fn message_timestamp(&self) -> MessageTimeStamp {
         self.item().timestamp().into()
     }
 
-    pub fn is_emote(&self) -> bool {
+    fn is_emote(&self) -> bool {
         self.item()
             .content()
             .as_message()
             .is_some_and(|msg| matches!(msg.msgtype(), MessageType::Emote(_)))
     }
 
-    pub fn new(item: EventTimelineItem) -> Self {
-        let html = generate_html(&item);
-
-        Message { item, downloaded: false, html, image_preview: None }
-    }
-
-    pub fn reply_to(&self) -> Option<OwnedEventId> {
+    fn reply_to(&self) -> Option<OwnedEventId> {
         Some(self.item().content().as_msglike()?.in_reply_to.as_ref()?.event_id.clone())
     }
 
-    pub fn thread_root(&self) -> Option<OwnedEventId> {
+    fn thread_root(&self) -> Option<OwnedEventId> {
         self.item().content().as_msglike()?.thread_root.clone()
     }
 
@@ -829,8 +823,8 @@ impl Message {
     ) -> MessageFormatter<'a> {
         let orig = width;
         let date = match &prev {
-            Some(prev) if prev.timestamp().same_day(&self.timestamp()) => None,
-            _ => self.timestamp().show_date(),
+            Some(prev) if prev.message_timestamp().same_day(&self.message_timestamp()) => None,
+            _ => self.message_timestamp().show_date(),
         };
         let user_gutter = settings.tunables.user_gutter_width;
 
@@ -840,7 +834,7 @@ impl Message {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
-            let time = Some(self.timestamp().show_time());
+            let time = Some(self.message_timestamp().show_time());
             let read = self
                 .item()
                 .read_receipts()
@@ -854,7 +848,7 @@ impl Message {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
             let user = self.show_sender(prev, true, info, settings);
-            let time = Some(self.timestamp().show_time());
+            let time = Some(self.message_timestamp().show_time());
             let read = Vec::new();
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
@@ -880,7 +874,7 @@ impl Message {
     /// Render the message as a [Text] object for the terminal.
     ///
     /// This will also get the image preview Protocol with an x/y offset.
-    pub fn show_with_preview<'a>(
+    fn show_with_preview<'a>(
         &'a self,
         prev: Option<&Message>,
         selected: bool,
@@ -888,6 +882,7 @@ impl Message {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
+        thread: &'a Messages,
     ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
         let width = vwctx.get_width();
 
@@ -904,11 +899,11 @@ impl Message {
             .and_then(|e| info.get_event(&e));
         let proto_reply = reply.as_ref().and_then(|r| {
             // Format the reply header, push it into the `Text` buffer, and get any image.
-            fmt.push_in_reply(r, style, &mut text, info, settings, previews)
+            fmt.push_in_reply(r, style, &mut text, info, settings, previews, thread)
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings, previews);
+        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings, previews, thread);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
@@ -945,7 +940,7 @@ impl Message {
         (text, [proto_main, proto_reply])
     }
 
-    pub fn show<'a>(
+    fn show<'a>(
         &'a self,
         prev: Option<&Message>,
         selected: bool,
@@ -953,8 +948,10 @@ impl Message {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
+        thread: &'a Messages,
     ) -> Text<'a> {
-        self.show_with_preview(prev, selected, vwctx, info, settings, previews).0
+        self.show_with_preview(prev, selected, vwctx, info, settings, previews, thread)
+            .0
     }
 
     fn show_msg<'a>(
@@ -964,8 +961,9 @@ impl Message {
         hide_reply: bool,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
+        thread: &'a Messages,
     ) -> (Text<'a>, Option<&'a Protocol>) {
-        if let Some(html) = &self.html {
+        if let Some(html) = thread.get_html(self.item().event_id()) {
             (html.to_text(width, style, hide_reply, settings), None)
         } else {
             let mut msg = self.body();
@@ -973,26 +971,21 @@ impl Message {
                 msg = Cow::Owned(replace_emojis_in_str(msg.as_ref()));
             }
 
-            if self.downloaded {
-                msg.to_mut().push_str(" \u{2705}");
-            }
-
             let mut proto = None;
-            let placeholder =
-                match self.image_preview.as_ref().and_then(|source| previews.get(source)) {
-                    None => None,
-                    Some(ImageStatus::Queued(image_preview_size)) => {
-                        placeholder_frame(Some("Queued..."), width, image_preview_size)
-                    },
-                    Some(ImageStatus::Downloading(image_preview_size)) => {
-                        placeholder_frame(Some("Downloading..."), width, image_preview_size)
-                    },
-                    Some(ImageStatus::Loaded(backend)) => {
-                        proto = Some(backend);
-                        placeholder_frame(Some("No Space..."), width, &backend.area().into())
-                    },
-                    Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
-                };
+            let placeholder = match self.image_preview().and_then(|source| previews.get(source)) {
+                None => None,
+                Some(ImageStatus::Queued(image_preview_size)) => {
+                    placeholder_frame(Some("Queued..."), width, image_preview_size)
+                },
+                Some(ImageStatus::Downloading(image_preview_size)) => {
+                    placeholder_frame(Some("Downloading..."), width, image_preview_size)
+                },
+                Some(ImageStatus::Loaded(backend)) => {
+                    proto = Some(backend);
+                    placeholder_frame(Some("No Space..."), width, &backend.area().into())
+                },
+                Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
+            };
 
             if let Some(placeholder) = placeholder {
                 msg.to_mut().insert_str(0, &placeholder);
@@ -1019,7 +1012,7 @@ impl Message {
     ) -> Option<Span<'a>> {
         if let Some(prev) = prev {
             if self.sender() == prev.sender() &&
-                self.timestamp().same_day(&prev.timestamp()) &&
+                self.message_timestamp().same_day(&prev.message_timestamp()) &&
                 !self.is_emote()
             {
                 return None;
@@ -1038,13 +1031,6 @@ impl Message {
         };
 
         Span::styled(sender, style).into()
-    }
-
-    #[allow(unused)]
-    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, rules: &RedactionRules) {
-        self.html = None;
-        self.downloaded = false;
-        self.image_preview = None;
     }
 }
 

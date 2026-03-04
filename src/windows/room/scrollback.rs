@@ -54,7 +54,7 @@ use crate::{
         RoomInfo,
     },
     config::ApplicationSettings,
-    message::{Message, MessageCursor, MessageKey, Messages},
+    message::{Message, MessageCursor, MessageExt, MessageKey, Messages},
     preview::PreviewManager,
 };
 
@@ -186,26 +186,12 @@ impl ScrollbackState {
         }
     }
 
-    pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
-        let thread = self.get_thread_mut(info);
-
-        if let Some(k) = &self.cursor.timestamp {
-            thread.get_mut(k)
-        } else {
-            thread.last_mut()
-        }
-    }
-
     pub fn thread(&self) -> Option<&OwnedEventId> {
         self.thread.as_ref()
     }
 
     pub fn get_thread<'a>(&self, info: &'a RoomInfo) -> Option<&'a Messages> {
         info.get_thread(self.thread.as_deref())
-    }
-
-    pub fn get_thread_mut<'a>(&self, info: &'a mut RoomInfo) -> &'a mut Messages {
-        info.get_thread_mut(self.thread.clone())
     }
 
     pub fn messages<'a>(
@@ -297,8 +283,10 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = selidx == key;
                     let prev = prevmsg(key, thread);
-                    let len =
-                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
+                    let len = item
+                        .show(prev, sel, &self.viewctx, info, settings, previews, thread)
+                        .lines
+                        .len();
 
                     if key == &idx {
                         lines += len / 2;
@@ -321,8 +309,10 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = key == selidx;
                     let prev = prevmsg(key, thread);
-                    let len =
-                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
+                    let len = item
+                        .show(prev, sel, &self.viewctx, info, settings, previews, thread)
+                        .lines
+                        .len();
 
                     lines += len;
 
@@ -381,7 +371,7 @@ impl ScrollbackState {
             }
 
             lines += item
-                .show(prev, false, &self.viewctx, info, settings, previews)
+                .show(prev, false, &self.viewctx, info, settings, previews, thread)
                 .height()
                 .max(1);
 
@@ -1110,7 +1100,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 for (key, item) in thread.range(..=&corner_key).rev() {
                     let sel = key == cursor_key;
                     let prev = prevmsg(key, thread);
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews, thread);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1138,7 +1128,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in thread.range(&corner_key..) {
                     let sel = key == cursor_key;
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews, thread);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1387,8 +1377,15 @@ impl StatefulWidget for Scrollback<'_> {
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
 
-            let (txt, [mut msg_preview, mut reply_preview]) =
-                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings, previews);
+            let (txt, [mut msg_preview, mut reply_preview]) = item.show_with_preview(
+                prev,
+                foc && sel,
+                &state.viewctx,
+                info,
+                settings,
+                previews,
+                thread,
+            );
 
             let incomplete_ok = !full || !sel;
 
