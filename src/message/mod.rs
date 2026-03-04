@@ -132,6 +132,9 @@ impl Messages {
     pub fn last_key_value(&self) -> Option<(&MessageKey, &Message)> {
         self.messages.last_key_value()
     }
+    pub fn last(&self) -> Option<&Message> {
+        self.messages.last_key_value().map(|(_, m)| m)
+    }
     pub fn last_mut(&mut self) -> Option<&mut Message> {
         self.messages.last_entry().map(|o| o.into_mut())
     }
@@ -909,6 +912,9 @@ pub struct Message {
 }
 
 impl Message {
+    pub fn item(&self) -> &Arc<TimelineItem> {
+        &self.item
+    }
     pub fn html(&self) -> Option<&StyleTree> {
         self.html.as_ref()
     }

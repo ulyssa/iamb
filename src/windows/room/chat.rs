@@ -20,8 +20,6 @@ use matrix_sdk::{
     media::{MediaFormat, MediaRequestParameters},
     room::Room as MatrixRoom,
     ruma::{
-        events::reaction::ReactionEventContent,
-        events::relation::Annotation,
         events::room::message::{MessageType, OriginalRoomMessageEvent, RoomMessageEventContent},
         OwnedEventId,
         OwnedRoomId,
@@ -65,6 +63,7 @@ use modalkit::errors::{EditError, EditResult, UIError};
 use modalkit::prelude::*;
 
 use crate::base::{
+    ChatStore,
     DownloadFlags,
     IambAction,
     IambBufferId,
@@ -171,12 +170,14 @@ impl ChatState {
         _: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
-        let client = &store.application.worker.client;
+        let ChatStore { worker, rooms, settings, .. } = &mut store.application;
+        let client = &worker.client;
 
-        let settings = &store.application.settings;
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        let info = rooms.get_or_default(self.room_id.clone());
 
-        let msg = self.scrollback.get_mut(info).ok_or(IambError::NoSelectedMessage)?;
+        let thread = self.scrollback.get_thread(info).unwrap(); // TODO
+
+        let msg = self.scrollback.get(info).ok_or(IambError::NoSelectedMessage)?;
 
         match act {
             MessageAction::Cancel(skip_confirm) => {
@@ -279,6 +280,8 @@ impl ChatState {
 
                         fs::write(filename.as_path(), bytes.as_slice())?;
 
+                        let msg =
+                            self.scrollback.get_mut(info).ok_or(IambError::NoSelectedMessage)?;
                         msg.set_downloaded();
                     } else if !flags.contains(DownloadFlags::OPEN) {
                         let msg = format!(
@@ -370,31 +373,30 @@ impl ChatState {
                     return Err(UIError::NeedConfirm(prompt));
                 };
 
-                let room = self.get_joined(&store.application.worker)?;
-                let event_id = match msg.event() {
-                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
-                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
-                    MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
-                        let msg = "Cannot react to a redacted message";
-                        let err = UIError::Failure(msg.into());
+                let Some(event_timeline_item) = msg.item().as_event() else {
+                    let msg = "You can only react to a message.".to_owned();
+                    let err = UIError::Failure(msg);
 
-                        return Err(err);
-                    },
+                    return Err(err);
                 };
 
-                if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
+                if event_timeline_item
+                    .content()
+                    .reactions()
+                    .and_then(|reactions| reactions.get(&emoji))
+                    .is_some_and(|reactions| reactions.contains_key(&settings.profile.user_id))
+                {
                     let msg = format!("You’ve already reacted to this message with {emoji}");
                     let err = UIError::Failure(msg);
 
                     return Err(err);
                 }
 
-                let reaction = Annotation::new(event_id, emoji);
-                let msg = ReactionEventContent::new(reaction);
-                let _ = room.send(msg).await.map_err(IambError::from)?;
+                thread
+                    .timeline()
+                    .toggle_reaction(&event_timeline_item.identifier(), &emoji)
+                    .await
+                    .map_err(IambError::from)?;
 
                 Ok(None)
             },
@@ -408,7 +410,7 @@ impl ChatState {
                     return Err(UIError::NeedConfirm(prompt));
                 }
 
-                let room = self.get_joined(&store.application.worker)?;
+                let room = self.get_joined(worker)?;
                 let event_id = match msg.event() {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
@@ -471,44 +473,31 @@ impl ChatState {
                     None => None,
                 };
 
-                let room = self.get_joined(&store.application.worker)?;
-                let event_id = match msg.event() {
-                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
-                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
-                    MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
-                        let msg = "Cannot unreact to a redacted message";
-                        let err = UIError::Failure(msg.into());
-
-                        return Err(err);
-                    },
+                let Some(event_timeline_item) = msg.item().as_event() else {
+                    return Ok(None);
                 };
 
-                let reactions = match info.reactions.get(&event_id) {
-                    Some(r) => r,
-                    None => return Ok(None),
-                };
+                let reactions = event_timeline_item.content().reactions();
 
-                let reactions = reactions.iter().filter_map(|(event_id, (reaction, user_id))| {
-                    if user_id != &settings.profile.user_id {
-                        return None;
-                    }
-
-                    if let Some(emoji) = &emoji {
-                        if emoji == reaction {
-                            return Some(event_id);
-                        } else {
-                            return None;
-                        }
-                    } else {
-                        return Some(event_id);
-                    }
-                });
+                let reactions = reactions
+                    .iter()
+                    .flat_map(|reactions| {
+                        reactions.iter().filter_map(|(key, users)| {
+                            if users.contains_key(&settings.profile.user_id) {
+                                Some(key)
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .filter(|key| emoji.as_ref().is_none_or(|emoji| &emoji == key));
 
                 for reaction in reactions {
-                    let _ = room.redact(reaction, None, None).await.map_err(IambError::from)?;
+                    thread
+                        .timeline()
+                        .toggle_reaction(&event_timeline_item.identifier(), reaction)
+                        .await
+                        .map_err(IambError::from)?;
                 }
 
                 Ok(None)
