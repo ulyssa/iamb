@@ -3,7 +3,7 @@ use matrix_sdk_ui::timeline::TimelineItem;
 use ratatui_image::Image;
 use regex::Regex;
 
-use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId};
+use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, UserId};
 
 use modalkit_ratatui::{ScrollActions, TerminalCursor, WindowOps};
 use ratatui::{
@@ -109,8 +109,8 @@ fn nth_after(pos: MessageKey, n: usize, thread: &Messages) -> MessageCursor {
     nth_key_after(pos, n, thread).map(MessageCursor::from).unwrap_or_default()
 }
 
-fn prevmsg<'a>(key: &MessageKey, thread: &'a Messages) -> Option<&'a Message> {
-    thread.range_messages(..key).next_back().map(|(_, v)| v)
+fn prev_sender<'a>(key: &MessageKey, thread: &'a Messages) -> Option<&'a UserId> {
+    thread.range(..key).next_back().and_then(|(_, msg)| msg.sender())
 }
 
 pub struct ScrollbackState {
@@ -283,11 +283,9 @@ impl ScrollbackState {
 
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = selidx == key;
-                    let prev = prevmsg(&key, thread);
-                    let len = item
-                        .show(prev, sel, &self.viewctx, info, settings, previews, thread)
-                        .lines
-                        .len();
+                    let prev = prev_sender(&key, thread);
+                    let len =
+                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
 
                     if key == idx {
                         lines += len / 2;
@@ -309,11 +307,9 @@ impl ScrollbackState {
 
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = key == selidx;
-                    let prev = prevmsg(&key, thread);
-                    let len = item
-                        .show(prev, sel, &self.viewctx, info, settings, previews, thread)
-                        .lines
-                        .len();
+                    let prev = prev_sender(&key, thread);
+                    let len =
+                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
 
                     lines += len;
 
@@ -361,7 +357,7 @@ impl ScrollbackState {
         let mut lines = 0;
 
         let cursor_key = self.cursor.key.as_ref().unwrap_or(&last_key);
-        let mut prev = prevmsg(cursor_key, thread);
+        let mut prev = prev_sender(cursor_key, thread);
 
         for (idx, item) in thread.range(corner_key.clone()..) {
             if idx == *cursor_key {
@@ -370,7 +366,7 @@ impl ScrollbackState {
             }
 
             lines += item
-                .show(prev, false, &self.viewctx, info, settings, previews, thread)
+                .show(prev, false, &self.viewctx, info, settings, previews)
                 .height()
                 .max(1);
 
@@ -380,8 +376,7 @@ impl ScrollbackState {
                 break;
             }
 
-            let item = todo!();
-            prev = Some(item);
+            prev = item.sender();
         }
     }
 
@@ -1103,8 +1098,8 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in thread.range(..=&corner_key).rev() {
                     let sel = key == *cursor_key;
-                    let prev = prevmsg(&key, thread);
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews, thread);
+                    let prev = prev_sender(&key, thread);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1128,16 +1123,15 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 }
             },
             MoveDir2D::Down => {
-                let mut prev = prevmsg(&corner_key, thread);
+                let mut prev = prev_sender(&corner_key, thread);
 
                 for (key, item) in thread.range(&corner_key..) {
                     let sel = key == *cursor_key;
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews, thread);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
-                    let item = todo!();
-                    prev = Some(item);
+                    prev = item.sender();
 
                     if key != corner_key {
                         corner.text_row = 0;
@@ -1355,7 +1349,7 @@ impl StatefulWidget for Scrollback<'_> {
         let full = std::mem::take(&mut state.show_full_on_redraw) || cursor.key.is_none();
         let mut lines = vec![];
         let mut sawit = false;
-        let mut prev = prevmsg(&corner_key, thread);
+        let mut prev = prev_sender(&corner_key, thread);
 
         // load image previews
         for (_, item) in thread.range_messages(&corner_key..).rev() {
@@ -1382,15 +1376,8 @@ impl StatefulWidget for Scrollback<'_> {
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
 
-            let (txt, [mut msg_preview, mut reply_preview]) = item.show_with_preview(
-                prev,
-                foc && sel,
-                &state.viewctx,
-                info,
-                settings,
-                previews,
-                thread,
-            );
+            let (txt, [mut msg_preview, mut reply_preview]) =
+                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings, previews);
 
             let incomplete_ok = !full || !sel;
 
@@ -1422,8 +1409,7 @@ impl StatefulWidget for Scrollback<'_> {
                 sawit |= sel;
             }
 
-            let item = todo!();
-            prev = Some(item);
+            prev = item.sender();
         }
 
         if lines.len() > height {

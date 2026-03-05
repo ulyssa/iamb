@@ -2,7 +2,6 @@
 use std::borrow::Cow;
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::hash::{Hash, Hasher};
 use std::ops::{Bound, RangeBounds};
@@ -14,13 +13,13 @@ use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::message::TextMessageEventContent;
 use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::UserId;
 use matrix_sdk_ui::eyeball_im::Vector;
 use matrix_sdk_ui::timeline::{
     EventTimelineItem,
     MsgLikeContent,
     MsgLikeKind,
     ReactionsByKeyBySender,
-    TimelineEventItemId,
     TimelineItem,
     TimelineItemContent,
     TimelineItemKind,
@@ -57,8 +56,9 @@ use crate::{
     util::{replace_emojis_in_str, space, space_span, take_width, wrapped_text},
 };
 
+pub(super) mod html;
+
 mod compose;
-mod html;
 mod printer;
 mod state;
 
@@ -101,7 +101,6 @@ impl PartialOrd for MessageKey {
 pub struct Messages {
     timeline: Timeline,
     messages: Vector<Arc<TimelineItem>>,
-    htmls: HashMap<TimelineEventItemId, StyleTree>,
 
     /// This is the index of the first element in the vector when this object was created. This is
     /// used by [`MessageKey`] as a referenc because the vector can be extended in both directions.
@@ -111,9 +110,6 @@ pub struct Messages {
 impl Messages {
     pub fn timeline(&self) -> &Timeline {
         &self.timeline
-    }
-    pub fn get_html(&self, id: &TimelineEventItemId) -> Option<&StyleTree> {
-        self.htmls.get(id)
     }
     pub fn get_message(&self, key: &MessageKey) -> Option<&Message> {
         let index = self.start_element.checked_add_signed(key.offset())?;
@@ -181,6 +177,7 @@ impl Messages {
 
     #[allow(unused)]
     fn new(_thread: ReceiptThread) -> Self {
+        let info: &mut RoomInfo = todo!();
         let timeline = todo!();
 
         let messages: Vector<Arc<TimelineItem>> = todo!();
@@ -188,10 +185,10 @@ impl Messages {
         let htmls = messages
             .iter()
             .filter_map(|item| item.as_event())
-            .filter_map(|item| generate_html(item).map(|html| (item.identifier(), html)))
-            .collect();
+            .filter_map(|item| generate_html(item).map(|html| (item.identifier(), html)));
+        info.htmls.extend(htmls);
 
-        Self { messages, htmls, timeline, start_element: 0 }
+        Self { messages, timeline, start_element: 0 }
     }
 
     pub fn main() -> Self {
@@ -269,14 +266,6 @@ const fn span_static(s: &'static str) -> Span<'static> {
     }
 }
 
-const BOLD_STYLE: Style = Style {
-    fg: None,
-    bg: None,
-    add_modifier: StyleModifier::BOLD,
-    sub_modifier: StyleModifier::empty(),
-    underline_color: None,
-};
-
 const TIME_GUTTER: usize = 12;
 const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
@@ -351,19 +340,6 @@ impl MessageTimeStamp {
         let time = i64::from(self.0) / 1000;
         let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
         time.into()
-    }
-
-    fn same_day(&self, other: &Self) -> bool {
-        let dt1 = self.as_datetime();
-        let dt2 = other.as_datetime();
-
-        dt1.date_naive() == dt2.date_naive()
-    }
-
-    fn show_date(&self) -> Option<Span<'static>> {
-        let time = self.as_datetime().format("%A, %B %d %Y").to_string();
-
-        Span::styled(time, BOLD_STYLE).into()
     }
 
     fn show_time(&self) -> Span<'static> {
@@ -619,9 +595,6 @@ pub struct MessageFormatter<'a> {
     /// How many columns to print.
     cols: MessageColumns,
 
-    /// The full, original width.
-    orig: usize,
-
     /// The width that the message contents need to fill.
     fill: usize,
 
@@ -630,9 +603,6 @@ pub struct MessageFormatter<'a> {
 
     /// The time the message was sent.
     time: Option<Span<'a>>,
-
-    /// The date the message was sent.
-    date: Option<Span<'a>>,
 
     /// The users who have read up to this message.
     read: Vec<OwnedUserId>,
@@ -645,15 +615,6 @@ impl<'a> MessageFormatter<'a> {
 
     #[inline]
     fn push_spans(&mut self, prev_line: Line<'a>, style: Style, text: &mut Text<'a>) {
-        if let Some(date) = self.date.take() {
-            let len = date.content.as_ref().len();
-            let padding = self.orig.saturating_sub(len);
-            let leading = space_span(padding / 2, Style::default());
-            let trailing = space_span(padding.saturating_sub(padding / 2), Style::default());
-
-            text.lines.push(Line::from(vec![leading, date, trailing]));
-        }
-
         let user_gutter_empty_span =
             space_span(self.settings.tunables.user_gutter_width, Style::default());
 
@@ -727,7 +688,6 @@ impl<'a> MessageFormatter<'a> {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-        thread: &'a Messages,
     ) -> Option<ProtocolPreview<'a>> {
         let reply_style = if settings.tunables.message_user_color {
             style.patch(settings.get_user_color(msg.sender()))
@@ -737,7 +697,7 @@ impl<'a> MessageFormatter<'a> {
 
         let width = self.width();
         let w = width.saturating_sub(2);
-        let (mut replied, proto) = msg.show_msg(w, reply_style, true, settings, previews, thread);
+        let (mut replied, proto) = msg.show_msg(w, reply_style, true, info, settings, previews);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -917,16 +877,11 @@ pub trait MessageExt {
 
     fn get_render_format<'a>(
         &'a self,
-        prev: Option<&Message>,
+        prev_sender: Option<&UserId>,
         width: usize,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> MessageFormatter<'a> {
-        let orig = width;
-        let date = match &prev {
-            Some(prev) if prev.message_timestamp().same_day(&self.message_timestamp()) => None,
-            _ => self.message_timestamp().show_date(),
-        };
         let user_gutter = settings.tunables.user_gutter_width;
 
         if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
@@ -934,7 +889,7 @@ pub trait MessageExt {
         {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
-            let user = self.show_sender(prev, true, info, settings);
+            let user = self.show_sender(prev_sender, true, info, settings);
             let time = Some(self.message_timestamp().show_time());
             let read = self
                 .item()
@@ -944,31 +899,31 @@ pub trait MessageExt {
                 .map(|(user_id, _)| user_id.to_owned())
                 .collect();
 
-            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
+            MessageFormatter { settings, cols, fill, user, time, read }
         } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
-            let user = self.show_sender(prev, true, info, settings);
+            let user = self.show_sender(prev_sender, true, info, settings);
             let time = Some(self.message_timestamp().show_time());
             let read = Vec::new();
 
-            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
+            MessageFormatter { settings, cols, fill, user, time, read }
         } else if user_gutter + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Two;
             let fill = width - user_gutter;
-            let user = self.show_sender(prev, true, info, settings);
+            let user = self.show_sender(prev_sender, true, info, settings);
             let time = None;
             let read = Vec::new();
 
-            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
+            MessageFormatter { settings, cols, fill, user, time, read }
         } else {
             let cols = MessageColumns::One;
             let fill = width.saturating_sub(2);
-            let user = self.show_sender(prev, false, info, settings);
+            let user = self.show_sender(prev_sender, false, info, settings);
             let time = None;
             let read = Vec::new();
 
-            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
+            MessageFormatter { settings, cols, fill, user, time, read }
         }
     }
 
@@ -977,18 +932,17 @@ pub trait MessageExt {
     /// This will also get the image preview Protocol with an x/y offset.
     fn show_with_preview<'a>(
         &'a self,
-        prev: Option<&Message>,
+        prev_sender: Option<&UserId>,
         selected: bool,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-        thread: &'a Messages,
     ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected, settings);
-        let mut fmt = self.get_render_format(prev, width, info, settings);
+        let mut fmt = self.get_render_format(prev_sender, width, info, settings);
         let mut text = Text::default();
         let width = fmt.width();
 
@@ -1000,19 +954,16 @@ pub trait MessageExt {
             .and_then(|e| info.get_event(&e));
         let proto_reply = reply.as_ref().and_then(|r| {
             // Format the reply header, push it into the `Text` buffer, and get any image.
-            fmt.push_in_reply(r, style, &mut text, info, settings, previews, thread)
+            fmt.push_in_reply(r, style, &mut text, info, settings, previews)
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings, previews, thread);
+        let (msg, proto) = self.show_msg(width, style, reply.is_some(), info, settings, previews);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
             let y_off = text.lines.len() as u16;
             let x_off = fmt.cols.user_gutter_width(settings);
-            // Adjust y_off by 1 if a date was printed before the message to account for
-            // the extra line we're going to print.
-            let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
             (p, x_off, y_off)
         });
 
@@ -1046,11 +997,11 @@ pub trait MessageExt {
         width: usize,
         style: Style,
         hide_reply: bool,
+        info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-        thread: &'a Messages,
     ) -> (Text<'a>, Option<&'a Protocol>) {
-        if let Some(html) = thread.get_html(&self.item().identifier()) {
+        if let Some(html) = info.get_html(&self.item().identifier()) {
             (html.to_text(width, style, hide_reply, settings), None)
         } else {
             let mut msg = self.body();
@@ -1092,16 +1043,13 @@ pub trait MessageExt {
 
     fn show_sender<'a>(
         &'a self,
-        prev: Option<&Message>,
+        prev_sender: Option<&UserId>,
         align_right: bool,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Option<Span<'a>> {
-        if let Some(prev) = prev {
-            if self.item().sender() == prev.sender() &&
-                self.message_timestamp().same_day(&prev.message_timestamp()) &&
-                !self.is_emote()
-            {
+        if let Some(prev) = prev_sender {
+            if self.item().sender() == prev && !self.is_emote() {
                 return None;
             }
         }
@@ -1130,37 +1078,40 @@ impl TimelineItemExt for TimelineItem {
 pub trait TimelineItemExt {
     fn item(&self) -> &TimelineItem;
 
+    fn sender(&self) -> Option<&UserId> {
+        self.item().as_event().map(|event| event.sender())
+    }
+
     /// Render the message as a [Text] object for the terminal.
     ///
     /// This will also get the image preview Protocol with an x/y offset.
     fn show_with_preview<'a>(
         &'a self,
-        prev: Option<&Message>,
+        prev_sender: Option<&UserId>,
         selected: bool,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-        thread: &'a Messages,
     ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
         match self.item().kind() {
             TimelineItemKind::Event(item) => {
-                item.show_with_preview(prev, selected, vwctx, info, settings, previews, thread)
+                item.show_with_preview(prev_sender, selected, vwctx, info, settings, previews)
             },
             TimelineItemKind::Virtual(_item) => todo!(),
         }
     }
+
     fn show<'a>(
         &'a self,
-        prev: Option<&Message>,
+        prev_sender: Option<&UserId>,
         selected: bool,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-        thread: &'a Messages,
     ) -> Text<'a> {
-        self.show_with_preview(prev, selected, vwctx, info, settings, previews, thread)
+        self.show_with_preview(prev_sender, selected, vwctx, info, settings, previews)
             .0
     }
 }

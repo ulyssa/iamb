@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use emojis::Emoji;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::room_version_rules::RedactionRules;
+use matrix_sdk_ui::timeline::TimelineEventItemId;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -88,6 +89,7 @@ use modalkit::{
 };
 
 use crate::config::ImagePreviewProtocolValues;
+use crate::message::html::StyleTree;
 use crate::notifications::NotificationHandle;
 use crate::preview::{source_from_event, PreviewManager};
 use crate::{
@@ -924,6 +926,8 @@ pub struct RoomInfo {
 
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
+
+    pub htmls: HashMap<TimelineEventItemId, StyleTree>,
 }
 
 impl Default for RoomInfo {
@@ -944,6 +948,7 @@ impl Default for RoomInfo {
             users_typing: Default::default(),
             display_names: Default::default(),
             draw_last: Default::default(),
+            htmls: Default::default(),
         }
     }
 }
@@ -1233,6 +1238,10 @@ impl RoomInfo {
             .render(bar, buf);
 
         return top;
+    }
+
+    pub fn get_html(&self, id: &TimelineEventItemId) -> Option<&StyleTree> {
+        self.htmls.get(id)
     }
 }
 

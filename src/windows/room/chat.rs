@@ -188,7 +188,7 @@ impl ChatState {
                             return Err(IambError::NoAttachment.into());
                         }
 
-                        let links = if let Some(html) = thread.get_html(&msg.item().identifier()) {
+                        let links = if let Some(html) = info.get_html(&msg.item().identifier()) {
                             html.get_links()
                         } else {
                             linkify::LinkFinder::new()
