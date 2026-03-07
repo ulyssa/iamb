@@ -45,13 +45,12 @@ use matrix_sdk::{
                 VerificationMethod,
             },
             presence::PresenceEvent,
-            room::{encryption::RoomEncryptionEventContent, name::RoomNameEventContent},
+            room::encryption::RoomEncryptionEventContent,
             tag::Tags,
             typing::SyncTypingEvent,
             AnyInitialStateEvent,
             EmptyStateKey,
             InitialStateEvent,
-            SyncStateEvent,
         },
         room::RoomType,
         serde::Raw,
@@ -71,6 +70,7 @@ use matrix_sdk::{
 use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
+use crate::base::RoomInfo;
 use crate::config::ImagePreviewSize;
 use crate::notifications::register_notifications;
 use crate::preview::load_image;
@@ -251,44 +251,68 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
-async fn refresh_rooms(_client: &Client, _store: &AsyncProgramStore) {
-    todo!()
-    // let mut names = vec![];
-    //
-    // let mut spaces = vec![];
-    // let mut rooms = vec![];
-    // let mut dms = vec![];
-    //
-    // // TODO: process invited rooms
-    //
-    // for room in client.joined_rooms().into_iter() {
-    //     let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
-    //     let tags = room.tags().await.unwrap_or_default();
-    //
-    //     names.push((room.room_id().to_owned(), name));
-    //
-    //     if is_direct(&room).await {
-    //         dms.push(Arc::new((room, tags)));
-    //     } else if room.is_space() {
-    //         spaces.push(Arc::new((room, tags)));
-    //     } else {
-    //         rooms.push(Arc::new((room, tags)));
-    //     }
-    // }
-    //
-    // let mut locked = store.lock().await;
-    // locked.application.sync_info.spaces = spaces;
-    // locked.application.sync_info.rooms = rooms;
-    // locked.application.sync_info.dms = dms;
-    //
-    // for (room_id, name) in names {
-    //     locked.application.rooms.get_or_default(room_id).name = name.into();
-    //     // if let Some(alias) = room.canonical_alias() {
-    //     //     locked.application.names.insert(alias.to_string(), room_id);
-    //     // }
-    // }
-    //
-    // // TODO: load initial messages
+async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
+    // TODO: process invited rooms
+    // TODO: load initial messages
+
+    let mut spaces = vec![];
+    let mut rooms = vec![];
+    let mut dms = vec![];
+
+    let mut locked = store.lock().await;
+    for room in client.joined_rooms() {
+        if let Some(alias) = room.canonical_alias() {
+            locked
+                .application
+                .names
+                .insert(alias.to_string(), room.room_id().to_owned());
+        }
+
+        // pre-compute name for spaces
+        let name = room.display_name().await.unwrap_or(RoomDisplayName::Empty).to_string();
+
+        if room.is_space() {
+            spaces.push(room.room_id().to_owned());
+            continue;
+        }
+
+        if is_direct(&room).await {
+            dms.push(room.room_id().to_owned());
+        } else {
+            rooms.push(room.room_id().to_owned());
+        }
+
+        // only create `RoomInfo` for chats
+
+        if locked.application.rooms.get(room.room_id()).is_none() {
+            let info = match RoomInfo::new(&room, Arc::clone(store)).await {
+                Ok(info) => info,
+                Err(err) => {
+                    tracing::warn!("cannot create room info: {err}");
+                    continue;
+                },
+            };
+            locked.application.rooms.insert(room.room_id().to_owned(), info);
+        }
+        let info = locked
+            .application
+            .rooms
+            .get_mut(room.room_id())
+            .expect("value should have been inserted");
+
+        info.name = name;
+
+        match room.tags().await {
+            Ok(tags) => info.tags = tags,
+            Err(err) => {
+                tracing::warn!("unable to compute room tags: {err}");
+            },
+        }
+    }
+
+    locked.application.sync_info.spaces = spaces;
+    locked.application.sync_info.rooms = rooms;
+    locked.application.sync_info.dms = dms;
 }
 
 async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
@@ -732,22 +756,6 @@ impl ClientWorker {
                         locked.application.presences.insert(ev.sender, ev.content.presence);
                     }
                 });
-
-        let _ = self.client.add_event_handler(
-            |ev: SyncStateEvent<RoomNameEventContent>,
-             room: MatrixRoom,
-             store: Ctx<AsyncProgramStore>| {
-                async move {
-                    if let SyncStateEvent::Original(ev) = ev {
-                        let room_id = room.room_id().to_owned();
-                        let room_name = Some(ev.content.name);
-                        let mut locked = store.lock().await;
-                        let info = locked.application.rooms.get_or_default(room_id.clone());
-                        info.name = room_name;
-                    }
-                }
-            },
-        );
 
         let _ = self.client.add_event_handler(
             |ev: OriginalSyncKeyVerificationStartEvent,

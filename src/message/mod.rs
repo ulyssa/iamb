@@ -2,6 +2,7 @@
 use std::borrow::Cow;
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
 use std::hash::{Hash, Hasher};
 use std::ops::{Bound, RangeBounds};
@@ -9,17 +10,22 @@ use std::sync::Arc;
 
 use alternating_iter::AlternatingExt;
 use chrono::{DateTime, Local as LocalTz};
+use futures::StreamExt;
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::message::TextMessageEventContent;
 use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::UserId;
-use matrix_sdk_ui::eyeball_im::Vector;
+use matrix_sdk::ruma::{EventId, OwnedRoomId, RoomId, UserId};
+use matrix_sdk::Room;
+use matrix_sdk_ui::eyeball_im::{Vector, VectorDiff};
 use matrix_sdk_ui::timeline::{
     EventTimelineItem,
     MsgLikeContent,
     MsgLikeKind,
     ReactionsByKeyBySender,
+    RoomExt,
+    TimelineEventItemId,
+    TimelineFocus,
     TimelineItem,
     TimelineItemContent,
     TimelineItemKind,
@@ -46,6 +52,7 @@ use modalkit::editing::cursor::Cursor;
 use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
+use crate::base::{AsyncProgramStore, ProgramStore};
 use crate::config::ImagePreviewSize;
 use crate::message::state::{body_cow_membership, body_cow_profile, html_membership, html_profile};
 use crate::preview::{ImageStatus, PreviewManager};
@@ -95,6 +102,109 @@ impl Ord for MessageKey {
 impl PartialOrd for MessageKey {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
+    }
+}
+
+fn handle_update(
+    room_id: &RoomId,
+    thread: Option<&EventId>,
+    update: VectorDiff<Arc<TimelineItem>>,
+    store: &mut ProgramStore,
+) {
+    let Some(info) = store.application.rooms.get_mut(room_id) else {
+        tracing::warn!("received update for unknown room");
+        return;
+    };
+
+    match &update {
+        VectorDiff::PushFront { value } |
+        VectorDiff::PushBack { value } |
+        VectorDiff::Insert { value, .. } |
+        VectorDiff::Set { value, .. } => {
+            if let Some(item) = value.as_event() {
+                if let Some(html) = generate_html(item) {
+                    info.htmls.insert(item.identifier(), html);
+                }
+            }
+        },
+        _ => {
+            unimplemented!("these vector operations aren't used by the sdk")
+        },
+    }
+
+    let Some(messages) = info.get_thread_mut(thread) else {
+        tracing::warn!("received update for unknown thread");
+        return;
+    };
+
+    let remove_htmls: Vec<_> = match &update {
+        VectorDiff::Clear => {
+            messages.start_element = 0;
+            messages
+                .messages
+                .iter()
+                .filter_map(|item| item.as_event())
+                .map(|item| item.identifier())
+                .collect()
+        },
+        VectorDiff::PushFront { .. } => {
+            messages.start_element += 1;
+            vec![]
+        },
+        VectorDiff::PushBack { .. } => vec![],
+        VectorDiff::Insert { index, .. } => {
+            if *index <= messages.start_element {
+                messages.start_element += 1;
+            }
+            vec![]
+        },
+        VectorDiff::Set { index, value } => {
+            match (messages.messages[*index].as_event(), value.as_event()) {
+                (Some(old), Some(new)) => {
+                    if old.identifier() != new.identifier() {
+                        vec![old.identifier()]
+                    } else {
+                        vec![]
+                    }
+                },
+                _ => vec![],
+            }
+        },
+        VectorDiff::Remove { index } => {
+            if *index <= messages.start_element {
+                messages.start_element = messages.start_element.saturating_sub(1);
+            }
+            if let Some(item) = messages.messages[*index].as_event() {
+                vec![item.identifier()]
+            } else {
+                vec![]
+            }
+        },
+        _ => {
+            unimplemented!("these vector operations aren't used by the sdk")
+        },
+    };
+
+    update.apply(&mut messages.messages);
+
+    for id in remove_htmls {
+        info.htmls.remove(&id);
+    }
+}
+
+async fn handle_updates(
+    room_id: OwnedRoomId,
+    thread: Option<OwnedEventId>,
+    store: AsyncProgramStore,
+    stream: impl futures::Stream<Item = Vec<VectorDiff<Arc<TimelineItem>>>>,
+) {
+    futures::pin_mut!(stream);
+
+    while let Some(updates) = stream.next().await {
+        let mut locked = store.lock().await;
+        for update in updates {
+            handle_update(&room_id, thread.as_deref(), update, &mut locked);
+        }
     }
 }
 
@@ -175,28 +285,42 @@ impl Messages {
             .filter_map(|(key, item)| item.as_event().map(|event| (key, event)))
     }
 
-    #[allow(unused)]
-    fn new(_thread: ReceiptThread) -> Self {
-        let info: &mut RoomInfo = todo!();
-        let timeline = todo!();
+    pub async fn new(
+        room: &Room,
+        thread: Option<OwnedEventId>,
+        store: AsyncProgramStore,
+    ) -> Result<(Self, HashMap<TimelineEventItemId, StyleTree>), matrix_sdk_ui::timeline::Error>
+    {
+        let focus = match thread.clone() {
+            Some(root_event_id) => TimelineFocus::Thread { root_event_id },
+            None => TimelineFocus::Live { hide_threaded_events: true },
+        };
+        let timeline = room
+            .timeline_builder()
+            .with_focus(focus)
+            .track_read_marker_and_receipts()
+            .build()
+            .await?;
 
-        let messages: Vector<Arc<TimelineItem>> = todo!();
+        let (messages, updates) = timeline.subscribe().await;
+
+        tokio::spawn(handle_updates(room.room_id().to_owned(), thread, store, updates));
 
         let htmls = messages
             .iter()
             .filter_map(|item| item.as_event())
-            .filter_map(|item| generate_html(item).map(|html| (item.identifier(), html)));
-        info.htmls.extend(htmls);
+            .filter_map(|item| generate_html(item).map(|html| (item.identifier(), html)))
+            .collect();
 
-        Self { messages, timeline, start_element: 0 }
+        Ok((Self { messages, timeline, start_element: 0 }, htmls))
     }
 
     pub fn main() -> Self {
-        Self::new(ReceiptThread::Main)
+        todo!()
     }
 
-    pub fn thread(root: OwnedEventId) -> Self {
-        Self::new(ReceiptThread::Thread(root))
+    pub fn thread(_root: OwnedEventId) -> Self {
+        todo!()
     }
 }
 
@@ -1206,8 +1330,9 @@ pub mod tests {
         assert_eq!(k6, MSG1_KEY.clone());
 
         // MessageCursor::latest() fails to convert for a room w/o messages.
-        let messages_empty = Messages::new(ReceiptThread::Main);
-        assert_eq!(mc6.to_key(&messages_empty), None);
+        // let messages_empty = Messages::new(ReceiptThread::Main);
+        // assert_eq!(mc6.to_key(&messages_empty), None);
+        todo!()
     }
 
     #[test]

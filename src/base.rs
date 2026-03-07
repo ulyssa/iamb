@@ -46,7 +46,6 @@ use matrix_sdk::{
         RoomId,
         UserId,
     },
-    RoomState as MatrixRoomState,
 };
 
 use modalkit::{
@@ -828,7 +827,7 @@ impl UnreadInfo {
 /// Information about room's the user's joined.
 pub struct RoomInfo {
     /// The display name for this room.
-    pub name: Option<String>,
+    pub name: String,
 
     /// The tags placed on this room.
     pub tags: Option<Tags>,
@@ -852,6 +851,25 @@ pub struct RoomInfo {
 }
 
 impl RoomInfo {
+    pub async fn new(
+        room: &MatrixRoom,
+        store: AsyncProgramStore,
+    ) -> Result<Self, matrix_sdk_ui::timeline::Error> {
+        let (messages, htmls) = Messages::new(room, None, store).await?;
+
+        Ok(Self {
+            messages,
+            htmls,
+
+            name: Default::default(),
+            tags: Default::default(),
+            threads: Default::default(),
+            users_typing: Default::default(),
+            display_names: Default::default(),
+            draw_last: Default::default(),
+        })
+    }
+
     #[inline]
     pub fn room(&self) -> &MatrixRoom {
         self.messages.timeline().room()
@@ -862,6 +880,14 @@ impl RoomInfo {
             self.threads.get(thread_root)
         } else {
             Some(&self.messages)
+        }
+    }
+
+    pub fn get_thread_mut(&mut self, root: Option<&EventId>) -> Option<&mut Messages> {
+        if let Some(thread_root) = root {
+            self.threads.get_mut(thread_root)
+        } else {
+            Some(&mut self.messages)
         }
     }
 
@@ -1086,6 +1112,14 @@ impl Rooms {
         self.0.get_mut(&room_id).expect("default value should have been inserted")
     }
 
+    pub fn insert(&mut self, room_id: OwnedRoomId, room: RoomInfo) -> Option<RoomInfo> {
+        self.0.insert(room_id, room)
+    }
+
+    pub fn get_mut(&mut self, room_id: &RoomId) -> Option<&mut RoomInfo> {
+        self.0.get_mut(room_id)
+    }
+
     pub fn get(&self, room_id: &RoomId) -> Option<&RoomInfo> {
         self.0.get(room_id)
     }
@@ -1169,22 +1203,22 @@ impl ChatStore {
     }
 
     /// Get a joined room.
-    pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
-        let room = self.worker.client.get_room(room_id)?;
-
-        if room.state() == MatrixRoomState::Joined {
-            Some(room)
-        } else {
-            None
-        }
+    pub fn get_joined_room(&self, _room_id: &RoomId) -> Option<MatrixRoom> {
+        todo!()
+        // let room = self.worker.client.get_room(room_id)?;
+        //
+        // if room.state() == MatrixRoomState::Joined {
+        //     Some(room)
+        // } else {
+        //     None
+        // }
     }
 
     /// Get the title for a room.
     pub fn get_room_title(&self, room_id: &RoomId) -> String {
         self.rooms
             .get(room_id)
-            .and_then(|i| i.name.as_ref())
-            .map(String::from)
+            .map(|i| i.name.clone())
             .unwrap_or_else(|| "Untitled Matrix Room".to_string())
     }
 

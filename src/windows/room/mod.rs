@@ -146,7 +146,7 @@ impl RoomState {
     ) -> Self {
         let room_id = room.room_id().to_owned();
         let info = store.application.rooms.get_or_default(room_id);
-        info.name = name.to_string().into();
+        info.name = name.to_string();
         info.tags = tags;
 
         if room.is_space() {

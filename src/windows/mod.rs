@@ -901,7 +901,7 @@ impl ItemType for UndifferentiatedItem {
 #[derive(Clone)]
 pub struct GenericChatItem<T: ItemType> {
     room: MatrixRoom,
-    name: Option<String>,
+    name: String,
     tags: Option<Tags>,
     alias: Option<OwnedRoomAliasId>,
     unread: UnreadInfo,
@@ -933,7 +933,7 @@ impl<T: ItemType> GenericChatItem<T> {
 
 impl<T: ItemType> RoomLikeItem for GenericChatItem<T> {
     fn name(&self) -> &str {
-        self.name.as_deref().unwrap_or_default()
+        &self.name
     }
 
     fn alias(&self) -> Option<&RoomAliasId> {
