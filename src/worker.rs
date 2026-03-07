@@ -241,13 +241,13 @@ fn members_insert(
     // else ???
 }
 
-async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
+async fn load_older_forever(_client: &Client, _store: &AsyncProgramStore) {
     // Load any pending older messages or members every 2 seconds.
     let mut interval = tokio::time::interval(Duration::from_secs(2));
 
     loop {
         interval.tick().await;
-        load_older(client, store).await;
+        // load_older(client, store).await;
     }
 }
 

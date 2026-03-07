@@ -246,7 +246,7 @@ impl ScrollbackState {
         //         !info.keys.contains_key(thread_root)
         //     },
         // }
-        todo!()
+        false
     }
 
     fn scrollview(
@@ -1363,13 +1363,13 @@ impl StatefulWidget for Scrollback<'_> {
             //     .or_else(|| item.thread_root())
             //     .and_then(|e| info.get_event(&e))
             //     .and_then(|msg| msg.image_preview());
-            let reply = todo!();
-            if let Some(source) = reply {
-                self.store
-                    .application
-                    .previews
-                    .load(source, &self.store.application.worker);
-            }
+            // let reply = todo!();
+            // if let Some(source) = reply {
+            //     self.store
+            //         .application
+            //         .previews
+            //         .load(source, &self.store.application.worker);
+            // }
         }
 
         let previews = &self.store.application.previews;
@@ -1455,7 +1455,7 @@ impl StatefulWidget for Scrollback<'_> {
                 //     settings.profile.user_id.clone(),
                 //     k.id().to_owned(),
                 // );
-                todo!()
+                // todo!()
             }
         }
 

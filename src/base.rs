@@ -11,6 +11,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
+use matrix_sdk::sync::UnreadNotificationsCount;
 use matrix_sdk_ui::timeline::TimelineEventItemId;
 use ratatui::{
     buffer::Buffer,
@@ -810,13 +811,14 @@ impl ApplicationError for IambError {}
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnreadInfo {
-    pub(crate) unread: bool,
+    pub(crate) notifications: u64,
+    pub(crate) highlights: u64,
     pub(crate) latest: Option<MessageTimeStamp>,
 }
 
 impl UnreadInfo {
     pub fn is_unread(&self) -> bool {
-        self.unread
+        self.notifications > 0 || self.highlights > 0
     }
 
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
@@ -898,7 +900,16 @@ impl RoomInfo {
 
     /// Indicates whether this room has unread messages.
     pub fn unreads(&self, _settings: &ApplicationSettings) -> UnreadInfo {
-        todo!()
+        let UnreadNotificationsCount { highlight_count, notification_count } =
+            self.room().unread_notification_counts();
+
+        let latest = self.messages.last_message().map(|item| item.timestamp().into());
+
+        UnreadInfo {
+            notifications: self.room().num_unread_notifications().max(notification_count),
+            highlights: self.room().num_unread_mentions().max(highlight_count),
+            latest,
+        }
     }
 
     /// Insert a new message event, and prepare for image-preview if it has an image attachment.

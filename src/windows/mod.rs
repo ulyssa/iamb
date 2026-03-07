@@ -1527,7 +1527,7 @@ mod tests {
             tags: vec![],
             alias: None,
             name: "Room 1",
-            unread: UnreadInfo { unread: false, latest: None },
+            unread: UnreadInfo { latest: None, notifications: 0, highlights: 0 },
             invite: false,
         };
 
@@ -1537,8 +1537,9 @@ mod tests {
             alias: None,
             name: "Room 2",
             unread: UnreadInfo {
-                unread: false,
                 latest: Some(40usize.try_into().unwrap()),
+                notifications: 0,
+                highlights: 0,
             },
             invite: false,
         };
@@ -1549,8 +1550,9 @@ mod tests {
             alias: None,
             name: "Room 3",
             unread: UnreadInfo {
-                unread: false,
                 latest: Some(20usize.try_into().unwrap()),
+                notifications: 0,
+                highlights: 0,
             },
             invite: false,
         };

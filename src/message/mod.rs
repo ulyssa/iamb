@@ -30,6 +30,7 @@ use matrix_sdk_ui::timeline::{
     TimelineItemContent,
     TimelineItemKind,
     TimelineUniqueId,
+    VirtualTimelineItem,
 };
 use matrix_sdk_ui::Timeline;
 use unicode_width::UnicodeWidthStr;
@@ -259,13 +260,17 @@ impl Messages {
             Bound::Excluded(start) => self.start_element.saturating_add_signed(start.offset() + 1),
             Bound::Unbounded => 0,
         };
-        let last = match range.end_bound() {
+        let mut last = match range.end_bound() {
             Bound::Included(end) => self.start_element.saturating_add_signed(end.offset()).into(),
             Bound::Excluded(end) => {
                 self.start_element.saturating_add_signed(end.offset()).checked_sub(1)
             },
             Bound::Unbounded => self.messages.len().checked_sub(1),
         };
+
+        if last.is_some_and(|last| last >= self.messages.len()) {
+            last = self.messages.len().checked_sub(1);
+        }
 
         let last = match last {
             Some(last) => last,
@@ -301,6 +306,9 @@ impl Messages {
             .track_read_marker_and_receipts()
             .build()
             .await?;
+
+        // TODO: load in background
+        timeline.paginate_backwards(50).await?;
 
         let (messages, updates) = timeline.subscribe().await;
 
@@ -1073,7 +1081,7 @@ pub trait MessageExt {
         //     .reply_to()
         //     .or_else(|| self.thread_root())
         //     .and_then(|e| info.get_event(&e));
-        let reply: Option<&Message> = todo!();
+        let reply: Option<&Message> = None;
         let proto_reply = reply.as_ref().and_then(|r| {
             // Format the reply header, push it into the `Text` buffer, and get any image.
             fmt.push_in_reply(r, style, &mut text, info, settings, previews)
@@ -1220,7 +1228,22 @@ pub trait TimelineItemExt {
             TimelineItemKind::Event(item) => {
                 item.show_with_preview(prev_sender, selected, vwctx, info, settings, previews)
             },
-            TimelineItemKind::Virtual(_item) => todo!(),
+            TimelineItemKind::Virtual(VirtualTimelineItem::ReadMarker) => {
+                ("----------------------------".into(), [None, None])
+            },
+            TimelineItemKind::Virtual(VirtualTimelineItem::TimelineStart) => {
+                ("--- Timeline Start ---".into(), [None, None])
+            },
+            TimelineItemKind::Virtual(VirtualTimelineItem::DateDivider(date)) => {
+                let ts = MessageTimeStamp(date.0);
+                let time = ts.as_datetime().format("%A, %B %d %Y").to_string();
+                let padding = vwctx.get_width().saturating_sub(time.len());
+                let leading = space_span(padding / 2, Style::default());
+                let trailing = space_span(padding.saturating_sub(padding / 2), Style::default());
+                let time = Span::styled(time, Style::new().add_modifier(StyleModifier::BOLD));
+
+                (Line::from(vec![leading, time, trailing]).into(), [None, None])
+            },
         }
     }
 
