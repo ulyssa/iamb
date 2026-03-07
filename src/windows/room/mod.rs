@@ -145,7 +145,7 @@ impl RoomState {
         store: &mut ProgramStore,
     ) -> Self {
         let room_id = room.room_id().to_owned();
-        let info = store.application.get_room_info(room_id);
+        let info = store.application.rooms.get_or_default(room_id);
         info.name = name.to_string().into();
         info.tags = tags;
 

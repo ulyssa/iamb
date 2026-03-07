@@ -832,7 +832,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         _: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        let info = store.application.get_room_info(self.room_id.clone());
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
         let cursor = self.cursor.to_cursor(thread).ok_or_else(no_msgs)?;
         store.cursors.set_mark(self.id.clone(), name, cursor);
@@ -888,7 +888,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        let info = store.application.get_room_info(self.room_id.clone());
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
         match act {
@@ -1021,7 +1021,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<Vec<(Action<IambInfo>, ProgramContext)>, IambInfo> {
-        let info = store.application.get_room_info(self.room_id.clone());
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
         let Some(msg) = self.cursor.to_key(thread).and_then(|key| thread.get_message(&key)) else {

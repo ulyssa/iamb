@@ -930,29 +930,6 @@ pub struct RoomInfo {
     pub htmls: HashMap<TimelineEventItemId, StyleTree>,
 }
 
-impl Default for RoomInfo {
-    fn default() -> Self {
-        Self {
-            messages: Messages::main(),
-
-            name: Default::default(),
-            tags: Default::default(),
-            keys: Default::default(),
-            event_receipts: Default::default(),
-            user_receipts: Default::default(),
-            reactions: Default::default(),
-            threads: Default::default(),
-            fetching: Default::default(),
-            fetch_id: Default::default(),
-            fetch_last: Default::default(),
-            users_typing: Default::default(),
-            display_names: Default::default(),
-            draw_last: Default::default(),
-            htmls: Default::default(),
-        }
-    }
-}
-
 impl RoomInfo {
     pub fn get_thread(&self, root: Option<&EventId>) -> Option<&Messages> {
         if let Some(thread_root) = root {
@@ -1391,6 +1368,44 @@ impl IntoIterator for RoomNeeds {
     }
 }
 
+#[derive(Default)]
+pub struct Rooms(CompletionMap<OwnedRoomId, RoomInfo>);
+
+impl Rooms {
+    /// Get the [RoomInfo] for a given room identifier.
+    pub fn get_or_default(&mut self, room_id: OwnedRoomId) -> &mut RoomInfo {
+        if self.0.get(&room_id).is_none() {
+            self.0.insert(room_id.clone(), RoomInfo {
+                messages: Messages::main(),
+
+                name: Default::default(),
+                tags: Default::default(),
+                keys: Default::default(),
+                event_receipts: Default::default(),
+                user_receipts: Default::default(),
+                reactions: Default::default(),
+                threads: Default::default(),
+                fetching: Default::default(),
+                fetch_id: Default::default(),
+                fetch_last: Default::default(),
+                users_typing: Default::default(),
+                display_names: Default::default(),
+                draw_last: Default::default(),
+                htmls: Default::default(),
+            });
+        }
+        self.0.get_mut(&room_id).expect("default value should have been inserted")
+    }
+
+    pub fn get(&self, room_id: &RoomId) -> Option<&RoomInfo> {
+        self.0.get(room_id)
+    }
+
+    pub fn complete(&self, prefix: &str) -> Vec<OwnedRoomId> {
+        self.0.complete(prefix)
+    }
+}
+
 /// The main application state.
 pub struct ChatStore {
     /// `:`-commands
@@ -1400,7 +1415,7 @@ pub struct ChatStore {
     pub worker: Requester,
 
     /// Map of joined rooms.
-    pub rooms: CompletionMap<OwnedRoomId, RoomInfo>,
+    pub rooms: Rooms,
 
     /// Map of room names.
     pub names: CompletionMap<String, OwnedRoomId>,
@@ -1486,16 +1501,6 @@ impl ChatStore {
             .and_then(|i| i.name.as_ref())
             .map(String::from)
             .unwrap_or_else(|| "Untitled Matrix Room".to_string())
-    }
-
-    /// Get the [RoomInfo] for a given room identifier.
-    pub fn get_room_info(&mut self, room_id: OwnedRoomId) -> &mut RoomInfo {
-        self.rooms.get_or_default(room_id)
-    }
-
-    /// Set the name for a room.
-    pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
-        self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
     }
 
     /// Insert a new E2EE verification.
@@ -1993,6 +1998,7 @@ fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
 }
 
 #[cfg(test)]
+#[allow(unused)]
 pub mod tests {
     use super::*;
     use crate::config::user_style_from_color;
@@ -2009,7 +2015,8 @@ pub mod tests {
 
     #[test]
     fn multiple_identical_reactions() {
-        let mut info = RoomInfo::default();
+        // let mut info = RoomInfo::default();
+        let mut info: RoomInfo = todo!();
 
         let content = ReactionEventContent::new(Annotation::new(
             owned_event_id!("$my_reaction"),
@@ -2071,7 +2078,8 @@ pub mod tests {
 
     #[test]
     fn test_typing_spans() {
-        let mut info = RoomInfo::default();
+        // let mut info = RoomInfo::default();
+        let mut info: RoomInfo = todo!();
         let settings = mock_settings();
 
         let users0 = vec![];

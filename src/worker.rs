@@ -485,7 +485,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     locked.application.sync_info.dms = dms;
 
     for (room_id, name) in names {
-        locked.application.set_room_name(&room_id, &name);
+        locked.application.rooms.get_or_default(room_id).name = name.into();
     }
 }
 
@@ -982,7 +982,7 @@ impl ClientWorker {
                         .filter(|u| u != &locked.application.settings.profile.user_id)
                         .collect();
 
-                    locked.application.get_room_info(room_id).set_typing(users);
+                    locked.application.rooms.get_or_default(room_id).set_typing(users);
                 }
             },
         );
@@ -1061,7 +1061,7 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let info = locked.application.get_room_info(room_id.to_owned());
+                    let info = locked.application.rooms.get_or_default(room_id.to_owned());
                     update_event_receipts(info, &room, ev.event_id()).await;
                     info.insert_reaction(ev.into_full_event(room_id.to_owned()));
                 }
@@ -1077,7 +1077,7 @@ impl ClientWorker {
 
                     let mut locked = store.lock().await;
 
-                    let info = locked.application.get_room_info(room_id.to_owned());
+                    let info = locked.application.rooms.get_or_default(room_id.to_owned());
                     for (event_id, receipts) in ev.content.0.into_iter() {
                         let Some(receipts) = receipts.get(&ReceiptType::Read) else {
                             continue;
@@ -1108,7 +1108,7 @@ impl ClientWorker {
                         .redaction;
 
                     let mut locked = store.lock().await;
-                    let info = locked.application.get_room_info(room_id.to_owned());
+                    let info = locked.application.rooms.get_or_default(room_id.to_owned());
                     info.redact(ev, rules);
                 }
             },
@@ -1134,7 +1134,7 @@ impl ClientWorker {
                         .unwrap_or_default();
 
                     let mut locked = store.lock().await;
-                    let info = locked.application.get_room_info(room_id.to_owned());
+                    let info = locked.application.rooms.get_or_default(room_id.to_owned());
 
                     if ambiguous {
                         info.display_names.remove(&user_id);

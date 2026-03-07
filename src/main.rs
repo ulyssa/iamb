@@ -565,9 +565,11 @@ impl Application {
                 store.application.open_notifications.clear();
 
                 for room_id in store.application.sync_info.chats() {
-                    if let Some(room) = store.application.rooms.get_mut(room_id) {
-                        room.fully_read(user_id);
-                    }
+                    store
+                        .application
+                        .rooms
+                        .get_or_default(room_id.to_owned())
+                        .fully_read(user_id);
                 }
 
                 None

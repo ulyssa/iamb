@@ -1,3 +1,5 @@
+#![allow(unused)]
+
 use std::collections::HashMap;
 use std::path::PathBuf;
 
@@ -123,9 +125,9 @@ pub fn mock_messages() -> Messages {
 }
 
 pub fn mock_room() -> RoomInfo {
-    let mut room = RoomInfo::default();
-    room.name = Some("Watercooler Discussion".into());
-    room.keys = mock_keys();
+    // let mut room = RoomInfo::default();
+    // room.name = Some("Watercooler Discussion".into());
+    // room.keys = mock_keys();
     // *room.get_thread_mut(None) = mock_messages();
     todo!()
 }
@@ -216,11 +218,11 @@ pub async fn mock_store() -> ProgramStore {
     store.presences.get_or_default(TEST_USER4.clone());
     store.presences.get_or_default(TEST_USER5.clone());
 
-    let room_id = TEST_ROOM1_ID.clone();
-    let info = mock_room();
-
-    store.rooms.insert(room_id.clone(), info);
-    store.names.insert(TEST_ROOM1_ALIAS.to_string(), room_id);
-
-    ProgramStore::new(store)
+    // let room_id = TEST_ROOM1_ID.clone();
+    // let info = mock_room();
+    //
+    // store.rooms.insert(room_id.clone(), info);
+    // store.names.insert(TEST_ROOM1_ALIAS.to_string(), room_id);
+    todo!()
+    // ProgramStore::new(store)
 }

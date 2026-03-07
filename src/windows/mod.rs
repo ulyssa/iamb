@@ -1234,7 +1234,8 @@ impl SpaceItem {
         let room_id = room_info.0.room_id();
         let name = store
             .application
-            .get_room_info(room_id.to_owned())
+            .rooms
+            .get_or_default(room_id.to_owned())
             .name
             .clone()
             .unwrap_or_default();
