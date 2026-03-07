@@ -852,10 +852,6 @@ pub trait MessageExt {
         Some(self.item().content().as_msglike()?.in_reply_to.as_ref()?.event_id.clone())
     }
 
-    fn thread_root(&self) -> Option<OwnedEventId> {
-        self.item().content().as_msglike()?.thread_root.clone()
-    }
-
     fn get_render_style(&self, selected: bool, settings: &ApplicationSettings) -> Style {
         let mut style = Style::default();
 
@@ -930,6 +926,7 @@ pub trait MessageExt {
     /// Render the message as a [Text] object for the terminal.
     ///
     /// This will also get the image preview Protocol with an x/y offset.
+    #[allow(unused)]
     fn show_with_preview<'a>(
         &'a self,
         prev_sender: Option<&UserId>,
@@ -948,10 +945,11 @@ pub trait MessageExt {
 
         // Show the message that this one replied to, if any.
         // TODO: use `InReplyToDetails::event`
-        let reply = self
-            .reply_to()
-            .or_else(|| self.thread_root())
-            .and_then(|e| info.get_event(&e));
+        // let reply = self
+        //     .reply_to()
+        //     .or_else(|| self.thread_root())
+        //     .and_then(|e| info.get_event(&e));
+        let reply: Option<&Message> = todo!();
         let proto_reply = reply.as_ref().and_then(|r| {
             // Format the reply header, push it into the `Text` buffer, and get any image.
             fmt.push_in_reply(r, style, &mut text, info, settings, previews)

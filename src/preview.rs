@@ -2,16 +2,7 @@ use std::{collections::HashMap, sync::Arc};
 
 use matrix_sdk::{
     media::{MediaFormat, MediaRequestParameters, UniqueKey},
-    ruma::{
-        events::{
-            room::{
-                message::{MessageType, RoomMessageEventContent},
-                MediaSource,
-            },
-            MessageLikeEvent,
-        },
-        OwnedEventId,
-    },
+    ruma::events::room::MediaSource,
     Media,
 };
 use ratatui::layout::Rect;
@@ -105,17 +96,6 @@ impl PreviewManager {
             self.load(&source, worker);
         }
     }
-}
-
-pub fn source_from_event(
-    ev: &MessageLikeEvent<RoomMessageEventContent>,
-) -> Option<(OwnedEventId, MediaSource)> {
-    if let MessageLikeEvent::Original(ev) = &ev {
-        if let MessageType::Image(c) = &ev.content.msgtype {
-            return Some((ev.event_id.clone(), c.source.clone()));
-        }
-    }
-    None
 }
 
 impl From<ImagePreviewSize> for Rect {

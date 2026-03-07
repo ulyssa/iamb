@@ -22,7 +22,7 @@ use tracing::Level;
 use url::Url;
 
 use crate::{
-    base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
+    base::{ChatStore, ProgramStore, RoomInfo},
     config::{
         user_color,
         user_style_from_color,
@@ -108,17 +108,17 @@ pub fn mock_message5() -> Message {
     mock_room1_message(content, TEST_USER2.clone(), MSG4_KEY.clone())
 }
 
-pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
-    let mut keys = HashMap::new();
-
-    keys.insert(MSG1_EVID.clone(), EventLocation::Message(None, MSG1_KEY.clone()));
-    keys.insert(MSG2_EVID.clone(), EventLocation::Message(None, MSG2_KEY.clone()));
-    keys.insert(MSG3_EVID.clone(), EventLocation::Message(None, MSG3_KEY.clone()));
-    keys.insert(MSG4_EVID.clone(), EventLocation::Message(None, MSG4_KEY.clone()));
-    keys.insert(MSG5_EVID.clone(), EventLocation::Message(None, MSG5_KEY.clone()));
-
-    keys
-}
+// pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
+//     let mut keys = HashMap::new();
+//
+//     keys.insert(MSG1_EVID.clone(), EventLocation::Message(None, MSG1_KEY.clone()));
+//     keys.insert(MSG2_EVID.clone(), EventLocation::Message(None, MSG2_KEY.clone()));
+//     keys.insert(MSG3_EVID.clone(), EventLocation::Message(None, MSG3_KEY.clone()));
+//     keys.insert(MSG4_EVID.clone(), EventLocation::Message(None, MSG4_KEY.clone()));
+//     keys.insert(MSG5_EVID.clone(), EventLocation::Message(None, MSG5_KEY.clone()));
+//
+//     keys
+// }
 
 pub fn mock_messages() -> Messages {
     todo!()

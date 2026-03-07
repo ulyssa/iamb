@@ -234,9 +234,9 @@ fn is_focused(locked: &ProgramStore) -> bool {
 }
 
 async fn is_visible_room(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
-    let mut locked = store.lock().await;
+    let locked = store.lock().await;
 
-    is_focused(&locked) && is_open(&mut locked, room_id)
+    is_focused(&locked) && is_open(&locked, room_id)
 }
 
 pub async fn parse_full_notification(

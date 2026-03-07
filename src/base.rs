@@ -2,8 +2,7 @@
 //!
 //! The types defined here get used throughout iamb.
 use std::borrow::Cow;
-use std::collections::hash_map::IntoIter;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::hash::Hash;
@@ -12,8 +11,6 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
-use matrix_sdk::ruma::events::receipt::ReceiptThread;
-use matrix_sdk::ruma::room_version_rules::RedactionRules;
 use matrix_sdk_ui::timeline::TimelineEventItemId;
 use ratatui::{
     buffer::Buffer,
@@ -38,17 +35,8 @@ use matrix_sdk::{
     room::Room as MatrixRoom,
     ruma::{
         events::{
-            reaction::ReactionEvent,
-            relation::Thread,
-            room::message::{
-                OriginalRoomMessageEvent,
-                Relation,
-                RoomMessageEvent,
-                RoomMessageEventContent,
-            },
-            room::redaction::OriginalSyncRoomRedactionEvent,
+            room::message::RoomMessageEvent,
             tag::{TagName, Tags},
-            MessageLikeEvent,
         },
         presence::PresenceState,
         EventId,
@@ -91,9 +79,9 @@ use modalkit::{
 use crate::config::ImagePreviewProtocolValues;
 use crate::message::html::StyleTree;
 use crate::notifications::NotificationHandle;
-use crate::preview::{source_from_event, PreviewManager};
+use crate::preview::PreviewManager;
 use crate::{
-    message::{Message, MessageKey, MessageTimeStamp, Messages},
+    message::{MessageKey, MessageTimeStamp, Messages},
     worker::Requester,
     ApplicationSettings,
 };
@@ -113,6 +101,7 @@ fn is_mxid_char(c: char) -> bool {
         ":-./@_#!".contains(c);
 }
 
+#[allow(unused)]
 const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
 
 /// Empty type used solely to implement [ApplicationInfo].
@@ -682,12 +671,6 @@ pub type AsyncProgramStore = Arc<AsyncMutex<ProgramStore>>;
 /// Alias for an action result.
 pub type IambResult<T> = UIResult<T, IambInfo>;
 
-/// Reaction events for some message.
-///
-/// The event identifier used as a key here is the ID for the reaction, and not for the message
-/// it's reacting to.
-pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
-
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
@@ -826,45 +809,6 @@ impl From<IambError> for UIError<IambInfo> {
 
 impl ApplicationError for IambError {}
 
-/// Status for tracking how much room scrollback we've fetched.
-#[derive(Default)]
-pub enum RoomFetchStatus {
-    /// Room history has been completely fetched.
-    Done,
-
-    /// More room history can be fetched.
-    HaveMore(String),
-
-    /// We have not yet started fetching history for this room.
-    #[default]
-    NotStarted,
-}
-
-/// Indicates where an [EventId] lives in the [ChatStore].
-pub enum EventLocation {
-    /// The [EventId] belongs to a message.
-    ///
-    /// If the first argument is [None], then it's part of the main scrollback. When [Some],
-    /// it specifies which thread it's in reply to.
-    Message(Option<OwnedEventId>, MessageKey),
-
-    /// The [EventId] belongs to a reaction to the given event.
-    Reaction(OwnedEventId),
-
-    /// The [EventId] belongs to a state event in the main timeline of the room.
-    State(MessageKey),
-}
-
-impl EventLocation {
-    fn to_message_key(&self) -> Option<&MessageKey> {
-        if let EventLocation::Message(_, key) = self {
-            Some(key)
-        } else {
-            None
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnreadInfo {
     pub(crate) unread: bool,
@@ -889,34 +833,11 @@ pub struct RoomInfo {
     /// The tags placed on this room.
     pub tags: Option<Tags>,
 
-    /// A map of event IDs to where they are stored in this struct.
-    pub keys: HashMap<OwnedEventId, EventLocation>,
-
     /// The messages loaded for this room.
     messages: Messages,
 
-    /// A map of read markers to display on different events.
-    pub event_receipts: HashMap<ReceiptThread, HashMap<OwnedEventId, HashSet<OwnedUserId>>>,
-    /// A map of the most recent read marker for each user.
-    ///
-    /// Every receipt in this map should also have an entry in [`event_receipts`](`Self::event_receipts`),
-    /// however not every user has an entry. If a user's most recent receipt is
-    /// older than the oldest loaded event, that user will not be included.
-    pub user_receipts: HashMap<ReceiptThread, HashMap<OwnedUserId, OwnedEventId>>,
-    /// A map of message identifiers to a map of reaction events.
-    pub reactions: HashMap<OwnedEventId, MessageReactions>,
-
     /// A map of message identifiers to thread replies.
     threads: HashMap<OwnedEventId, Messages>,
-
-    /// Whether the scrollback for this room is currently being fetched.
-    pub fetching: bool,
-
-    /// Where to continue fetching from when we continue loading scrollback history.
-    pub fetch_id: RoomFetchStatus,
-
-    /// The time that we last fetched scrollback for this room.
-    pub fetch_last: Option<Instant>,
 
     /// Users currently typing in this room, and when we received notification of them doing so.
     pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
@@ -939,69 +860,9 @@ impl RoomInfo {
         }
     }
 
-    /// Get the reactions and their counts for a message.
-    pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize)> {
-        if let Some(reacts) = self.reactions.get(event_id) {
-            let mut counts = HashMap::new();
-
-            let mut seen_user_reactions = BTreeSet::new();
-
-            for (key, user) in reacts.values() {
-                if !seen_user_reactions.contains(&(key, user)) {
-                    seen_user_reactions.insert((key, user));
-                    let count = counts.entry(key.as_str()).or_default();
-                    *count += 1;
-                }
-            }
-
-            let mut reactions = counts.into_iter().collect::<Vec<_>>();
-            reactions.sort();
-
-            reactions
-        } else {
-            vec![]
-        }
-    }
-
     /// Map an event identifier to its [MessageKey].
-    pub fn get_message_key(&self, event_id: &EventId) -> Option<&MessageKey> {
-        self.keys.get(event_id)?.to_message_key()
-    }
-
-    /// Get an event for an identifier.
-    pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
-        self.messages.get_message(self.get_message_key(event_id)?)
-    }
-
-    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent, rules: &RedactionRules) {
-        let _ = rules;
-        let Some(_redacts) = &ev.redacts else {
-            return;
-        };
-
+    pub fn get_message_key(&self, _event_id: &EventId) -> Option<&MessageKey> {
         todo!()
-    }
-
-    /// Insert a reaction to a message.
-    pub fn insert_reaction(&mut self, react: ReactionEvent) {
-        match react {
-            MessageLikeEvent::Original(react) => {
-                let rel_id = react.content.relates_to.event_id;
-                let key = react.content.relates_to.key;
-
-                let message = self.reactions.entry(rel_id.clone()).or_default();
-                let event_id = react.event_id;
-                let user_id = react.sender;
-
-                message.insert(event_id.clone(), (key, user_id));
-
-                let loc = EventLocation::Reaction(rel_id);
-                self.keys.insert(event_id, loc);
-            },
-            MessageLikeEvent::Redacted(_) => {
-                return;
-            },
-        }
     }
 
     /// Indicates whether this room has unread messages.
@@ -1009,53 +870,8 @@ impl RoomInfo {
         todo!()
     }
 
-    /// Insert a new message.
-    pub fn insert_message(&mut self, _msg: RoomMessageEvent) {
-        // let event_id = msg.event_id().to_owned();
-        // let key = todo!();
-        //
-        // let loc = EventLocation::Message(None, key.clone());
-        // self.keys.insert(event_id, loc);
-        // self.messages.insert_message(key, msg);
-        todo!()
-    }
-
-    fn insert_thread(&mut self, _msg: RoomMessageEvent, _thread_root: OwnedEventId) {
-        // let event_id = msg.event_id().to_owned();
-        // let key = todo!();
-        //
-        // let replies = self
-        //     .threads
-        //     .entry(thread_root.clone())
-        //     .or_insert_with(|| Messages::thread(thread_root.clone()));
-        // let loc = EventLocation::Message(Some(thread_root), key.clone());
-        // self.keys.insert(event_id, loc);
-        // replies.insert_message(key, msg);
-        todo!()
-    }
-
-    /// Insert a new message event.
-    pub fn insert(&mut self, msg: RoomMessageEvent) {
-        match msg {
-            RoomMessageEvent::Original(OriginalRoomMessageEvent {
-                content: RoomMessageEventContent { relates_to: Some(ref relates_to), .. },
-                ..
-            }) => {
-                match relates_to {
-                    Relation::Replacement(_) => todo!(),
-                    Relation::Thread(Thread { event_id, .. }) => {
-                        let event_id = event_id.clone();
-                        self.insert_thread(msg, event_id);
-                    },
-                    Relation::Reply { .. } => self.insert_message(msg),
-                    _ => self.insert_message(msg),
-                }
-            },
-            _ => self.insert_message(msg),
-        }
-    }
-
     /// Insert a new message event, and prepare for image-preview if it has an image attachment.
+    #[allow(unused)]
     pub fn insert_with_preview(
         &mut self,
         ev: RoomMessageEvent,
@@ -1064,52 +880,13 @@ impl RoomInfo {
         worker: &Requester,
     ) {
         // TODO: also register stickers
-        let source = source_from_event(&ev);
-        self.insert(ev);
+        let source = todo!();
 
-        if let Some((_, source)) = source {
+        if let Some(source) = source {
             if let Some(image_preview) = &settings.tunables.image_preview {
                 previews.register_preview(settings, source, image_preview.size, worker)
             }
         }
-    }
-
-    /// Indicates whether we've recently fetched scrollback for this room.
-    pub fn recently_fetched(&self) -> bool {
-        self.fetch_last.is_some_and(|i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
-    }
-
-    fn clear_receipt(&mut self, thread: &ReceiptThread, user_id: &OwnedUserId) -> Option<()> {
-        let old_event_id =
-            self.user_receipts.get(thread).and_then(|receipts| receipts.get(user_id))?;
-        let old_thread = self.event_receipts.get_mut(thread)?;
-        let old_receipts = old_thread.get_mut(old_event_id)?;
-        old_receipts.remove(user_id);
-
-        if old_receipts.is_empty() {
-            old_thread.remove(old_event_id);
-        }
-        if old_thread.is_empty() {
-            self.event_receipts.remove(thread);
-        }
-
-        None
-    }
-
-    pub fn set_receipt(
-        &mut self,
-        thread: ReceiptThread,
-        user_id: OwnedUserId,
-        event_id: OwnedEventId,
-    ) {
-        self.clear_receipt(&thread, &user_id);
-        self.event_receipts
-            .entry(thread.clone())
-            .or_default()
-            .entry(event_id.clone())
-            .or_default()
-            .insert(user_id.clone());
-        self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
     }
 
     pub fn fully_read(&mut self, _user_id: &UserId) {
@@ -1135,15 +912,6 @@ impl RoomInfo {
         //     self.set_receipt(thread, user_id.to_owned(), event_id.clone());
         // }
         todo!()
-    }
-
-    pub fn receipts<'a>(
-        &'a self,
-        user_id: &'a UserId,
-    ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
-        self.user_receipts
-            .iter()
-            .filter_map(move |(t, rs)| rs.get(user_id).map(|r| (t, r)))
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {
@@ -1305,69 +1073,6 @@ impl SyncInfo {
     }
 }
 
-static MESSAGE_NEED_TTL: u8 = 30;
-
-#[derive(Debug, PartialEq)]
-/// Load messages until the event is loaded or `ttl` loads are exceeded
-pub struct MessageNeed {
-    pub event_id: OwnedEventId,
-    pub ttl: u8,
-}
-
-#[derive(Default, Debug, PartialEq)]
-pub struct Need {
-    pub members: bool,
-    pub messages: Option<Vec<MessageNeed>>,
-}
-
-/// Things that need loading for different rooms.
-#[derive(Default)]
-pub struct RoomNeeds {
-    needs: HashMap<OwnedRoomId, Need>,
-}
-
-impl RoomNeeds {
-    /// Mark a room for needing to load members.
-    pub fn need_members(&mut self, room_id: OwnedRoomId) {
-        self.needs.entry(room_id).or_default().members = true;
-    }
-
-    /// Mark a room for needing to load messages.
-    pub fn need_messages(&mut self, room_id: OwnedRoomId) {
-        self.needs.entry(room_id).or_default().messages.get_or_insert_default();
-    }
-
-    /// Mark a room for needing to load messages until the given message is loaded or a retry limit
-    /// is exceeded.
-    pub fn need_message(&mut self, room_id: OwnedRoomId, event_id: OwnedEventId) {
-        let messages = &mut self.needs.entry(room_id).or_default().messages.get_or_insert_default();
-
-        messages.push(MessageNeed { event_id, ttl: MESSAGE_NEED_TTL });
-    }
-
-    pub fn need_messages_all(&mut self, room_id: OwnedRoomId, message_needs: Vec<MessageNeed>) {
-        self.needs
-            .entry(room_id)
-            .or_default()
-            .messages
-            .get_or_insert_default()
-            .extend(message_needs);
-    }
-
-    pub fn rooms(&self) -> usize {
-        self.needs.len()
-    }
-}
-
-impl IntoIterator for RoomNeeds {
-    type Item = (OwnedRoomId, Need);
-    type IntoIter = IntoIter<OwnedRoomId, Need>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.needs.into_iter()
-    }
-}
-
 #[derive(Default)]
 pub struct Rooms(CompletionMap<OwnedRoomId, RoomInfo>);
 
@@ -1380,14 +1085,7 @@ impl Rooms {
 
                 name: Default::default(),
                 tags: Default::default(),
-                keys: Default::default(),
-                event_receipts: Default::default(),
-                user_receipts: Default::default(),
-                reactions: Default::default(),
                 threads: Default::default(),
-                fetching: Default::default(),
-                fetch_id: Default::default(),
-                fetch_last: Default::default(),
                 users_typing: Default::default(),
                 display_names: Default::default(),
                 draw_last: Default::default(),
@@ -1428,9 +1126,6 @@ pub struct ChatStore {
 
     /// Settings for the current profile loaded from config file.
     pub settings: ApplicationSettings,
-
-    /// Set of rooms that need more messages loaded in their scrollback.
-    pub need_load: RoomNeeds,
 
     /// [CompletionMap] of Emoji shortcodes.
     pub emojis: CompletionMap<String, &'static Emoji>,
@@ -1474,7 +1169,6 @@ impl ChatStore {
             rooms: Default::default(),
             presences: Default::default(),
             verifications: Default::default(),
-            need_load: Default::default(),
             sync_info: Default::default(),
             draw_curr: None,
             ring_bell: false,
@@ -2014,69 +1708,6 @@ pub mod tests {
     use ratatui::style::Color;
 
     #[test]
-    fn multiple_identical_reactions() {
-        // let mut info = RoomInfo::default();
-        let mut info: RoomInfo = todo!();
-
-        let content = ReactionEventContent::new(Annotation::new(
-            owned_event_id!("$my_reaction"),
-            "🏠".to_owned(),
-        ));
-
-        for i in 0..3 {
-            let event_id = format!("$house_{i}");
-            info.insert_reaction(MessageLikeEvent::Original(
-                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
-                    content: content.clone(),
-                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
-                    sender: owned_user_id!("@foo:example.org"),
-                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
-                    room_id: owned_room_id!("!foo:example.org"),
-                    unsigned: MessageLikeUnsigned::new(),
-                },
-            ));
-        }
-
-        let content = ReactionEventContent::new(Annotation::new(
-            owned_event_id!("$my_reaction"),
-            "🙂".to_owned(),
-        ));
-
-        for i in 0..2 {
-            let event_id = format!("$smile_{i}");
-            info.insert_reaction(MessageLikeEvent::Original(
-                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
-                    content: content.clone(),
-                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
-                    sender: owned_user_id!("@foo:example.org"),
-                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
-                    room_id: owned_room_id!("!foo:example.org"),
-                    unsigned: MessageLikeUnsigned::new(),
-                },
-            ));
-        }
-
-        for i in 2..4 {
-            let event_id = format!("$smile_{i}");
-            info.insert_reaction(MessageLikeEvent::Original(
-                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
-                    content: content.clone(),
-                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
-                    sender: owned_user_id!("@bar:example.org"),
-                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
-                    room_id: owned_room_id!("!foo:example.org"),
-                    unsigned: MessageLikeUnsigned::new(),
-                },
-            ));
-        }
-
-        assert_eq!(info.get_reactions(&owned_event_id!("$my_reaction")), vec![
-            ("🏠", 1),
-            ("🙂", 2)
-        ]);
-    }
-
-    #[test]
     fn test_typing_spans() {
         // let mut info = RoomInfo::default();
         let mut info: RoomInfo = todo!();
@@ -2152,21 +1783,6 @@ pub mod tests {
                 Span::from(" is typing...")
             ])
         );
-    }
-
-    #[test]
-    fn test_need_load() {
-        let room_id = TEST_ROOM1_ID.clone();
-
-        let mut need_load = RoomNeeds::default();
-
-        need_load.need_messages(room_id.clone());
-        need_load.need_members(room_id.clone());
-
-        assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
-            room_id,
-            Need { members: true, messages: Some(Vec::new()) }
-        )],);
     }
 
     #[tokio::test]

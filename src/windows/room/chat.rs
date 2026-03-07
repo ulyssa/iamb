@@ -282,6 +282,7 @@ impl ChatState {
 
                 Ok(info.into())
             },
+            #[allow(unused)]
             MessageAction::Edit => {
                 if !msg.item().is_editable() {
                     let msg = "Cannot edit this message";
@@ -390,9 +391,8 @@ impl ChatState {
                 };
 
                 let Some(key) = info.get_message_key(&reply) else {
-                    store.application.need_load.need_message(self.room_id.clone(), reply);
-                    let msg = "Replied to message will be loaded in the background";
-                    return Err(UIError::Failure(msg.into()));
+                    // maybe switch to event focused timeline
+                    todo!();
                 };
 
                 self.scrollback.goto_message(key.clone());

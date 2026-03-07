@@ -50,7 +50,6 @@ use crate::{
         IambResult,
         ProgramContext,
         ProgramStore,
-        RoomFetchStatus,
         RoomFocus,
         RoomInfo,
     },
@@ -222,37 +221,32 @@ impl ScrollbackState {
         }
     }
 
-    fn need_more_messages(&self, info: &RoomInfo) -> bool {
-        match info.fetch_id {
-            // Don't fetch if we've already hit the end of history.
-            RoomFetchStatus::Done => return false,
-            // Fetch at least once if we're viewing a room.
-            RoomFetchStatus::NotStarted => return true,
-            _ => {},
-        }
+    fn need_more_messages(&self, _info: &RoomInfo) -> bool {
+        // TODO: check current fetch status
 
-        let first_key = self.get_thread(info).and_then(|t| t.first_key());
-        let at_top = first_key == self.viewctx.corner.key;
-
-        match (at_top, self.thread.as_ref()) {
-            (false, _) => {
-                // Not scrolled to top, don't fetch.
-                false
-            },
-            (true, None) => {
-                // Scrolled to top in non-thread, fetch.
-                true
-            },
-            (true, Some(thread_root)) => {
-                // Scrolled to top in thread, fetch until we have the thread root.
-                //
-                // Typically, if the user has entered a thread view, we should already have fetched
-                // all the way back to the thread root, but it is technically possible via :threads
-                // or when restoring a thread view in the layout at startup to not have the message
-                // yet.
-                !info.keys.contains_key(thread_root)
-            },
-        }
+        // let first_key = self.get_thread(info).and_then(|t| t.first_key());
+        // let at_top = first_key == self.viewctx.corner.key;
+        //
+        // match (at_top, self.thread.as_ref()) {
+        //     (false, _) => {
+        //         // Not scrolled to top, don't fetch.
+        //         false
+        //     },
+        //     (true, None) => {
+        //         // Scrolled to top in non-thread, fetch.
+        //         true
+        //     },
+        //     (true, Some(thread_root)) => {
+        //         // Scrolled to top in thread, fetch until we have the thread root.
+        //         //
+        //         // Typically, if the user has entered a thread view, we should already have fetched
+        //         // all the way back to the thread root, but it is technically possible via :threads
+        //         // or when restoring a thread view in the layout at startup to not have the message
+        //         // yet.
+        //         !info.keys.contains_key(thread_root)
+        //     },
+        // }
+        todo!()
     }
 
     fn scrollview(
@@ -694,7 +688,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
-                            store.application.need_load.need_messages(self.room_id.clone());
+                            // TODO: fetch messages
+                            // store.application.need_load.need_messages(self.room_id.clone());
                         }
                         mc
                     },
@@ -770,7 +765,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
-                            store.application.need_load.need_messages(self.room_id.to_owned());
+                            // TODO: fetch messages
+                            // store.application.need_load.need_messages(self.room_id.to_owned());
                         }
 
                         mc.map(|c| self._range_to(c))
@@ -1303,6 +1299,7 @@ impl<'a> Scrollback<'a> {
 impl StatefulWidget for Scrollback<'_> {
     type State = ScrollbackState;
 
+    #[allow(unused)]
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let info = self.store.application.rooms.get_or_default(state.room_id.clone());
         let settings = &self.store.application.settings;
@@ -1333,7 +1330,8 @@ impl StatefulWidget for Scrollback<'_> {
             k
         } else {
             if state.need_more_messages(info) {
-                self.store.application.need_load.need_messages(state.room_id.to_owned());
+                // TODO: fetch history
+                // self.store.application.need_load.need_messages(state.room_id.to_owned());
             }
             return;
         };
@@ -1359,11 +1357,13 @@ impl StatefulWidget for Scrollback<'_> {
                     .previews
                     .load(source, &self.store.application.worker);
             }
-            let reply = item
-                .reply_to()
-                .or_else(|| item.thread_root())
-                .and_then(|e| info.get_event(&e))
-                .and_then(|msg| msg.image_preview());
+            // TODO: use `InReplyToDetails::event`
+            // let reply = item
+            //     .reply_to()
+            //     .or_else(|| item.thread_root())
+            //     .and_then(|e| info.get_event(&e))
+            //     .and_then(|msg| msg.image_preview());
+            let reply = todo!();
             if let Some(source) = reply {
                 self.store
                     .application
@@ -1462,7 +1462,9 @@ impl StatefulWidget for Scrollback<'_> {
         // Check whether we should load older messages for this room.
         if state.need_more_messages(info) {
             // If the top of the screen is the older message, load more.
-            self.store.application.need_load.need_messages(state.room_id.to_owned());
+            // self.store.application.need_load.need_messages(state.room_id.to_owned());
+
+            // TODO: fetch history
         }
 
         info.draw_last = self.store.application.draw_curr;
@@ -1472,7 +1474,7 @@ impl StatefulWidget for Scrollback<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{base::Need, tests::*};
+    use crate::tests::*;
 
     #[tokio::test]
     async fn test_search_messages() {
@@ -1502,23 +1504,25 @@ mod tests {
         // Search backwards to MSG2.
         scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
-        assert_eq!(
-            std::mem::take(&mut store.application.need_load)
-                .into_iter()
-                .collect::<Vec<(OwnedRoomId, Need)>>()
-                .is_empty(),
-            true,
-        );
+        // assert_eq!(
+        //     std::mem::take(&mut store.application.need_load)
+        //         .into_iter()
+        //         .collect::<Vec<(OwnedRoomId, Need)>>()
+        //         .is_empty(),
+        //     true,
+        // );
+        todo!();
 
         // Can't go any further; need_load now contains the room ID.
         scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
-        assert_eq!(
-            std::mem::take(&mut store.application.need_load)
-                .into_iter()
-                .collect::<Vec<(OwnedRoomId, Need)>>(),
-            vec![(room_id.clone(), Need { messages: Some(Vec::new()), members: false })]
-        );
+        // assert_eq!(
+        //     std::mem::take(&mut store.application.need_load)
+        //         .into_iter()
+        //         .collect::<Vec<(OwnedRoomId, Need)>>(),
+        //     vec![(room_id.clone(), Need { messages: Some(Vec::new()), members: false })]
+        // );
+        todo!();
 
         // Search forward twice to MSG1.
         scrollback.search(next, 2.into(), &ctx, &mut store).unwrap();
