@@ -38,7 +38,7 @@ use crate::base::{
     SpaceAction,
 };
 
-use crate::windows::{room_fields_cmp, RoomItem, RoomLikeItem};
+use crate::windows::{room_fields_cmp, ChatItem, GenericChatItem, RoomLikeItem};
 
 const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -46,7 +46,7 @@ const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 pub struct SpaceState {
     room_id: OwnedRoomId,
     room: MatrixRoom,
-    list: ListState<RoomItem, IambInfo>,
+    list: ListState<GenericChatItem<ChatItem>, IambInfo>,
     last_fetch: Option<Instant>,
 }
 
@@ -164,7 +164,7 @@ impl TerminalCursor for SpaceState {
 }
 
 impl Deref for SpaceState {
-    type Target = ListState<RoomItem, IambInfo>;
+    type Target = ListState<GenericChatItem<ChatItem>, IambInfo>;
 
     fn deref(&self) -> &Self::Target {
         &self.list
@@ -211,13 +211,24 @@ impl StatefulWidget for Space<'_> {
                 Ok(members) => {
                     let mut items = members
                         .into_iter()
-                        .filter_map(|id| {
-                            let (room, _, tags) =
-                                self.store.application.worker.get_room(id.clone()).ok()?;
-                            let room_info = std::sync::Arc::new((room, tags));
+                        .filter_map(|room_id| self.store.application.rooms.get(&room_id))
+                        .filter_map(|info| {
+                            let room_id = info.room().room_id();
+                            let is_dm = if self
+                                .store
+                                .application
+                                .sync_info
+                                .dms
+                                .iter()
+                                .any(|id| id == room_id)
+                            {
+                                ChatItem::Dm
+                            } else {
+                                ChatItem::Room
+                            };
 
-                            if id != state.room_id {
-                                Some(RoomItem::new(room_info, self.store))
+                            if room_id != state.room_id {
+                                Some(GenericChatItem::new(info, self.store, is_dm))
                             } else {
                                 None
                             }

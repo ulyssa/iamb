@@ -251,53 +251,44 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
-async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
-    let mut names = vec![];
-
-    let mut spaces = vec![];
-    let mut rooms = vec![];
-    let mut dms = vec![];
-
-    for room in client.invited_rooms().into_iter() {
-        let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
-        let tags = room.tags().await.unwrap_or_default();
-
-        names.push((room.room_id().to_owned(), name));
-
-        if is_direct(&room).await {
-            dms.push(Arc::new((room, tags)));
-        } else if room.is_space() {
-            spaces.push(Arc::new((room, tags)));
-        } else {
-            rooms.push(Arc::new((room, tags)));
-        }
-    }
-
-    for room in client.joined_rooms().into_iter() {
-        let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
-        let tags = room.tags().await.unwrap_or_default();
-
-        names.push((room.room_id().to_owned(), name));
-
-        if is_direct(&room).await {
-            dms.push(Arc::new((room, tags)));
-        } else if room.is_space() {
-            spaces.push(Arc::new((room, tags)));
-        } else {
-            rooms.push(Arc::new((room, tags)));
-        }
-    }
-
-    let mut locked = store.lock().await;
-    locked.application.sync_info.spaces = spaces;
-    locked.application.sync_info.rooms = rooms;
-    locked.application.sync_info.dms = dms;
-
-    for (room_id, name) in names {
-        locked.application.rooms.get_or_default(room_id).name = name.into();
-    }
-
-    // TODO: load initial messages
+async fn refresh_rooms(_client: &Client, _store: &AsyncProgramStore) {
+    todo!()
+    // let mut names = vec![];
+    //
+    // let mut spaces = vec![];
+    // let mut rooms = vec![];
+    // let mut dms = vec![];
+    //
+    // // TODO: process invited rooms
+    //
+    // for room in client.joined_rooms().into_iter() {
+    //     let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
+    //     let tags = room.tags().await.unwrap_or_default();
+    //
+    //     names.push((room.room_id().to_owned(), name));
+    //
+    //     if is_direct(&room).await {
+    //         dms.push(Arc::new((room, tags)));
+    //     } else if room.is_space() {
+    //         spaces.push(Arc::new((room, tags)));
+    //     } else {
+    //         rooms.push(Arc::new((room, tags)));
+    //     }
+    // }
+    //
+    // let mut locked = store.lock().await;
+    // locked.application.sync_info.spaces = spaces;
+    // locked.application.sync_info.rooms = rooms;
+    // locked.application.sync_info.dms = dms;
+    //
+    // for (room_id, name) in names {
+    //     locked.application.rooms.get_or_default(room_id).name = name.into();
+    //     // if let Some(alias) = room.canonical_alias() {
+    //     //     locked.application.names.insert(alias.to_string(), room_id);
+    //     // }
+    // }
+    //
+    // // TODO: load initial messages
 }
 
 async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {

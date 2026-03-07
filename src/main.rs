@@ -559,18 +559,16 @@ impl Application {
 
         let info = match action {
             IambAction::ClearUnreads => {
-                let user_id = &store.application.settings.profile.user_id;
-
                 // Clear any notifications we displayed:
                 store.application.open_notifications.clear();
 
-                for room_id in store.application.sync_info.chats() {
-                    store
-                        .application
-                        .rooms
+                let ChatStore { sync_info, rooms, settings, .. } = &mut store.application;
+
+                sync_info.rooms.iter().chain(sync_info.dms.iter()).for_each(|room_id| {
+                    rooms
                         .get_or_default(room_id.to_owned())
-                        .fully_read(user_id);
-                }
+                        .fully_read(&settings.profile.user_id);
+                });
 
                 None
             },

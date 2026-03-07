@@ -852,6 +852,11 @@ pub struct RoomInfo {
 }
 
 impl RoomInfo {
+    #[inline]
+    pub fn room(&self) -> &MatrixRoom {
+        self.messages.timeline().room()
+    }
+
     pub fn get_thread(&self, root: Option<&EventId>) -> Option<&Messages> {
         if let Some(thread_root) = root {
             self.threads.get(thread_root)
@@ -1050,27 +1055,13 @@ fn picker_from_settings(settings: &ApplicationSettings) -> Option<Picker> {
 #[derive(Default)]
 pub struct SyncInfo {
     /// Spaces that the user is a member of.
-    pub spaces: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub spaces: Vec<OwnedRoomId>,
 
     /// Rooms that the user is a member of.
-    pub rooms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub rooms: Vec<OwnedRoomId>,
 
     /// DMs that the user is a member of.
-    pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
-}
-
-impl SyncInfo {
-    pub fn rooms(&self) -> impl Iterator<Item = &RoomId> {
-        self.rooms.iter().map(|r| r.0.room_id())
-    }
-
-    pub fn dms(&self) -> impl Iterator<Item = &RoomId> {
-        self.dms.iter().map(|r| r.0.room_id())
-    }
-
-    pub fn chats(&self) -> impl Iterator<Item = &RoomId> {
-        self.rooms().chain(self.dms())
-    }
+    pub dms: Vec<OwnedRoomId>,
 }
 
 #[derive(Default)]
