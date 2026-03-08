@@ -344,10 +344,23 @@ impl Messages {
             .filter_map(|item| generate_html(item).map(|html| (item.identifier(), html)))
             .collect();
 
+        let start_element = messages
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(i, item)| {
+                if item.as_event().is_some() {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+
         let messages = Self {
             messages,
             timeline: timeline.into(),
-            start_element: 0,
+            start_element,
             thread,
             fetching: false,
         };
