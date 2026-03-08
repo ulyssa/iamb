@@ -1,7 +1,7 @@
 //! Message scrollback
 use std::sync::{Arc, Weak};
 
-use matrix_sdk_ui::timeline::TimelineItem;
+use matrix_sdk_ui::timeline::{TimelineDetails, TimelineItem};
 use ratatui_image::Image;
 use regex::Regex;
 
@@ -257,8 +257,6 @@ impl ScrollbackState {
             todo!()
         }
 
-        let item = thread.range_messages(..).next().map(|(_, item)| item);
-
         match self.thread.as_ref() {
             None => {
                 // Scrolled to top in non-thread, fetch.
@@ -271,7 +269,12 @@ impl ScrollbackState {
                 // all the way back to the thread root, but it is technically possible via :threads
                 // or when restoring a thread view in the layout at startup to not have the message
                 // yet.
-                item.and_then(|item| item.event_id())
+
+                thread
+                    .range_messages(..)
+                    .next()
+                    .map(|(_, item)| item)
+                    .and_then(|item| item.event_id())
                     .is_none_or(|event_id| event_id != thread_root)
             },
         }
@@ -1067,7 +1070,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         "You are already in a thread. Use :reply to reply to a specific message.";
                     let err = EditError::Failure(msg.into());
                     Err(err)
-                } else if let Some(root) = msg.item().event_id() {
+                } else if let Some(root) = msg.event_id() {
                     let room_id = self.room_id.clone();
                     let id = IambId::Room(room_id, Some(root.to_owned()));
                     let open = WindowAction::Switch(OpenTarget::Application(id));
@@ -1386,7 +1389,7 @@ impl StatefulWidget for Scrollback<'_> {
         let mut sawit = false;
         let mut prev = prev_sender(&corner_key, thread);
 
-        // load image previews
+        // load image previews and replies
         for (_, item) in thread.range_messages(&corner_key..).rev() {
             if let Some(source) = item.image_preview() {
                 self.store
@@ -1394,19 +1397,40 @@ impl StatefulWidget for Scrollback<'_> {
                     .previews
                     .load(source, &self.store.application.worker);
             }
-            // TODO: use `InReplyToDetails::event`
-            // let reply = item
-            //     .reply_to()
-            //     .or_else(|| item.thread_root())
-            //     .and_then(|e| info.get_event(&e))
-            //     .and_then(|msg| msg.image_preview());
-            // let reply = todo!();
-            // if let Some(source) = reply {
-            //     self.store
-            //         .application
-            //         .previews
-            //         .load(source, &self.store.application.worker);
-            // }
+            if let Some(TimelineDetails::Ready(replied)) = item
+                .content()
+                .as_msglike()
+                .and_then(|msg| msg.in_reply_to.as_ref())
+                .map(|details| &details.event)
+            {
+                if let Some(source) = replied.image_preview() {
+                    self.store
+                        .application
+                        .previews
+                        .load(source, &self.store.application.worker);
+                }
+            }
+
+            if let Some(TimelineDetails::Unavailable) = item
+                .content()
+                .as_msglike()
+                .and_then(|msg| msg.in_reply_to.as_ref())
+                .map(|details| &details.event)
+            {
+                if let Some(event_id) = item.event_id() {
+                    let timeline = Arc::clone(thread.timeline());
+                    let event_id = event_id.to_owned();
+                    tokio::spawn(async move {
+                        if let Err(err) = timeline.fetch_details_for_event(&event_id).await {
+                            tracing::warn!(
+                                room_id = ?timeline.room().room_id(),
+                                ?event_id,
+                                "unable to load reply: {err}"
+                            );
+                        }
+                    });
+                }
+            }
         }
 
         let previews = &self.store.application.previews;

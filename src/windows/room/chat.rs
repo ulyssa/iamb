@@ -183,7 +183,7 @@ impl ChatState {
                 Err(UIError::NeedConfirm(prompt))
             },
             MessageAction::Download(filename, flags) => {
-                let Some(ev) = msg.item().content().as_message() else {
+                let Some(ev) = msg.content().as_message() else {
                     return Err(IambError::NoAttachment.into());
                 };
                 let media = client.media();
@@ -204,7 +204,7 @@ impl ChatState {
                             return Err(IambError::NoAttachment.into());
                         }
 
-                        let links = if let Some(html) = info.get_html(&msg.item().identifier()) {
+                        let links = if let Some(html) = info.get_html(&msg.identifier()) {
                             html.get_links()
                         } else {
                             linkify::LinkFinder::new()
@@ -300,14 +300,14 @@ impl ChatState {
             },
             #[allow(unused)]
             MessageAction::Edit => {
-                if !msg.item().is_editable() {
+                if !msg.is_editable() {
                     let msg = "Cannot edit this message";
                     let err = UIError::Failure(msg.into());
 
                     return Err(err);
                 }
 
-                let Some(text) = msg.item().content().as_message().and_then(|msg| {
+                let Some(text) = msg.content().as_message().and_then(|msg| {
                     match msg.msgtype() {
                         MessageType::Text(msg) => Some(msg.body.as_str()),
                         _ => None,
@@ -343,7 +343,6 @@ impl ChatState {
                 };
 
                 if msg
-                    .item()
                     .content()
                     .reactions()
                     .and_then(|reactions| reactions.get(&emoji))
@@ -357,7 +356,7 @@ impl ChatState {
 
                 thread
                     .timeline()
-                    .toggle_reaction(&msg.item().identifier(), &emoji)
+                    .toggle_reaction(&msg.identifier(), &emoji)
                     .await
                     .map_err(IambError::from)?;
 
@@ -373,7 +372,7 @@ impl ChatState {
                     return Err(UIError::NeedConfirm(prompt));
                 }
 
-                if msg.item().content().is_redacted() {
+                if msg.content().is_redacted() {
                     let msg = "Cannot redact already redacted message";
                     let err = UIError::Failure(msg.into());
 
@@ -382,14 +381,14 @@ impl ChatState {
 
                 thread
                     .timeline()
-                    .redact(&msg.item().identifier(), reason.as_deref())
+                    .redact(&msg.identifier(), reason.as_deref())
                     .await
                     .map_err(IambError::from)?;
 
                 Ok(None)
             },
             MessageAction::Reply => {
-                if let Some(event_id) = msg.item().event_id() {
+                if let Some(event_id) = msg.event_id() {
                     self.reply_to = Some(event_id.to_owned());
                     self.focus = RoomFocus::MessageBar;
                     Ok(None)
@@ -435,7 +434,7 @@ impl ChatState {
                     None => None,
                 };
 
-                let reactions = msg.item().content().reactions();
+                let reactions = msg.content().reactions();
 
                 let reactions = reactions
                     .iter()
@@ -453,7 +452,7 @@ impl ChatState {
                 for reaction in reactions {
                     thread
                         .timeline()
-                        .toggle_reaction(&msg.item().identifier(), reaction)
+                        .toggle_reaction(&msg.identifier(), reaction)
                         .await
                         .map_err(IambError::from)?;
                 }

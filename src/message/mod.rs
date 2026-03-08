@@ -12,16 +12,18 @@ use alternating_iter::AlternatingExt;
 use chrono::{DateTime, Local as LocalTz};
 use futures::StreamExt;
 use humansize::{format_size, DECIMAL};
-use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::receipt::{Receipt, ReceiptThread};
 use matrix_sdk::ruma::events::room::message::TextMessageEventContent;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::{EventId, OwnedRoomId, RoomId, UserId};
 use matrix_sdk::Room;
 use matrix_sdk_ui::eyeball_im::{Vector, VectorDiff};
 use matrix_sdk_ui::timeline::{
+    EmbeddedEvent,
     EventTimelineItem,
     MsgLikeContent,
     MsgLikeKind,
+    Profile,
     ReactionsByKeyBySender,
     RoomExt,
     TimelineDetails,
@@ -35,6 +37,7 @@ use matrix_sdk_ui::timeline::{
     VirtualTimelineItem,
 };
 use matrix_sdk_ui::Timeline;
+use ratatui::style::Color;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
@@ -874,21 +877,68 @@ impl<'a> MessageFormatter<'a> {
 
     fn push_in_reply(
         &mut self,
-        msg: &'a Message,
+        msg: &'a TimelineDetails<Box<EmbeddedEvent>>,
         style: Style,
         text: &mut Text<'a>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
     ) -> Option<ProtocolPreview<'a>> {
+        let width = self.width();
+        let w = width.saturating_sub(2);
+
+        let msg = match msg {
+            TimelineDetails::Unavailable => {
+                let msg = "Message not loaded";
+                let trailing = w.saturating_sub(msg.len());
+                let line = Line::from(vec![
+                    Span::styled(" ", style),
+                    Span::styled(THICK_VERTICAL, style),
+                    Span::styled(msg, style),
+                    space_span(trailing, style),
+                ]);
+
+                self.push_spans(line, style, text);
+
+                return None;
+            },
+            TimelineDetails::Pending => {
+                let msg = "Message loading";
+                let trailing = w.saturating_sub(msg.len());
+                let line = Line::from(vec![
+                    Span::styled(" ", style),
+                    Span::styled(THICK_VERTICAL, style),
+                    Span::styled(msg, style),
+                    space_span(trailing, style),
+                ]);
+
+                self.push_spans(line, style, text);
+
+                return None;
+            },
+            TimelineDetails::Error(error) => {
+                let style = style.patch(Style::new().fg(Color::Red));
+                let msg = error.to_string();
+                let mut error = wrapped_text(msg, w, style);
+
+                for line in error.lines.iter_mut() {
+                    line.spans.insert(0, Span::styled(THICK_VERTICAL, style));
+                    line.spans.insert(0, Span::styled(" ", style));
+                }
+
+                self.push_text(error, style, text);
+
+                return None;
+            },
+            TimelineDetails::Ready(msg) => msg,
+        };
+
         let reply_style = if settings.tunables.message_user_color {
             style.patch(settings.get_user_color(msg.sender()))
         } else {
             style
         };
 
-        let width = self.width();
-        let w = width.saturating_sub(2);
         let (mut replied, proto) = msg.show_msg(w, reply_style, true, info, settings, previews);
         let mut sender = msg.sender_span(self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
@@ -999,16 +1049,83 @@ pub type Message = EventTimelineItem;
 
 impl MessageExt for Message {
     #[inline]
-    fn item(&self) -> &EventTimelineItem {
-        self
+    fn content(&self) -> &TimelineItemContent {
+        self.content()
+    }
+
+    #[inline]
+    fn sender(&self) -> &UserId {
+        self.sender()
+    }
+
+    #[inline]
+    fn sender_profile(&self) -> &TimelineDetails<Profile> {
+        self.sender_profile()
+    }
+
+    #[inline]
+    fn message_timestamp(&self) -> MessageTimeStamp {
+        self.timestamp().into()
+    }
+
+    #[inline]
+    fn identifier(&self) -> TimelineEventItemId {
+        self.identifier()
+    }
+
+    #[inline]
+    fn is_local_echo(&self) -> bool {
+        self.is_local_echo()
+    }
+
+    #[inline]
+    fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)> {
+        self.read_receipts().iter()
+    }
+}
+
+impl MessageExt for EmbeddedEvent {
+    fn content(&self) -> &TimelineItemContent {
+        &self.content
+    }
+
+    fn sender(&self) -> &UserId {
+        &self.sender
+    }
+
+    fn sender_profile(&self) -> &TimelineDetails<Profile> {
+        &self.sender_profile
+    }
+
+    fn message_timestamp(&self) -> MessageTimeStamp {
+        self.timestamp.into()
+    }
+
+    fn identifier(&self) -> TimelineEventItemId {
+        self.identifier.clone()
+    }
+
+    fn is_local_echo(&self) -> bool {
+        false
+    }
+
+    fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)> {
+        vec![].into_iter()
     }
 }
 
 pub trait MessageExt {
-    fn item(&self) -> &EventTimelineItem;
+    fn content(&self) -> &TimelineItemContent;
+    fn sender(&self) -> &UserId;
+    fn sender_profile(&self) -> &TimelineDetails<Profile>;
+    fn message_timestamp(&self) -> MessageTimeStamp;
+    fn identifier(&self) -> TimelineEventItemId;
+    fn is_local_echo(&self) -> bool;
+    fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)>;
+
     fn body(&self) -> Cow<'_, str> {
         #[allow(unused)]
-        match self.item().content() {
+        match self.content() {
             TimelineItemContent::MsgLike(content) => body_cow_msglike(content),
             TimelineItemContent::MembershipChange(change) => body_cow_membership(change),
             TimelineItemContent::ProfileChange(change) => body_cow_profile(change),
@@ -1022,26 +1139,21 @@ pub trait MessageExt {
     }
 
     fn image_preview(&self) -> Option<&MediaSource> {
-        if let MessageType::Image(c) = self.item().content().as_message()?.msgtype() {
+        if let MessageType::Image(c) = self.content().as_message()?.msgtype() {
             Some(&c.source)
         } else {
             None
         }
     }
 
-    fn message_timestamp(&self) -> MessageTimeStamp {
-        self.item().timestamp().into()
-    }
-
     fn is_emote(&self) -> bool {
-        self.item()
-            .content()
+        self.content()
             .as_message()
             .is_some_and(|msg| matches!(msg.msgtype(), MessageType::Emote(_)))
     }
 
     fn reply_to(&self) -> Option<OwnedEventId> {
-        Some(self.item().content().as_msglike()?.in_reply_to.as_ref()?.event_id.clone())
+        Some(self.content().as_msglike()?.in_reply_to.as_ref()?.event_id.clone())
     }
 
     fn get_render_style(&self, selected: bool, settings: &ApplicationSettings) -> Style {
@@ -1051,12 +1163,12 @@ pub trait MessageExt {
             style = style.add_modifier(StyleModifier::REVERSED)
         }
 
-        if self.item().is_local_echo() {
+        if self.is_local_echo() {
             style = style.add_modifier(StyleModifier::ITALIC);
         }
 
         if settings.tunables.message_user_color {
-            let color = settings.get_user_color(self.item().sender());
+            let color = settings.get_user_color(self.sender());
             style = style.fg(color);
         }
 
@@ -1079,9 +1191,7 @@ pub trait MessageExt {
             let user = self.show_sender(prev_sender, true, settings);
             let time = Some(self.message_timestamp().show_time());
             let read = self
-                .item()
                 .read_receipts()
-                .iter()
                 .filter(|(_, receipt)| !matches!(receipt.thread, ReceiptThread::Unthreaded))
                 .map(|(user_id, _)| user_id.to_owned())
                 .collect();
@@ -1117,7 +1227,6 @@ pub trait MessageExt {
     /// Render the message as a [Text] object for the terminal.
     ///
     /// This will also get the image preview Protocol with an x/y offset.
-    #[allow(unused)]
     fn show_with_preview<'a>(
         &'a self,
         prev_sender: Option<&UserId>,
@@ -1135,12 +1244,11 @@ pub trait MessageExt {
         let width = fmt.width();
 
         // Show the message that this one replied to, if any.
-        // TODO: use `InReplyToDetails::event`
-        // let reply = self
-        //     .reply_to()
-        //     .or_else(|| self.thread_root())
-        //     .and_then(|e| info.get_event(&e));
-        let reply: Option<&Message> = None;
+        let reply = self
+            .content()
+            .as_msglike()
+            .and_then(|msg| msg.in_reply_to.as_ref())
+            .map(|details| &details.event);
         let proto_reply = reply.as_ref().and_then(|r| {
             // Format the reply header, push it into the `Text` buffer, and get any image.
             fmt.push_in_reply(r, style, &mut text, info, settings, previews)
@@ -1164,16 +1272,13 @@ pub trait MessageExt {
         }
 
         if settings.tunables.reaction_display {
-            if let Some(msg) = self.item().content().as_msglike() {
+            if let Some(msg) = self.content().as_msglike() {
                 fmt.push_reactions(&msg.reactions, style, &mut text);
             }
         }
 
-        if let Some(thread) = self
-            .item()
-            .content()
-            .as_msglike()
-            .and_then(|msg| msg.thread_summary.as_ref())
+        if let Some(thread) =
+            self.content().as_msglike().and_then(|msg| msg.thread_summary.as_ref())
         {
             fmt.push_thread_reply_count(thread.num_replies, &mut text);
         }
@@ -1190,7 +1295,7 @@ pub trait MessageExt {
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
     ) -> (Text<'a>, Option<&'a Protocol>) {
-        if let Some(html) = info.get_html(&self.item().identifier()) {
+        if let Some(html) = info.get_html(&self.identifier()) {
             (html.to_text(width, style, hide_reply, settings), None)
         } else {
             let mut msg = self.body();
@@ -1223,13 +1328,13 @@ pub trait MessageExt {
     }
 
     fn sender_span<'a>(&'a self, settings: &'a ApplicationSettings) -> Span<'a> {
-        let name = if let TimelineDetails::Ready(profile) = self.item().sender_profile() {
+        let name = if let TimelineDetails::Ready(profile) = self.sender_profile() {
             profile.display_name.as_deref()
         } else {
             None
         };
 
-        settings.get_user_span(self.item().sender(), name)
+        settings.get_user_span(self.sender(), name)
     }
 
     fn show_sender<'a>(
@@ -1239,7 +1344,7 @@ pub trait MessageExt {
         settings: &'a ApplicationSettings,
     ) -> Option<Span<'a>> {
         if let Some(prev) = prev_sender {
-            if self.item().sender() == prev && !self.is_emote() {
+            if self.sender() == prev && !self.is_emote() {
                 return None;
             }
         }
