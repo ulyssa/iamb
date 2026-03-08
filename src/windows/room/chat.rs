@@ -854,7 +854,8 @@ impl StatefulWidget for Chat<'_> {
                 #[allow(unused)]
                 self.store.application.rooms.get(state.id()).and_then(|room| {
                     let sender = todo!();
-                    let user = self.store.application.settings.get_user_span(sender, room);
+                    let display_name = todo!();
+                    let user = self.store.application.settings.get_user_span(sender, display_name);
                     let prefix = match (editing.is_some(), thread.is_some()) {
                         (true, false) => Span::from("Editing reply to "),
                         (true, true) => Span::from("Editing reply in thread to "),

@@ -24,6 +24,7 @@ use matrix_sdk_ui::timeline::{
     MsgLikeKind,
     ReactionsByKeyBySender,
     RoomExt,
+    TimelineDetails,
     TimelineEventItemId,
     TimelineFocus,
     TimelineItem,
@@ -893,7 +894,7 @@ impl<'a> MessageFormatter<'a> {
         let width = self.width();
         let w = width.saturating_sub(2);
         let (mut replied, proto) = msg.show_msg(w, reply_style, true, info, settings, previews);
-        let mut sender = msg.sender_span(info, self.settings);
+        let mut sender = msg.sender_span(self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
 
@@ -1070,7 +1071,6 @@ pub trait MessageExt {
         &'a self,
         prev_sender: Option<&UserId>,
         width: usize,
-        info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> MessageFormatter<'a> {
         let user_gutter = settings.tunables.user_gutter_width;
@@ -1080,7 +1080,7 @@ pub trait MessageExt {
         {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
-            let user = self.show_sender(prev_sender, true, info, settings);
+            let user = self.show_sender(prev_sender, true, settings);
             let time = Some(self.message_timestamp().show_time());
             let read = self
                 .item()
@@ -1094,7 +1094,7 @@ pub trait MessageExt {
         } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
-            let user = self.show_sender(prev_sender, true, info, settings);
+            let user = self.show_sender(prev_sender, true, settings);
             let time = Some(self.message_timestamp().show_time());
             let read = Vec::new();
 
@@ -1102,7 +1102,7 @@ pub trait MessageExt {
         } else if user_gutter + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Two;
             let fill = width - user_gutter;
-            let user = self.show_sender(prev_sender, true, info, settings);
+            let user = self.show_sender(prev_sender, true, settings);
             let time = None;
             let read = Vec::new();
 
@@ -1110,7 +1110,7 @@ pub trait MessageExt {
         } else {
             let cols = MessageColumns::One;
             let fill = width.saturating_sub(2);
-            let user = self.show_sender(prev_sender, false, info, settings);
+            let user = self.show_sender(prev_sender, false, settings);
             let time = None;
             let read = Vec::new();
 
@@ -1134,7 +1134,7 @@ pub trait MessageExt {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected, settings);
-        let mut fmt = self.get_render_format(prev_sender, width, info, settings);
+        let mut fmt = self.get_render_format(prev_sender, width, settings);
         let mut text = Text::default();
         let width = fmt.width();
 
@@ -1226,19 +1226,20 @@ pub trait MessageExt {
         }
     }
 
-    fn sender_span<'a>(
-        &'a self,
-        info: &'a RoomInfo,
-        settings: &'a ApplicationSettings,
-    ) -> Span<'a> {
-        settings.get_user_span(self.item().sender(), info)
+    fn sender_span<'a>(&'a self, settings: &'a ApplicationSettings) -> Span<'a> {
+        let name = if let TimelineDetails::Ready(profile) = self.item().sender_profile() {
+            profile.display_name.as_deref()
+        } else {
+            None
+        };
+
+        settings.get_user_span(self.item().sender(), name)
     }
 
     fn show_sender<'a>(
         &'a self,
         prev_sender: Option<&UserId>,
         align_right: bool,
-        info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Option<Span<'a>> {
         if let Some(prev) = prev_sender {
@@ -1247,7 +1248,7 @@ pub trait MessageExt {
             }
         }
 
-        let Span { content, style } = self.sender_span(info, settings);
+        let Span { content, style } = self.sender_span(settings);
         let user_gutter = settings.tunables.user_gutter_width;
         let ((truncated, width), _) = take_width(content, user_gutter - 2);
         let padding = user_gutter - 2 - width;

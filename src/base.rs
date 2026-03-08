@@ -827,6 +827,8 @@ impl UnreadInfo {
     }
 }
 
+type UserWithName = (OwnedUserId, Option<String>);
+
 /// Information about room's the user's joined.
 pub struct RoomInfo {
     /// The tags placed on this room.
@@ -839,10 +841,7 @@ pub struct RoomInfo {
     threads: HashMap<OwnedEventId, Messages>,
 
     /// Users currently typing in this room, and when we received notification of them doing so.
-    pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
-
-    /// The display names for users in this room.
-    pub display_names: HashMap<OwnedUserId, String>,
+    pub users_typing: Option<(Instant, Vec<UserWithName>)>,
 
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
@@ -867,7 +866,6 @@ impl RoomInfo {
             tags: Default::default(),
             threads: Default::default(),
             users_typing: Default::default(),
-            display_names: Default::default(),
             draw_last: Default::default(),
         })
     }
@@ -977,7 +975,7 @@ impl RoomInfo {
         todo!()
     }
 
-    fn get_typers(&self) -> &[OwnedUserId] {
+    fn get_typers(&self) -> &[UserWithName] {
         if let Some((t, users)) = &self.users_typing {
             if t.elapsed() < Duration::from_secs(4) {
                 return users.as_ref();
@@ -996,13 +994,20 @@ impl RoomInfo {
         match n {
             0 => Line::from(vec![]),
             1 => {
-                let user = settings.get_user_span(typers[0].as_ref(), self);
+                let user_id = &typers[0].0;
+                let display_name = typers[0].1.as_deref();
+                let user = settings.get_user_span(user_id, display_name);
 
                 Line::from(vec![user, Span::from(" is typing...")])
             },
             2 => {
-                let user1 = settings.get_user_span(typers[0].as_ref(), self);
-                let user2 = settings.get_user_span(typers[1].as_ref(), self);
+                let user_id = &typers[0].0;
+                let display_name = typers[0].1.as_deref();
+                let user1 = settings.get_user_span(user_id, display_name);
+
+                let user_id = &typers[1].0;
+                let display_name = typers[1].1.as_deref();
+                let user2 = settings.get_user_span(user_id, display_name);
 
                 Line::from(vec![
                     user1,
@@ -1016,9 +1021,9 @@ impl RoomInfo {
         }
     }
 
-    /// Update typing information for this room.
-    pub fn set_typing(&mut self, user_ids: Vec<OwnedUserId>) {
-        self.users_typing = (Instant::now(), user_ids).into();
+    /// Update typing information for this room including the user display name.
+    pub fn set_typing(&mut self, users: Vec<UserWithName>) {
+        self.users_typing = (Instant::now(), users).into();
     }
 
     /// Create a [Rect] that displays what users are typing.
@@ -1135,7 +1140,6 @@ impl Rooms {
                 tags: Default::default(),
                 threads: Default::default(),
                 users_typing: Default::default(),
-                display_names: Default::default(),
                 draw_last: Default::default(),
                 htmls: Default::default(),
             });
@@ -1771,20 +1775,20 @@ pub mod tests {
         let settings = mock_settings();
 
         let users0 = vec![];
-        let users1 = vec![TEST_USER1.clone()];
-        let users2 = vec![TEST_USER1.clone(), TEST_USER2.clone()];
+        let users1 = vec![(TEST_USER1.clone(), None)];
+        let users2 = vec![(TEST_USER1.clone(), None), (TEST_USER2.clone(), None)];
         let users4 = vec![
-            TEST_USER1.clone(),
-            TEST_USER2.clone(),
-            TEST_USER3.clone(),
-            TEST_USER4.clone(),
+            (TEST_USER1.clone(), None),
+            (TEST_USER2.clone(), None),
+            (TEST_USER3.clone(), None),
+            (TEST_USER4.clone(), None),
         ];
         let users5 = vec![
-            TEST_USER1.clone(),
-            TEST_USER2.clone(),
-            TEST_USER3.clone(),
-            TEST_USER4.clone(),
-            TEST_USER5.clone(),
+            (TEST_USER1.clone(), None),
+            (TEST_USER2.clone(), None),
+            (TEST_USER3.clone(), None),
+            (TEST_USER4.clone(), None),
+            (TEST_USER5.clone(), None),
         ];
 
         // Nothing set.
@@ -1831,7 +1835,7 @@ pub mod tests {
         assert_eq!(info.get_typing_spans(&settings), Line::from("Many people are typing..."));
 
         // Test that USER5 gets rendered using the configured color and name.
-        info.set_typing(vec![TEST_USER5.clone()]);
+        info.set_typing(vec![(TEST_USER5.clone(), Some("USER 5".into()))]);
         assert!(info.users_typing.is_some());
         assert_eq!(
             info.get_typing_spans(&settings),

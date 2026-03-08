@@ -5,13 +5,12 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::{Arc, Weak};
 use std::time::Duration;
 
-use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::OwnedEventId;
@@ -60,7 +59,6 @@ use matrix_sdk::{
         OwnedRoomId,
         OwnedRoomOrAliasId,
         OwnedUserId,
-        RoomId,
     },
     Client,
     ClientBuildError,
@@ -80,7 +78,6 @@ use crate::preview::load_image;
 use crate::{
     base::{
         AsyncProgramStore,
-        ChatStore,
         CreateRoomFlags,
         CreateRoomType,
         IambError,
@@ -179,82 +176,8 @@ pub async fn create_room(
     return Ok(resp.room_id().to_owned());
 }
 
-async fn run_plan(
-    client: &Client,
-    store: &AsyncProgramStore,
-    room_id: OwnedRoomId,
-    permits: &Semaphore,
-) {
-    let permit = permits.acquire().await;
-    let res = members_load(client, &room_id).await;
-    let mut locked = store.lock().await;
-    members_insert(room_id, res, locked.deref_mut());
-    drop(permit);
-}
-
-#[allow(unused)]
-async fn load_older(client: &Client, store: &AsyncProgramStore) -> usize {
-    // This is an arbitrary limit on how much work we do in parallel to avoid
-    // spawning too many tasks at startup and overwhelming the client. We
-    // should normally only surpass this limit at startup when doing an initial.
-    // fetch for each room.
-    const LIMIT: usize = 15;
-
-    // Plans are run in parallel. Any room *may* have several plans.
-    let plans: Vec<OwnedRoomId> = todo!();
-    let permits = Semaphore::new(LIMIT);
-
-    plans
-        .into_iter()
-        .map(|plan| run_plan(client, store, plan, &permits))
-        .collect::<FuturesUnordered<_>>()
-        .count()
-        .await
-}
-
-async fn members_load(client: &Client, room_id: &RoomId) -> IambResult<Vec<RoomMember>> {
-    if let Some(room) = client.get_room(room_id) {
-        Ok(room
-            .members_no_sync(RoomMemberships::all())
-            .await
-            .map_err(IambError::from)?)
-    } else {
-        Err(IambError::UnknownRoom(room_id.to_owned()).into())
-    }
-}
-
-fn members_insert(
-    room_id: OwnedRoomId,
-    res: IambResult<Vec<RoomMember>>,
-    store: &mut ProgramStore,
-) {
-    if let Ok(members) = res {
-        let ChatStore { rooms, .. } = &mut store.application;
-        let info = rooms.get_or_default(room_id);
-
-        for member in members {
-            let user_id = member.user_id();
-            let display_name =
-                member.display_name().map_or(user_id.to_string(), |str| str.to_string());
-            info.display_names.insert(user_id.to_owned(), display_name);
-        }
-    }
-    // else ???
-}
-
-async fn load_older_forever(_client: &Client, _store: &AsyncProgramStore) {
-    // Load any pending older messages or members every 2 seconds.
-    let mut interval = tokio::time::interval(Duration::from_secs(2));
-
-    loop {
-        interval.tick().await;
-        // load_older(client, store).await;
-    }
-}
-
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     // TODO: process invited rooms
-    // TODO: load members
 
     let mut spaces = vec![];
     let mut rooms = vec![];
@@ -740,12 +663,20 @@ impl ClientWorker {
                     let room_id = room.room_id().to_owned();
                     let mut locked = store.lock().await;
 
-                    let users = ev
-                        .content
-                        .user_ids
-                        .into_iter()
-                        .filter(|u| u != &locked.application.settings.profile.user_id)
-                        .collect();
+                    let mut users = vec![];
+
+                    for user_id in ev.content.user_ids {
+                        if user_id == locked.application.settings.profile.user_id {
+                            continue;
+                        }
+
+                        let display_name =
+                            room.get_member_no_sync(&user_id).await.ok().flatten().and_then(
+                                |member| member.display_name().map(|name| name.to_owned()),
+                            );
+
+                        users.push((user_id, display_name));
+                    }
 
                     locked.application.rooms.get_or_default(room_id).set_typing(users);
                 }
@@ -885,10 +816,9 @@ impl ClientWorker {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
 
-                let load = load_older_forever(&client, &store);
                 let room = refresh_rooms_forever(&client, &store);
                 let notifications = register_notifications(&client, &settings, &store);
-                let ((), (), ()) = tokio::join!(load, room, notifications);
+                let ((), ()) = tokio::join!(room, notifications);
             }
         })
         .into();

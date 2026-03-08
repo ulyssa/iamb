@@ -22,15 +22,7 @@ use url::Url;
 
 use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
 
-use super::base::{
-    IambError,
-    IambId,
-    RoomInfo,
-    SortColumn,
-    SortFieldRoom,
-    SortFieldUser,
-    SortOrder,
-};
+use super::base::{IambError, IambId, SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
 
@@ -1061,7 +1053,11 @@ impl ApplicationSettings {
         user_style_from_color(self.get_user_color(user_id))
     }
 
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
+    pub fn get_user_span<'a>(
+        &self,
+        user_id: &'a UserId,
+        display_name: Option<&'a str>,
+    ) -> Span<'a> {
         let (color, name) = self.get_user_overrides(user_id);
 
         let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
@@ -1071,8 +1067,8 @@ impl ApplicationSettings {
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
             (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
             (None, UserDisplayStyle::DisplayName) => {
-                if let Some(display) = info.display_names.get(user_id) {
-                    Cow::Borrowed(display.as_str())
+                if let Some(display) = display_name {
+                    Cow::Borrowed(display)
                 } else {
                     Cow::Borrowed(user_id.as_str())
                 }
