@@ -715,8 +715,9 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
-                            // TODO: fetch messages
-                            // store.application.need_load.need_messages(self.room_id.clone());
+                            if let Some(store) = Weak::upgrade(&store.application.worker.store) {
+                                thread.paginate_backwards(store);
+                            }
                         }
                         mc
                     },
@@ -792,8 +793,9 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
-                            // TODO: fetch messages
-                            // store.application.need_load.need_messages(self.room_id.to_owned());
+                            if let Some(store) = Weak::upgrade(&store.application.worker.store) {
+                                thread.paginate_backwards(store);
+                            }
                         }
 
                         mc.map(|c| self._range_to(c))
