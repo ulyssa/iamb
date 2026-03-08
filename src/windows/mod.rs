@@ -776,11 +776,17 @@ impl Window<IambInfo> for IambWindow {
     fn open(id: IambId, store: &mut ProgramStore) -> IambResult<Self> {
         match id {
             IambId::Room(room_id, thread) => {
-                let (room, name, tags) = store.application.worker.get_room(room_id)?;
-                let room = RoomState::new(room, thread, name, tags, store);
+                let Some(info) = store.application.rooms.get_mut(&room_id) else {
+                    return Err(UIError::Application(IambError::UnknownRoom(room_id)));
+                };
 
-                // TODO: fetch members
-                // store.application.need_load.need_members(room.id().to_owned());
+                if let Some(root) = thread.as_deref() {
+                    info.ensure_thread(root, &store.application.worker)
+                        .map_err(IambError::from)?;
+                }
+
+                let room = RoomState::new(info.room().clone(), thread, store);
+
                 return Ok(room.into());
             },
             IambId::DirectList => {
@@ -837,13 +843,15 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::open(id, store)
         } else {
             let room_id = worker.join_room(name.clone())?;
+            // TODO: make sure `RoomInfo` exists
             names.insert(name, room_id.clone());
 
-            let (room, name, tags) = store.application.worker.get_room(room_id)?;
-            let room = RoomState::new(room, None, name, tags, store);
+            let Some(info) = store.application.rooms.get_mut(&room_id) else {
+                return Err(UIError::Application(IambError::UnknownRoom(room_id)));
+            };
 
-            // TODO: fetch members
-            // store.application.need_load.need_members(room.id().to_owned());
+            let room = RoomState::new(info.room().clone(), None, store);
+
             Ok(room.into())
         }
     }

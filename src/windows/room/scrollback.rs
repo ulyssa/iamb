@@ -252,7 +252,7 @@ impl ScrollbackState {
             todo!()
         }
 
-        let (_, item) = thread.range(..).next().unzip();
+        let item = thread.range_messages(..).next().map(|(_, item)| item);
 
         match self.thread.as_ref() {
             None => {
@@ -266,10 +266,8 @@ impl ScrollbackState {
                 // all the way back to the thread root, but it is technically possible via :threads
                 // or when restoring a thread view in the layout at startup to not have the message
                 // yet.
-                item.and_then(|item| item.as_event())
-                    .and_then(|item| item.event_id())
+                item.and_then(|item| item.event_id())
                     .is_none_or(|event_id| event_id != thread_root)
-                // TODO: check if this is correct
             },
         }
     }

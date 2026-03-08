@@ -875,6 +875,27 @@ impl RoomInfo {
         })
     }
 
+    /// Create the thread if it didn't already exists.
+    ///
+    /// Returns whether a new thread was created.
+    pub fn ensure_thread(
+        &mut self,
+        root: &EventId,
+        worker: &Requester,
+    ) -> Result<bool, matrix_sdk_ui::timeline::Error> {
+        if self.threads.contains_key(root) {
+            return Ok(false);
+        }
+
+        let (messages, htmls) = worker.get_messages(self.room().clone(), Some(root.to_owned()))?;
+
+        self.htmls.extend(htmls);
+
+        self.threads.insert(root.to_owned(), messages);
+
+        Ok(true)
+    }
+
     #[inline]
     pub fn room(&self) -> &MatrixRoom {
         self.messages.timeline().room()

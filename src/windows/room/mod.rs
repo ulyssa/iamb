@@ -19,14 +19,13 @@ use matrix_sdk::{
                 name::RoomNameEventContent,
                 topic::RoomTopicEventContent,
             },
-            tag::{TagInfo, Tags},
+            tag::TagInfo,
         },
         OwnedEventId,
         OwnedRoomAliasId,
         OwnedUserId,
         RoomId,
     },
-    RoomDisplayName,
     RoomState as MatrixRoomState,
 };
 
@@ -137,18 +136,7 @@ impl From<SpaceState> for RoomState {
 }
 
 impl RoomState {
-    pub fn new(
-        room: MatrixRoom,
-        thread: Option<OwnedEventId>,
-        name: RoomDisplayName,
-        tags: Option<Tags>,
-        store: &mut ProgramStore,
-    ) -> Self {
-        let room_id = room.room_id().to_owned();
-        let info = store.application.rooms.get_or_default(room_id);
-        info.name = name.to_string();
-        info.tags = tags;
-
+    pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
         if room.is_space() {
             SpaceState::new(room).into()
         } else {

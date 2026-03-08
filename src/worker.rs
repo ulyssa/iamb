@@ -2,6 +2,7 @@
 //!
 //! The worker thread handles asynchronous work, and can receive messages from the main thread that
 //! block on a reply from the async worker.
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
@@ -13,6 +14,8 @@ use std::time::Duration;
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
 use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::OwnedEventId;
+use matrix_sdk_ui::timeline::TimelineEventItemId;
 use ratatui_image::picker::Picker;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{Mutex, Semaphore};
@@ -46,7 +49,6 @@ use matrix_sdk::{
             },
             presence::PresenceEvent,
             room::encryption::RoomEncryptionEventContent,
-            tag::Tags,
             typing::SyncTypingEvent,
             AnyInitialStateEvent,
             EmptyStateKey,
@@ -72,6 +74,8 @@ use modalkit::prelude::{EditInfo, InfoMessage};
 
 use crate::base::RoomInfo;
 use crate::config::ImagePreviewSize;
+use crate::message::html::StyleTree;
+use crate::message::Messages;
 use crate::notifications::register_notifications;
 use crate::preview::load_image;
 use crate::{
@@ -251,7 +255,7 @@ async fn load_older_forever(_client: &Client, _store: &AsyncProgramStore) {
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     // TODO: process invited rooms
-    // TODO: load initial messages
+    // TODO: load members
 
     let mut spaces = vec![];
     let mut rooms = vec![];
@@ -373,14 +377,15 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
     return (reply, response);
 }
 
-pub type FetchedRoom = (MatrixRoom, RoomDisplayName, Option<Tags>);
+pub type MessagesResult =
+    Result<(Messages, HashMap<TimelineEventItemId, StyleTree>), matrix_sdk_ui::timeline::Error>;
 
 pub enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     Logout(String, ClientReply<IambResult<EditInfo>>),
     GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
-    GetRoom(OwnedRoomId, ClientReply<IambResult<FetchedRoom>>),
+    GetMessages(MatrixRoom, Option<OwnedEventId>, ClientReply<MessagesResult>),
     JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
@@ -411,9 +416,10 @@ impl Debug for WorkerTask {
             WorkerTask::GetInviter(invite, _) => {
                 f.debug_tuple("WorkerTask::GetInviter").field(invite).finish()
             },
-            WorkerTask::GetRoom(room_id, _) => {
-                f.debug_tuple("WorkerTask::GetRoom")
-                    .field(room_id)
+            WorkerTask::GetMessages(room, thread, _) => {
+                f.debug_tuple("WorkerTask::GetMessages")
+                    .field(&room.room_id())
+                    .field(thread)
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -554,10 +560,10 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn get_room(&self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
+    pub fn get_messages(&self, room: MatrixRoom, thread: Option<OwnedEventId>) -> MessagesResult {
         let (reply, response) = oneshot();
 
-        self.tx.send(WorkerTask::GetRoom(room_id, reply)).unwrap();
+        self.tx.send(WorkerTask::GetMessages(room, thread, reply)).unwrap();
 
         return response.recv();
     }
@@ -680,9 +686,9 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.get_inviter(invited).await);
             },
-            WorkerTask::GetRoom(room_id, reply) => {
+            WorkerTask::GetMessages(room, thread, reply) => {
                 assert!(self.initialized);
-                reply.send(self.get_room(room_id).await);
+                reply.send(self.get_messages(room, thread).await);
             },
             WorkerTask::Login(style, reply) => {
                 assert!(self.initialized);
@@ -1003,15 +1009,13 @@ impl ClientWorker {
         Ok(details.inviter)
     }
 
-    async fn get_room(&mut self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
-        if let Some(room) = self.client.get_room(&room_id) {
-            let name = room.cached_display_name().ok_or_else(|| IambError::UnknownRoom(room_id))?;
-            let tags = room.tags().await.map_err(IambError::from)?;
-
-            Ok((room, name, tags))
-        } else {
-            Err(IambError::UnknownRoom(room_id).into())
-        }
+    async fn get_messages(
+        &mut self,
+        room: MatrixRoom,
+        thread: Option<OwnedEventId>,
+    ) -> MessagesResult {
+        let store = self.store.clone().unwrap();
+        Messages::new(&room, thread, store).await
     }
 
     async fn join_room(&mut self, name: String) -> IambResult<OwnedRoomId> {
