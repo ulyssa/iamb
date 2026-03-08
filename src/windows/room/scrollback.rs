@@ -659,7 +659,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        let info = store.application.rooms.get(&self.room_id).expect("internal state invalid");
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
         let key = self.cursor.to_key(thread).ok_or_else(no_msgs)?.clone();
 
@@ -857,7 +857,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         _: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        let info = store.application.rooms.get(&self.room_id).expect("internal state invalid");
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
         let cursor = self.cursor.to_cursor(thread).ok_or_else(no_msgs)?;
         store.cursors.set_mark(self.id.clone(), name, cursor);
@@ -913,7 +913,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        let info = store.application.rooms.get(&self.room_id).expect("internal state invalid");
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
         match act {
@@ -1046,7 +1046,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<Vec<(Action<IambInfo>, ProgramContext)>, IambInfo> {
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        let info = store.application.rooms.get(&self.room_id).expect("internal state invalid");
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
         let Some(msg) = self.cursor.to_key(thread).and_then(|key| thread.get_message(&key)) else {
@@ -1096,7 +1096,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         ctx: &ProgramContext,
         store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        let info = store.application.rooms.get(&self.room_id).expect("internal state invalid");
         let settings = &store.application.settings;
         let previews = &store.application.previews;
         let mut corner = self.viewctx.corner.clone();
@@ -1210,7 +1210,8 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 Err(err)
             },
             Axis::Vertical => {
-                let info = store.application.rooms.get_or_default(self.room_id.clone());
+                let info =
+                    store.application.rooms.get(&self.room_id).expect("internal state invalid");
                 let settings = &store.application.settings;
                 let previews = &store.application.previews;
                 let thread = self.get_thread(info).ok_or_else(no_msgs)?;
@@ -1329,7 +1330,9 @@ impl StatefulWidget for Scrollback<'_> {
     type State = ScrollbackState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
-        let info = self.store.application.rooms.get_or_default(state.room_id.clone());
+        let Some(info) = self.store.application.rooms.get_mut(&state.room_id) else {
+            todo!()
+        };
         let settings = &self.store.application.settings;
         let area = if state.cursor.key.is_some() {
             render_jump_to_recent(area, buf, self.focused)

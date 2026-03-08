@@ -386,14 +386,6 @@ impl Messages {
                 .fetching = false;
         });
     }
-
-    pub fn main() -> Self {
-        todo!()
-    }
-
-    pub fn thread(_root: OwnedEventId) -> Self {
-        todo!()
-    }
 }
 
 pub struct MessagesRange<'a> {

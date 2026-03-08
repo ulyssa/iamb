@@ -46,7 +46,6 @@ use matrix_sdk::{
         OwnedRoomId,
         OwnedUserId,
         RoomId,
-        UserId,
     },
 };
 
@@ -950,31 +949,6 @@ impl RoomInfo {
         }
     }
 
-    pub fn fully_read(&mut self, _user_id: &UserId) {
-        // let Some((key, _)) = self.messages.last_key_value() else {
-        //     return;
-        // };
-        //
-        // self.set_receipt(ReceiptThread::Main, user_id.to_owned(), key.id().to_owned());
-        //
-        // let newest = self
-        //     .threads
-        //     .iter()
-        //     .filter_map(|(thread_id, messages)| {
-        //         let thread = ReceiptThread::Thread(thread_id.to_owned());
-        //
-        //         messages
-        //             .last_key_value()
-        //             .map(|(key, _)| (thread, key.id().to_owned()))
-        //     })
-        //     .collect::<Vec<_>>();
-        //
-        // for (thread, event_id) in newest.into_iter() {
-        //     self.set_receipt(thread, user_id.to_owned(), event_id.clone());
-        // }
-        todo!()
-    }
-
     fn get_typers(&self) -> &[UserWithName] {
         if let Some((t, users)) = &self.users_typing {
             if t.elapsed() < Duration::from_secs(4) {
@@ -1127,43 +1101,6 @@ pub struct SyncInfo {
     pub dms: Vec<OwnedRoomId>,
 }
 
-#[derive(Default)]
-pub struct Rooms(CompletionMap<OwnedRoomId, RoomInfo>);
-
-impl Rooms {
-    /// Get the [RoomInfo] for a given room identifier.
-    pub fn get_or_default(&mut self, room_id: OwnedRoomId) -> &mut RoomInfo {
-        if self.0.get(&room_id).is_none() {
-            self.0.insert(room_id.clone(), RoomInfo {
-                messages: Messages::main(),
-
-                tags: Default::default(),
-                threads: Default::default(),
-                users_typing: Default::default(),
-                draw_last: Default::default(),
-                htmls: Default::default(),
-            });
-        }
-        self.0.get_mut(&room_id).expect("default value should have been inserted")
-    }
-
-    pub fn insert(&mut self, room_id: OwnedRoomId, room: RoomInfo) -> Option<RoomInfo> {
-        self.0.insert(room_id, room)
-    }
-
-    pub fn get_mut(&mut self, room_id: &RoomId) -> Option<&mut RoomInfo> {
-        self.0.get_mut(room_id)
-    }
-
-    pub fn get(&self, room_id: &RoomId) -> Option<&RoomInfo> {
-        self.0.get(room_id)
-    }
-
-    pub fn complete(&self, prefix: &str) -> Vec<OwnedRoomId> {
-        self.0.complete(prefix)
-    }
-}
-
 /// The main application state.
 pub struct ChatStore {
     /// `:`-commands
@@ -1173,7 +1110,7 @@ pub struct ChatStore {
     pub worker: Requester,
 
     /// Map of joined rooms.
-    pub rooms: Rooms,
+    pub rooms: CompletionMap<OwnedRoomId, RoomInfo>,
 
     /// Map of room names.
     pub names: CompletionMap<String, OwnedRoomId>,

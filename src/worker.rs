@@ -660,7 +660,6 @@ impl ClientWorker {
         let _ = self.client.add_event_handler(
             |ev: SyncTypingEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
                 async move {
-                    let room_id = room.room_id().to_owned();
                     let mut locked = store.lock().await;
 
                     let mut users = vec![];
@@ -678,7 +677,9 @@ impl ClientWorker {
                         users.push((user_id, display_name));
                     }
 
-                    locked.application.rooms.get_or_default(room_id).set_typing(users);
+                    if let Some(info) = locked.application.rooms.get_mut(room.room_id()) {
+                        info.set_typing(users);
+                    }
                 }
             },
         );

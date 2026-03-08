@@ -158,7 +158,9 @@ impl ChatState {
     ) -> IambResult<EditInfo> {
         let ChatStore { worker, rooms, settings, .. } = &mut store.application;
         let client = &worker.client;
-        let info = rooms.get_or_default(self.room_id.clone());
+        let Some(info) = rooms.get(&self.room_id) else {
+            return Err(IambError::NoSelectedRoom.into());
+        };
         let thread = self.scrollback.get_thread(info).unwrap(); // TODO
         let msg = self.scrollback.get(info).ok_or(IambError::NoSelectedMessage)?;
 
@@ -467,7 +469,9 @@ impl ChatState {
         _: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
-        let info = store.application.rooms.get_or_default(self.id().to_owned());
+        let Some(info) = store.application.rooms.get(self.id()) else {
+            return Err(IambError::NoSelectedRoom.into());
+        };
         // TODO: don't unwrap?
         let timeline = info
             .get_thread(self.scrollback.thread().map(|id| &**id))

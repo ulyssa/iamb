@@ -23,12 +23,13 @@ use std::io::{stdout, BufWriter, Stdout, Write};
 use std::ops::DerefMut;
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
 use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
+use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
 use matrix_sdk::ruma::OwnedUserId;
 use modalkit::keybindings::InputBindings;
 use rand::{distributions::Alphanumeric, Rng};
@@ -562,12 +563,24 @@ impl Application {
                 // Clear any notifications we displayed:
                 store.application.open_notifications.clear();
 
-                let ChatStore { sync_info, rooms, settings, .. } = &mut store.application;
+                let receipt = if store.application.settings.tunables.read_receipt_send {
+                    ReceiptType::Read
+                } else {
+                    ReceiptType::ReadPrivate
+                };
 
-                sync_info.rooms.iter().chain(sync_info.dms.iter()).for_each(|room_id| {
-                    rooms
-                        .get_or_default(room_id.to_owned())
-                        .fully_read(&settings.profile.user_id);
+                let store = Weak::upgrade(&store.application.worker.store).unwrap();
+                tokio::spawn(async move {
+                    let locked = store.lock().await;
+
+                    for (_, info) in locked.application.rooms.iter() {
+                        let _ = info
+                            .get_thread(None)
+                            .unwrap()
+                            .timeline()
+                            .mark_as_read(receipt.clone())
+                            .await;
+                    }
                 });
 
                 None
