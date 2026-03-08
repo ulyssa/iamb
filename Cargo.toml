@@ -91,13 +91,16 @@ git = "https://github.com/ulyssa/modalkit"
 rev = "118da3b9d724c0c54d54708a9694b65839703d19"
 
 [dependencies.matrix-sdk]
-version = "0.14.0"
+version = "0.16.0"
 default-features = false
 features = ["e2e-encryption", "sqlite", "sso-login"]
 
 [dependencies.matrix-sdk-ui]
-version = "0.14.0"
+version = "0.16.0"
 default-features = false
+
+[dependencies.matrix-sdk-crypto]
+version = "0.16.0"
 
 [dependencies.tokio]
 version = "1.24.1"

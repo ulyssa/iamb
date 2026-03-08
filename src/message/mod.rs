@@ -30,6 +30,7 @@ use matrix_sdk_ui::timeline::{
     TimelineItem,
     TimelineItemContent,
     TimelineItemKind,
+    TimelineReadReceiptTracking,
     TimelineUniqueId,
     VirtualTimelineItem,
 };
@@ -315,7 +316,7 @@ impl Messages {
         let timeline = room
             .timeline_builder()
             .with_focus(focus)
-            .track_read_marker_and_receipts()
+            .track_read_marker_and_receipts(TimelineReadReceiptTracking::AllEvents)
             .build()
             .await?;
 
@@ -696,6 +697,9 @@ fn body_cow_msglike(content: &MsgLikeContent) -> Cow<'_, str> {
         },
         MsgLikeKind::Redacted => Cow::Borrowed("[Redacted]"),
         MsgLikeKind::UnableToDecrypt(_) => Cow::Borrowed("[Unable to decrypt message]"),
+        MsgLikeKind::Other(other) => {
+            Cow::Owned(format!("[Unsupported event: {}]", other.event_type()))
+        },
     }
 }
 
@@ -749,7 +753,7 @@ fn generate_html(item: &EventTimelineItem) -> Option<StyleTree> {
 
         TimelineItemContent::FailedToParseMessageLike { event_type, error } => todo!(),
         TimelineItemContent::FailedToParseState { event_type, state_key, error } => todo!(),
-        TimelineItemContent::CallInvite | TimelineItemContent::CallNotify => None,
+        TimelineItemContent::CallInvite | TimelineItemContent::RtcNotification => None,
     }
 }
 
@@ -1011,7 +1015,7 @@ pub trait MessageExt {
             TimelineItemContent::OtherState(change) => body_cow_state(change),
             TimelineItemContent::FailedToParseMessageLike { event_type, error } => todo!(),
             TimelineItemContent::FailedToParseState { event_type, state_key, error } => todo!(),
-            TimelineItemContent::CallInvite | TimelineItemContent::CallNotify => {
+            TimelineItemContent::RtcNotification | TimelineItemContent::CallInvite => {
                 Cow::Borrowed("* started a call")
             },
         }

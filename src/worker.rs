@@ -144,7 +144,7 @@ pub async fn create_room(
         // XXX: Once matrix-sdk uses ruma 0.8, then this can skip the cast.
         let algo = EventEncryptionAlgorithm::MegolmV1AesSha2;
         let content = RoomEncryptionEventContent::new(algo);
-        let encr = InitialStateEvent { content, state_key: EmptyStateKey };
+        let encr = InitialStateEvent::new(EmptyStateKey, content);
         let encr_raw = Raw::new(&encr).map_err(IambError::from)?;
         let encr_raw = encr_raw.cast::<AnyInitialStateEvent>();
         initial_state.push(encr_raw);
