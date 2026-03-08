@@ -1068,39 +1068,36 @@ impl<'a> MessageFormatter<'a> {
 pub type Message = EventTimelineItem;
 
 impl MessageExt for Message {
-    #[inline]
     fn content(&self) -> &TimelineItemContent {
         self.content()
     }
 
-    #[inline]
     fn sender(&self) -> &UserId {
         self.sender()
     }
 
-    #[inline]
     fn sender_profile(&self) -> &TimelineDetails<Profile> {
         self.sender_profile()
     }
 
-    #[inline]
     fn message_timestamp(&self) -> MessageTimeStamp {
         self.timestamp().into()
     }
 
-    #[inline]
     fn identifier(&self) -> TimelineEventItemId {
         self.identifier()
     }
 
-    #[inline]
     fn is_local_echo(&self) -> bool {
         self.is_local_echo()
     }
 
-    #[inline]
     fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)> {
         self.read_receipts().iter()
+    }
+
+    fn is_edited(&self) -> bool {
+        self.latest_edit_json().is_some()
     }
 }
 
@@ -1132,6 +1129,10 @@ impl MessageExt for EmbeddedEvent {
     fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)> {
         vec![].into_iter()
     }
+
+    fn is_edited(&self) -> bool {
+        false
+    }
 }
 
 pub trait MessageExt {
@@ -1142,6 +1143,7 @@ pub trait MessageExt {
     fn identifier(&self) -> TimelineEventItemId;
     fn is_local_echo(&self) -> bool;
     fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)>;
+    fn is_edited(&self) -> bool;
 
     fn body(&self) -> Cow<'_, str> {
         #[allow(unused)]
@@ -1289,6 +1291,17 @@ pub trait MessageExt {
         if text.lines.is_empty() {
             // If there was nothing in the body, just show an empty message.
             fmt.push_spans(space_span(width, style).into(), style, &mut text);
+        }
+
+        if self.is_edited() {
+            fmt.push_spans(
+                Line::from(vec![
+                    Span::styled("(edited)", style.fg(Color::Gray)),
+                    space_span(fmt.width() - 8, style),
+                ]),
+                style,
+                &mut text,
+            );
         }
 
         if settings.tunables.reaction_display {
