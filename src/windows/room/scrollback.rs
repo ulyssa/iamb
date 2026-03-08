@@ -1,4 +1,6 @@
 //! Message scrollback
+use std::sync::Weak;
+
 use matrix_sdk_ui::timeline::TimelineItem;
 use ratatui_image::Image;
 use regex::Regex;
@@ -230,32 +232,46 @@ impl ScrollbackState {
         }
     }
 
-    fn need_more_messages(&self, _info: &RoomInfo) -> bool {
-        // TODO: check current fetch status
+    fn need_more_messages(&self, thread: &Messages) -> bool {
+        if thread.fetching {
+            // We are currently fetching.
+            return false;
+        }
 
-        // let first_key = self.get_thread(info).and_then(|t| t.first_key());
-        // let at_top = first_key == self.viewctx.corner.key;
-        //
-        // match (at_top, self.thread.as_ref()) {
-        //     (false, _) => {
-        //         // Not scrolled to top, don't fetch.
-        //         false
-        //     },
-        //     (true, None) => {
-        //         // Scrolled to top in non-thread, fetch.
-        //         true
-        //     },
-        //     (true, Some(thread_root)) => {
-        //         // Scrolled to top in thread, fetch until we have the thread root.
-        //         //
-        //         // Typically, if the user has entered a thread view, we should already have fetched
-        //         // all the way back to the thread root, but it is technically possible via :threads
-        //         // or when restoring a thread view in the layout at startup to not have the message
-        //         // yet.
-        //         !info.keys.contains_key(thread_root)
-        //     },
-        // }
-        false
+        if thread.range(..).next().is_some_and(|(_, item)| item.is_timeline_start()) {
+            // We have fetched the start of the timeline.
+            return false;
+        }
+
+        if let Some(corner) = &self.viewctx.corner.key {
+            if thread.range(..corner).nth(10).is_some() {
+                // We are not near the top.
+                return false;
+            }
+        } else {
+            todo!()
+        }
+
+        let (_, item) = thread.range(..).next().unzip();
+
+        match self.thread.as_ref() {
+            None => {
+                // Scrolled to top in non-thread, fetch.
+                true
+            },
+            Some(thread_root) => {
+                // Scrolled to top in thread, fetch until we have the thread root.
+                //
+                // Typically, if the user has entered a thread view, we should already have fetched
+                // all the way back to the thread root, but it is technically possible via :threads
+                // or when restoring a thread view in the layout at startup to not have the message
+                // yet.
+                item.and_then(|item| item.as_event())
+                    .and_then(|item| item.event_id())
+                    .is_none_or(|event_id| event_id != thread_root)
+                // TODO: check if this is correct
+            },
+        }
     }
 
     fn scrollview(
@@ -1341,9 +1357,10 @@ impl StatefulWidget for Scrollback<'_> {
         let cursor_key = if let Some(k) = cursor.to_key(thread) {
             k
         } else {
-            if state.need_more_messages(info) {
-                // TODO: fetch history
-                // self.store.application.need_load.need_messages(state.room_id.to_owned());
+            if state.need_more_messages(thread) {
+                if let Some(store) = Weak::upgrade(&self.store.application.worker.store) {
+                    thread.paginate_backwards(store);
+                }
             }
             return;
         };
@@ -1472,11 +1489,11 @@ impl StatefulWidget for Scrollback<'_> {
         }
 
         // Check whether we should load older messages for this room.
-        if state.need_more_messages(info) {
+        if state.need_more_messages(thread) {
             // If the top of the screen is the older message, load more.
-            // self.store.application.need_load.need_messages(state.room_id.to_owned());
-
-            // TODO: fetch history
+            if let Some(store) = Weak::upgrade(&self.store.application.worker.store) {
+                thread.paginate_backwards(store);
+            }
         }
 
         info.draw_last = self.store.application.draw_curr;

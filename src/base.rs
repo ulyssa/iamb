@@ -849,10 +849,13 @@ pub struct RoomInfo {
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
 
+    /// Cache of html representation for messages in this room
     pub htmls: HashMap<TimelineEventItemId, StyleTree>,
 }
 
 impl RoomInfo {
+    /// This must be called while `store` is locked and must be inserted in the store before it is
+    /// unlocked.
     pub async fn new(
         room: &MatrixRoom,
         store: AsyncProgramStore,
@@ -1002,7 +1005,7 @@ impl RoomInfo {
 
     /// Create a [Rect] that displays what users are typing.
     pub fn render_typing(
-        &mut self,
+        &self,
         area: Rect,
         buf: &mut Buffer,
         settings: &ApplicationSettings,

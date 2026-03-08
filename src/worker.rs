@@ -7,7 +7,7 @@ use std::fmt::{Debug, Formatter};
 use std::ops::{Deref, DerefMut};
 use std::str::FromStr;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use futures::{stream::FuturesUnordered, StreamExt};
@@ -15,7 +15,7 @@ use gethostname::gethostname;
 use matrix_sdk::ruma::events::room::MediaSource;
 use ratatui_image::picker::Picker;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinHandle;
 use tracing::error;
 use url::Url;
@@ -96,8 +96,6 @@ const DEFAULT_ENCRYPTION_SETTINGS: EncryptionSettings = EncryptionSettings {
 
 const IAMB_DEVICE_NAME: &str = "iamb";
 const IAMB_USER_AGENT: &str = "iamb";
-#[allow(unused)]
-const MIN_MSG_LOAD: u32 = 50;
 
 fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
@@ -520,6 +518,7 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
 pub struct Requester {
     pub client: Client,
     pub tx: UnboundedSender<WorkerTask>,
+    pub store: Weak<Mutex<ProgramStore>>,
 }
 
 impl Requester {
@@ -646,7 +645,7 @@ impl ClientWorker {
             worker.work(rx).await;
         });
 
-        return Requester { client, tx };
+        return Requester { client, tx, store: Weak::new() };
     }
 
     async fn work(&mut self, mut rx: UnboundedReceiver<WorkerTask>) {
@@ -728,6 +727,7 @@ impl ClientWorker {
     }
 
     async fn init(&mut self, store: AsyncProgramStore) {
+        store.lock().await.application.worker.store = Arc::downgrade(&store);
         self.client.add_event_handler_context(store.clone());
 
         let _ = self.client.add_event_handler(

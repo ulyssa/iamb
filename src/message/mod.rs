@@ -74,6 +74,8 @@ pub use self::compose::text_to_message;
 use self::state::{body_cow_state, html_state};
 pub use html::TreeGenState;
 
+const MIN_MSG_LOAD: u16 = 50;
+
 type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -210,12 +212,19 @@ async fn handle_updates(
 }
 
 pub struct Messages {
-    timeline: Timeline,
+    timeline: Arc<Timeline>,
+
+    /// The thread root of the timeline
+    thread: Option<OwnedEventId>,
+
     messages: Vector<Arc<TimelineItem>>,
 
     /// This is the index of the first element in the vector when this object was created. This is
     /// used by [`MessageKey`] as a referenc because the vector can be extended in both directions.
     start_element: usize,
+
+    /// Whether more history is currently being loaded.
+    pub fetching: bool,
 }
 
 impl Messages {
@@ -290,6 +299,8 @@ impl Messages {
             .filter_map(|(key, item)| item.as_event().map(|event| (key, event)))
     }
 
+    /// This must be called while `store` is locked and must be inserted in the store before it is
+    /// unlocked.
     pub async fn new(
         room: &Room,
         thread: Option<OwnedEventId>,
@@ -307,12 +318,14 @@ impl Messages {
             .build()
             .await?;
 
-        // TODO: load in background
-        timeline.paginate_backwards(50).await?;
-
         let (messages, updates) = timeline.subscribe().await;
 
-        tokio::spawn(handle_updates(room.room_id().to_owned(), thread, store, updates));
+        tokio::spawn(handle_updates(
+            room.room_id().to_owned(),
+            thread.clone(),
+            Arc::clone(&store),
+            updates,
+        ));
 
         let htmls = messages
             .iter()
@@ -320,7 +333,57 @@ impl Messages {
             .filter_map(|item| generate_html(item).map(|html| (item.identifier(), html)))
             .collect();
 
-        Ok((Self { messages, timeline, start_element: 0 }, htmls))
+        let messages = Self {
+            messages,
+            timeline: timeline.into(),
+            start_element: 0,
+            thread,
+            fetching: false,
+        };
+
+        messages.paginate_backwards(store);
+
+        Ok((messages, htmls))
+    }
+
+    pub fn paginate_backwards(&self, store: AsyncProgramStore) {
+        let room_id = self.timeline().room().room_id().to_owned();
+        let thread = self.thread.clone();
+        let timeline = Arc::clone(&self.timeline);
+
+        tokio::spawn(async move {
+            if std::mem::replace(
+                &mut store
+                    .lock()
+                    .await
+                    .application
+                    .rooms
+                    .get_mut(&room_id)
+                    .expect("internal state inconsistent")
+                    .get_thread_mut(thread.as_deref())
+                    .expect("internal state inconsistent")
+                    .fetching,
+                true,
+            ) {
+                return;
+            }
+
+            if let Err(err) = timeline.paginate_backwards(MIN_MSG_LOAD).await {
+                tracing::warn!(?room_id, ?thread, "error while loading message history: {err}");
+                return;
+            }
+
+            store
+                .lock()
+                .await
+                .application
+                .rooms
+                .get_mut(&room_id)
+                .expect("internal state inconsistent")
+                .get_thread_mut(thread.as_deref())
+                .expect("internal state inconsistent")
+                .fetching = false;
+        });
     }
 
     pub fn main() -> Self {

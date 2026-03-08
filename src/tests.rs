@@ -1,7 +1,7 @@
 #![allow(unused)]
 
-use std::collections::HashMap;
 use std::path::PathBuf;
+use std::{collections::HashMap, sync::Weak};
 
 use matrix_sdk::ruma::{
     event_id,
@@ -207,7 +207,7 @@ pub async fn mock_store() -> ProgramStore {
     let (tx, _) = unbounded_channel();
     let homeserver = Url::parse("https://localhost").unwrap();
     let client = matrix_sdk::Client::new(homeserver).await.unwrap();
-    let worker = Requester { tx, client };
+    let worker = Requester { tx, client, store: Weak::new() };
 
     let mut store = ChatStore::new(worker, mock_settings());
 
