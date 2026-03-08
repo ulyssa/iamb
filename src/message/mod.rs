@@ -230,7 +230,7 @@ pub struct Messages {
 }
 
 impl Messages {
-    pub fn timeline(&self) -> &Timeline {
+    pub fn timeline(&self) -> &Arc<Timeline> {
         &self.timeline
     }
     pub fn get_message(&self, key: &MessageKey) -> Option<&Message> {

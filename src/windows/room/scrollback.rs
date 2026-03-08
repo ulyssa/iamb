@@ -1,11 +1,16 @@
 //! Message scrollback
-use std::sync::Weak;
+use std::sync::{Arc, Weak};
 
 use matrix_sdk_ui::timeline::TimelineItem;
 use ratatui_image::Image;
 use regex::Regex;
 
-use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, UserId};
+use matrix_sdk::ruma::{
+    api::client::receipt::create_receipt::v3::ReceiptType,
+    OwnedEventId,
+    OwnedRoomId,
+    UserId,
+};
 
 use modalkit_ratatui::{ScrollActions, TerminalCursor, WindowOps};
 use ratatui::{
@@ -1481,14 +1486,23 @@ impl StatefulWidget for Scrollback<'_> {
 
         if self.room_focused && settings.tunables.read_receipt_send && state.cursor.key.is_none() {
             // If the cursor is at the last message, then update the read marker.
-            if let Some(_k) = thread.last_key() {
-                // info.set_receipt(
-                //     thread.receipt_thread().clone(),
-                //     settings.profile.user_id.clone(),
-                //     k.id().to_owned(),
-                // );
-                // todo!()
-            }
+
+            let receipt = if settings.tunables.read_receipt_send {
+                ReceiptType::Read
+            } else {
+                ReceiptType::ReadPrivate
+            };
+
+            let timeline = Arc::clone(thread.timeline());
+
+            tokio::spawn(async move {
+                if let Err(err) = timeline.mark_as_read(receipt).await {
+                    tracing::warn!(
+                        room_id = ?timeline.room().room_id(),
+                        "unable to send read receipt: {err}"
+                    );
+                }
+            });
         }
 
         // Check whether we should load older messages for this room.

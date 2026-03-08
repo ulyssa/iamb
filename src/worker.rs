@@ -178,6 +178,7 @@ pub async fn create_room(
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     // TODO: process invited rooms
+    // TODO: log errors
 
     let mut spaces = vec![];
     let mut rooms = vec![];
