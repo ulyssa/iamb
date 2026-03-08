@@ -79,18 +79,27 @@ fn nth_key_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageKey {
 }
 
 fn nth_before(pos: MessageKey, n: usize, thread: &Messages) -> MessageCursor {
-    let key = nth_key_before(pos, n, thread);
+    let mut end = pos;
+    let iter = thread.range_messages(..=end.clone()).rev().enumerate();
 
-    if thread.last_key().is_some_and(|last| key == last) {
+    for (i, (key, _)) in iter {
+        end = key;
+
+        if i >= n {
+            break;
+        }
+    }
+
+    if thread.last_key().is_some_and(|last| end == last) {
         MessageCursor::latest()
     } else {
-        MessageCursor::from(key)
+        MessageCursor::from(end)
     }
 }
 
 fn nth_key_after(pos: MessageKey, n: usize, thread: &Messages) -> Option<MessageKey> {
     let mut end = pos;
-    let mut iter = thread.range(&end..).enumerate();
+    let mut iter = thread.range_messages(end.clone()..).enumerate();
 
     for (i, (key, _)) in iter.by_ref() {
         end = key;
@@ -101,7 +110,7 @@ fn nth_key_after(pos: MessageKey, n: usize, thread: &Messages) -> Option<Message
     }
 
     // Avoid returning the key if it's at the end.
-    iter.next().map(|_| end.clone())
+    iter.next().map(|_| end)
 }
 
 fn nth_after(pos: MessageKey, n: usize, thread: &Messages) -> MessageCursor {
@@ -405,7 +414,7 @@ impl ScrollbackState {
             MoveType::BufferLineOffset => None,
             MoveType::BufferLinePercent => None,
             MoveType::BufferPos(MovePosition::Beginning) => {
-                let start = self.get_thread(info)?.first_key()?.clone();
+                let start = self.get_thread(info)?.range_messages(..).next()?.0;
 
                 Some(start.into())
             },
@@ -426,7 +435,11 @@ impl ScrollbackState {
                 }
             },
             MoveType::ViewportPos(MovePosition::Beginning) => {
-                return self.viewctx.corner.key.as_ref().map(|k| k.clone().into());
+                let corner = self.viewctx.corner.key.as_ref()?;
+
+                let key = self.get_thread(info)?.range_messages(corner..).next()?.0;
+
+                Some(key.into())
             },
             MoveType::ViewportPos(MovePosition::Middle) => {
                 // XXX: Need to calculate an accurate middle position.
@@ -1299,7 +1312,6 @@ impl<'a> Scrollback<'a> {
 impl StatefulWidget for Scrollback<'_> {
     type State = ScrollbackState;
 
-    #[allow(unused)]
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let info = self.store.application.rooms.get_or_default(state.room_id.clone());
         let settings = &self.store.application.settings;

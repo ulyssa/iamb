@@ -539,7 +539,7 @@ impl MessageCursor {
         if let Some(key) = &self.key {
             Some(key.clone())
         } else {
-            Some(thread.last_key()?)
+            thread.range_messages(..).next_back().map(|(key, _)| key)
         }
     }
 
