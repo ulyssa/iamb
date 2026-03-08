@@ -97,14 +97,28 @@ pub struct ChatState {
 }
 
 impl ChatState {
-    pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
+    pub fn new(
+        room: MatrixRoom,
+        thread: Option<OwnedEventId>,
+        store: &mut ProgramStore,
+    ) -> IambResult<Self> {
         let room_id = room.room_id().to_owned();
+
+        let Some(info) = store.application.rooms.get_mut(&room_id) else {
+            return Err(UIError::Application(IambError::UnknownRoom(room_id)));
+        };
+
+        if let Some(root) = thread.as_deref() {
+            info.ensure_thread(root, &store.application.worker)
+                .map_err(IambError::from)?;
+        }
+
         let scrollback = ScrollbackState::new(room_id.clone(), thread.clone());
         let id = IambBufferId::Room(room_id.clone(), thread, RoomFocus::MessageBar);
         let ebuf = store.load_buffer(id);
         let tbox = TextBoxState::new(ebuf);
 
-        ChatState {
+        Ok(ChatState {
             room_id,
             room,
 
@@ -117,7 +131,7 @@ impl ChatState {
 
             reply_to: None,
             editing: None,
-        }
+        })
     }
 
     pub fn thread(&self) -> Option<&OwnedEventId> {

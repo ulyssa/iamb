@@ -136,11 +136,15 @@ impl From<SpaceState> for RoomState {
 }
 
 impl RoomState {
-    pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
+    pub fn new(
+        room: MatrixRoom,
+        thread: Option<OwnedEventId>,
+        store: &mut ProgramStore,
+    ) -> IambResult<Self> {
         if room.is_space() {
-            SpaceState::new(room).into()
+            Ok(SpaceState::new(room).into())
         } else {
-            ChatState::new(room, thread, store).into()
+            Ok(ChatState::new(room, thread, store)?.into())
         }
     }
 

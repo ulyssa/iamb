@@ -65,7 +65,6 @@ use matrix_sdk::{
     Client,
     ClientBuildError,
     Error as MatrixError,
-    RoomDisplayName,
     RoomMemberships,
 };
 
@@ -270,8 +269,9 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
                 .insert(alias.to_string(), room.room_id().to_owned());
         }
 
-        // pre-compute name for spaces
-        let name = room.display_name().await.unwrap_or(RoomDisplayName::Empty).to_string();
+        // pre-compute name
+        let _ = room.sync_members().await;
+        let _ = room.display_name().await;
 
         if room.is_space() {
             spaces.push(room.room_id().to_owned());
@@ -301,8 +301,6 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
             .rooms
             .get_mut(room.room_id())
             .expect("value should have been inserted");
-
-        info.name = name;
 
         match room.tags().await {
             Ok(tags) => info.tags = tags,
@@ -942,7 +940,17 @@ impl ClientWorker {
 
         self.sync_handle = tokio::spawn(async move {
             loop {
-                let settings = SyncSettings::default();
+                let mut room = RoomEventFilter::default();
+                room.lazy_load_options =
+                    LazyLoadOptions::Enabled { include_redundant_members: false };
+
+                let mut room_ev = RoomFilter::default();
+                room_ev.state = room;
+
+                let mut filter = FilterDefinition::default();
+                filter.room = room_ev;
+
+                let settings = SyncSettings::new().filter(filter.into());
 
                 let _ = client.sync(settings).await;
             }

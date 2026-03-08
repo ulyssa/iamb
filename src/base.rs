@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 use matrix_sdk::sync::UnreadNotificationsCount;
+use matrix_sdk::{RoomDisplayName, RoomState};
 use matrix_sdk_ui::timeline::TimelineEventItemId;
 use ratatui::{
     buffer::Buffer,
@@ -828,9 +829,6 @@ impl UnreadInfo {
 
 /// Information about room's the user's joined.
 pub struct RoomInfo {
-    /// The display name for this room.
-    pub name: String,
-
     /// The tags placed on this room.
     pub tags: Option<Tags>,
 
@@ -866,7 +864,6 @@ impl RoomInfo {
             messages,
             htmls,
 
-            name: Default::default(),
             tags: Default::default(),
             threads: Default::default(),
             users_typing: Default::default(),
@@ -1135,7 +1132,6 @@ impl Rooms {
             self.0.insert(room_id.clone(), RoomInfo {
                 messages: Messages::main(),
 
-                name: Default::default(),
                 tags: Default::default(),
                 threads: Default::default(),
                 users_typing: Default::default(),
@@ -1238,23 +1234,24 @@ impl ChatStore {
     }
 
     /// Get a joined room.
-    pub fn get_joined_room(&self, _room_id: &RoomId) -> Option<MatrixRoom> {
-        todo!()
-        // let room = self.worker.client.get_room(room_id)?;
-        //
-        // if room.state() == MatrixRoomState::Joined {
-        //     Some(room)
-        // } else {
-        //     None
-        // }
+    pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
+        let room = self.worker.client.get_room(room_id)?;
+
+        if room.state() == RoomState::Joined {
+            Some(room)
+        } else {
+            None
+        }
     }
 
     /// Get the title for a room.
     pub fn get_room_title(&self, room_id: &RoomId) -> String {
-        self.rooms
-            .get(room_id)
-            .map(|i| i.name.clone())
-            .unwrap_or_else(|| "Untitled Matrix Room".to_string())
+        self.worker
+            .client
+            .get_room(room_id)
+            .and_then(|room| room.cached_display_name())
+            .unwrap_or(RoomDisplayName::Empty)
+            .to_string()
     }
 
     /// Insert a new E2EE verification.

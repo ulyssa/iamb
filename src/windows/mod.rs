@@ -10,6 +10,7 @@ use std::cmp::{Ord, Ordering, PartialOrd};
 use std::fmt::{self, Display};
 use std::time::{Duration, Instant};
 
+use matrix_sdk::RoomDisplayName;
 use matrix_sdk::{
     encryption::verification::{format_emojis, SasVerification},
     room::{Room as MatrixRoom, RoomMember},
@@ -520,10 +521,7 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 if need_fetch {
                     if let Ok(mems) = store.application.worker.members(room_id.clone()) {
-                        let mut items = mems
-                            .into_iter()
-                            .map(|m| MemberItem::new(m, room_id.clone()))
-                            .collect::<Vec<_>>();
+                        let mut items = mems.into_iter().map(MemberItem::new).collect::<Vec<_>>();
                         let fields = &store.application.settings.tunables.sort.members;
                         items.sort_by(|a, b| user_fields_cmp(a, b, fields));
                         state.set(items);
@@ -776,18 +774,13 @@ impl Window<IambInfo> for IambWindow {
     fn open(id: IambId, store: &mut ProgramStore) -> IambResult<Self> {
         match id {
             IambId::Room(room_id, thread) => {
-                let Some(info) = store.application.rooms.get_mut(&room_id) else {
+                let Some(room) = store.application.worker.client.get_room(&room_id) else {
                     return Err(UIError::Application(IambError::UnknownRoom(room_id)));
                 };
 
-                if let Some(root) = thread.as_deref() {
-                    info.ensure_thread(root, &store.application.worker)
-                        .map_err(IambError::from)?;
-                }
+                let room = RoomState::new(room, thread, store);
 
-                let room = RoomState::new(info.room().clone(), thread, store);
-
-                return Ok(room.into());
+                return Ok(room?.into());
             },
             IambId::DirectList => {
                 let list = DirectListState::new(IambBufferId::DirectList, vec![]);
@@ -852,7 +845,7 @@ impl Window<IambInfo> for IambWindow {
 
             let room = RoomState::new(info.room().clone(), None, store);
 
-            Ok(room.into())
+            Ok(room?.into())
         }
     }
 
@@ -920,9 +913,9 @@ impl<T: ItemType> GenericChatItem<T> {
     fn new(info: &RoomInfo, store: &ProgramStore, is_dm: T) -> Self {
         let unread = info.unreads(&store.application.settings);
         let tags = info.tags.clone();
-        let name = info.name.clone();
 
         let room = info.room().clone();
+        let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
         let alias = room.canonical_alias();
 
         Self { room, name, tags, alias, is_dm, unread }
@@ -1315,12 +1308,11 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for VerifyItem {
 #[derive(Clone)]
 pub struct MemberItem {
     member: RoomMember,
-    room_id: OwnedRoomId,
 }
 
 impl MemberItem {
-    fn new(member: RoomMember, room_id: OwnedRoomId) -> Self {
-        Self { member, room_id }
+    fn new(member: RoomMember) -> Self {
+        Self { member }
     }
 }
 
@@ -1337,7 +1329,6 @@ impl ListItem<IambInfo> for MemberItem {
         _: &ViewportContext<ListCursor>,
         store: &mut ProgramStore,
     ) -> Text<'_> {
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
         let user_id = self.member.user_id();
 
         let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
@@ -1354,8 +1345,8 @@ impl ListItem<IambInfo> for MemberItem {
         if let Some(name) = name {
             spans.push(Span::styled(name, style));
             parens = true;
-        } else if let Some(display) = info.display_names.get(user_id) {
-            spans.push(Span::styled(display.clone(), style));
+        } else if let Some(display) = self.member.display_name() {
+            spans.push(Span::styled(display, style));
             parens = true;
         }
 
