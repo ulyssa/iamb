@@ -211,7 +211,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
         // only create `RoomInfo` for chats
 
         if locked.application.rooms.get(room.room_id()).is_none() {
-            let info = match RoomInfo::new(&room, Arc::clone(store)).await {
+            let info = match RoomInfo::new(&room, Arc::clone(store), &mut locked).await {
                 Ok(info) => info,
                 Err(err) => {
                     tracing::warn!("cannot create room info: {err}");

@@ -58,10 +58,11 @@ use modalkit::editing::cursor::Cursor;
 use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
-use crate::base::{AsyncProgramStore, ProgramStore};
+use crate::base::{AsyncProgramStore, ChatStore, ProgramStore};
 use crate::config::ImagePreviewSize;
 use crate::message::state::{body_cow_membership, body_cow_profile, html_membership, html_profile};
 use crate::preview::{ImageStatus, PreviewManager};
+use crate::worker::Requester;
 use crate::{
     base::RoomInfo,
     config::ApplicationSettings,
@@ -119,7 +120,9 @@ fn handle_update(
     update: VectorDiff<Arc<TimelineItem>>,
     store: &mut ProgramStore,
 ) {
-    let Some(info) = store.application.rooms.get_mut(room_id) else {
+    let ChatStore { rooms, settings, previews, worker, .. } = &mut store.application;
+
+    let Some(info) = rooms.get_mut(room_id) else {
         tracing::warn!("received update for unknown room");
         return;
     };
@@ -132,6 +135,9 @@ fn handle_update(
             if let Some(item) = value.as_event() {
                 if let Some(html) = generate_html(item) {
                     info.htmls.insert(item.identifier(), html);
+                }
+                if let Some(source) = item.image_preview() {
+                    previews.register_preview(settings, source, worker);
                 }
             }
         },
@@ -349,6 +355,20 @@ impl Messages {
         messages.paginate_backwards(store);
 
         Ok((messages, htmls))
+    }
+
+    /// This should be called closely after [`Self::new`].
+    pub fn register_image_previews(
+        &self,
+        settings: &ApplicationSettings,
+        previews: &mut PreviewManager,
+        worker: &Requester,
+    ) {
+        for (_, item) in self.range_messages(..) {
+            if let Some(source) = item.image_preview() {
+                previews.register_preview(settings, source, worker);
+            }
+        }
     }
 
     pub fn paginate_backwards(&self, store: AsyncProgramStore) {

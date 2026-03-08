@@ -73,27 +73,25 @@ impl PreviewManager {
     pub fn register_preview(
         &mut self,
         settings: &ApplicationSettings,
-        source: MediaSource,
-        size: ImagePreviewSize,
+        source: &MediaSource,
         worker: &Requester,
     ) {
         if self.picker.is_none() {
             return;
         }
 
+        let Some(image_preview) = &settings.tunables.image_preview else {
+            return;
+        };
+
         let key = source.unique_key();
         if self.previews.contains_key(&key) {
             return;
         }
-        self.previews.insert(key, ImageStatus::Queued(size));
+        self.previews.insert(key, ImageStatus::Queued(image_preview.size));
 
-        if settings
-            .tunables
-            .image_preview
-            .as_ref()
-            .is_some_and(|setting| !setting.lazy_load)
-        {
-            self.load(&source, worker);
+        if !image_preview.lazy_load {
+            self.load(source, worker);
         }
     }
 }

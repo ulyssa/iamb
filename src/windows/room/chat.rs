@@ -104,12 +104,14 @@ impl ChatState {
     ) -> IambResult<Self> {
         let room_id = room.room_id().to_owned();
 
-        let Some(info) = store.application.rooms.get_mut(&room_id) else {
+        let ChatStore { rooms, settings, previews, worker, .. } = &mut store.application;
+
+        let Some(info) = rooms.get_mut(&room_id) else {
             return Err(UIError::Application(IambError::UnknownRoom(room_id)));
         };
 
         if let Some(root) = thread.as_deref() {
-            info.ensure_thread(root, &store.application.worker)
+            info.ensure_thread(root, settings, previews, worker)
                 .map_err(IambError::from)?;
         }
 

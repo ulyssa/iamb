@@ -36,10 +36,7 @@ use matrix_sdk::{
     encryption::verification::SasVerification,
     room::Room as MatrixRoom,
     ruma::{
-        events::{
-            room::message::RoomMessageEvent,
-            tag::{TagName, Tags},
-        },
+        events::tag::{TagName, Tags},
         presence::PresenceState,
         EventId,
         OwnedEventId,
@@ -855,8 +852,13 @@ impl RoomInfo {
     pub async fn new(
         room: &MatrixRoom,
         store: AsyncProgramStore,
+        locked: &mut ProgramStore,
     ) -> Result<Self, matrix_sdk_ui::timeline::Error> {
         let (messages, htmls) = Messages::new(room, None, store).await?;
+
+        let ChatStore { settings, previews, worker, .. } = &mut locked.application;
+
+        messages.register_image_previews(settings, previews, worker);
 
         Ok(Self {
             messages,
@@ -875,6 +877,8 @@ impl RoomInfo {
     pub fn ensure_thread(
         &mut self,
         root: &EventId,
+        settings: &ApplicationSettings,
+        previews: &mut PreviewManager,
         worker: &Requester,
     ) -> Result<bool, matrix_sdk_ui::timeline::Error> {
         if self.threads.contains_key(root) {
@@ -882,6 +886,8 @@ impl RoomInfo {
         }
 
         let (messages, htmls) = worker.get_messages(self.room().clone(), Some(root.to_owned()))?;
+
+        messages.register_image_previews(settings, previews, worker);
 
         self.htmls.extend(htmls);
 
@@ -927,25 +933,6 @@ impl RoomInfo {
             notifications: self.room().num_unread_notifications().max(notification_count),
             highlights: self.room().num_unread_mentions().max(highlight_count),
             latest,
-        }
-    }
-
-    /// Insert a new message event, and prepare for image-preview if it has an image attachment.
-    #[allow(unused)]
-    pub fn insert_with_preview(
-        &mut self,
-        ev: RoomMessageEvent,
-        settings: &ApplicationSettings,
-        previews: &mut PreviewManager,
-        worker: &Requester,
-    ) {
-        // TODO: also register stickers
-        let source = todo!();
-
-        if let Some(source) = source {
-            if let Some(image_preview) = &settings.tunables.image_preview {
-                previews.register_preview(settings, source, image_preview.size, worker)
-            }
         }
     }
 
