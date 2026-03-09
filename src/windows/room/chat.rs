@@ -8,7 +8,7 @@ use edit::Builder;
 use matrix_sdk::room::edit::EditedContent;
 use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
 use matrix_sdk::EncryptionState;
-use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource, TimelineEventItemId};
+use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
 use modalkit::editing::store::RegisterError;
 use ratatui::style::{Color, Style};
 use std::process::Command;
@@ -76,7 +76,8 @@ use crate::base::{
     SendAction,
 };
 
-use crate::message::{text_to_message, MessageExt, TreeGenState};
+use crate::message::{text_to_message, MessageExt, MessageKey, TreeGenState};
+use crate::util::TimelineDetailsExt;
 
 use super::scrollback::{Scrollback, ScrollbackState};
 
@@ -92,8 +93,8 @@ pub struct ChatState {
     scrollback: ScrollbackState,
     focus: RoomFocus,
 
-    reply_to: Option<OwnedEventId>,
-    editing: Option<TimelineEventItemId>,
+    reply_to: Option<MessageKey>,
+    editing: Option<MessageKey>,
 }
 
 impl ChatState {
@@ -300,7 +301,6 @@ impl ChatState {
 
                 Ok(info.into())
             },
-            #[allow(unused)]
             MessageAction::Edit => {
                 if !msg.is_editable() {
                     let msg = "Cannot edit this message";
@@ -321,9 +321,29 @@ impl ChatState {
                     return Err(err);
                 };
 
+                let key = self.scrollback.get_key(info).unwrap();
+
+                if let Some(reply_to) = msg.reply_to() {
+                    let Some(reply_to) = thread.range_messages(..key).find_map(|(key, item)| {
+                        if item.event_id() == Some(&reply_to) {
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    }) else {
+                        let msg = "Replied to message not loaded";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    };
+
+                    self.reply_to = Some(reply_to);
+                } else {
+                    self.reply_to = None;
+                }
+
                 self.tbox.set_text(text);
-                self.reply_to = msg.reply_to();
-                self.editing = todo!();
+                self.editing = self.scrollback.get_key(info);
                 self.focus = RoomFocus::MessageBar;
 
                 Ok(None)
@@ -390,8 +410,9 @@ impl ChatState {
                 Ok(None)
             },
             MessageAction::Reply => {
-                if let Some(event_id) = msg.event_id() {
-                    self.reply_to = Some(event_id.to_owned());
+                if msg.event_id().is_some() {
+                    let key = self.scrollback.get_key(info).unwrap();
+                    self.reply_to = Some(key);
                     self.focus = RoomFocus::MessageBar;
                     Ok(None)
                 } else {
@@ -401,18 +422,17 @@ impl ChatState {
                     Err(err)
                 }
             },
+            #[allow(unused)]
             MessageAction::Replied => {
                 let Some(reply) = msg.reply_to() else {
                     let msg = "Selected message is not a reply";
                     return Err(UIError::Failure(msg.into()));
                 };
 
-                let Some(key) = info.get_message_key(&reply) else {
-                    // maybe switch to event focused timeline
-                    todo!();
-                };
+                // maybe switch to event focused timeline
+                let key = todo!();
 
-                self.scrollback.goto_message(key.clone());
+                self.scrollback.goto_message(key);
                 Ok(None)
             },
             MessageAction::Unreact(reaction, literal) => {
@@ -474,10 +494,9 @@ impl ChatState {
             return Err(IambError::NoSelectedRoom.into());
         };
         // TODO: don't unwrap?
-        let timeline = info
-            .get_thread(self.scrollback.thread().map(|id| &**id))
-            .unwrap()
-            .timeline();
+        let thread = info.get_thread(self.scrollback.thread().map(|id| &**id)).unwrap();
+
+        let timeline = thread.timeline();
 
         match act {
             SendAction::Submit | SendAction::SubmitFromEditor => {
@@ -503,11 +522,27 @@ impl ChatState {
                 let msg = text_to_message(msg);
 
                 if let Some(key) = &self.editing {
+                    let Some(editing) = thread.get_message(key).map(|event| event.identifier())
+                    else {
+                        self.editing = None;
+                        return Err(UIError::Failure(
+                            "Edited message not found. Please retry".into(),
+                        ));
+                    };
+
                     timeline
-                        .edit(key, EditedContent::RoomMessage(msg))
+                        .edit(&editing, EditedContent::RoomMessage(msg))
                         .await
                         .map_err(IambError::from)?;
-                } else if let Some(reply_to) = &self.reply_to {
+                } else if let Some(key) = &self.reply_to {
+                    let Some(reply_to) = thread.get_message(key).and_then(|event| event.event_id())
+                    else {
+                        self.reply_to = None;
+                        return Err(UIError::Failure(
+                            "Replied to message not found. Please retry".into(),
+                        ));
+                    };
+
                     timeline
                         .send_reply(msg, reply_to.to_owned())
                         .await
@@ -851,26 +886,38 @@ impl StatefulWidget for Chat<'_> {
         // Determine whether we have a description to show for the message bar.
         let desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
             (None, None, None) => None,
-            (None, None, Some(_)) => Some(Line::from("Replying in thread")),
+            (None, None, Some(_)) => Some(Line::from("Writing in thread")),
             (Some(_), None, None) => Some(Line::from("Editing message")),
             (Some(_), None, Some(_)) => Some(Line::from("Editing message in thread")),
-            (editing, Some(_), thread) =>
-            {
-                #[allow(unused)]
-                self.store.application.rooms.get(state.id()).and_then(|room| {
-                    let sender = todo!();
-                    let display_name = todo!();
-                    let user = self.store.application.settings.get_user_span(sender, display_name);
-                    let prefix = match (editing.is_some(), thread.is_some()) {
-                        (true, false) => Span::from("Editing reply to "),
-                        (true, true) => Span::from("Editing reply in thread to "),
-                        (false, false) => Span::from("Replying to "),
-                        (false, true) => Span::from("Replying in thread to "),
-                    };
-                    let spans = Line::from(vec![prefix, user]);
+            (editing, Some(reply_to), thread) => {
+                let orig_sender = self
+                    .store
+                    .application
+                    .rooms
+                    .get(state.id())
+                    .and_then(|info| info.get_thread(state.thread().map(|id| &**id)))
+                    .and_then(|thread| thread.get_message(reply_to))
+                    .map(|msg| {
+                        let sender = msg.sender();
+                        let display_name = msg
+                            .sender_profile()
+                            .ready()
+                            .and_then(|profile| profile.display_name.as_deref());
+                        self.store.application.settings.get_user_span(sender, display_name)
+                    });
+                let prefix = match (editing.is_some(), thread.is_some()) {
+                    (true, false) => Span::from("Editing reply"),
+                    (true, true) => Span::from("Editing reply in thread"),
+                    (false, false) => Span::from("Replying"),
+                    (false, true) => Span::from("Replying in thread"),
+                };
 
-                    spans.into()
-                })
+                if let Some(orig_sender) = orig_sender {
+                    let infix = Span::from(" to ");
+                    Line::from(vec![prefix, infix, orig_sender]).into()
+                } else {
+                    Line::from(vec![prefix]).into()
+                }
             },
         };
 

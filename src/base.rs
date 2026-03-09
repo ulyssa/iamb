@@ -78,7 +78,7 @@ use crate::message::html::StyleTree;
 use crate::notifications::NotificationHandle;
 use crate::preview::PreviewManager;
 use crate::{
-    message::{MessageKey, MessageTimeStamp, Messages},
+    message::{MessageTimeStamp, Messages},
     worker::Requester,
     ApplicationSettings,
 };
@@ -915,11 +915,6 @@ impl RoomInfo {
         } else {
             Some(&mut self.messages)
         }
-    }
-
-    /// Map an event identifier to its [MessageKey].
-    pub fn get_message_key(&self, _event_id: &EventId) -> Option<&MessageKey> {
-        todo!()
     }
 
     /// Indicates whether this room has unread messages.

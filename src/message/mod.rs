@@ -63,6 +63,7 @@ use crate::config::ImagePreviewSize;
 use crate::message::html::StyleTreeNode;
 use crate::message::state::{body_cow_membership, body_cow_profile, html_membership, html_profile};
 use crate::preview::{ImageStatus, PreviewManager};
+use crate::util::TimelineDetailsExt;
 use crate::worker::Requester;
 use crate::{
     base::RoomInfo,
@@ -1390,7 +1391,7 @@ pub trait MessageExt {
     }
 
     fn sender_span<'a>(&'a self, settings: &'a ApplicationSettings) -> Span<'a> {
-        let name = if let TimelineDetails::Ready(profile) = self.sender_profile() {
+        let name = if let Some(profile) = self.sender_profile().ready() {
             profile.display_name.as_deref()
         } else {
             None

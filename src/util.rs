@@ -1,11 +1,25 @@
 //! # Utility functions
 use std::borrow::Cow;
 
+use matrix_sdk_ui::timeline::TimelineDetails;
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
+
+pub trait TimelineDetailsExt<T> {
+    fn ready(&self) -> Option<&T>;
+}
+
+impl<T> TimelineDetailsExt<T> for TimelineDetails<T> {
+    fn ready(&self) -> Option<&T> {
+        match self {
+            TimelineDetails::Ready(v) => Some(v),
+            _ => None,
+        }
+    }
+}
 
 pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) {
     match cow {

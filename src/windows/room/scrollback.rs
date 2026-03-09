@@ -63,6 +63,7 @@ use crate::{
     config::ApplicationSettings,
     message::{Message, MessageCursor, MessageExt, MessageKey, Messages, TimelineItemExt},
     preview::PreviewManager,
+    util::TimelineDetailsExt,
 };
 
 fn no_msgs() -> EditError<IambInfo> {
@@ -190,6 +191,10 @@ impl ScrollbackState {
     /// Set the dimensions and placement within the terminal window for this list.
     pub fn set_term_info(&mut self, area: Rect) {
         self.viewctx.dimensions = (area.width as usize, area.height as usize);
+    }
+
+    pub fn get_key(&self, info: &RoomInfo) -> Option<MessageKey> {
+        self.cursor.key.clone().or_else(|| self.get_thread(info)?.last_key())
     }
 
     pub fn get<'a>(&self, info: &'a RoomInfo) -> Option<&'a Message> {
@@ -1397,11 +1402,11 @@ impl StatefulWidget for Scrollback<'_> {
                     .previews
                     .load(source, &self.store.application.worker);
             }
-            if let Some(TimelineDetails::Ready(replied)) = item
+            if let Some(replied) = item
                 .content()
                 .as_msglike()
                 .and_then(|msg| msg.in_reply_to.as_ref())
-                .map(|details| &details.event)
+                .and_then(|details| details.event.ready())
             {
                 if let Some(source) = replied.image_preview() {
                     self.store
