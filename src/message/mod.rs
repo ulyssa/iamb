@@ -60,6 +60,7 @@ use ratatui_image::protocol::Protocol;
 
 use crate::base::{AsyncProgramStore, ChatStore, ProgramStore};
 use crate::config::ImagePreviewSize;
+use crate::message::html::StyleTreeNode;
 use crate::message::state::{body_cow_membership, body_cow_profile, html_membership, html_profile};
 use crate::preview::{ImageStatus, PreviewManager};
 use crate::worker::Requester;
@@ -248,6 +249,7 @@ impl Messages {
 
         if item.unique_id() != key.id() {
             // TODO: search messages around?
+            tracing::error!("key not found");
             return None;
         }
 
@@ -765,7 +767,6 @@ fn body_cow_content(msgtype: &MessageType) -> Cow<'_, str> {
     Cow::Borrowed(s)
 }
 
-#[allow(unused)]
 fn generate_html(item: &EventTimelineItem) -> Option<StyleTree> {
     match item.content() {
         TimelineItemContent::MsgLike(content) => {
@@ -787,8 +788,18 @@ fn generate_html(item: &EventTimelineItem) -> Option<StyleTree> {
         TimelineItemContent::ProfileChange(change) => Some(html_profile(change)),
         TimelineItemContent::OtherState(change) => Some(html_state(change)),
 
-        TimelineItemContent::FailedToParseMessageLike { event_type, error } => todo!(),
-        TimelineItemContent::FailedToParseState { event_type, state_key, error } => todo!(),
+        TimelineItemContent::FailedToParseMessageLike { error, .. } => {
+            let msg = format!("[Failed to parse message: {error}]");
+            let text = StyleTreeNode::Text(Cow::Owned(msg));
+            let styled = StyleTreeNode::Style(Box::new(text), Style::new().fg(Color::Red));
+            Some(StyleTree { children: vec![styled] })
+        },
+        TimelineItemContent::FailedToParseState { error, .. } => {
+            let msg = format!("[Failed to parse state event: {error}]");
+            let text = StyleTreeNode::Text(Cow::Owned(msg));
+            let styled = StyleTreeNode::Style(Box::new(text), Style::new().fg(Color::Red));
+            Some(StyleTree { children: vec![styled] })
+        },
         TimelineItemContent::CallInvite | TimelineItemContent::RtcNotification => None,
     }
 }
@@ -1159,14 +1170,19 @@ pub trait MessageExt {
     fn is_edited(&self) -> bool;
 
     fn body(&self) -> Cow<'_, str> {
-        #[allow(unused)]
         match self.content() {
             TimelineItemContent::MsgLike(content) => body_cow_msglike(content),
             TimelineItemContent::MembershipChange(change) => body_cow_membership(change),
             TimelineItemContent::ProfileChange(change) => body_cow_profile(change),
             TimelineItemContent::OtherState(change) => body_cow_state(change),
-            TimelineItemContent::FailedToParseMessageLike { event_type, error } => todo!(),
-            TimelineItemContent::FailedToParseState { event_type, state_key, error } => todo!(),
+            TimelineItemContent::FailedToParseMessageLike { error, .. } => {
+                let msg = format!("[Failed to parse message: {error}]");
+                Cow::Owned(msg)
+            },
+            TimelineItemContent::FailedToParseState { error, .. } => {
+                let msg = format!("[Failed to parse state event: {error}]");
+                Cow::Owned(msg)
+            },
             TimelineItemContent::RtcNotification | TimelineItemContent::CallInvite => {
                 Cow::Borrowed("* started a call")
             },
