@@ -143,8 +143,9 @@ fn handle_update(
                 }
             }
         },
+        VectorDiff::Clear | VectorDiff::Remove { .. } => (),
         _ => {
-            unimplemented!("these vector operations aren't used by the sdk")
+            unimplemented!("these vector operations aren't used by the sdk: {update:?}")
         },
     }
 

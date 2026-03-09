@@ -2,6 +2,7 @@
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::sync::Weak;
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
@@ -422,17 +423,32 @@ impl ChatState {
                     Err(err)
                 }
             },
-            #[allow(unused)]
             MessageAction::Replied => {
-                let Some(reply) = msg.reply_to() else {
+                let Some(reply_to) = msg.reply_to() else {
                     let msg = "Selected message is not a reply";
                     return Err(UIError::Failure(msg.into()));
                 };
 
-                // maybe switch to event focused timeline
-                let key = todo!();
+                let key = self.scrollback.get_key(info).unwrap();
+                let Some(reply_to) = thread.range_messages(..key).find_map(|(key, item)| {
+                    if item.event_id() == Some(&reply_to) {
+                        Some(key)
+                    } else {
+                        None
+                    }
+                }) else {
+                    if let Some(store) = Weak::upgrade(&worker.store) {
+                        thread.paginate_backwards(store);
+                    }
 
-                self.scrollback.goto_message(key);
+                    let msg = "Replied to message will be loaded in the background";
+                    let err = UIError::Failure(msg.into());
+                    return Err(err);
+                };
+
+                // TODO: maybe switch to event focused timeline
+
+                self.scrollback.goto_message(reply_to);
                 Ok(None)
             },
             MessageAction::Unreact(reaction, literal) => {
