@@ -564,12 +564,6 @@ impl Application {
                 // Clear any notifications we displayed:
                 store.application.open_notifications.clear();
 
-                let receipt = if store.application.settings.tunables.read_receipt_send {
-                    ReceiptType::Read
-                } else {
-                    ReceiptType::ReadPrivate
-                };
-
                 let store = Weak::upgrade(&store.application.worker.store).unwrap();
                 tokio::spawn(async move {
                     let locked = store.lock().await;
@@ -579,7 +573,7 @@ impl Application {
                             .get_thread(None)
                             .unwrap()
                             .timeline()
-                            .mark_as_read(receipt.clone())
+                            .mark_as_read(ReceiptType::ReadPrivate)
                             .await;
                     }
                 });
