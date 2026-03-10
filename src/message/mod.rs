@@ -1123,7 +1123,7 @@ impl MessageExt for Message {
     }
 
     fn is_edited(&self) -> bool {
-        self.latest_edit_json().is_some()
+        self.content().as_message().is_some_and(|msg| msg.is_edited())
     }
 }
 
