@@ -271,7 +271,7 @@ impl Messages {
             .messages
             .len()
             .cast_signed()
-            .checked_sub_unsigned(self.start_element)?;
+            .checked_sub_unsigned(self.start_element + 1)?;
 
         MessageKey::new(offset, id).into()
     }
