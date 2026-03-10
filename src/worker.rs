@@ -178,7 +178,6 @@ pub async fn create_room(
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     // TODO: process invited rooms
-    // TODO: log errors
 
     let mut spaces = vec![];
     let mut rooms = vec![];
@@ -194,8 +193,12 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
         }
 
         // pre-compute name
-        let _ = room.sync_members().await;
-        let _ = room.display_name().await;
+        if let Err(err) = room.sync_members().await {
+            tracing::warn!(room_id = ?room.room_id(), "cannot load room members: {err}");
+        }
+        if let Err(err) = room.display_name().await {
+            tracing::warn!(room_id = ?room.room_id(), "cannot load room name: {err}");
+        };
 
         if room.is_space() {
             spaces.push(room.room_id().to_owned());
@@ -214,7 +217,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
             let info = match RoomInfo::new(&room, Arc::clone(store), &mut locked).await {
                 Ok(info) => info,
                 Err(err) => {
-                    tracing::warn!("cannot create room info: {err}");
+                    tracing::warn!(room_id = ?room.room_id(), "cannot create room info: {err}");
                     continue;
                 },
             };
@@ -229,7 +232,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
         match room.tags().await {
             Ok(tags) => info.tags = tags,
             Err(err) => {
-                tracing::warn!("unable to compute room tags: {err}");
+                tracing::warn!(room_id = ?room.room_id(), "cannot to load room tags: {err}");
             },
         }
     }
@@ -884,7 +887,9 @@ impl ClientWorker {
 
                 let settings = SyncSettings::new().filter(filter.into());
 
-                let _ = client.sync(settings).await;
+                if let Err(err) = client.sync(settings).await {
+                    tracing::warn!("sync error: {err}");
+                };
             }
         })
         .into();
@@ -1001,7 +1006,9 @@ impl ClientWorker {
 
     async fn typing_notice(&mut self, room_id: OwnedRoomId) {
         if let Some(room) = self.client.get_room(room_id.as_ref()) {
-            let _ = room.typing_notice(true).await;
+            if let Err(err) = room.typing_notice(true).await {
+                tracing::warn!("cannot send typing notice: {err}");
+            };
         }
     }
 

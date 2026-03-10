@@ -219,10 +219,8 @@ impl ScrollbackState {
         &self,
         range: EditRange<MessageCursor>,
         info: &'a RoomInfo,
-    ) -> impl Iterator<Item = (MessageKey, &'a TimelineItem)> {
-        let Some(thread) = self.get_thread(info) else {
-            todo!()
-        };
+    ) -> Option<impl Iterator<Item = (MessageKey, &'a TimelineItem)>> {
+        let thread = self.get_thread(info)?;
 
         let start = range.start.to_key(thread);
         let end = range.end.to_key(thread);
@@ -232,13 +230,13 @@ impl ScrollbackState {
         } else if let Some(last) = thread.last_key() {
             (last.clone(), last)
         } else {
-            return thread.range(..);
+            return Some(thread.range(..));
         };
 
         if range.inclusive {
-            thread.range(start..=end)
+            Some(thread.range(start..=end))
         } else {
-            thread.range(start..end)
+            Some(thread.range(start..end))
         }
     }
 
@@ -258,30 +256,25 @@ impl ScrollbackState {
                 // We are not near the top.
                 return false;
             }
-        } else {
-            todo!()
         }
 
-        match self.thread.as_ref() {
-            None => {
-                // Scrolled to top in non-thread, fetch.
-                true
-            },
-            Some(thread_root) => {
-                // Scrolled to top in thread, fetch until we have the thread root.
-                //
-                // Typically, if the user has entered a thread view, we should already have fetched
-                // all the way back to the thread root, but it is technically possible via :threads
-                // or when restoring a thread view in the layout at startup to not have the message
-                // yet.
+        if let Some(thread_root) = self.thread.as_ref() {
+            // Scrolled to top in thread, fetch until we have the thread root.
+            //
+            // Typically, if the user has entered a thread view, we should already have fetched
+            // all the way back to the thread root, but it is technically possible via :threads
+            // or when restoring a thread view in the layout at startup to not have the message
+            // yet.
 
-                thread
-                    .range_messages(..)
-                    .next()
-                    .map(|(_, item)| item)
-                    .and_then(|item| item.event_id())
-                    .is_none_or(|event_id| event_id != thread_root)
-            },
+            thread
+                .range_messages(..)
+                .next()
+                .map(|(_, item)| item)
+                .and_then(|item| item.event_id())
+                .is_none_or(|event_id| event_id != thread_root)
+        } else {
+            // Scrolled to top in non-thread, fetch.
+            true
         }
     }
 
@@ -833,6 +826,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                     for (_, msg) in self
                         .messages(range, info)
+                        .into_iter()
+                        .flatten()
                         .filter_map(|(key, item)| item.as_event().map(|event| (key, event)))
                     {
                         yanked += EditRope::from(msg.body());
@@ -1344,7 +1339,8 @@ impl StatefulWidget for Scrollback<'_> {
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         let Some(info) = self.store.application.rooms.get_mut(&state.room_id) else {
-            todo!()
+            tracing::warn!(room_id = ?state.room_id, "Open room not found in internal state");
+            return;
         };
         let settings = &self.store.application.settings;
         let area = if state.cursor.key.is_some() {
@@ -1362,6 +1358,7 @@ impl StatefulWidget for Scrollback<'_> {
         }
 
         let Some(thread) = state.get_thread(info) else {
+            tracing::warn!(room_id = ?state.room_id, root = ?state.thread(), "Open thread not found in internal state");
             return;
         };
 

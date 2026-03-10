@@ -165,7 +165,9 @@ impl ChatState {
         let Some(info) = rooms.get(&self.room_id) else {
             return Err(IambError::NoSelectedRoom.into());
         };
-        let thread = self.scrollback.get_thread(info).unwrap(); // TODO
+        let Some(thread) = self.scrollback.get_thread(info) else {
+            return Err(IambError::NoSelectedRoom.into());
+        };
         let msg = self.scrollback.get(info).ok_or(IambError::NoSelectedMessage)?;
 
         match act {
@@ -509,8 +511,9 @@ impl ChatState {
         let Some(info) = store.application.rooms.get(self.id()) else {
             return Err(IambError::NoSelectedRoom.into());
         };
-        // TODO: don't unwrap?
-        let thread = info.get_thread(self.scrollback.thread().map(|id| &**id)).unwrap();
+        let Some(thread) = info.get_thread(self.scrollback.thread().map(|id| &**id)) else {
+            return Err(IambError::NoSelectedRoom.into());
+        };
 
         let timeline = thread.timeline();
 

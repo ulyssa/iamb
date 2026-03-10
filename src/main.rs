@@ -568,13 +568,16 @@ impl Application {
                 tokio::spawn(async move {
                     let locked = store.lock().await;
 
-                    for (_, info) in locked.application.rooms.iter() {
-                        let _ = info
+                    for (room_id, info) in locked.application.rooms.iter() {
+                        if let Err(err) = info
                             .get_thread(None)
                             .unwrap()
                             .timeline()
                             .mark_as_read(ReceiptType::ReadPrivate)
-                            .await;
+                            .await
+                        {
+                            tracing::warn!(?room_id, "cannot mark room as read: {err}");
+                        };
                     }
                 });
 
