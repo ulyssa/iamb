@@ -391,7 +391,7 @@ impl Messages {
             fetching: false,
         };
 
-        messages.paginate_backwards(store);
+        messages.paginate_backwards_count(store, 10);
 
         Ok((messages, htmls))
     }
@@ -410,7 +410,12 @@ impl Messages {
         }
     }
 
+    #[inline]
     pub fn paginate_backwards(&self, store: AsyncProgramStore) {
+        self.paginate_backwards_count(store, MIN_MSG_LOAD);
+    }
+
+    fn paginate_backwards_count(&self, store: AsyncProgramStore, num_events: u16) {
         let room_id = self.timeline().room().room_id().to_owned();
         let thread = self.thread.clone();
         let timeline = Arc::clone(self.timeline());
@@ -432,7 +437,7 @@ impl Messages {
                 return;
             }
 
-            if let Err(err) = timeline.paginate_backwards(MIN_MSG_LOAD).await {
+            if let Err(err) = timeline.paginate_backwards(num_events).await {
                 tracing::warn!(?room_id, ?thread, "error while loading message history: {err}");
                 return;
             }
