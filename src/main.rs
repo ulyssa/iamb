@@ -16,6 +16,8 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::result_large_err)]
 #![allow(clippy::bool_assert_comparison)]
+#![cfg_attr(test, allow(unused_imports, dead_code))]
+
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::Display;

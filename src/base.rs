@@ -98,9 +98,6 @@ fn is_mxid_char(c: char) -> bool {
         ":-./@_#!".contains(c);
 }
 
-#[allow(unused)]
-const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
-
 /// Empty type used solely to implement [ApplicationInfo].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambInfo {}
@@ -869,6 +866,19 @@ impl RoomInfo {
             users_typing: Default::default(),
             draw_last: Default::default(),
         })
+    }
+
+    #[cfg(test)]
+    pub fn mock_new() -> Self {
+        Self {
+            messages: Messages::mock_new(),
+
+            htmls: Default::default(),
+            tags: Default::default(),
+            threads: Default::default(),
+            users_typing: Default::default(),
+            draw_last: Default::default(),
+        }
     }
 
     /// Create the thread if it didn't already exists.
@@ -1689,8 +1699,7 @@ pub mod tests {
 
     #[test]
     fn test_typing_spans() {
-        // let mut info = RoomInfo::default();
-        let mut info: RoomInfo = todo!();
+        let mut info = RoomInfo::mock_new();
         let settings = mock_settings();
 
         let users0 = vec![];

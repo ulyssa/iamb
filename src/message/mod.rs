@@ -84,7 +84,7 @@ pub use html::TreeGenState;
 
 const MIN_MSG_LOAD: u16 = 50;
 
-type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
+pub(crate) type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct MessageKey {
@@ -119,7 +119,7 @@ impl PartialOrd for MessageKey {
 fn handle_update(
     room_id: &RoomId,
     thread: Option<&EventId>,
-    update: VectorDiff<Arc<TimelineItem>>,
+    update: VectorDiff<Arc<MessageItem>>,
     store: &mut ProgramStore,
 ) {
     let ChatStore { rooms, settings, previews, worker, .. } = &mut store.application;
@@ -213,7 +213,7 @@ async fn handle_updates(
     room_id: OwnedRoomId,
     thread: Option<OwnedEventId>,
     store: AsyncProgramStore,
-    stream: impl futures::Stream<Item = Vec<VectorDiff<Arc<TimelineItem>>>>,
+    stream: impl futures::Stream<Item = Vec<VectorDiff<Arc<MessageItem>>>>,
 ) {
     futures::pin_mut!(stream);
 
@@ -225,13 +225,20 @@ async fn handle_updates(
     }
 }
 
+#[cfg(not(test))]
+pub type MessageItem = TimelineItem;
+
+#[cfg(test)]
+pub type MessageItem = crate::tests::MockMessageItem;
+
 pub struct Messages {
+    #[cfg(not(test))]
     timeline: Arc<Timeline>,
 
     /// The thread root of the timeline
     thread: Option<OwnedEventId>,
 
-    messages: Vector<Arc<TimelineItem>>,
+    messages: Vector<Arc<MessageItem>>,
 
     /// This is the index of the first element in the vector when this object was created. This is
     /// used by [`MessageKey`] as a referenc because the vector can be extended in both directions.
@@ -242,9 +249,11 @@ pub struct Messages {
 }
 
 impl Messages {
+    #[cfg(not(test))]
     pub fn timeline(&self) -> &Arc<Timeline> {
         &self.timeline
     }
+
     pub fn get_message(&self, key: &MessageKey) -> Option<&Message> {
         let index = self.start_element.checked_add_signed(key.offset())?;
         let item = self.messages.get(index)?;
@@ -316,6 +325,7 @@ impl Messages {
 
     /// This must be called while `store` is locked and must be inserted in the store before it is
     /// unlocked.
+    #[cfg(not(test))]
     pub async fn new(
         room: &Room,
         thread: Option<OwnedEventId>,
@@ -388,6 +398,7 @@ impl Messages {
         }
     }
 
+    #[cfg(not(test))]
     pub fn paginate_backwards(&self, store: AsyncProgramStore) {
         let room_id = self.timeline().room().room_id().to_owned();
         let thread = self.thread.clone();
@@ -429,6 +440,37 @@ impl Messages {
     }
 }
 
+#[cfg(test)]
+impl Messages {
+    pub fn mock_new() -> Self {
+        Self {
+            thread: None,
+            messages: Vector::new(),
+            start_element: 0,
+            fetching: false,
+        }
+    }
+
+    pub fn set_messages(&mut self, messages: Vector<Arc<MessageItem>>) {
+        self.messages = messages;
+    }
+
+    pub async fn new(
+        _room: &Room,
+        _thread: Option<OwnedEventId>,
+        _store: AsyncProgramStore,
+    ) -> Result<(Self, HashMap<TimelineEventItemId, StyleTree>), matrix_sdk_ui::timeline::Error>
+    {
+        unimplemented!()
+    }
+    pub fn paginate_backwards(&self, _store: AsyncProgramStore) {
+        unimplemented!()
+    }
+    pub fn timeline(&self) -> &Arc<Timeline> {
+        unimplemented!()
+    }
+}
+
 pub struct MessagesRange<'a> {
     messages: &'a Messages,
     next: usize,
@@ -436,7 +478,7 @@ pub struct MessagesRange<'a> {
 }
 
 impl<'a> Iterator for MessagesRange<'a> {
-    type Item = (MessageKey, &'a TimelineItem);
+    type Item = (MessageKey, &'a MessageItem);
 
     fn next(&mut self) -> Option<Self::Item> {
         if self.next > self.last {
@@ -1091,9 +1133,13 @@ impl<'a> MessageFormatter<'a> {
     }
 }
 
+#[cfg(not(test))]
 pub type Message = EventTimelineItem;
 
-impl MessageExt for Message {
+#[cfg(test)]
+pub type Message = crate::tests::MockMessage;
+
+impl MessageExt for EventTimelineItem {
     fn content(&self) -> &TimelineItemContent {
         self.content()
     }
@@ -1556,7 +1602,8 @@ pub mod tests {
 
     #[test]
     fn test_mc_to_key() {
-        let messages = mock_messages();
+        let mut messages = Messages::mock_new();
+        messages.set_messages(mock_messages());
         let mc1 = MessageCursor::from(MSG1_KEY.clone());
         let mc2 = MessageCursor::from(MSG2_KEY.clone());
         let mc3 = MessageCursor::from(MSG3_KEY.clone());
@@ -1582,14 +1629,14 @@ pub mod tests {
         assert_eq!(k6, MSG1_KEY.clone());
 
         // MessageCursor::latest() fails to convert for a room w/o messages.
-        // let messages_empty = Messages::new(ReceiptThread::Main);
-        // assert_eq!(mc6.to_key(&messages_empty), None);
-        todo!()
+        let messages_empty = Messages::mock_new();
+        assert_eq!(mc6.to_key(&messages_empty), None);
     }
 
     #[test]
     fn test_mc_to_from_cursor() {
-        let messages = mock_messages();
+        let mut messages = Messages::mock_new();
+        messages.set_messages(mock_messages());
         let mc1 = MessageCursor::from(MSG1_KEY.clone());
         let mc2 = MessageCursor::from(MSG2_KEY.clone());
         let mc3 = MessageCursor::from(MSG3_KEY.clone());

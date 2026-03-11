@@ -1,7 +1,7 @@
 //! Message scrollback
 use std::sync::{Arc, Weak};
 
-use matrix_sdk_ui::timeline::{TimelineDetails, TimelineItem};
+use matrix_sdk_ui::timeline::TimelineDetails;
 use ratatui_image::Image;
 use regex::Regex;
 
@@ -61,7 +61,15 @@ use crate::{
         RoomInfo,
     },
     config::ApplicationSettings,
-    message::{Message, MessageCursor, MessageExt, MessageKey, Messages, TimelineItemExt},
+    message::{
+        Message,
+        MessageCursor,
+        MessageExt,
+        MessageItem,
+        MessageKey,
+        Messages,
+        TimelineItemExt,
+    },
     preview::PreviewManager,
     util::TimelineDetailsExt,
 };
@@ -219,7 +227,7 @@ impl ScrollbackState {
         &self,
         range: EditRange<MessageCursor>,
         info: &'a RoomInfo,
-    ) -> Option<impl Iterator<Item = (MessageKey, &'a TimelineItem)>> {
+    ) -> Option<impl Iterator<Item = (MessageKey, &'a MessageItem)>> {
         let thread = self.get_thread(info)?;
 
         let start = range.start.to_key(thread);
@@ -1576,25 +1584,10 @@ mod tests {
         // Search backwards to MSG2.
         scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
-        // assert_eq!(
-        //     std::mem::take(&mut store.application.need_load)
-        //         .into_iter()
-        //         .collect::<Vec<(OwnedRoomId, Need)>>()
-        //         .is_empty(),
-        //     true,
-        // );
-        todo!();
 
         // Can't go any further; need_load now contains the room ID.
         scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
-        // assert_eq!(
-        //     std::mem::take(&mut store.application.need_load)
-        //         .into_iter()
-        //         .collect::<Vec<(OwnedRoomId, Need)>>(),
-        //     vec![(room_id.clone(), Need { messages: Some(Vec::new()), members: false })]
-        // );
-        todo!();
 
         // Search forward twice to MSG1.
         scrollback.search(next, 2.into(), &ctx, &mut store).unwrap();
@@ -1708,24 +1701,24 @@ mod tests {
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 1));
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 0));
 
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 0));
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(DIVIDER1_KEY.clone(), 0));
 
         // Cannot scroll any further.
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 0));
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(DIVIDER1_KEY.clone(), 0));
 
         // Now scroll back down one line at a time.
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 1));
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 0));
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
@@ -1765,18 +1758,18 @@ mod tests {
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 0));
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(DIVIDER2_KEY.clone(), 0));
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 1));
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 0));
 
         // Cannot scroll down any further.
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
-        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 1));
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG1_KEY.clone(), 0));
 
         // Scroll up two Pages (eight lines).
         scrollback
