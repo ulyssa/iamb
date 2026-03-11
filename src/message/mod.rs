@@ -249,9 +249,15 @@ pub struct Messages {
 }
 
 impl Messages {
-    #[cfg(not(test))]
     pub fn timeline(&self) -> &Arc<Timeline> {
-        &self.timeline
+        #[cfg(test)]
+        {
+            unimplemented!()
+        }
+        #[cfg(not(test))]
+        {
+            &self.timeline
+        }
     }
 
     pub fn get_message(&self, key: &MessageKey) -> Option<&Message> {
@@ -325,7 +331,7 @@ impl Messages {
 
     /// This must be called while `store` is locked and must be inserted in the store before it is
     /// unlocked.
-    #[cfg(not(test))]
+    #[cfg_attr(test, allow(unused, clippy::diverging_sub_expression))]
     pub async fn new(
         room: &Room,
         thread: Option<OwnedEventId>,
@@ -344,6 +350,10 @@ impl Messages {
             .await?;
 
         let (messages, updates) = timeline.subscribe().await;
+
+        #[cfg(test)]
+        let (messages, updates): (Vector<Arc<MessageItem>>, futures::stream::Empty<_>) =
+            unimplemented!();
 
         tokio::spawn(handle_updates(
             room.room_id().to_owned(),
@@ -372,8 +382,10 @@ impl Messages {
             .unwrap_or(0);
 
         let messages = Self {
-            messages,
+            #[cfg(not(test))]
             timeline: timeline.into(),
+
+            messages,
             start_element,
             thread,
             fetching: false,
@@ -398,11 +410,10 @@ impl Messages {
         }
     }
 
-    #[cfg(not(test))]
     pub fn paginate_backwards(&self, store: AsyncProgramStore) {
         let room_id = self.timeline().room().room_id().to_owned();
         let thread = self.thread.clone();
-        let timeline = Arc::clone(&self.timeline);
+        let timeline = Arc::clone(self.timeline());
 
         tokio::spawn(async move {
             if std::mem::replace(
@@ -453,21 +464,6 @@ impl Messages {
 
     pub fn set_messages(&mut self, messages: Vector<Arc<MessageItem>>) {
         self.messages = messages;
-    }
-
-    pub async fn new(
-        _room: &Room,
-        _thread: Option<OwnedEventId>,
-        _store: AsyncProgramStore,
-    ) -> Result<(Self, HashMap<TimelineEventItemId, StyleTree>), matrix_sdk_ui::timeline::Error>
-    {
-        unimplemented!()
-    }
-    pub fn paginate_backwards(&self, _store: AsyncProgramStore) {
-        unimplemented!()
-    }
-    pub fn timeline(&self) -> &Arc<Timeline> {
-        unimplemented!()
     }
 }
 
