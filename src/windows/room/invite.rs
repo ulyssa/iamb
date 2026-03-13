@@ -107,11 +107,15 @@ impl WindowOps<IambInfo> for InviteState {
 impl Editable<ProgramContext, ProgramStore, IambInfo> for InviteState {
     fn editor_command(
         &mut self,
-        _act: &EditorAction,
-        _ctx: &ProgramContext,
+        act: &EditorAction,
+        ctx: &ProgramContext,
         _store: &mut ProgramStore,
     ) -> EditResult<EditInfo, IambInfo> {
-        Err(EditError::ReadOnly)
+        if act.is_readonly(ctx) {
+            Ok(None)
+        } else {
+            Err(EditError::ReadOnly)
+        }
     }
 }
 

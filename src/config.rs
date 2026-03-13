@@ -353,6 +353,7 @@ fn merge_sorts(profile: SortOverrides, global: SortOverrides) -> SortOverrides {
         rooms: profile.rooms.or(global.rooms),
         spaces: profile.spaces.or(global.spaces),
         members: profile.members.or(global.members),
+        invites: profile.invites.or(global.invites),
     }
 }
 
@@ -527,6 +528,7 @@ pub struct SortValues {
     pub dms: Vec<SortColumn<SortFieldRoom>>,
     pub rooms: Vec<SortColumn<SortFieldRoom>>,
     pub spaces: Vec<SortColumn<SortFieldRoom>>,
+    pub invites: Vec<SortColumn<SortFieldRoom>>,
     pub members: Vec<SortColumn<SortFieldUser>>,
 }
 
@@ -536,6 +538,7 @@ pub struct SortOverrides {
     pub dms: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub rooms: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub spaces: Option<Vec<SortColumn<SortFieldRoom>>>,
+    pub invites: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub members: Option<Vec<SortColumn<SortFieldUser>>>,
 }
 
@@ -545,9 +548,10 @@ impl SortOverrides {
         let chats = self.chats.unwrap_or_else(|| rooms.clone());
         let dms = self.dms.unwrap_or_else(|| rooms.clone());
         let spaces = self.spaces.unwrap_or_else(|| rooms.clone());
+        let invites = self.invites.unwrap_or_else(|| rooms.clone());
         let members = self.members.unwrap_or_else(|| Vec::from(DEFAULT_MEMBERS_SORT));
 
-        SortValues { rooms, members, chats, dms, spaces }
+        SortValues { rooms, members, chats, dms, spaces, invites }
     }
 }
 

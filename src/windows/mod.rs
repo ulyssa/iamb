@@ -326,6 +326,7 @@ macro_rules! delegate {
             IambWindow::Welcome($id) => $e,
             IambWindow::ChatList($id) => $e,
             IambWindow::UnreadList($id) => $e,
+            IambWindow::InviteList($id) => $e,
         }
     };
 }
@@ -340,6 +341,7 @@ pub enum IambWindow {
     Welcome(WelcomeState),
     ChatList(ChatListState),
     UnreadList(UnreadListState),
+    InviteList(InviteListState),
 }
 
 impl IambWindow {
@@ -404,13 +406,14 @@ impl IambWindow {
     }
 }
 
-pub type DirectListState = ListState<GenericChatItem<UndifferentiatedItem>, IambInfo>;
+pub type DirectListState = ListState<GenericChatItem, IambInfo>;
 pub type MemberListState = ListState<MemberItem, IambInfo>;
-pub type RoomListState = ListState<GenericChatItem<UndifferentiatedItem>, IambInfo>;
-pub type ChatListState = ListState<GenericChatItem<ChatItem>, IambInfo>;
-pub type UnreadListState = ListState<GenericChatItem<ChatItem>, IambInfo>;
+pub type RoomListState = ListState<GenericChatItem, IambInfo>;
+pub type ChatListState = ListState<GenericChatItem, IambInfo>;
+pub type UnreadListState = ListState<GenericChatItem, IambInfo>;
 pub type SpaceListState = ListState<SpaceItem, IambInfo>;
 pub type VerifyListState = ListState<VerifyItem, IambInfo>;
+pub type InviteListState = ListState<GenericChatItem, IambInfo>;
 
 impl From<RoomState> for IambWindow {
     fn from(room: RoomState) -> Self {
@@ -498,7 +501,14 @@ impl WindowOps<IambInfo> for IambWindow {
                     .dms
                     .iter()
                     .filter_map(|room_id| store.application.rooms.get(room_id))
-                    .map(|info| GenericChatItem::new(info, store, UndifferentiatedItem))
+                    .map(|info| {
+                        GenericChatItem::new(
+                            info.room().clone(),
+                            Some(info),
+                            store,
+                            ItemTypeTag::None,
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let fields = &store.application.settings.tunables.sort.dms;
                 let mut collator = Collator::default();
@@ -541,7 +551,14 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .filter_map(|room_id| store.application.rooms.get(room_id))
-                    .map(|info| GenericChatItem::new(info, store, UndifferentiatedItem))
+                    .map(|info| {
+                        GenericChatItem::new(
+                            info.room().clone(),
+                            Some(info),
+                            store,
+                            ItemTypeTag::None,
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let fields = &store.application.settings.tunables.sort.rooms;
                 let mut collator = Collator::default();
@@ -562,7 +579,14 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .filter_map(|room_id| store.application.rooms.get(room_id))
-                    .map(|info| GenericChatItem::new(info, store, ChatItem::Room))
+                    .map(|info| {
+                        GenericChatItem::new(
+                            info.room().clone(),
+                            Some(info),
+                            store,
+                            ItemTypeTag::Room,
+                        )
+                    })
                     .collect::<Vec<_>>();
 
                 let dms = store
@@ -571,9 +595,26 @@ impl WindowOps<IambInfo> for IambWindow {
                     .dms
                     .iter()
                     .filter_map(|room_id| store.application.rooms.get(room_id))
-                    .map(|info| GenericChatItem::new(info, store, ChatItem::Dm));
+                    .map(|info| {
+                        GenericChatItem::new(
+                            info.room().clone(),
+                            Some(info),
+                            store,
+                            ItemTypeTag::Dm,
+                        )
+                    });
 
                 items.extend(dms);
+
+                let invites = store
+                    .application
+                    .sync_info
+                    .invites
+                    .iter()
+                    .filter_map(|room_id| store.application.worker.client.get_room(room_id))
+                    .map(|room| GenericChatItem::new(room, None, store, ItemTypeTag::Invite));
+
+                items.extend(invites);
 
                 let fields = &store.application.settings.tunables.sort.chats;
                 let mut collator = Collator::default();
@@ -594,7 +635,14 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .filter_map(|room_id| store.application.rooms.get(room_id))
-                    .map(|info| GenericChatItem::new(info, store, ChatItem::Room))
+                    .map(|info| {
+                        GenericChatItem::new(
+                            info.room().clone(),
+                            Some(info),
+                            store,
+                            ItemTypeTag::Room,
+                        )
+                    })
                     .filter(RoomLikeItem::is_unread)
                     .collect::<Vec<_>>();
 
@@ -604,7 +652,14 @@ impl WindowOps<IambInfo> for IambWindow {
                     .dms
                     .iter()
                     .filter_map(|room_id| store.application.rooms.get(room_id))
-                    .map(|info| GenericChatItem::new(info, store, ChatItem::Dm))
+                    .map(|info| {
+                        GenericChatItem::new(
+                            info.room().clone(),
+                            Some(info),
+                            store,
+                            ItemTypeTag::Dm,
+                        )
+                    })
                     .filter(RoomLikeItem::is_unread);
 
                 items.extend(dms);
@@ -617,6 +672,27 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 List::new(store)
                     .empty_message("You do not have any unreads yet")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(area, buf, state);
+            },
+            IambWindow::InviteList(state) => {
+                let mut items = store
+                    .application
+                    .sync_info
+                    .invites
+                    .iter()
+                    .filter_map(|room_id| store.application.worker.client.get_room(room_id))
+                    .map(|room| GenericChatItem::new(room, None, store, ItemTypeTag::None))
+                    .collect::<Vec<_>>();
+                let fields = &store.application.settings.tunables.sort.invites;
+                let mut collator = Collator::default();
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, &mut collator));
+
+                state.set(items);
+
+                List::new(store)
+                    .empty_message("You don't have any invites")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
                     .render(area, buf, state);
@@ -674,6 +750,7 @@ impl WindowOps<IambInfo> for IambWindow {
             IambWindow::Welcome(w) => w.dup(store).into(),
             IambWindow::ChatList(w) => IambWindow::ChatList(w.dup(store)),
             IambWindow::UnreadList(w) => IambWindow::UnreadList(w.dup(store)),
+            IambWindow::InviteList(w) => IambWindow::InviteList(w.dup(store)),
         }
     }
 
@@ -715,6 +792,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => IambId::Welcome,
             IambWindow::ChatList(_) => IambId::ChatList,
             IambWindow::UnreadList(_) => IambId::UnreadList,
+            IambWindow::InviteList(_) => IambId::InviteList,
         }
     }
 
@@ -727,6 +805,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
             IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::InviteList(_) => bold_spans("Invites"),
 
             IambWindow::Room(w) => {
                 let title = store.application.get_room_title(w.id());
@@ -755,6 +834,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
             IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::InviteList(_) => bold_spans("Invites"),
 
             IambWindow::Room(w) => w.get_title(store),
             IambWindow::MemberList(state, room_id, _) => {
@@ -823,6 +903,11 @@ impl Window<IambInfo> for IambWindow {
 
                 return Ok(IambWindow::UnreadList(list));
             },
+            IambId::InviteList => {
+                let list = InviteListState::new(IambBufferId::InviteList, vec![]);
+
+                return Ok(IambWindow::InviteList(list));
+            },
         }
     }
 
@@ -852,64 +937,49 @@ impl Window<IambInfo> for IambWindow {
     }
 }
 
-pub trait ItemType: Clone {
-    fn is_dm(&self) -> bool;
-    fn show_marker(&self) -> bool;
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ChatItem {
+pub enum ItemTypeTag {
+    Invite,
     Room,
     Dm,
+    None,
 }
 
-impl ItemType for ChatItem {
-    fn is_dm(&self) -> bool {
+impl ItemTypeTag {
+    fn text(&self) -> Option<&'static str> {
         match self {
-            Self::Room => false,
-            Self::Dm => true,
+            Self::None => None,
+            Self::Invite => Some("Invite"),
+            Self::Room => Some("Room"),
+            Self::Dm => Some("DM"),
         }
-    }
-
-    fn show_marker(&self) -> bool {
-        true
-    }
-}
-
-/// Eiter a dm-only or a room-only item
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct UndifferentiatedItem;
-
-impl ItemType for UndifferentiatedItem {
-    fn is_dm(&self) -> bool {
-        false
-    }
-
-    fn show_marker(&self) -> bool {
-        false
     }
 }
 
 #[derive(Clone)]
-pub struct GenericChatItem<T: ItemType> {
+pub struct GenericChatItem {
     room: MatrixRoom,
     name: String,
     tags: Option<Tags>,
     alias: Option<OwnedRoomAliasId>,
-    unread: UnreadInfo,
-    is_dm: T,
+    unread: Option<UnreadInfo>,
+    iamb_tag: ItemTypeTag,
 }
 
-impl<T: ItemType> GenericChatItem<T> {
-    fn new(info: &RoomInfo, store: &ProgramStore, is_dm: T) -> Self {
-        let unread = info.unreads(&store.application.settings);
-        let tags = info.tags.clone();
+impl GenericChatItem {
+    fn new(
+        room: MatrixRoom,
+        info: Option<&RoomInfo>,
+        store: &ProgramStore,
+        iamb_tag: ItemTypeTag,
+    ) -> Self {
+        let unread = info.map(|info| info.unreads(&store.application.settings));
+        let tags = info.and_then(|info| info.tags.clone());
 
-        let room = info.room().clone();
         let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
         let alias = room.canonical_alias();
 
-        Self { room, name, tags, alias, is_dm, unread }
+        Self { room, name, tags, alias, iamb_tag, unread }
     }
 
     #[inline]
@@ -923,7 +993,7 @@ impl<T: ItemType> GenericChatItem<T> {
     }
 }
 
-impl<T: ItemType> RoomLikeItem for GenericChatItem<T> {
+impl RoomLikeItem for GenericChatItem {
     fn name(&self) -> &str {
         &self.name
     }
@@ -945,11 +1015,11 @@ impl<T: ItemType> RoomLikeItem for GenericChatItem<T> {
     }
 
     fn recent_ts(&self) -> Option<&MessageTimeStamp> {
-        self.unread.latest()
+        self.unread.as_ref()?.latest()
     }
 
     fn is_unread(&self) -> bool {
-        self.unread.is_unread()
+        self.unread.as_ref().is_some_and(|u| u.is_unread())
     }
 
     fn is_invite(&self) -> bool {
@@ -957,30 +1027,25 @@ impl<T: ItemType> RoomLikeItem for GenericChatItem<T> {
     }
 }
 
-impl<T: ItemType> Display for GenericChatItem<T> {
+impl Display for GenericChatItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.name())
     }
 }
 
-impl<T: ItemType> ListItem<IambInfo> for GenericChatItem<T> {
+impl ListItem<IambInfo> for GenericChatItem {
     fn show(
         &self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(self.name(), unread, style);
+        let (name, mut labels) = name_and_labels(self.name(), self.is_unread(), style);
         let mut spans = vec![name];
 
-        if self.is_dm.show_marker() {
-            labels.push(if self.is_dm.is_dm() {
-                vec![Span::styled("DM", style)]
-            } else {
-                vec![Span::styled("Room", style)]
-            });
+        if let Some(tag) = self.iamb_tag.text() {
+            labels.push(vec![Span::styled(tag, style)]);
         }
 
         if let Some(tags) = &self.tags() {
@@ -996,7 +1061,7 @@ impl<T: ItemType> ListItem<IambInfo> for GenericChatItem<T> {
     }
 }
 
-impl<T: ItemType> Promptable<ProgramContext, ProgramStore, IambInfo> for GenericChatItem<T> {
+impl Promptable<ProgramContext, ProgramStore, IambInfo> for GenericChatItem {
     fn prompt(
         &mut self,
         act: &PromptAction,

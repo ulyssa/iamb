@@ -1235,6 +1235,9 @@ pub enum IambId {
 
     /// The `:unreads` window.
     UnreadList,
+
+    /// The `:invites` window.
+    InviteList,
 }
 
 impl Display for IambId {
@@ -1256,6 +1259,7 @@ impl Display for IambId {
             IambId::Welcome => f.write_str("iamb://welcome"),
             IambId::ChatList => f.write_str("iamb://chats"),
             IambId::UnreadList => f.write_str("iamb://unreads"),
+            IambId::InviteList => f.write_str("iamb://invites"),
         }
     }
 }
@@ -1394,6 +1398,13 @@ impl Visitor<'_> for IambIdVisitor {
 
                 Ok(IambId::UnreadList)
             },
+            Some("invites") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://invites takes no path"));
+                }
+
+                Ok(IambId::UnreadList)
+            },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
         }
@@ -1464,6 +1475,9 @@ pub enum IambBufferId {
 
     /// The `:unreads` window.
     UnreadList,
+
+    /// The `:invits` window.
+    InviteList,
 }
 
 impl IambBufferId {
@@ -1480,6 +1494,7 @@ impl IambBufferId {
             IambBufferId::Welcome => IambId::Welcome,
             IambBufferId::ChatList => IambId::ChatList,
             IambBufferId::UnreadList => IambId::UnreadList,
+            IambBufferId::InviteList => IambId::InviteList,
         };
 
         Some(id)
@@ -1524,6 +1539,7 @@ impl Completer<IambInfo> for IambCompleter {
             IambBufferId::Welcome => vec![],
             IambBufferId::ChatList => vec![],
             IambBufferId::UnreadList => vec![],
+            IambBufferId::InviteList => vec![],
         }
     }
 }
@@ -1850,7 +1866,7 @@ pub mod tests {
         let text = EditRope::from("abo hor inv");
         let mut cursor = Cursor::new(0, 11);
         let res = complete_cmdbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec!["invite"]);
+        assert_eq!(res, vec!["invite", "invites"]);
 
         let text = EditRope::from("abo hor invite \n");
         let mut cursor = Cursor::new(0, 15);

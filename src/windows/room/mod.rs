@@ -152,7 +152,7 @@ impl RoomState {
         thread: Option<OwnedEventId>,
         store: &mut ProgramStore,
     ) -> IambResult<Self> {
-        if store.application.sync_info.invites.iter().any(|id| id == room.room_id()) {
+        if room.state() == matrix_sdk::RoomState::Invited {
             return Ok(InviteState::new(room, store)?.into());
         }
 

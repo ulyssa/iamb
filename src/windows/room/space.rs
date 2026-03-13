@@ -35,7 +35,7 @@ use crate::base::{
     SpaceAction,
 };
 
-use crate::windows::{room_fields_cmp, ChatItem, GenericChatItem, RoomLikeItem};
+use crate::windows::{room_fields_cmp, GenericChatItem, ItemTypeTag, RoomLikeItem};
 
 const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -43,7 +43,7 @@ const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 pub struct SpaceState {
     room_id: OwnedRoomId,
     room: MatrixRoom,
-    list: ListState<GenericChatItem<ChatItem>, IambInfo>,
+    list: ListState<GenericChatItem, IambInfo>,
     last_fetch: Option<Instant>,
 }
 
@@ -151,7 +151,7 @@ impl TerminalCursor for SpaceState {
 }
 
 impl Deref for SpaceState {
-    type Target = ListState<GenericChatItem<ChatItem>, IambInfo>;
+    type Target = ListState<GenericChatItem, IambInfo>;
 
     fn deref(&self) -> &Self::Target {
         &self.list
@@ -209,13 +209,18 @@ impl StatefulWidget for Space<'_> {
                                 .iter()
                                 .any(|id| id == room_id)
                             {
-                                ChatItem::Dm
+                                ItemTypeTag::Dm
                             } else {
-                                ChatItem::Room
+                                ItemTypeTag::Room
                             };
 
                             if room_id != state.room_id {
-                                Some(GenericChatItem::new(info, self.store, is_dm))
+                                Some(GenericChatItem::new(
+                                    info.room().clone(),
+                                    Some(info),
+                                    self.store,
+                                    is_dm,
+                                ))
                             } else {
                                 None
                             }
