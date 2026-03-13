@@ -558,6 +558,7 @@ impl SortOverrides {
 
 #[derive(Clone)]
 pub struct TunableValues {
+    pub cursor_shape: CursorShape,
     pub log_level: Level,
     pub message_shortcode_display: bool,
     pub normal_after_send: bool,
@@ -585,6 +586,7 @@ pub struct TunableValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
+    pub cursor_shape: Option<CursorShape>,
     pub log_level: Option<LogLevel>,
     pub message_shortcode_display: Option<bool>,
     pub normal_after_send: Option<bool>,
@@ -614,6 +616,7 @@ pub struct Tunables {
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
+            cursor_shape: self.cursor_shape.or(other.cursor_shape),
             log_level: self.log_level.or(other.log_level),
             message_shortcode_display: self
                 .message_shortcode_display
@@ -648,6 +651,7 @@ impl Tunables {
 
     fn values(self) -> TunableValues {
         TunableValues {
+            cursor_shape: self.cursor_shape.unwrap_or_default(),
             log_level: self.log_level.map(Level::from).unwrap_or(Level::INFO),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
@@ -675,6 +679,16 @@ impl Tunables {
             tabstop: self.tabstop.unwrap_or(4),
         }
     }
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum CursorShape {
+    #[default]
+    Default,
+    Block,
+    Line,
+    Underline,
 }
 
 #[derive(Clone)]
@@ -1343,6 +1357,16 @@ mod tests {
         );
         assert!(serde_json::from_str::<NotifyVia>(r#""other""#).is_err());
         assert!(serde_json::from_str::<NotifyVia>(r#""""#).is_err());
+    }
+
+    #[test]
+    fn test_parse_cursor_shape() {
+        assert_eq!(CursorShape::Default, CursorShape::default());
+        assert_eq!(CursorShape::Default, serde_json::from_str(r#""default""#).unwrap());
+        assert_eq!(CursorShape::Block, serde_json::from_str(r#""block""#).unwrap());
+        assert_eq!(CursorShape::Line, serde_json::from_str(r#""line""#).unwrap());
+        assert_eq!(CursorShape::Underline, serde_json::from_str(r#""underline""#).unwrap());
+        assert!(serde_json::from_str::<CursorShape>(r#""beam""#).is_err());
     }
 
     #[test]

@@ -5,6 +5,7 @@ user_id = "@user:matrix.org"
 url = "https://matrix.org"
 
 [settings]
+cursor_shape = "default"
 default_room = "#iamb-users:0x.badd.cafe"
 external_edit_file_suffix = ".md"
 log_level = "warn"
