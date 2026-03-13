@@ -265,9 +265,28 @@ impl Messages {
         let item = self.messages.get(index)?;
 
         if item.unique_id() != key.id() {
-            // TODO: search messages around?
-            tracing::error!("key not found");
-            return None;
+            // This should only happen if the fully read marker moves, thereby shifting the
+            // timeline. Search a few messages around the indec to account for that. But if we
+            // search to many messages we might be trying to use the fully read marker at its new
+            // position.
+
+            let item = self
+                .messages
+                .iter()
+                .skip(index + 1)
+                .alternate_with_all(self.messages.iter().take(index.saturating_sub(1)).rev())
+                .take(4)
+                .find(|item| item.unique_id() == key.id());
+
+            if item.is_none() {
+                tracing::warn!(
+                    room_id = ?self.timeline().room().room_id(),
+                    id = ?key.id(),
+                    "message key not found in timeline"
+                );
+            }
+
+            return item.and_then(|item| item.as_event());
         }
 
         item.as_event()
