@@ -64,7 +64,6 @@ use crate::message::html::StyleTreeNode;
 use crate::message::state::{body_cow_membership, body_cow_profile, html_membership, html_profile};
 use crate::preview::{ImageStatus, PreviewManager};
 use crate::util::TimelineDetailsExt;
-use crate::worker::Requester;
 use crate::{
     base::RoomInfo,
     config::ApplicationSettings,
@@ -410,23 +409,33 @@ impl Messages {
             fetching: false,
         };
 
-        messages.paginate_backwards_count(store, 10);
+        messages.paginate_backwards_count(Arc::clone(&store), 10);
+
+        messages.register_image_previews(store);
 
         Ok((messages, htmls))
     }
 
-    /// This should be called closely after [`Self::new`].
-    pub fn register_image_previews(
-        &self,
-        settings: &ApplicationSettings,
-        previews: &mut PreviewManager,
-        worker: &Requester,
-    ) {
-        for (_, item) in self.range_messages(..) {
-            if let Some(source) = item.image_preview() {
-                previews.register_preview(settings, source, worker);
+    fn register_image_previews(&self, store: AsyncProgramStore) {
+        let room_id = self.timeline().room().room_id().to_owned();
+        let thread = self.thread.clone();
+
+        tokio::spawn(async move {
+            let mut locked = store.lock().await;
+            let ChatStore { rooms, settings, previews, worker, .. } = &mut locked.application;
+
+            let messages = rooms
+                .get(&room_id)
+                .expect("internal state inconsistent")
+                .get_thread(thread.as_deref())
+                .expect("internal state inconsistent");
+
+            for (_, item) in messages.range_messages(..) {
+                if let Some(source) = item.image_preview() {
+                    previews.register_preview(settings, source, worker);
+                }
             }
-        }
+        });
     }
 
     #[inline]
@@ -794,7 +803,7 @@ fn body_cow_msglike(content: &MsgLikeContent) -> Cow<'_, str> {
         MsgLikeKind::Message(message) => body_cow_content(message.msgtype()),
         MsgLikeKind::Sticker(sticker) => Cow::Owned(format!("Alt: {}", sticker.content().body)),
         MsgLikeKind::Poll(_) => {
-            // TODO: implement
+            // TODO: implement polls
             Cow::Borrowed("[Poll]")
         },
         MsgLikeKind::Redacted => Cow::Borrowed("[Redacted]"),

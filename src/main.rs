@@ -155,14 +155,14 @@ fn config_tab_to_desc(
             let window = match window {
                 config::WindowPath::UserId(user_id) => {
                     let name = user_id.to_string();
-                    let room_id = worker.join_room(name.clone())?;
+                    let room_id = worker.join_room(name.clone())?.room_id().to_owned();
                     names.insert(name, room_id.clone());
                     IambId::Room(room_id, None)
                 },
                 config::WindowPath::RoomId(room_id) => IambId::Room(room_id, None),
                 config::WindowPath::AliasId(alias) => {
                     let name = alias.to_string();
-                    let room_id = worker.join_room(name.clone())?;
+                    let room_id = worker.join_room(name.clone())?.room_id().to_owned();
                     names.insert(name, room_id.clone());
                     IambId::Room(room_id, None)
                 },
@@ -654,7 +654,11 @@ impl Application {
         match action {
             HomeserverAction::CreateRoom(alias, vis, flags) => {
                 let client = &store.application.worker.client;
-                let room_id = create_room(client, alias, vis, flags).await?;
+                let room = create_room(client, alias, vis, flags).await?;
+                let room_id = room.room_id().to_owned();
+
+                store.application.join_room(room_id.to_string())?;
+
                 let room = IambId::Room(room_id, None);
                 let target = OpenTarget::Application(room);
                 let action = WindowAction::Switch(target);

@@ -849,13 +849,8 @@ impl RoomInfo {
     pub async fn new(
         room: &MatrixRoom,
         store: AsyncProgramStore,
-        locked: &mut ProgramStore,
     ) -> Result<Self, matrix_sdk_ui::timeline::Error> {
         let (messages, htmls) = Messages::new(room, None, store).await?;
-
-        let ChatStore { settings, previews, worker, .. } = &mut locked.application;
-
-        messages.register_image_previews(settings, previews, worker);
 
         Ok(Self {
             messages,
@@ -887,8 +882,6 @@ impl RoomInfo {
     pub fn ensure_thread(
         &mut self,
         root: &EventId,
-        settings: &ApplicationSettings,
-        previews: &mut PreviewManager,
         worker: &Requester,
     ) -> Result<bool, matrix_sdk_ui::timeline::Error> {
         if self.threads.contains_key(root) {
@@ -896,8 +889,6 @@ impl RoomInfo {
         }
 
         let (messages, htmls) = worker.get_messages(self.room().clone(), Some(root.to_owned()))?;
-
-        messages.register_image_previews(settings, previews, worker);
 
         self.htmls.extend(htmls);
 
@@ -1086,11 +1077,14 @@ pub struct SyncInfo {
     /// Spaces that the user is a member of.
     pub spaces: Vec<OwnedRoomId>,
 
-    /// Rooms that the user is a member of.
+    /// Normal rooms that the user is a member of.
     pub rooms: Vec<OwnedRoomId>,
 
     /// DMs that the user is a member of.
     pub dms: Vec<OwnedRoomId>,
+
+    /// Rooms that the user is invited to.
+    pub invites: Vec<OwnedRoomId>,
 }
 
 /// The main application state.
@@ -1175,6 +1169,21 @@ impl ChatStore {
         } else {
             None
         }
+    }
+
+    pub fn join_room(&mut self, name: String) -> IambResult<&mut RoomInfo> {
+        let room = self.worker.join_room(name.clone())?;
+
+        let room_id = room.room_id().to_owned();
+
+        if self.rooms.get(&room_id).is_none() {
+            let info = self.worker.create_room_info(room).map_err(IambError::from)?;
+            self.rooms.insert(room_id.clone(), info);
+
+            self.names.insert(name, room_id.clone());
+        }
+
+        Ok(self.rooms.get_mut(&room_id).expect("value should have been inserted"))
     }
 
     /// Get the title for a room.

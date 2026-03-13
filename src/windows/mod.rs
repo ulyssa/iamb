@@ -58,7 +58,6 @@ use modalkit_ratatui::{
 };
 
 use crate::base::{
-    ChatStore,
     IambBufferId,
     IambError,
     IambId,
@@ -828,20 +827,12 @@ impl Window<IambInfo> for IambWindow {
     }
 
     fn find(name: String, store: &mut ProgramStore) -> IambResult<Self> {
-        let ChatStore { names, worker, .. } = &mut store.application;
-
-        if let Some(room) = names.get_mut(&name) {
+        if let Some(room) = store.application.names.get_mut(&name) {
             let id = IambId::Room(room.clone(), None);
 
             IambWindow::open(id, store)
         } else {
-            let room_id = worker.join_room(name.clone())?;
-            // TODO: make sure `RoomInfo` exists
-            names.insert(name, room_id.clone());
-
-            let Some(info) = store.application.rooms.get_mut(&room_id) else {
-                return Err(UIError::Application(IambError::UnknownRoom(room_id)));
-            };
+            let info = store.application.join_room(name)?;
 
             let room = RoomState::new(info.room().clone(), None, store);
 

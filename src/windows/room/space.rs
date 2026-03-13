@@ -6,10 +6,7 @@ use std::time::{Duration, Instant};
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::ruma::OwnedSpaceChildOrder;
-use matrix_sdk::{
-    room::Room as MatrixRoom,
-    ruma::{OwnedRoomId, RoomId},
-};
+use matrix_sdk::{room::Room as MatrixRoom, ruma::OwnedRoomId};
 
 use modalkit::prelude::{EditInfo, InfoMessage};
 use ratatui::{
@@ -60,18 +57,8 @@ impl SpaceState {
         SpaceState { room_id, room, list, last_fetch }
     }
 
-    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
-        if let Some(room) = store.application.worker.client.get_room(self.id()) {
-            self.room = room;
-        }
-    }
-
     pub fn room(&self) -> &MatrixRoom {
         &self.room
-    }
-
-    pub fn id(&self) -> &RoomId {
-        &self.room_id
     }
 
     pub fn dup(&self, store: &mut ProgramStore) -> Self {

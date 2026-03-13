@@ -12,6 +12,7 @@ use std::sync::{Arc, Weak};
 use std::time::Duration;
 
 use gethostname::gethostname;
+use matrix_sdk::room::Invite;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::OwnedEventId;
 use matrix_sdk_ui::timeline::TimelineEventItemId;
@@ -110,7 +111,7 @@ pub async fn create_room(
     room_alias_name: Option<String>,
     rt: CreateRoomType,
     flags: CreateRoomFlags,
-) -> IambResult<OwnedRoomId> {
+) -> IambResult<MatrixRoom> {
     let mut creation_content = None;
     let mut initial_state = vec![];
     let mut is_direct = false;
@@ -173,17 +174,36 @@ pub async fn create_room(
         }
     }
 
-    return Ok(resp.room_id().to_owned());
+    return Ok(resp);
 }
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
-    // TODO: process invited rooms
-
     let mut spaces = vec![];
     let mut rooms = vec![];
     let mut dms = vec![];
+    let mut invites = vec![];
 
     let mut locked = store.lock().await;
+
+    for room in client.invited_rooms() {
+        if let Some(alias) = room.canonical_alias() {
+            locked
+                .application
+                .names
+                .insert(alias.to_string(), room.room_id().to_owned());
+        }
+
+        // pre-compute name
+        if let Err(err) = room.sync_members().await {
+            tracing::warn!(room_id = ?room.room_id(), "cannot load room members: {err}");
+        }
+        if let Err(err) = room.display_name().await {
+            tracing::warn!(room_id = ?room.room_id(), "cannot load room name: {err}");
+        };
+
+        invites.push(room.room_id().to_owned());
+    }
+
     for room in client.joined_rooms() {
         if let Some(alias) = room.canonical_alias() {
             locked
@@ -214,7 +234,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
         // only create `RoomInfo` for chats
 
         if locked.application.rooms.get(room.room_id()).is_none() {
-            let info = match RoomInfo::new(&room, Arc::clone(store), &mut locked).await {
+            let info = match RoomInfo::new(&room, Arc::clone(store)).await {
                 Ok(info) => info,
                 Err(err) => {
                     tracing::warn!(room_id = ?room.room_id(), "cannot create room info: {err}");
@@ -240,6 +260,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     locked.application.sync_info.spaces = spaces;
     locked.application.sync_info.rooms = rooms;
     locked.application.sync_info.dms = dms;
+    locked.application.sync_info.invites = invites;
 }
 
 async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
@@ -309,9 +330,10 @@ pub enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     Logout(String, ClientReply<IambResult<EditInfo>>),
-    GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
+    GetInviter(MatrixRoom, ClientReply<Result<Invite, matrix_sdk::Error>>),
     GetMessages(MatrixRoom, Option<OwnedEventId>, ClientReply<MessagesResult>),
-    JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
+    JoinRoom(String, ClientReply<IambResult<MatrixRoom>>),
+    CreateRoomInfo(MatrixRoom, ClientReply<Result<RoomInfo, matrix_sdk_ui::timeline::Error>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     TypingNotice(OwnedRoomId),
@@ -351,6 +373,12 @@ impl Debug for WorkerTask {
             WorkerTask::JoinRoom(s, _) => {
                 f.debug_tuple("WorkerTask::JoinRoom")
                     .field(s)
+                    .field(&format_args!("_"))
+                    .finish()
+            },
+            WorkerTask::CreateRoomInfo(room, _) => {
+                f.debug_tuple("WorkerTask::CreateRoomInfo")
+                    .field(room)
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -477,7 +505,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn get_inviter(&self, invite: MatrixRoom) -> IambResult<Option<RoomMember>> {
+    pub fn get_inviter(&self, invite: MatrixRoom) -> Result<Invite, matrix_sdk::Error> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::GetInviter(invite, reply)).unwrap();
@@ -493,10 +521,21 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn join_room(&self, name: String) -> IambResult<OwnedRoomId> {
+    pub fn join_room(&self, name: String) -> IambResult<MatrixRoom> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::JoinRoom(name, reply)).unwrap();
+
+        return response.recv();
+    }
+
+    pub fn create_room_info(
+        &self,
+        room: MatrixRoom,
+    ) -> Result<RoomInfo, matrix_sdk_ui::timeline::Error> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::CreateRoomInfo(room, reply)).unwrap();
 
         return response.recv();
     }
@@ -607,9 +646,13 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.join_room(room_id).await);
             },
+            WorkerTask::CreateRoomInfo(room, reply) => {
+                assert!(self.initialized);
+                reply.send(RoomInfo::new(&room, Arc::clone(self.store.as_ref().unwrap())).await);
+            },
             WorkerTask::GetInviter(invited, reply) => {
                 assert!(self.initialized);
-                reply.send(self.get_inviter(invited).await);
+                reply.send(invited.invite_details().await);
             },
             WorkerTask::GetMessages(room, thread, reply) => {
                 assert!(self.initialized);
@@ -922,14 +965,14 @@ impl ClientWorker {
         Ok(Some(InfoMessage::from("Successfully logged out")))
     }
 
-    async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<OwnedRoomId> {
+    async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<MatrixRoom> {
         for room in self.client.rooms() {
             if !is_direct(&room).await {
                 continue;
             }
 
             if room.get_member(user.as_ref()).await.map_err(IambError::from)?.is_some() {
-                return Ok(room.room_id().to_owned());
+                return Ok(room);
             }
         }
 
@@ -948,12 +991,6 @@ impl ClientWorker {
         })
     }
 
-    async fn get_inviter(&mut self, invited: MatrixRoom) -> IambResult<Option<RoomMember>> {
-        let details = invited.invite_details().await.map_err(IambError::from)?;
-
-        Ok(details.inviter)
-    }
-
     async fn get_messages(
         &mut self,
         room: MatrixRoom,
@@ -963,10 +1000,10 @@ impl ClientWorker {
         Messages::new(&room, thread, store).await
     }
 
-    async fn join_room(&mut self, name: String) -> IambResult<OwnedRoomId> {
-        if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
+    async fn join_room(&mut self, name: String) -> IambResult<MatrixRoom> {
+        let room = if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
             match self.client.join_room_by_id_or_alias(&alias_id, &[]).await {
-                Ok(resp) => Ok(resp.room_id().to_owned()),
+                Ok(resp) => resp,
                 Err(e) => {
                     let msg = e.to_string();
                     let err = UIError::Failure(msg);
@@ -975,13 +1012,20 @@ impl ClientWorker {
                 },
             }
         } else if let Ok(user) = OwnedUserId::try_from(name.as_str()) {
-            self.direct_message(user).await
+            self.direct_message(user).await?
         } else {
             let msg = format!("{:?} is not a valid room or user name", name.as_str());
             let err = UIError::Failure(msg);
 
             return Err(err);
-        }
+        };
+
+        // pre-compute name
+        if let Err(err) = room.display_name().await {
+            tracing::warn!(room_id = ?room.room_id(), "cannot load room name: {err}");
+        };
+
+        Ok(room)
     }
 
     async fn members(&mut self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
