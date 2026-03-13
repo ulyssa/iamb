@@ -38,7 +38,7 @@ use tracing_subscriber::FmtSubscriber;
 
 use modalkit::crossterm::{
     self,
-    cursor::Show as CursorShow,
+    cursor::{SetCursorStyle, Show as CursorShow},
     event::{
         poll,
         read,
@@ -99,7 +99,7 @@ use crate::{
         ProgramContext,
         ProgramStore,
     },
-    config::{ApplicationSettings, Iamb},
+    config::{ApplicationSettings, CursorShape, Iamb},
     windows::IambWindow,
     worker::{create_room, ClientWorker, LoginStyle, Requester},
 };
@@ -976,6 +976,12 @@ async fn login_normal(
 /// Set up the terminal for drawing the TUI, and getting additional info.
 fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std::io::Result<()> {
     let title = format!("iamb ({})", settings.profile.user_id.as_str());
+    let cursor_style = match settings.tunables.cursor_shape {
+        CursorShape::Default => SetCursorStyle::DefaultUserShape,
+        CursorShape::Block => SetCursorStyle::SteadyBlock,
+        CursorShape::Line => SetCursorStyle::SteadyBar,
+        CursorShape::Underline => SetCursorStyle::SteadyUnderScore,
+    };
 
     // Enable raw mode and enter the alternate screen.
     crossterm::terminal::enable_raw_mode()?;
@@ -993,7 +999,13 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
         crossterm::execute!(stdout(), EnableMouseCapture)?;
     }
 
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
+    crossterm::execute!(
+        stdout(),
+        EnableBracketedPaste,
+        EnableFocusChange,
+        SetTitle(title),
+        cursor_style
+    )
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
@@ -1010,6 +1022,7 @@ fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
         stdout(),
         DisableBracketedPaste,
         DisableFocusChange,
+        SetCursorStyle::DefaultUserShape,
         LeaveAlternateScreen,
         CursorShow,
     );
