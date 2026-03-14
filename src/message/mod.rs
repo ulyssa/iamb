@@ -299,15 +299,30 @@ impl Messages {
 
         item.as_event()
     }
-    pub fn first_key(&self) -> Option<MessageKey> {
-        let id = self.messages.front()?.unique_id().to_owned();
+
+    pub fn first_key(&self, settings: &ApplicationSettings) -> Option<MessageKey> {
+        let filter = settings.filter_hidden_item();
+        let id = self
+            .messages
+            .iter()
+            .find(|item| item.as_event().is_none_or(|item| filter(&item)))?
+            .unique_id()
+            .to_owned();
 
         let offset = 0isize.checked_sub_unsigned(self.start_element)?;
 
         MessageKey::new(offset, id).into()
     }
-    pub fn last_key(&self) -> Option<MessageKey> {
-        let id = self.messages.back()?.unique_id().to_owned();
+
+    pub fn last_key(&self, settings: &ApplicationSettings) -> Option<MessageKey> {
+        let filter = settings.filter_hidden_item();
+        let id = self
+            .messages
+            .iter()
+            .filter(|item| item.as_event().is_none_or(|item| filter(&item)))
+            .next_back()?
+            .unique_id()
+            .to_owned();
 
         let offset = self
             .messages
@@ -317,10 +332,28 @@ impl Messages {
 
         MessageKey::new(offset, id).into()
     }
-    pub fn last_message(&self) -> Option<&Message> {
-        self.messages.iter().filter_map(|item| item.as_event()).next_back()
+
+    pub fn last_message(&self, settings: &ApplicationSettings) -> Option<&Message> {
+        self.messages
+            .iter()
+            .filter_map(|item| item.as_event())
+            .filter(settings.filter_hidden_item())
+            .next_back()
     }
-    pub fn range(&self, range: impl RangeBounds<MessageKey>) -> MessagesRange {
+
+    pub fn range(
+        &self,
+        range: impl RangeBounds<MessageKey>,
+        settings: &ApplicationSettings,
+    ) -> impl DoubleEndedIterator<Item = (MessageKey, &MessageItem)> {
+        self.range_filtered(range, settings.filter_hidden())
+    }
+
+    pub fn range_filtered<F: FnMut(&(MessageKey, &MessageItem)) -> bool>(
+        &self,
+        range: impl RangeBounds<MessageKey>,
+        filter: F,
+    ) -> std::iter::Filter<MessagesRange, F> {
         let mut next = match range.start_bound() {
             Bound::Included(start) => self.start_element.saturating_add_signed(start.offset()),
             Bound::Excluded(start) => self.start_element.saturating_add_signed(start.offset() + 1),
@@ -346,13 +379,15 @@ impl Messages {
             },
         };
 
-        MessagesRange { messages: self, next, last }
+        MessagesRange { messages: self, next, last }.filter(filter)
     }
+
     pub fn range_messages(
         &self,
         range: impl RangeBounds<MessageKey>,
+        settings: &ApplicationSettings,
     ) -> impl DoubleEndedIterator<Item = (MessageKey, &Message)> {
-        self.range(range)
+        self.range(range, settings)
             .filter_map(|(key, item)| item.as_event().map(|event| (key, event)))
     }
 
@@ -439,7 +474,7 @@ impl Messages {
                 .get_thread(thread.as_deref())
                 .expect("internal state inconsistent");
 
-            for (_, item) in messages.range_messages(..) {
+            for (_, item) in messages.range_messages(.., settings) {
                 if let Some(source) = item.image_preview() {
                     previews.register_preview(settings, source, worker);
                 }
@@ -712,22 +747,32 @@ impl MessageCursor {
         MessageCursor::default()
     }
 
-    pub fn to_key<'a>(&'a self, thread: &'a Messages) -> Option<MessageKey> {
+    pub fn to_key<'a>(
+        &'a self,
+        thread: &'a Messages,
+        settings: &ApplicationSettings,
+    ) -> Option<MessageKey> {
         if let Some(key) = &self.key {
             Some(key.clone())
         } else {
-            thread.range_messages(..).next_back().map(|(key, _)| key)
+            thread.range_messages(.., settings).next_back().map(|(key, _)| key)
         }
     }
 
-    pub fn from_cursor(cursor: &Cursor, thread: &Messages) -> Option<Self> {
+    pub fn from_cursor(
+        cursor: &Cursor,
+        thread: &Messages,
+        settings: &ApplicationSettings,
+    ) -> Option<Self> {
         let ev_hash = cursor.get_x();
         let ev_term = TimelineUniqueId(String::new());
 
         let offset_start = isize::MIN.wrapping_add_unsigned(cursor.get_y());
         let start = MessageKey::new(offset_start, ev_term);
 
-        let iter = thread.range(&start..).alternate_with_all(thread.range(..&start).rev());
+        let iter = thread
+            .range(&start.., settings)
+            .alternate_with_all(thread.range(..&start, settings).rev());
         for (key, _) in iter {
             if hash_event_id(key.id())? == ev_hash {
                 return Self::from(key.to_owned()).into();
@@ -739,11 +784,14 @@ impl MessageCursor {
         }
 
         // If we can't find the cursor, then go to the nearest timestamp.
-        thread.range(start..).next().map(|(key, _)| Self::from(key.clone()))
+        thread
+            .range(start.., settings)
+            .next()
+            .map(|(key, _)| Self::from(key.clone()))
     }
 
-    pub fn to_cursor(&self, thread: &Messages) -> Option<Cursor> {
-        let key = self.to_key(thread)?;
+    pub fn to_cursor(&self, thread: &Messages, settings: &ApplicationSettings) -> Option<Cursor> {
+        let key = self.to_key(thread, settings)?;
 
         let y = key.offset().abs_diff(isize::MIN);
         let x = hash_event_id(key.id())?;
@@ -1640,6 +1688,7 @@ pub mod tests {
 
     #[test]
     fn test_mc_to_key() {
+        let settings = mock_settings();
         let mut messages = Messages::mock_new();
         messages.set_messages(mock_messages());
         let mc1 = MessageCursor::from(MSG1_KEY.clone());
@@ -1649,12 +1698,12 @@ pub mod tests {
         let mc5 = MessageCursor::from(MSG5_KEY.clone());
         let mc6 = MessageCursor::latest();
 
-        let k1 = mc1.to_key(&messages).unwrap();
-        let k2 = mc2.to_key(&messages).unwrap();
-        let k3 = mc3.to_key(&messages).unwrap();
-        let k4 = mc4.to_key(&messages).unwrap();
-        let k5 = mc5.to_key(&messages).unwrap();
-        let k6 = mc6.to_key(&messages).unwrap();
+        let k1 = mc1.to_key(&messages, &settings).unwrap();
+        let k2 = mc2.to_key(&messages, &settings).unwrap();
+        let k3 = mc3.to_key(&messages, &settings).unwrap();
+        let k4 = mc4.to_key(&messages, &settings).unwrap();
+        let k5 = mc5.to_key(&messages, &settings).unwrap();
+        let k6 = mc6.to_key(&messages, &settings).unwrap();
 
         // These should all be equal to their MSGN_KEYs.
         assert_eq!(k1, MSG1_KEY.clone());
@@ -1668,11 +1717,12 @@ pub mod tests {
 
         // MessageCursor::latest() fails to convert for a room w/o messages.
         let messages_empty = Messages::mock_new();
-        assert_eq!(mc6.to_key(&messages_empty), None);
+        assert_eq!(mc6.to_key(&messages_empty, &settings), None);
     }
 
     #[test]
     fn test_mc_to_from_cursor() {
+        let settings = mock_settings();
         let mut messages = Messages::mock_new();
         messages.set_messages(mock_messages());
         let mc1 = MessageCursor::from(MSG1_KEY.clone());
@@ -1683,9 +1733,9 @@ pub mod tests {
         let mc6 = MessageCursor::latest();
 
         let identity = |mc: &MessageCursor| {
-            let c = mc.to_cursor(&messages).unwrap();
+            let c = mc.to_cursor(&messages, &settings).unwrap();
 
-            MessageCursor::from_cursor(&c, &messages).unwrap()
+            MessageCursor::from_cursor(&c, &messages, &settings).unwrap()
         };
 
         // These should all convert to a Cursor and back to the original value.

@@ -13,6 +13,7 @@ use std::process;
 use clap::Parser;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use matrix_sdk_ui::timeline::TimelineItemContent;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
@@ -21,6 +22,8 @@ use tracing::Level;
 use url::Url;
 
 use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
+
+use crate::message::{Message, MessageItem, MessageKey};
 
 use super::base::{IambError, IambId, SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 
@@ -1080,6 +1083,27 @@ impl ApplicationSettings {
         };
 
         Span::styled(name, style)
+    }
+
+    pub fn filter_hidden_item(&self) -> impl Fn(&&Message) -> bool {
+        let show_state = self.tunables.state_event_display;
+
+        move |item| {
+            show_state ||
+                !matches!(
+                    item.content(),
+                    TimelineItemContent::MembershipChange(_) |
+                        TimelineItemContent::ProfileChange(_) |
+                        TimelineItemContent::OtherState(_) |
+                        TimelineItemContent::FailedToParseState { .. }
+                )
+        }
+    }
+
+    pub fn filter_hidden(&self) -> impl Fn(&(MessageKey, &MessageItem)) -> bool {
+        let filter = self.filter_hidden_item();
+
+        move |(_, item)| item.as_event().is_none_or(|item| filter(&item))
     }
 }
 

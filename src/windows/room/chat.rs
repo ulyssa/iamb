@@ -161,7 +161,7 @@ impl ChatState {
         let Some(thread) = self.scrollback.get_thread(info) else {
             return Err(IambError::NoSelectedRoom.into());
         };
-        let msg = self.scrollback.get(info).ok_or(IambError::NoSelectedMessage)?;
+        let msg = self.scrollback.get(info, settings).ok_or(IambError::NoSelectedMessage)?;
 
         match act {
             MessageAction::Cancel(skip_confirm) => {
@@ -317,16 +317,18 @@ impl ChatState {
                     return Err(err);
                 };
 
-                let key = self.scrollback.get_key(info).unwrap();
+                let key = self.scrollback.get_key(info, settings).unwrap();
 
                 if let Some(reply_to) = msg.reply_to() {
-                    let Some(reply_to) = thread.range_messages(..key).find_map(|(key, item)| {
-                        if item.event_id() == Some(&reply_to) {
-                            Some(key)
-                        } else {
-                            None
-                        }
-                    }) else {
+                    let Some(reply_to) =
+                        thread.range_messages(..key, settings).find_map(|(key, item)| {
+                            if item.event_id() == Some(&reply_to) {
+                                Some(key)
+                            } else {
+                                None
+                            }
+                        })
+                    else {
                         let msg = "Replied to message not loaded";
                         let err = UIError::Failure(msg.into());
 
@@ -339,7 +341,7 @@ impl ChatState {
                 }
 
                 self.tbox.set_text(text);
-                self.editing = self.scrollback.get_key(info);
+                self.editing = self.scrollback.get_key(info, settings);
                 self.focus = RoomFocus::MessageBar;
 
                 Ok(None)
@@ -407,7 +409,7 @@ impl ChatState {
             },
             MessageAction::Reply => {
                 if msg.event_id().is_some() {
-                    let key = self.scrollback.get_key(info).unwrap();
+                    let key = self.scrollback.get_key(info, settings).unwrap();
                     self.reply_to = Some(key);
                     self.focus = RoomFocus::MessageBar;
                     Ok(None)
@@ -424,14 +426,16 @@ impl ChatState {
                     return Err(UIError::Failure(msg.into()));
                 };
 
-                let key = self.scrollback.get_key(info).unwrap();
-                let Some(reply_to) = thread.range_messages(..key).find_map(|(key, item)| {
-                    if item.event_id() == Some(&reply_to) {
-                        Some(key)
-                    } else {
-                        None
-                    }
-                }) else {
+                let key = self.scrollback.get_key(info, settings).unwrap();
+                let Some(reply_to) =
+                    thread.range_messages(..key, settings).find_map(|(key, item)| {
+                        if item.event_id() == Some(&reply_to) {
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    })
+                else {
                     if let Some(store) = Weak::upgrade(&worker.store) {
                         thread.paginate_backwards(store);
                     }

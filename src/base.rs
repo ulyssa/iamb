@@ -919,11 +919,11 @@ impl RoomInfo {
     }
 
     /// Indicates whether this room has unread messages.
-    pub fn unreads(&self, _settings: &ApplicationSettings) -> UnreadInfo {
+    pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
         let UnreadNotificationsCount { highlight_count, notification_count } =
             self.room().unread_notification_counts();
 
-        let latest = self.messages.last_message().map(|item| item.timestamp().into());
+        let latest = self.messages.last_message(settings).map(|item| item.timestamp().into());
 
         UnreadInfo {
             notifications: self.room().num_unread_notifications().max(notification_count),
