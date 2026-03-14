@@ -142,7 +142,7 @@ fn handle_update(
                 }
             }
         },
-        VectorDiff::Clear | VectorDiff::Remove { .. } => (),
+        VectorDiff::PopFront | VectorDiff::Clear | VectorDiff::Remove { .. } => (),
         _ => {
             unimplemented!("these vector operations aren't used by the sdk: {update:?}")
         },
@@ -191,6 +191,15 @@ fn handle_update(
                 messages.start_element = messages.start_element.saturating_sub(1);
             }
             if let Some(item) = messages.messages[*index].as_event() {
+                vec![item.identifier()]
+            } else {
+                vec![]
+            }
+        },
+        VectorDiff::PopFront => {
+            messages.start_element = messages.start_element.saturating_sub(1);
+
+            if let Some(item) = messages.messages.get(0).and_then(|msg| msg.as_event()) {
                 vec![item.identifier()]
             } else {
                 vec![]
