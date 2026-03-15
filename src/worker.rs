@@ -13,6 +13,9 @@ use std::time::Duration;
 
 use gethostname::gethostname;
 use matrix_sdk::room::Invite;
+use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
+use matrix_sdk::ruma::events::fully_read::FullyReadEventContent;
+use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::OwnedEventId;
 use matrix_sdk_ui::timeline::TimelineEventItemId;
@@ -241,6 +244,35 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
                     continue;
                 },
             };
+
+            match room.account_data_static::<FullyReadEventContent>().await {
+                Ok(Some(_)) => (),
+                Ok(None) => {
+                    // initialize with normal read marker
+                    if let Some((event_id, _)) = info
+                        .get_thread(None)
+                        .unwrap()
+                        .timeline()
+                        .latest_user_read_receipt(client.user_id().unwrap())
+                        .await
+                    {
+                        if let Err(err) = room
+                            .send_single_receipt(
+                                ReceiptType::FullyRead,
+                                ReceiptThread::Unthreaded,
+                                event_id,
+                            )
+                            .await
+                        {
+                            tracing::warn!(room_id = ?room.room_id(), "cannot set default fully_read marker: {err}");
+                        }
+                    }
+                },
+                Err(err) => {
+                    tracing::warn!(room_id = ?room.room_id(), "failed to load fully_read marker: {err}");
+                },
+            };
+
             locked.application.rooms.insert(room.room_id().to_owned(), info);
         }
         let info = locked
