@@ -9,7 +9,6 @@ use std::{collections::HashMap, sync::Weak};
 use chrono::DateTime;
 use matrix_sdk::ruma::events::receipt::Receipt;
 use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::UserId;
 use matrix_sdk::ruma::{
     event_id,
     events::room::message::RoomMessageEventContent,
@@ -21,6 +20,7 @@ use matrix_sdk::ruma::{
     OwnedUserId,
     RoomId,
 };
+use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, UserId};
 
 use lazy_static::lazy_static;
 use matrix_sdk_ui::eyeball_im::Vector;
@@ -33,6 +33,7 @@ use matrix_sdk_ui::timeline::{
     TimelineItem,
     TimelineItemContent,
     TimelineUniqueId,
+    VirtualTimelineItem,
 };
 use modalkit::prelude::ViewportContext;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
@@ -165,6 +166,12 @@ impl MessageExt for MockMessage {
     }
 }
 
+impl MockMessage {
+    pub fn event_id(&self) -> Option<&EventId> {
+        None
+    }
+}
+
 #[derive(Debug)]
 pub struct MockMessageItem {
     id: TimelineUniqueId,
@@ -239,6 +246,14 @@ impl MockMessageItem {
 
     pub fn as_event(&self) -> Option<&Message> {
         self.inner.as_ref()
+    }
+
+    pub fn as_virtual(&self) -> Option<VirtualTimelineItem> {
+        if self.inner.is_none() {
+            Some(VirtualTimelineItem::DateDivider(MilliSecondsSinceUnixEpoch(0u16.into())))
+        } else {
+            None
+        }
     }
 
     pub fn is_timeline_start(&self) -> bool {

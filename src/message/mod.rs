@@ -1590,7 +1590,7 @@ pub trait TimelineItemExt {
                 item.show_with_preview(prev_sender, selected, vwctx, info, settings, previews)
             },
             TimelineItemKind::Virtual(VirtualTimelineItem::ReadMarker) => {
-                ("----------------------------".into(), [None, None])
+                ("-".repeat(vwctx.get_width()).into(), [None, None])
             },
             TimelineItemKind::Virtual(VirtualTimelineItem::TimelineStart) => {
                 ("--- Timeline Start ---".into(), [None, None])

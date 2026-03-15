@@ -1,7 +1,7 @@
 //! Message scrollback
 use std::sync::{Arc, Weak};
 
-use matrix_sdk_ui::timeline::TimelineDetails;
+use matrix_sdk_ui::timeline::{TimelineDetails, VirtualTimelineItem};
 use ratatui_image::Image;
 use regex::Regex;
 
@@ -187,6 +187,9 @@ pub struct ScrollbackState {
     /// This is used to ensure that ^E/^Y work nicely when the cursor is currently
     /// on a multiline message.
     show_full_on_redraw: bool,
+
+    /// The lowest the user has scrolled in the timeline. Used to update the fully_read marker.
+    newest_seen: Option<(MessageKey, OwnedEventId)>,
 }
 
 impl ScrollbackState {
@@ -205,6 +208,7 @@ impl ScrollbackState {
             viewctx,
             jumped,
             show_full_on_redraw,
+            newest_seen: None,
         }
     }
 
@@ -674,6 +678,7 @@ impl WindowOps<IambInfo> for ScrollbackState {
             viewctx: self.viewctx.clone(),
             jumped: self.jumped.clone(),
             show_full_on_redraw: false,
+            newest_seen: self.newest_seen.clone(),
         }
     }
 
@@ -1429,7 +1434,7 @@ impl StatefulWidget for Scrollback<'_> {
             return;
         };
 
-        if state.cursor.key < state.viewctx.corner.key {
+        if state.cursor.key.is_some() && state.cursor.key < state.viewctx.corner.key {
             state.viewctx.corner = state.cursor.clone();
         }
 
@@ -1445,7 +1450,7 @@ impl StatefulWidget for Scrollback<'_> {
             return;
         };
 
-        let corner = &state.viewctx.corner;
+        let corner = state.viewctx.corner.clone();
         let corner_key = if let Some(k) = &corner.key {
             k.clone()
         } else {
@@ -1457,6 +1462,9 @@ impl StatefulWidget for Scrollback<'_> {
         let mut lines = vec![];
         let mut sawit = false;
         let mut prev = prev_sender(&corner_key, thread, settings);
+        let mut newest_seen = None;
+        let mut seen_fully_read = false;
+        let mut scrolled_above_fully_read = false;
 
         // load image previews and replies
         for (_, item) in thread.range_messages(&corner_key.., settings).rev() {
@@ -1505,6 +1513,10 @@ impl StatefulWidget for Scrollback<'_> {
         let previews = &self.store.application.previews;
         for (key, item) in thread.range(&corner_key.., settings) {
             let sel = key == cursor_key;
+            if matches!(item.as_virtual(), Some(VirtualTimelineItem::ReadMarker)) {
+                seen_fully_read = true;
+                scrolled_above_fully_read = sawit;
+            }
 
             let (txt, [mut msg_preview, mut reply_preview]) =
                 item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings, previews);
@@ -1537,9 +1549,17 @@ impl StatefulWidget for Scrollback<'_> {
 
                 lines.push((key.clone(), row, line, line_preview));
                 sawit |= sel;
+
+                newest_seen = item.as_event().and_then(|item| item.event_id()).or(newest_seen);
             }
 
             prev = item.sender();
+
+            if let Some(event_id) = item.as_event().and_then(|item| item.event_id()) {
+                if state.newest_seen.as_ref().map(|s| &s.0) < Some(&key) {
+                    state.newest_seen = Some((key, event_id.to_owned()));
+                }
+            }
         }
 
         if lines.len() > height {
@@ -1577,25 +1597,66 @@ impl StatefulWidget for Scrollback<'_> {
             }
         }
 
-        if self.room_focused && settings.tunables.read_receipt_send && state.cursor.key.is_none() {
-            // If the cursor is at the last message, then update the read marker.
+        // update read markers
+        if self.room_focused {
+            if let Some(newest_seen) = newest_seen {
+                let receipt = if settings.tunables.read_receipt_send {
+                    ReceiptType::Read
+                } else {
+                    ReceiptType::ReadPrivate
+                };
 
-            let receipt = if settings.tunables.read_receipt_send {
-                ReceiptType::Read
-            } else {
-                ReceiptType::ReadPrivate
-            };
+                let timeline = Arc::clone(thread.timeline());
+                let newest_seen = newest_seen.to_owned();
 
-            let timeline = Arc::clone(thread.timeline());
+                tokio::spawn(async move {
+                    // The timeline checks whether the receipt is older than the current one
+                    if let Err(err) = timeline.send_single_receipt(receipt, newest_seen).await {
+                        tracing::warn!(
+                            room_id = ?timeline.room().room_id(),
+                            "unable to send read receipt: {err}"
+                        );
+                    }
+                });
+            }
+        }
 
-            tokio::spawn(async move {
-                if let Err(err) = timeline.mark_as_read(receipt).await {
-                    tracing::warn!(
-                        room_id = ?timeline.room().room_id(),
-                        "unable to send read receipt: {err}"
-                    );
+        // only update fully_read marker on main thread
+        if self.room_focused && state.thread().is_none() {
+            if state.cursor.key.is_none() && seen_fully_read && corner.key.is_some() {
+                // Update fully_read marker if the timeline is scrolled to the bottom and the
+                // fully_read marker is visible
+
+                let timeline = Arc::clone(thread.timeline());
+
+                tokio::spawn(async move {
+                    if let Err(err) = timeline.mark_as_read(ReceiptType::FullyRead).await {
+                        tracing::warn!(
+                            room_id = ?timeline.room().room_id(),
+                            "unable to update fully read marker: {err}"
+                        );
+                    }
+                });
+            } else if scrolled_above_fully_read {
+                // Update fully_read marker if the the user scrolled past it
+
+                if let Some((_, fully_read)) = &state.newest_seen {
+                    let timeline = Arc::clone(thread.timeline());
+                    let fully_read = fully_read.to_owned();
+
+                    tokio::spawn(async move {
+                        // The timeline checks whether the receipt is older than the current one
+                        if let Err(err) =
+                            timeline.send_single_receipt(ReceiptType::FullyRead, fully_read).await
+                        {
+                            tracing::warn!(
+                                room_id = ?timeline.room().room_id(),
+                                "unable to update fully read marker: {err}"
+                            );
+                        }
+                    });
                 }
-            });
+            }
         }
 
         // Check whether we should load older messages for this room.
