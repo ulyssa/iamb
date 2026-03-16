@@ -109,7 +109,9 @@ impl Messages {
 
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
         let event_id = key.1.clone();
-        let msg = msg.into();
+        let mut msg = msg.into();
+
+        msg.event.strip_reply_fallback();
 
         self.0.insert(key, msg);
 
@@ -531,6 +533,24 @@ impl MessageEvent {
             },
         }
     }
+
+    pub fn strip_reply_fallback(&mut self) {
+        let MessageEvent::Original(ev) = self else {
+            return;
+        };
+
+        let MessageType::Text(content) = &mut ev.content.msgtype else {
+            return;
+        };
+
+        if !content.body.starts_with('>') {
+            return;
+        }
+
+        let new_body = content.body.lines().skip_while(|line| line.starts_with('>')).collect();
+
+        content.body = new_body;
+    }
 }
 
 /// Macro rule converting a File / Image / Audio / Video to its text content with the shape:
@@ -740,7 +760,7 @@ impl<'a> MessageFormatter<'a> {
 
         let width = self.width();
         let w = width.saturating_sub(2);
-        let (mut replied, proto) = msg.show_msg(w, reply_style, true, settings);
+        let (mut replied, proto) = msg.show_msg(w, reply_style, settings);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -778,7 +798,7 @@ impl<'a> MessageFormatter<'a> {
     }
 
     fn push_reactions(&mut self, counts: Vec<(&'a str, usize)>, style: Style, text: &mut Text<'a>) {
-        let mut emojis = printer::TextPrinter::new(self.width(), style, false, self.settings);
+        let mut emojis = printer::TextPrinter::new(self.width(), style, self.settings);
         let mut reactions = 0;
 
         for (key, count) in counts {
@@ -827,7 +847,7 @@ impl<'a> MessageFormatter<'a> {
         let plural = len != 1;
         let style = Style::default();
         let mut threaded =
-            printer::TextPrinter::new(self.width(), style, false, self.settings).literal(true);
+            printer::TextPrinter::new(self.width(), style, self.settings).literal(true);
         let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
         threaded.push_str(" \u{2937} ", style);
         threaded.push_span_nobreak(len);
@@ -1030,7 +1050,7 @@ impl Message {
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(width, style, true, settings);
+        let (msg, proto) = self.show_msg(width, style, settings);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
@@ -1076,11 +1096,10 @@ impl Message {
         &'a self,
         width: usize,
         style: Style,
-        hide_reply: bool,
         settings: &'a ApplicationSettings,
     ) -> (Text<'a>, Option<&'a Protocol>) {
         if let Some(html) = &self.html {
-            (html.to_text(width, style, hide_reply, settings), None)
+            (html.to_text(width, style, settings), None)
         } else {
             let mut msg = self.event.body();
             if settings.tunables.message_shortcode_display {
