@@ -1572,6 +1572,11 @@ impl StatefulWidget for Scrollback<'_> {
             state.viewctx.corner.text_row = *row;
         }
 
+        if lines.len() < height {
+            state.viewctx.corner.key = None;
+            state.viewctx.corner.text_row = 0;
+        }
+
         let mut y = area.top();
         let x = area.left();
 
