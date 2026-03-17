@@ -16,16 +16,10 @@ use std::process::Command;
 use tokio;
 use url::Url;
 
-use matrix_sdk::{
-    media::{MediaFormat, MediaRequestParameters},
-    room::Room as MatrixRoom,
-    ruma::{
-        events::room::message::{MessageType, RoomMessageEventContent},
-        OwnedEventId,
-        OwnedRoomId,
-        RoomId,
-    },
-};
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
+use matrix_sdk::room::Room as MatrixRoom;
+use matrix_sdk::ruma::events::room::message::MessageType;
+use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, RoomId};
 
 use ratatui::{
     buffer::Buffer,
@@ -564,9 +558,7 @@ impl ChatState {
                         .await
                         .map_err(IambError::from)?;
                 } else {
-                    let msg = AnyMessageLikeEventContent::RoomMessage(
-                        RoomMessageEventContent::new(msg.msgtype),
-                    );
+                    let msg = AnyMessageLikeEventContent::RoomMessage(msg.into());
                     timeline.send(msg).await.map_err(IambError::from)?;
                 }
 
