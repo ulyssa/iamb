@@ -1707,7 +1707,6 @@ fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
 }
 
 #[cfg(test)]
-#[allow(unused)]
 pub mod tests {
     use super::*;
     use crate::config::user_style_from_color;

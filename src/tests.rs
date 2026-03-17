@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use std::borrow::Cow;
 use std::ops::Deref;
 use std::path::PathBuf;
