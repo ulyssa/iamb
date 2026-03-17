@@ -180,6 +180,31 @@ pub async fn create_room(
     return Ok(resp);
 }
 
+async fn refresh_matrix_room(room: &MatrixRoom, store: &mut ProgramStore) {
+    if let Some(alias) = room.canonical_alias() {
+        store
+            .application
+            .names
+            .insert(alias.to_string(), room.room_id().to_owned());
+    }
+
+    match room.members(RoomMemberships::ACTIVE).await {
+        Ok(members) => {
+            for member in members {
+                store.application.presences.get_or_default(member.user_id().to_owned());
+            }
+        },
+        Err(err) => {
+            tracing::warn!(room_id = ?room.room_id(), "cannot load room members: {err}");
+        },
+    }
+
+    // pre-compute name
+    if let Err(err) = room.display_name().await {
+        tracing::warn!(room_id = ?room.room_id(), "cannot load room name: {err}");
+    };
+}
+
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     let mut spaces = vec![];
     let mut rooms = vec![];
@@ -189,39 +214,12 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     let mut locked = store.lock().await;
 
     for room in client.invited_rooms() {
-        if let Some(alias) = room.canonical_alias() {
-            locked
-                .application
-                .names
-                .insert(alias.to_string(), room.room_id().to_owned());
-        }
-
-        // pre-compute name
-        if let Err(err) = room.sync_members().await {
-            tracing::warn!(room_id = ?room.room_id(), "cannot load room members: {err}");
-        }
-        if let Err(err) = room.display_name().await {
-            tracing::warn!(room_id = ?room.room_id(), "cannot load room name: {err}");
-        };
-
+        refresh_matrix_room(&room, &mut locked).await;
         invites.push(room.room_id().to_owned());
     }
 
     for room in client.joined_rooms() {
-        if let Some(alias) = room.canonical_alias() {
-            locked
-                .application
-                .names
-                .insert(alias.to_string(), room.room_id().to_owned());
-        }
-
-        // pre-compute name
-        if let Err(err) = room.sync_members().await {
-            tracing::warn!(room_id = ?room.room_id(), "cannot load room members: {err}");
-        }
-        if let Err(err) = room.display_name().await {
-            tracing::warn!(room_id = ?room.room_id(), "cannot load room name: {err}");
-        };
+        refresh_matrix_room(&room, &mut locked).await;
 
         if room.is_space() {
             spaces.push(room.room_id().to_owned());
