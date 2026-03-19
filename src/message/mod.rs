@@ -485,14 +485,30 @@ impl MessageEvent {
             MessageEvent::Local(_, content) => content,
         };
 
-        if let MessageType::Text(content) = &content.msgtype {
-            if let Some(FormattedBody { format: MessageFormat::Html, body }) = &content.formatted {
-                Some(parse_matrix_html(body.as_str()))
-            } else {
-                None
-            }
+        let formatted = match &content.msgtype {
+            MessageType::Text(content) => content.formatted.as_ref(),
+            MessageType::Emote(content) => content.formatted.as_ref(),
+            MessageType::Notice(content) => content.formatted.as_ref(),
+
+            MessageType::Audio(content) => content.formatted.as_ref(),
+            MessageType::File(content) => content.formatted.as_ref(),
+            MessageType::Image(content) => content.formatted.as_ref(),
+            MessageType::Video(content) => content.formatted.as_ref(),
+            _ => None,
+        };
+
+        if let Some(FormattedBody { format: MessageFormat::Html, body }) = formatted {
+            Some(parse_matrix_html(body.as_str()))
         } else {
             None
+        }
+    }
+
+    pub fn filename(&self) -> Option<String> {
+        match self {
+            MessageEvent::Original(ev) => content_filename(&ev.content),
+            MessageEvent::Local(_, content) => content_filename(content),
+            _ => None,
         }
     }
 
@@ -514,12 +530,12 @@ impl MessageEvent {
 
 /// Macro rule converting a File / Image / Audio / Video to its text content with the shape:
 /// `[Attached <type>: <content>[ (<human readable file size>)]]`
-macro_rules! display_file_to_text {
-    ( $msgtype:ident, $content:expr ) => {
-        return Cow::Owned(format!(
+macro_rules! display_file_name {
+    ( $msgtype:ident, $content:expr ) => {{
+        Some(format!(
             "[Attached {}: {}{}]",
             stringify!($msgtype),
-            $content.body,
+            $content.filename(),
             $content
                 .info
                 .as_ref()
@@ -530,7 +546,39 @@ macro_rules! display_file_to_text {
                 })
                 .unwrap_or_else(String::new)
         ))
-    };
+    }};
+}
+
+/// Macro rule extraction the text caption of a File / Image / Audio / Video
+macro_rules! display_file_to_text {
+    ( $msgtype:ident, $content:expr ) => {{
+        if $content
+            .filename
+            .as_ref()
+            .is_none_or(|filename| *filename == $content.body)
+        {
+            return Cow::Borrowed("");
+        }
+        $content.body.as_str()
+    }};
+}
+
+fn content_filename(content: &RoomMessageEventContent) -> Option<String> {
+    match &content.msgtype {
+        MessageType::Audio(content) => {
+            display_file_name!(Audio, content)
+        },
+        MessageType::File(content) => {
+            display_file_name!(File, content)
+        },
+        MessageType::Image(content) => {
+            display_file_name!(Image, content)
+        },
+        MessageType::Video(content) => {
+            display_file_name!(Video, content)
+        },
+        _ => None,
+    }
 }
 
 fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
@@ -542,16 +590,16 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
         MessageType::ServerNotice(content) => content.body.as_str(),
 
         MessageType::Audio(content) => {
-            display_file_to_text!(Audio, content);
+            display_file_to_text!(Audio, content)
         },
         MessageType::File(content) => {
-            display_file_to_text!(File, content);
+            display_file_to_text!(File, content)
         },
         MessageType::Image(content) => {
-            display_file_to_text!(Image, content);
+            display_file_to_text!(Image, content)
         },
         MessageType::Video(content) => {
-            display_file_to_text!(Video, content);
+            display_file_to_text!(Video, content)
         },
         _ => content.body(),
     };
@@ -1049,37 +1097,44 @@ impl Message {
         hide_reply: bool,
         settings: &'a ApplicationSettings,
     ) -> (Text<'a>, Option<&'a Protocol>) {
+        let mut proto = None;
+        let placeholder = match &self.image_preview {
+            ImageStatus::None => None,
+            ImageStatus::Downloading(image_preview_size) => {
+                placeholder_frame(Some("Downloading..."), width, image_preview_size)
+            },
+            ImageStatus::Loaded(backend) => {
+                proto = Some(backend);
+                placeholder_frame(Some("No Space..."), width, &backend.area().into())
+            },
+            ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
+        };
+
+        let mut text = if let Some(placeholder) = placeholder {
+            wrapped_text(placeholder, width, style)
+        } else {
+            Default::default()
+        };
+
+        if let Some(mut filename) = self.event.filename() {
+            if self.downloaded {
+                filename.push_str(" \u{2705}");
+            }
+
+            text = text + wrapped_text(filename, width, style);
+        }
+
         if let Some(html) = &self.html {
-            (html.to_text(width, style, hide_reply, settings), None)
+            text = text + html.to_text(width, style, hide_reply, settings);
         } else {
             let mut msg = self.event.body();
             if settings.tunables.message_shortcode_display {
                 msg = Cow::Owned(replace_emojis_in_str(msg.as_ref()));
             }
+            text = text + wrapped_text(msg, width, style);
+        };
 
-            if self.downloaded {
-                msg.to_mut().push_str(" \u{2705}");
-            }
-
-            let mut proto = None;
-            let placeholder = match &self.image_preview {
-                ImageStatus::None => None,
-                ImageStatus::Downloading(image_preview_size) => {
-                    placeholder_frame(Some("Downloading..."), width, image_preview_size)
-                },
-                ImageStatus::Loaded(backend) => {
-                    proto = Some(backend);
-                    placeholder_frame(Some("No Space..."), width, &backend.area().into())
-                },
-                ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
-            };
-
-            if let Some(placeholder) = placeholder {
-                msg.to_mut().insert_str(0, &placeholder);
-            }
-
-            (wrapped_text(msg, width, style), proto)
-        }
+        (text, proto)
     }
 
     fn sender_span<'a>(
@@ -1418,79 +1473,79 @@ pub mod tests {
     #[test]
     fn test_display_attachment_size() {
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            content_filename(&RoomMessageEventContent::new(MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::default()))
             ))),
-            "[Attached Image: Alt text]".to_string()
+            "[Attached Image: Alt text]".to_string().into()
         );
 
         let mut info = ImageInfo::default();
         info.size = Some(442630_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            content_filename(&RoomMessageEventContent::new(MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
             ))),
-            "[Attached Image: Alt text (442.63 kB)]".to_string()
+            "[Attached Image: Alt text (442.63 kB)]".to_string().into()
         );
 
         let mut info = ImageInfo::default();
         info.size = Some(12_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            content_filename(&RoomMessageEventContent::new(MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
             ))),
-            "[Attached Image: Alt text (12 B)]".to_string()
+            "[Attached Image: Alt text (12 B)]".to_string().into()
         );
 
         let mut info = AudioInfo::default();
         info.size = Some(4294967295_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Audio(
+            content_filename(&RoomMessageEventContent::new(MessageType::Audio(
                 AudioMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
             ))),
-            "[Attached Audio: Alt text (4.29 GB)]".to_string()
+            "[Attached Audio: Alt text (4.29 GB)]".to_string().into()
         );
 
         let mut info = FileInfo::default();
         info.size = Some(4426300_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::File(
+            content_filename(&RoomMessageEventContent::new(MessageType::File(
                 FileMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
             ))),
-            "[Attached File: Alt text (4.43 MB)]".to_string()
+            "[Attached File: Alt text (4.43 MB)]".to_string().into()
         );
 
         let mut info = VideoInfo::default();
         info.size = Some(44000_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Video(
+            content_filename(&RoomMessageEventContent::new(MessageType::Video(
                 VideoMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
             ))),
-            "[Attached Video: Alt text (44 kB)]".to_string()
+            "[Attached Video: Alt text (44 kB)]".to_string().into()
         );
     }
 }
