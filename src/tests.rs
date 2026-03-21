@@ -171,6 +171,7 @@ pub fn mock_tunables() -> TunableValues {
     TunableValues {
         default_room: None,
         log_level: Level::WARN,
+        max_log_files: 7,
         message_shortcode_display: false,
         normal_after_send: true,
         reaction_display: true,

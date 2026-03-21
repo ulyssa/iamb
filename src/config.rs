@@ -559,6 +559,7 @@ impl SortOverrides {
 #[derive(Clone)]
 pub struct TunableValues {
     pub log_level: Level,
+    pub max_log_files: usize,
     pub message_shortcode_display: bool,
     pub normal_after_send: bool,
     pub reaction_display: bool,
@@ -586,6 +587,7 @@ pub struct TunableValues {
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
     pub log_level: Option<LogLevel>,
+    pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
     pub normal_after_send: Option<bool>,
     pub reaction_display: Option<bool>,
@@ -615,6 +617,7 @@ impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
             log_level: self.log_level.or(other.log_level),
+            max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
                 .message_shortcode_display
                 .or(other.message_shortcode_display),
@@ -649,6 +652,7 @@ impl Tunables {
     fn values(self) -> TunableValues {
         TunableValues {
             log_level: self.log_level.map(Level::from).unwrap_or(Level::WARN),
+            max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
             reaction_display: self.reaction_display.unwrap_or(true),

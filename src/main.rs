@@ -1084,7 +1084,7 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
 fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocking::WorkerGuard {
     let log_prefix = format!("iamb-log-{}", settings.profile_name);
     let log_dir = settings.dirs.logs.as_path();
-    let max_log_files = 7;
+    let max_log_files = settings.tunables.max_log_files;
 
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
