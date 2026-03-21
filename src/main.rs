@@ -1085,6 +1085,7 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
     let log_prefix = format!("iamb-log-{}", settings.profile_name);
     let log_dir = settings.dirs.logs.as_path();
     let max_log_files = settings.tunables.max_log_files;
+    let log_level = settings.tunables.log_level;
 
     let appender = tracing_appender::rolling::Builder::new()
         .rotation(tracing_appender::rolling::Rotation::DAILY)
@@ -1094,10 +1095,16 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
         .unwrap();
     let (appender, guard) = tracing_appender::non_blocking(appender);
 
+    let filter = tracing_subscriber::EnvFilter::builder()
+        .with_default_directive(log_level.into())
+        .from_env()
+        .unwrap();
+
     let subscriber = FmtSubscriber::builder()
         .with_writer(appender)
-        .with_max_level(settings.tunables.log_level)
+        .with_env_filter(filter)
         .finish();
+
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     guard
