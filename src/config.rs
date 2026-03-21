@@ -17,7 +17,6 @@ use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
 use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer, Serialize};
-use tracing::Level;
 use url::Url;
 
 use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
@@ -221,47 +220,6 @@ impl<'de> Deserialize<'de> for VimModes {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_str(VimModesVisitor)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LogLevel(pub Level);
-pub struct LogLevelVisitor;
-
-impl From<LogLevel> for Level {
-    fn from(level: LogLevel) -> Level {
-        level.0
-    }
-}
-
-impl Visitor<'_> for LogLevelVisitor {
-    type Value = LogLevel;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid log level (e.g. \"warn\" or \"debug\")")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: SerdeError,
-    {
-        match value {
-            "info" => Ok(LogLevel(Level::INFO)),
-            "debug" => Ok(LogLevel(Level::DEBUG)),
-            "warn" => Ok(LogLevel(Level::WARN)),
-            "error" => Ok(LogLevel(Level::ERROR)),
-            "trace" => Ok(LogLevel(Level::TRACE)),
-            _ => Err(E::custom("Could not parse log level")),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for LogLevel {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(LogLevelVisitor)
     }
 }
 
@@ -558,7 +516,7 @@ impl SortOverrides {
 
 #[derive(Clone)]
 pub struct TunableValues {
-    pub log_level: Level,
+    pub log_level: String,
     pub max_log_files: usize,
     pub message_shortcode_display: bool,
     pub normal_after_send: bool,
@@ -586,7 +544,7 @@ pub struct TunableValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
-    pub log_level: Option<LogLevel>,
+    pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
     pub normal_after_send: Option<bool>,
@@ -651,7 +609,7 @@ impl Tunables {
 
     fn values(self) -> TunableValues {
         TunableValues {
-            log_level: self.log_level.map(Level::from).unwrap_or(Level::WARN),
+            log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),

@@ -17,7 +17,6 @@ use matrix_sdk::ruma::{
 use lazy_static::lazy_static;
 use ratatui::style::{Color, Style};
 use tokio::sync::mpsc::unbounded_channel;
-use tracing::Level;
 use url::Url;
 
 use crate::{
@@ -170,7 +169,7 @@ pub fn mock_dirs() -> DirectoryValues {
 pub fn mock_tunables() -> TunableValues {
     TunableValues {
         default_room: None,
-        log_level: Level::WARN,
+        log_level: "warn".into(),
         max_log_files: 7,
         message_shortcode_display: false,
         normal_after_send: true,
