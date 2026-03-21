@@ -648,7 +648,7 @@ impl Tunables {
 
     fn values(self) -> TunableValues {
         TunableValues {
-            log_level: self.log_level.map(Level::from).unwrap_or(Level::INFO),
+            log_level: self.log_level.map(Level::from).unwrap_or(Level::WARN),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
             reaction_display: self.reaction_display.unwrap_or(true),

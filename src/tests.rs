@@ -170,7 +170,7 @@ pub fn mock_dirs() -> DirectoryValues {
 pub fn mock_tunables() -> TunableValues {
     TunableValues {
         default_room: None,
-        log_level: Level::INFO,
+        log_level: Level::WARN,
         message_shortcode_display: false,
         normal_after_send: true,
         reaction_display: true,
