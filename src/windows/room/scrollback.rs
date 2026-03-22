@@ -1572,7 +1572,7 @@ impl StatefulWidget for Scrollback<'_> {
             state.viewctx.corner.text_row = *row;
         }
 
-        if lines.len() < height {
+        if lines.len() < height && state.cursor.key.is_none() {
             state.viewctx.corner.key = None;
             state.viewctx.corner.text_row = 0;
         }
