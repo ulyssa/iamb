@@ -212,6 +212,7 @@ pub fn mock_settings() -> ApplicationSettings {
         session_json_old: PathBuf::new(),
         sled_dir: PathBuf::new(),
         sqlite_dir: PathBuf::new(),
+        sqlite_cache_dir: PathBuf::new(),
 
         profile_name: "test".into(),
         profile: ProfileConfig {
