@@ -147,14 +147,6 @@ const fn span_static(s: &'static str) -> Span<'static> {
     }
 }
 
-const BOLD_STYLE: Style = Style {
-    fg: None,
-    bg: None,
-    add_modifier: StyleModifier::BOLD,
-    sub_modifier: StyleModifier::empty(),
-    underline_color: None,
-};
-
 const TIME_GUTTER: usize = 12;
 const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
@@ -258,17 +250,18 @@ impl MessageTimeStamp {
         dt1.date_naive() == dt2.date_naive()
     }
 
-    fn show_date(self) -> Option<Span<'static>> {
+    fn show_date(self, settings: &ApplicationSettings) -> Option<Span<'static>> {
         let time = self.as_datetime().format("%A, %B %d %Y").to_string();
 
-        Span::styled(time, BOLD_STYLE).into()
+        Span::styled(time, settings.tunables.colors.message_date.add_modifier(StyleModifier::BOLD))
+            .into()
     }
 
-    fn show_time(self) -> Option<Span<'static>> {
+    fn show_time(self, settings: &ApplicationSettings) -> Option<Span<'static>> {
         let time = self.as_datetime().format("%T");
         let time = format!("  [{time}]");
 
-        Span::raw(time).into()
+        Span::styled(time, settings.tunables.colors.message_time).into()
     }
 }
 
@@ -1049,7 +1042,7 @@ impl Message {
         let orig = width;
         let date = match &prev {
             Some(prev) if prev.timestamp.same_day(self.timestamp) => None,
-            _ => self.timestamp.show_date(),
+            _ => self.timestamp.show_date(settings),
         };
         let user_gutter = settings.tunables.user_gutter_width;
 
@@ -1059,7 +1052,7 @@ impl Message {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings, width);
-            let time = self.timestamp.show_time();
+            let time = self.timestamp.show_time(settings);
             let read = info
                 .event_receipts
                 .values()
@@ -1073,7 +1066,7 @@ impl Message {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
             let user = self.show_sender(prev, true, info, settings, width);
-            let time = self.timestamp.show_time();
+            let time = self.timestamp.show_time(settings);
             let read = Vec::new();
 
             MessageFormatter { settings, cols, orig, fill, user, date, time, read }
