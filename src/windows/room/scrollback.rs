@@ -1623,6 +1623,12 @@ impl StatefulWidget for Scrollback<'_> {
                         );
                     }
                 });
+
+                if let Some(notification_handles) =
+                    self.store.application.open_notifications.remove(&state.room_id)
+                {
+                    tokio::task::spawn_blocking(|| std::mem::drop(notification_handles));
+                };
             }
         }
 
