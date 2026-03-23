@@ -186,7 +186,7 @@ pub fn mock_tunables() -> TunableValues {
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
-            color: Some(UserColor(Color::Black)),
+            color: Some(Color::Black),
             name: Some("USER 5".into()),
         })]
         .into_iter()
