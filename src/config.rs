@@ -199,7 +199,6 @@ macro_rules! deserialize_str_with_visitor {
 
 deserialize_str_with_visitor!(Keys, KeysVisitor);
 deserialize_str_with_visitor!(VimModes, VimModesVisitor);
-deserialize_str_with_visitor!(UserColor, UserColorVisitor);
 deserialize_str_with_visitor!(EncryptionIndicatorLocation, EncryptionIndicatorLocationVisitor);
 deserialize_str_with_visitor!(NotifyVia, NotifyViaVisitor);
 deserialize_str_with_visitor!(ProxyUrl, ProxyUrlVisitor);
@@ -261,44 +260,6 @@ impl Visitor<'_> for VimModesVisitor {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UserColor(pub Color);
-pub struct UserColorVisitor;
-
-impl Visitor<'_> for UserColorVisitor {
-    type Value = UserColor;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid color")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: SerdeError,
-    {
-        match value {
-            "none" => Ok(UserColor(Color::Reset)),
-            "red" => Ok(UserColor(Color::Red)),
-            "black" => Ok(UserColor(Color::Black)),
-            "green" => Ok(UserColor(Color::Green)),
-            "yellow" => Ok(UserColor(Color::Yellow)),
-            "blue" => Ok(UserColor(Color::Blue)),
-            "magenta" => Ok(UserColor(Color::Magenta)),
-            "cyan" => Ok(UserColor(Color::Cyan)),
-            "gray" => Ok(UserColor(Color::Gray)),
-            "dark-gray" => Ok(UserColor(Color::DarkGray)),
-            "light-red" => Ok(UserColor(Color::LightRed)),
-            "light-green" => Ok(UserColor(Color::LightGreen)),
-            "light-yellow" => Ok(UserColor(Color::LightYellow)),
-            "light-blue" => Ok(UserColor(Color::LightBlue)),
-            "light-magenta" => Ok(UserColor(Color::LightMagenta)),
-            "light-cyan" => Ok(UserColor(Color::LightCyan)),
-            "white" => Ok(UserColor(Color::White)),
-            _ => Err(E::custom("Could not parse color")),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Session {
     access_token: String,
@@ -335,7 +296,7 @@ impl From<MatrixSession> for Session {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct UserDisplayTunables {
-    pub color: Option<UserColor>,
+    pub color: Option<Color>,
     pub name: Option<String>,
 }
 
@@ -1425,12 +1386,7 @@ impl ApplicationSettings {
             .tunables
             .users
             .get(user_id)
-            .map(|user| {
-                (
-                    user.color.as_ref().map(|c| c.0),
-                    user.name.as_ref().and_then(|s| s.chars().next()),
-                )
-            })
+            .map(|user| (user.color, user.name.as_ref().and_then(|s| s.chars().next())))
             .unwrap_or_default();
 
         let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
@@ -1448,7 +1404,7 @@ impl ApplicationSettings {
         self.tunables
             .users
             .get(user_id)
-            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
+            .map(|user| (user.color, user.name.clone().map(Cow::Owned)))
             .unwrap_or_default()
     }
 
@@ -1456,7 +1412,7 @@ impl ApplicationSettings {
         self.tunables
             .users
             .get(user_id)
-            .and_then(|user| user.color.as_ref().map(|c| c.0))
+            .and_then(|user| user.color)
             .unwrap_or_else(|| user_color(user_id.as_str()))
     }
 
@@ -1519,13 +1475,13 @@ mod tests {
     fn test_merge_users() {
         let a = None;
         let b = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Red)),
+            color: Some(Color::Red),
             name: Some("Hello".into()),
         })]
         .into_iter()
         .collect::<HashMap<_, _>>();
         let c = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Green)),
+            color: Some(Color::Green),
             name: Some("World".into()),
         })]
         .into_iter()
@@ -1579,7 +1535,7 @@ mod tests {
         assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
         let users = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Black)),
+            color: Some(Color::Black),
             name: Some("Tim".into()),
         })];
         assert_eq!(res.users, Some(users.into_iter().collect()));
