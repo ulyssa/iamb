@@ -22,12 +22,15 @@ fn once(key: &TerminalKey) -> (EdgeRepeat, EdgeEvent<TerminalKey, CommonKeyClass
 }
 
 /// Initialize the default keybinding state.
-pub fn setup_keybindings() -> Keybindings {
+pub fn setup_keybindings(leader_space_chords: bool) -> Keybindings {
     let mut ism = Keybindings::empty();
 
-    let vim = VimBindings::default()
+    let mut vim = VimBindings::default()
         .submit_on_enter()
         .cursor_open(MATRIX_ID_WORD.clone());
+    if leader_space_chords {
+        vim = vim.without_nxo_space_motion();
+    }
 
     vim.setup(&mut ism);
 

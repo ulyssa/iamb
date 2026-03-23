@@ -581,6 +581,7 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub leader_space_chords: bool,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -609,6 +610,7 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    pub leader_space_chords: Option<bool>,
 }
 
 impl Tunables {
@@ -643,6 +645,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            leader_space_chords: self.leader_space_chords.or(other.leader_space_chords),
         }
     }
 
@@ -673,6 +676,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            leader_space_chords: self.leader_space_chords.unwrap_or(false),
         }
     }
 }
