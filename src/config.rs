@@ -446,6 +446,8 @@ pub struct Colorscheme {
     pub tab_title_unfocused: Option<Color>,
     pub room_list: Option<Color>,
     pub room_list_unread: Option<Color>,
+    pub message_time: Option<Color>,
+    pub message_date: Option<Color>,
 }
 
 impl Colorscheme {
@@ -458,6 +460,8 @@ impl Colorscheme {
             tab_title_unfocused: self.tab_title_unfocused.or(other.tab_title_unfocused),
             room_list: self.room_list.or(other.room_list),
             room_list_unread: self.room_list_unread.or(other.room_list_unread),
+            message_time: self.message_time.or(other.message_time),
+            message_date: self.message_date.or(other.message_date),
         }
     }
 }
@@ -471,6 +475,8 @@ pub struct ColorschemeValues {
     pub tab_title_unfocused: Style,
     pub room_list: Style,
     pub room_list_unread: Style,
+    pub message_time: Style,
+    pub message_date: Style,
 }
 
 impl Colorscheme {
@@ -482,6 +488,8 @@ impl Colorscheme {
         let tab_title_unfocused = self.tab_title_unfocused.map(Into::into).unwrap_or(tab_title);
         let room_list = self.room_list.map(Into::into).unwrap_or_default();
         let room_list_unread = self.room_list_unread.map(Into::into).unwrap_or(room_list);
+        let message_time = self.message_time.map(Into::into).unwrap_or_default();
+        let message_date = self.message_date.map(Into::into).unwrap_or_default();
 
         ColorschemeValues {
             border,
@@ -491,6 +499,8 @@ impl Colorscheme {
             tab_title_unfocused,
             room_list,
             room_list_unread,
+            message_time,
+            message_date,
         }
     }
 }
