@@ -136,6 +136,8 @@ fn handle_update(
             if let Some(item) = value.as_event() {
                 if let Some(html) = generate_html(item) {
                     info.htmls.insert(item.identifier(), html);
+                } else {
+                    info.htmls.remove(&item.identifier());
                 }
                 if let Some(source) = item.image_preview() {
                     previews.register_preview(settings, source, worker);
@@ -217,6 +219,7 @@ fn handle_update(
     }
 }
 
+#[tracing::instrument(level = "debug", skip(store, stream))]
 async fn handle_updates(
     room_id: OwnedRoomId,
     thread: Option<OwnedEventId>,
