@@ -489,6 +489,31 @@ impl MessageEvent {
         }
     }
 
+    fn message_style(&self, settings: &ApplicationSettings) -> Style {
+        let content = match self {
+            MessageEvent::EncryptedOriginal(_) | MessageEvent::EncryptedRedacted(_) => {
+                return settings.tunables.colors.message_other
+            },
+            MessageEvent::Redacted(..) => return settings.tunables.colors.message_redacted,
+            MessageEvent::State(_) => return settings.tunables.colors.message_state,
+            MessageEvent::Original(ev) => &ev.content,
+            MessageEvent::Local(_, content) => content,
+        };
+
+        match &content.msgtype {
+            MessageType::Text(_) |
+            MessageType::Audio(_) |
+            MessageType::Emote(_) |
+            MessageType::File(_) |
+            MessageType::Image(_) |
+            MessageType::Video(_) => settings.tunables.colors.message_normal,
+            MessageType::Notice(_) | MessageType::ServerNotice(_) => {
+                settings.tunables.colors.message_notice
+            },
+            _ => settings.tunables.colors.message_other,
+        }
+    }
+
     fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
         match self {
             MessageEvent::EncryptedOriginal(_) => return,
@@ -709,7 +734,7 @@ impl<'a> MessageFormatter<'a> {
         let reply_style = if settings.tunables.message_user_color {
             style.patch(settings.get_user_color(&msg.sender))
         } else {
-            style
+            style.patch(msg.event.message_style(settings))
         };
 
         let width = self.width();
@@ -792,14 +817,13 @@ impl<'a> MessageFormatter<'a> {
         }
     }
 
-    fn push_thread_reply_count(&mut self, len: usize, text: &mut Text<'a>) {
+    fn push_thread_reply_count(&mut self, len: usize, text: &mut Text<'a>, style: Style) {
         if len == 0 {
             return;
         }
 
         // If we have threaded replies to this message, show how many.
         let plural = len != 1;
-        let style = Style::default();
         let mut threaded =
             printer::TextPrinter::new(self.width(), style, false, self.settings).literal(true);
         let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
@@ -889,7 +913,7 @@ impl Message {
     }
 
     fn get_render_style(&self, selected: bool, settings: &ApplicationSettings) -> Style {
-        let mut style = Style::default();
+        let mut style = self.event.message_style(settings);
 
         if selected {
             style = style.add_modifier(StyleModifier::REVERSED)
@@ -1018,7 +1042,7 @@ impl Message {
         }
 
         if let Some(thread) = info.get_thread(Some(self.event.event_id())) {
-            fmt.push_thread_reply_count(thread.len(), &mut text);
+            fmt.push_thread_reply_count(thread.len(), &mut text, style);
         }
 
         (text, [proto_main, proto_reply])
