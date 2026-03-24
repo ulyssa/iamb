@@ -67,6 +67,11 @@ impl<'a> TextPrinter<'a> {
         self
     }
 
+    /// Set the base style and return the old style.
+    pub fn replace_base_style(&mut self, style: Style) -> Style {
+        std::mem::replace(&mut self.base_style, style)
+    }
+
     /// Indicates whether emojis should be replaced by shortcodes
     pub fn emoji_shortcodes(&self) -> bool {
         self.tunables().message_shortcode_display
