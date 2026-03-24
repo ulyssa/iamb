@@ -69,6 +69,11 @@ impl<'a> TextPrinter<'a> {
         self
     }
 
+    /// Set the base style and return the old style.
+    pub fn replace_base_style(&mut self, style: Style) -> Style {
+        std::mem::replace(&mut self.base_style, style)
+    }
+
     /// Indicates whether replies should be pushed to the printer.
     pub fn hide_reply(&self) -> bool {
         self.hide_reply
