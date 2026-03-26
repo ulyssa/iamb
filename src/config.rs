@@ -56,11 +56,13 @@ const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
     SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
 ];
 
-const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
+const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 7] = [
     SortColumn(SortFieldRoom::Favorite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Invite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::LowPriority, SortOrder::Ascending),
-    SortColumn(SortFieldRoom::Unread, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Mentions, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Notifications, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Recent, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 

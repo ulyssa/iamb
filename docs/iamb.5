@@ -485,7 +485,7 @@ How to sort the
 .Sy :rooms
 window.
 Defaults to
-.Sy ["favorite",\ "lowpriority",\ "unread",\ "name"] .
+.Sy ["favorite",\ "invite",\ "lowpriority",\ "mentions",\ "notifications",\ "recent",\ "name"] .
 .It Sy chats
 How to sort the
 .Sy :chats
@@ -532,7 +532,11 @@ Sort rooms by alphabetically ascending server name from the room alias.
 This will fall back to the server from the room identifier if there is
 no canonical alias for the room.
 .It Sy unread
-Put unread rooms before other rooms.
+Put rooms with unread messages before other rooms.
+.It Sy notifications
+Put rooms with unread notifications before other rooms.
+.It Sy mentions
+Put rooms with unread mentions before other rooms.
 .It Sy recent
 Sort rooms by most recent message timestamp.
 .It Sy invite

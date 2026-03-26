@@ -127,18 +127,36 @@ fn selected_text(s: &str, selected: bool) -> Text<'_> {
     Text::from(selected_span(s, selected))
 }
 
-fn name_and_labels<'a>(
+fn name_unreads_labels<'a>(
     name: &'a str,
     unread: &UnreadInfo,
     room: &MatrixRoom,
     style: Style,
-) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
-    // TODO: use different colors for "mention", "notification", "muted room"
-    let name_style = if unread.is_unread() {
-        style.add_modifier(StyleModifier::BOLD)
+) -> (Span<'static>, Span<'a>, Vec<Vec<Span<'static>>>) {
+    let (value, number_style) = if unread.unread_mentions > 0 {
+        (unread.unread_mentions + unread.unread_notifications, Color::Red)
+    } else if unread.unread_notifications > 0 {
+        (unread.unread_notifications, Color::Yellow)
     } else {
-        style
+        (unread.unread_messages, Color::Gray)
     };
+
+    let unreads = if unread.unread_mark {
+        Span::styled("  U ", Color::Green)
+    } else if value > 99 {
+        Span::styled("99+ ", number_style)
+    } else if value == 0 {
+        Span::styled("    ", number_style)
+    } else {
+        Span::styled(format!(" {:2} ", value), number_style)
+    };
+
+    let name_style =
+        if unread.unread_mark || unread.unread_notifications > 0 || unread.unread_mentions > 0 {
+            style.bold()
+        } else {
+            style
+        };
 
     let name = Span::styled(name, name_style);
 
@@ -152,13 +170,7 @@ fn name_and_labels<'a>(
         MatrixRoomState::Invited => labels.push(vec![Span::styled("Invited", style)]),
     }
 
-    if unread.unread_mentions > 0 {
-        labels.push(vec![Span::styled("Unread Mention", style)]);
-    } else if unread.is_unread() {
-        labels.push(vec![Span::styled("Unread", style)]);
-    }
-
-    (name, labels)
+    (unreads, name, labels)
 }
 
 /// Sort `Some` to be less than `None` so that list items with values come before those without.
@@ -236,6 +248,14 @@ fn room_cmp<T: RoomLikeItem>(
         SortFieldRoom::Unread => {
             // Sort true (unread) before false (read)
             b.is_unread().cmp(&a.is_unread())
+        },
+        SortFieldRoom::Notifications => {
+            // Sort true (unread) before false (read)
+            b.has_notification().cmp(&a.has_notification())
+        },
+        SortFieldRoom::Mentions => {
+            // Sort true (unread) before false (read)
+            b.has_mention().cmp(&a.has_mention())
         },
         SortFieldRoom::Recent => {
             // sort larger timestamps towards the top.
@@ -321,6 +341,8 @@ trait RoomLikeItem {
     fn room_id(&self) -> &RoomId;
     fn has_tag(&self, tag: TagName) -> bool;
     fn is_unread(&self) -> bool;
+    fn has_notification(&self) -> bool;
+    fn has_mention(&self) -> bool;
     fn recent_ts(&self) -> Option<&MessageTimeStamp>;
     fn alias(&self) -> Option<&RoomAliasId>;
     fn name(&self) -> &str;
@@ -1033,11 +1055,6 @@ impl GenericChatItem {
     fn tags(&self) -> &Option<Tags> {
         &self.room_info.deref().1
     }
-
-    #[inline]
-    fn has_mention(&self) -> bool {
-        self.unread.has_mention()
-    }
 }
 
 impl RoomLikeItem for GenericChatItem {
@@ -1066,7 +1083,15 @@ impl RoomLikeItem for GenericChatItem {
     }
 
     fn is_unread(&self) -> bool {
-        self.unread.is_unread()
+        self.unread.unread_messages > 0
+    }
+
+    fn has_notification(&self) -> bool {
+        self.unread.unread_notifications > 0
+    }
+
+    fn has_mention(&self) -> bool {
+        self.unread.unread_mentions > 0
     }
 
     fn is_invite(&self) -> bool {
@@ -1088,8 +1113,9 @@ impl ListItem<IambInfo> for GenericChatItem {
         _: &mut ProgramStore,
     ) -> Text<'_> {
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
-        let mut spans = vec![name];
+        let (unreads, name, mut labels) =
+            name_unreads_labels(&self.name, &self.unread, self.room(), style);
+        let mut spans = vec![unreads, name];
 
         labels.push(if self.is_dm {
             vec![Span::styled("DM", style)]
@@ -1184,7 +1210,15 @@ impl RoomLikeItem for RoomItem {
     }
 
     fn is_unread(&self) -> bool {
-        self.unread.is_unread()
+        self.unread.unread_messages > 0
+    }
+
+    fn has_notification(&self) -> bool {
+        self.unread.unread_notifications > 0
+    }
+
+    fn has_mention(&self) -> bool {
+        self.unread.unread_mentions > 0
     }
 
     fn is_invite(&self) -> bool {
@@ -1206,8 +1240,9 @@ impl ListItem<IambInfo> for RoomItem {
         _: &mut ProgramStore,
     ) -> Text<'_> {
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
-        let mut spans = vec![name];
+        let (unreads, name, mut labels) =
+            name_unreads_labels(&self.name, &self.unread, self.room(), style);
+        let mut spans = vec![unreads, name];
 
         if let Some(tags) = &self.tags() {
             labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
@@ -1293,7 +1328,15 @@ impl RoomLikeItem for DirectItem {
     }
 
     fn is_unread(&self) -> bool {
-        self.unread.is_unread()
+        self.unread.unread_messages > 0
+    }
+
+    fn has_notification(&self) -> bool {
+        self.unread.unread_notifications > 0
+    }
+
+    fn has_mention(&self) -> bool {
+        self.unread.unread_mentions > 0
     }
 
     fn is_invite(&self) -> bool {
@@ -1315,8 +1358,9 @@ impl ListItem<IambInfo> for DirectItem {
         _: &mut ProgramStore,
     ) -> Text<'_> {
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
-        let mut spans = vec![name];
+        let (unreads, name, mut labels) =
+            name_unreads_labels(&self.name, &self.unread, self.room(), style);
+        let mut spans = vec![unreads, name];
 
         if let Some(tags) = &self.tags() {
             labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
@@ -1399,6 +1443,16 @@ impl RoomLikeItem for SpaceItem {
     }
 
     fn is_unread(&self) -> bool {
+        // XXX: this needs to check whether the space contains rooms with unread messages
+        false
+    }
+
+    fn has_notification(&self) -> bool {
+        // XXX: this needs to check whether the space contains rooms with unread messages
+        false
+    }
+
+    fn has_mention(&self) -> bool {
         // XXX: this needs to check whether the space contains rooms with unread messages
         false
     }
@@ -1621,7 +1675,15 @@ mod tests {
         }
 
         fn is_unread(&self) -> bool {
-            self.unread.is_unread()
+            self.unread.unread_messages > 0
+        }
+
+        fn has_notification(&self) -> bool {
+            self.unread.unread_notifications > 0
+        }
+
+        fn has_mention(&self) -> bool {
+            self.unread.unread_mentions > 0
         }
 
         fn is_invite(&self) -> bool {
