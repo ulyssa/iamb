@@ -40,7 +40,25 @@ pub fn default_theme() -> Theme {
             ..Default::default()
         },
         rooms: ThemeRooms {
-            unread: Stylable::with_modifiers(StyleModifier::BOLD),
+            unread: ThemeRoomsUnreads {
+                number: Stylable::fg(Color::Gray),
+                ..Default::default()
+            },
+            notification: ThemeRoomsUnreads {
+                name: Stylable::with_modifiers(StyleModifier::BOLD),
+                number: Stylable::fg(Color::Yellow),
+                ..Default::default()
+            },
+            mention: ThemeRoomsUnreads {
+                name: Stylable::with_modifiers(StyleModifier::BOLD),
+                number: Stylable::fg(Color::Red),
+                ..Default::default()
+            },
+            marked_unread: ThemeRoomsUnreads {
+                name: Stylable::with_modifiers(StyleModifier::BOLD),
+                number: Stylable::fg(Color::Green),
+                ..Default::default()
+            },
             ..Default::default()
         },
         users: ThemeUsers {
@@ -387,9 +405,17 @@ struct ThemeRooms {
     #[serde(default)]
     labels: Stylable,
 
-    // XXX: use different colors for "mention", "notification", "muted room"
     #[serde(default)]
-    unread: Stylable,
+    unread: ThemeRoomsUnreads,
+
+    #[serde(default)]
+    notification: ThemeRoomsUnreads,
+
+    #[serde(default)]
+    mention: ThemeRoomsUnreads,
+
+    #[serde(default)]
+    marked_unread: ThemeRoomsUnreads,
 }
 
 impl ThemeRooms {
@@ -398,15 +424,28 @@ impl ThemeRooms {
             default: self.default.merge(other.default),
             labels: self.labels.merge(other.labels),
             unread: self.unread.merge(other.unread),
+            notification: self.notification.merge(other.notification),
+            mention: self.mention.merge(other.mention),
+            marked_unread: self.marked_unread.merge(other.marked_unread),
         }
     }
 
     fn values(self, base: Style) -> ThemeRoomsValues {
         let default = base.patch(self.default);
         let labels = default.patch(self.labels);
-        let unread = default.patch(self.unread);
+        let unread = self.unread.values(default, labels);
+        let notification = self.notification.values(default, labels);
+        let mention = self.mention.values(default, labels);
+        let marked_unread = self.marked_unread.values(default, labels);
 
-        ThemeRoomsValues { default, labels, unread }
+        ThemeRoomsValues {
+            default,
+            labels,
+            unread,
+            notification,
+            mention,
+            marked_unread,
+        }
     }
 }
 
@@ -414,7 +453,47 @@ impl ThemeRooms {
 pub struct ThemeRoomsValues {
     pub default: Style,
     pub labels: Style,
-    pub unread: Style,
+    pub unread: ThemeRoomsUnreadsValues,
+    pub notification: ThemeRoomsUnreadsValues,
+    pub mention: ThemeRoomsUnreadsValues,
+    pub marked_unread: ThemeRoomsUnreadsValues,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ThemeRoomsUnreads {
+    #[serde(default)]
+    name: Stylable,
+
+    #[serde(default)]
+    number: Stylable,
+
+    #[serde(default)]
+    labels: Stylable,
+}
+
+impl ThemeRoomsUnreads {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            name: self.name.merge(other.name),
+            number: self.number.merge(other.number),
+            labels: self.labels.merge(other.labels),
+        }
+    }
+
+    fn values(self, base: Style, labels_base: Style) -> ThemeRoomsUnreadsValues {
+        let name = base.patch(self.name);
+        let number = base.patch(self.number);
+        let labels = labels_base.patch(self.labels);
+
+        ThemeRoomsUnreadsValues { name, number, labels }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ThemeRoomsUnreadsValues {
+    pub name: Style,
+    pub number: Style,
+    pub labels: Style,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
