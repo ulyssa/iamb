@@ -21,10 +21,10 @@ desktop = ["dep:notify-rust", "modalkit/clipboard"]
 native-tls = ["matrix-sdk/native-tls"]
 rustls-tls = ["matrix-sdk/rustls-tls"]
 
-[build-dependencies.vergen]
-version = "8"
+[build-dependencies.vergen-gitcl]
+version = "9"
 default-features = false
-features = ["build", "git", "gitcl",]
+features = ["build"]
 
 [dependencies]
 anyhow = "1.0"
