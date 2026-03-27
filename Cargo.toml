@@ -88,9 +88,12 @@ version = "0.0.24"
 #rev = "e40dbb0bfeabe4cfd08facd2acb446080a330d75"
 
 [dependencies.matrix-sdk]
-version = "0.14.0"
+version = "0.16.0"
 default-features = false
 features = ["e2e-encryption", "sqlite", "sso-login"]
+
+[dependencies.matrix-sdk-crypto]
+version = "0.16.0"
 
 [dependencies.tokio]
 version = "1.24.1"
