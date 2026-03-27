@@ -2355,7 +2355,7 @@ dependencies = [
  "mime_guess",
  "modalkit",
  "modalkit-ratatui",
- "nom 7.1.3",
+ "nom 8.0.0",
  "notify-rust",
  "open",
  "pretty_assertions",

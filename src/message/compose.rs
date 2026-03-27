@@ -6,6 +6,7 @@ use nom::{
     character::complete::space0,
     combinator::value,
     IResult,
+    Parser as _,
 };
 
 use matrix_sdk::ruma::events::room::message::{
@@ -118,7 +119,8 @@ fn parse_slash_command_inner(input: &str) -> IResult<&str, SlashCommand> {
         value(SlashCommand::Rainfall, tag("/rainfall ")),
         value(SlashCommand::Snowfall, tag("/snowfall ")),
         value(SlashCommand::SpaceInvaders, tag("/spaceinvaders ")),
-    ))(input)?;
+    ))
+    .parse(input)?;
     let (input, _) = space0(input)?;
 
     Ok((input, slash))
