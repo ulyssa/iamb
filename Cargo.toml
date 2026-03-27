@@ -73,9 +73,7 @@ default-features = false
 features = ["shortcodes"]
 
 [dependencies.notify-rust]
-version = "~4.10.0"
-default-features = false
-features = ["zbus", "serde"]
+version = "4.12"
 optional = true
 
 [dependencies.modalkit]
