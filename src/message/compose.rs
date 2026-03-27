@@ -1,5 +1,5 @@
 //! Code for converting composed messages into content to send to the homeserver.
-use comrak::{markdown_to_html, ComrakOptions};
+use comrak::{markdown_to_html, options::Options};
 use nom::{
     branch::alt,
     bytes::complete::tag,
@@ -154,7 +154,7 @@ fn text_to_html(input: &str) -> Option<String> {
         return None;
     }
 
-    let mut options = ComrakOptions::default();
+    let mut options = Options::default();
     options.extension.autolink = true;
     options.extension.shortcodes = true;
     options.extension.strikethrough = true;

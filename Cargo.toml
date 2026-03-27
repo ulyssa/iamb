@@ -68,7 +68,7 @@ unicode-width = "0.2"
 url = {version = "2.2.2", features = ["serde"]}
 
 [dependencies.comrak]
-version = "0.22.0"
+version = "0.52.0"
 default-features = false
 features = ["shortcodes"]
 
