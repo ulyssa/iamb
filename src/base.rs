@@ -470,6 +470,9 @@ pub enum RoomAction {
 
     /// List the values in a list room property.
     Show(RoomField),
+
+    /// Mark the room as read/unread.
+    SetUnread(bool),
 }
 
 /// An action that sends a message to a room.

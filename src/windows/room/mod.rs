@@ -360,6 +360,29 @@ impl RoomState {
 
                 Ok(vec![])
             },
+            RoomAction::SetUnread(is_unread) => {
+                let room = store
+                    .application
+                    .get_joined_room(self.id())
+                    .ok_or(UIError::Application(IambError::NotJoined))?;
+
+                room.set_unread_flag(is_unread).await.map_err(IambError::from)?;
+
+                if !is_unread {
+                    let user_id = store.application.settings.profile.user_id.clone();
+                    let info = store.application.get_room_info(self.id().to_owned());
+                    let messages = info.get_thread(None).expect("room main timeline doesn't exit");
+                    if let Some(((_, event_id), _)) = messages.last_key_value() {
+                        info.set_receipt(
+                            matrix_sdk::ruma::events::receipt::ReceiptThread::Main,
+                            user_id,
+                            event_id.to_owned(),
+                        );
+                    }
+                }
+
+                Ok(vec![])
+            },
             RoomAction::Set(field, value) => {
                 let room = store
                     .application
