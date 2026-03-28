@@ -1140,7 +1140,9 @@ impl RoomInfo {
     }
 
     /// Indicates whether this room has unread messages.
-    pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
+    pub fn unreads(&self, room: &MatrixRoom, settings: &ApplicationSettings) -> UnreadInfo {
+        let marked_unread = room.is_marked_unread();
+
         let last_message = self.messages.last_key_value();
 
         let last_receipt = self
@@ -1169,14 +1171,17 @@ impl RoomInfo {
 
         match (last_message, last_receipt) {
             (Some(((ts, _), _)), Some((read_ts, _))) => {
-                UnreadInfo { unread: ts > read_ts, latest: Some(*ts) }
+                UnreadInfo {
+                    unread: marked_unread | (ts > read_ts),
+                    latest: Some(*ts),
+                }
             },
             (Some(((ts, _), _)), None) => {
                 // If we've never loaded/generated a room's receipt (example,
                 // a newly joined but never viewed room), show it as unread.
                 UnreadInfo { unread: true, latest: Some(*ts) }
             },
-            (None, _) => UnreadInfo::default(),
+            (None, _) => UnreadInfo { unread: marked_unread, latest: None },
         }
     }
 

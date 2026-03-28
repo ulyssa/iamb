@@ -545,6 +545,12 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
                 continue;
             };
 
+            if ReceiptThread::Main == thread || ReceiptThread::Unthreaded == thread {
+                if let Err(err) = room.set_unread_flag(false).await {
+                    tracing::warn!(?room_id, "Failed to clear unread flag: {err}");
+                }
+            }
+
             match room
                 .send_single_receipt(ReceiptType::Read, thread.to_owned(), new_receipt.clone())
                 .await
