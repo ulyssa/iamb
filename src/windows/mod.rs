@@ -78,6 +78,7 @@ use crate::base::{
     SpaceAction,
     UnreadInfo,
 };
+use crate::windows::room::room_command;
 
 use self::{room::RoomState, welcome::WelcomeState};
 use crate::message::MessageTimeStamp;
@@ -386,8 +387,22 @@ impl IambWindow {
         ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
-        if let IambWindow::Room(w) = self {
-            w.room_command(act, ctx, store).await
+        let id = match self {
+            IambWindow::Room(state) => Some(state.id()),
+            IambWindow::MemberList(_, room_id, _) => Some(&**room_id),
+
+            IambWindow::DirectList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::RoomList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::SpaceList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::ChatList(state) | IambWindow::UnreadList(state) => {
+                state.get().map(|state| state.room_id())
+            },
+
+            _ => None,
+        };
+
+        if let Some(id) = id {
+            room_command(id, act, ctx, store).await
         } else {
             return Err(IambError::NoSelectedRoomOrSpace.into());
         }
