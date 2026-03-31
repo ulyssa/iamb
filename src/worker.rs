@@ -16,6 +16,7 @@ use matrix_sdk::room::Invite;
 use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
 use matrix_sdk::ruma::events::fully_read::FullyReadEventContent;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::room::message::{MessageType, OriginalSyncRoomMessageEvent};
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::OwnedEventId;
 use matrix_sdk_ui::timeline::TimelineEventItemId;
@@ -767,6 +768,22 @@ impl ClientWorker {
                     async move {
                         let mut locked = store.lock().await;
                         locked.application.presences.insert(ev.sender, ev.content.presence);
+                    }
+                });
+
+        let _ =
+            self.client
+                .add_event_handler(|ev: OriginalSyncRoomMessageEvent, client: Client| {
+                    async move {
+                        if let MessageType::VerificationRequest(_) = ev.content.msgtype {
+                            if let Some(request) = client
+                                .encryption()
+                                .get_verification_request(&ev.sender, &ev.event_id)
+                                .await
+                            {
+                                request.accept().await.expect("Failed to accept request");
+                            }
+                        }
                     }
                 });
 
