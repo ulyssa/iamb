@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 
+use matrix_sdk::encryption::verification::VerificationRequest;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -31,7 +32,6 @@ use url::Url;
 
 use matrix_sdk::{
     RoomState as MatrixRoomState,
-    encryption::verification::SasVerification,
     room::Room as MatrixRoom,
     ruma::{
         EventId,
@@ -1839,7 +1839,8 @@ pub struct ChatStore {
     pub presences: CompletionMap<OwnedUserId, PresenceState>,
 
     /// In-progress and completed verifications.
-    pub verifications: CompletionMap<String, SasVerification>,
+    /// The map key is the `flow_id`.
+    pub verifications: CompletionMap<String, VerificationRequest>,
 
     /// Settings for the current profile loaded from config file.
     pub settings: ApplicationSettings,
@@ -1926,13 +1927,6 @@ impl ChatStore {
     /// Set the name for a room.
     pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
         self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
-    }
-
-    /// Insert a new E2EE verification.
-    pub fn insert_sas(&mut self, sas: SasVerification) {
-        let key = format!("{}/{}", sas.other_user_id(), sas.other_device().device_id());
-
-        self.verifications.insert(key, sas);
     }
 }
 
