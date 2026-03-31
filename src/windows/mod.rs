@@ -12,8 +12,14 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use matrix_sdk::encryption::verification::{
+    Verification,
+    VerificationRequest,
+    VerificationRequestState,
+};
+use matrix_sdk::ruma::events::key::verification::VerificationMethod;
 use matrix_sdk::{
-    encryption::verification::{format_emojis, SasVerification},
+    encryption::verification::format_emojis,
     room::{Room as MatrixRoom, RoomMember},
     ruma::{
         events::room::member::MembershipState,
@@ -25,6 +31,7 @@ use matrix_sdk::{
     },
     RoomState as MatrixRoomState,
 };
+use matrix_sdk_crypto::SasState;
 
 use ratatui::{
     buffer::Buffer,
@@ -667,11 +674,20 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::VerifyList(state) => {
-                let verifications = &store.application.verifications;
-                let mut items = verifications.iter().map(VerifyItem::from).collect::<Vec<_>>();
+                let mut items = store
+                    .application
+                    .verifications
+                    .values()
+                    .cloned()
+                    .map(VerifyItem::new)
+                    .collect::<Vec<_>>();
 
                 // Sort the active verifications towards the top.
                 items.sort();
+
+                if let Some(item) = items.first_mut() {
+                    item.show_help();
+                }
 
                 state.set(items);
 
@@ -1321,43 +1337,23 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for SpaceItem {
 
 #[derive(Clone)]
 pub struct VerifyItem {
-    user_dev: String,
-    sasv1: SasVerification,
+    request: VerificationRequest,
+    show_help: bool,
 }
 
 impl VerifyItem {
-    fn new(user_dev: String, sasv1: SasVerification) -> Self {
-        VerifyItem { user_dev, sasv1 }
+    fn new(request: VerificationRequest) -> Self {
+        Self { request, show_help: false }
     }
 
-    fn show_item(&self) -> String {
-        let state = if self.sasv1.is_done() {
-            "done"
-        } else if self.sasv1.is_cancelled() {
-            "cancelled"
-        } else if self.sasv1.emoji().is_some() {
-            "accepted"
-        } else {
-            "not accepted"
-        };
-
-        if self.sasv1.is_self_verification() {
-            let device = self.sasv1.other_device();
-
-            if let Some(display_name) = device.display_name() {
-                format!("Device verification with {display_name} ({state})")
-            } else {
-                format!("Device verification with device {} ({})", device.device_id(), state)
-            }
-        } else {
-            format!("User Verification with {} ({})", self.sasv1.other_user_id(), state)
-        }
+    pub fn show_help(&mut self) {
+        self.show_help = true;
     }
 }
 
 impl PartialEq for VerifyItem {
     fn eq(&self, other: &Self) -> bool {
-        self.user_dev == other.user_dev
+        self.request.flow_id() == other.request.flow_id()
     }
 }
 
@@ -1365,36 +1361,50 @@ impl Eq for VerifyItem {}
 
 impl Ord for VerifyItem {
     fn cmp(&self, other: &Self) -> Ordering {
-        fn state_val(sas: &SasVerification) -> usize {
-            if sas.is_done() {
-                return 3;
-            } else if sas.is_cancelled() {
-                return 2;
-            } else {
-                return 1;
+        fn state_val(req: &VerificationRequest) -> usize {
+            // 1: comparing emojis
+            // 2: requests for this session
+            // 3: all others
+            // 4: canceled
+            // 5: done
+            match req.state() {
+                VerificationRequestState::Requested { .. } => 2,
+                VerificationRequestState::Transitioned {
+                    verification: Verification::SasV1(sas),
+                } => {
+                    match sas.state() {
+                        SasState::KeysExchanged { emojis: Some(_), .. } => 1,
+                        SasState::Done { .. } => 5,
+                        SasState::Cancelled(_) => 4,
+                        _ => 3,
+                    }
+                },
+                VerificationRequestState::Done => 5,
+                VerificationRequestState::Cancelled(_) => 4,
+                _ => 3,
             }
         }
 
-        fn device_val(sas: &SasVerification) -> usize {
-            if sas.is_self_verification() {
-                return 1;
+        fn device_val(req: &VerificationRequest) -> usize {
+            if req.is_self_verification() {
+                1
             } else {
-                return 2;
+                2
             }
         }
 
-        let state1 = state_val(&self.sasv1);
-        let state2 = state_val(&other.sasv1);
+        let state1 = state_val(&self.request);
+        let state2 = state_val(&other.request);
 
-        let dev1 = device_val(&self.sasv1);
-        let dev2 = device_val(&other.sasv1);
+        let dev1 = device_val(&self.request);
+        let dev2 = device_val(&other.request);
 
         let scmp = state1.cmp(&state2);
         let dcmp = dev1.cmp(&dev2);
 
         scmp.then(dcmp).then_with(|| {
-            let did1 = self.sasv1.other_device().device_id();
-            let did2 = other.sasv1.other_device().device_id();
+            let did1 = self.request.flow_id();
+            let did2 = other.request.flow_id();
 
             did1.cmp(did2)
         })
@@ -1407,24 +1417,21 @@ impl PartialOrd for VerifyItem {
     }
 }
 
-impl From<(&String, &SasVerification)> for VerifyItem {
-    fn from((user_dev, sasv1): (&String, &SasVerification)) -> Self {
-        VerifyItem::new(user_dev.clone(), sasv1.clone())
-    }
-}
-
 impl Display for VerifyItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.sasv1.is_done() {
-            return Ok(());
-        }
-
-        if self.sasv1.is_cancelled() {
-            write!(f, ":verify request {}", self.sasv1.other_user_id())
-        } else if self.sasv1.emoji().is_some() {
-            write!(f, ":verify confirm {}", self.user_dev)
-        } else {
-            write!(f, ":verify accept {}", self.user_dev)
+        match self.request.state() {
+            VerificationRequestState::Requested { .. } => {
+                write!(f, ":verify accept {}", self.request.flow_id())
+            },
+            VerificationRequestState::Transitioned { verification: Verification::SasV1(sas) } => {
+                match sas.state() {
+                    SasState::KeysExchanged { emojis: Some(_), .. } => {
+                        write!(f, ":verify confirm {}", self.request.flow_id())
+                    },
+                    _ => Ok(()),
+                }
+            },
+            _ => Ok(()),
         }
     }
 }
@@ -1434,58 +1441,124 @@ impl ListItem<IambInfo> for VerifyItem {
         &self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
-        _: &mut ProgramStore,
+        store: &mut ProgramStore,
     ) -> Text<'_> {
         let mut lines = vec![];
-
         let bold = Style::default().add_modifier(StyleModifier::BOLD);
-        let item = Span::styled(self.show_item(), selected_style(selected));
-        lines.push(Line::from(item));
+        let selected_bold = selected_style(selected).add_modifier(StyleModifier::BOLD);
+        let selected = selected_style(selected);
 
-        if self.sasv1.is_done() {
-            // Print nothing.
-        } else if self.sasv1.is_cancelled() {
-            if let Some(info) = self.sasv1.cancel_info() {
+        let mut other_device = None;
+        let state = match self.request.state() {
+            _ if self.request.is_passive() => "completed with other device",
+            VerificationRequestState::Created { .. } => "request sent",
+            VerificationRequestState::Requested { their_methods, other_device_data } => {
+                other_device = Some(other_device_data);
+
+                if their_methods.contains(&VerificationMethod::SasV1) {
+                    lines.push(Line::from("    To accept this request, run:"));
+                    "requested"
+                } else {
+                    "no methods in common"
+                }
+            },
+            VerificationRequestState::Ready { other_device_data, .. } => {
+                other_device = Some(other_device_data);
+
+                "starting"
+            },
+            VerificationRequestState::Transitioned { verification: Verification::SasV1(sas) } => {
+                other_device = Some(sas.other_device().to_owned());
+
+                match sas.state() {
+                    SasState::Created { .. } |
+                    SasState::Started { .. } |
+                    SasState::Accepted { .. } => "starting",
+                    SasState::KeysExchanged { emojis: Some(emojis), .. } => {
+                        lines.push(Line::from(
+                            "    Both devices should see the following Emoji sequence:".to_string(),
+                        ));
+                        lines.push(Line::from(""));
+
+                        for line in format_emojis(emojis.emojis).lines() {
+                            lines.push(Line::from(format!("    {line}")));
+                        }
+
+                        lines.push(Line::from(""));
+                        lines.push(Line::from("    If they don't match, run:"));
+                        lines.push(Line::from(""));
+                        lines.push(Line::from(Span::styled(
+                            format!("        :verify mismatch {}", self.request.flow_id()),
+                            bold,
+                        )));
+                        lines.push(Line::from(""));
+                        lines.push(Line::from(
+                            "    If everything looks right, you can confirm with:",
+                        ));
+                        "running"
+                    },
+                    SasState::KeysExchanged { emojis: None, .. } => "unsupported method",
+                    SasState::Confirmed => "waiting for response",
+                    SasState::Done { .. } => "done",
+                    SasState::Cancelled(info) => {
+                        lines.push(Line::from(format!("    Cancelled: {}", info.reason())));
+                        "cancelled"
+                    },
+                }
+            },
+            VerificationRequestState::Transitioned { .. } => "unsupported method",
+            VerificationRequestState::Done => "done",
+            VerificationRequestState::Cancelled(info) => {
                 lines.push(Line::from(format!("    Cancelled: {}", info.reason())));
-                lines.push(Line::from(""));
+                "cancelled"
+            },
+        };
+
+        let line = if self.request.is_self_verification() {
+            if let Some(device) = other_device {
+                if let Some(display_name) = device.display_name() {
+                    vec![
+                        Span::styled("Device verification with ", selected),
+                        Span::styled(display_name.to_owned(), selected_bold),
+                        Span::styled(format!(" ({state})"), selected),
+                    ]
+                } else {
+                    vec![
+                        Span::styled("Device verification with ", selected),
+                        Span::styled(device.device_id().to_string(), selected_bold),
+                        Span::styled(format!(" ({state})"), selected),
+                    ]
+                }
+            } else {
+                vec![Span::styled(
+                    format!("Device verification with any own device ({state})"),
+                    selected,
+                )]
             }
-
-            lines.push(Line::from("    You can start a new verification request with:"));
-        } else if let Some(emoji) = self.sasv1.emoji() {
-            lines.push(Line::from(
-                "    Both devices should see the following Emoji sequence:".to_string(),
-            ));
-            lines.push(Line::from(""));
-
-            for line in format_emojis(emoji).lines() {
-                lines.push(Line::from(format!("    {line}")));
-            }
-
-            lines.push(Line::from(""));
-            lines.push(Line::from("    If they don't match, run:"));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!(":verify mismatch {}", self.user_dev),
-                bold,
-            )));
-            lines.push(Line::from(""));
-            lines.push(Line::from("    If everything looks right, you can confirm with:"));
         } else {
-            lines.push(Line::from("    To accept this request, run:"));
-        }
+            let color = store.application.settings.get_user_color(self.request.other_user_id());
+            vec![
+                Span::styled("User verification with ", selected),
+                Span::styled(self.request.other_user_id().as_str(), selected_bold.patch(color)),
+                Span::styled(format!(" ({state})"), selected),
+            ]
+        };
+        lines.insert(0, line.into());
 
         let cmd = self.to_string();
 
         if !cmd.is_empty() {
             lines.push(Line::from(""));
             lines.push(Line::from(vec![Span::from("        "), Span::styled(cmd, bold)]));
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::from("You can copy the above command with "),
-                Span::styled("yy", bold),
-                Span::from(" and then execute it with "),
-                Span::styled("@\"", bold),
-            ]));
+            if self.show_help {
+                lines.push(Line::from(""));
+                lines.push(Line::from(vec![
+                    Span::from("You can copy the above command with "),
+                    Span::styled("yy", bold),
+                    Span::from(" and then execute it with "),
+                    Span::styled("@\"", bold),
+                ]));
+            }
         }
 
         Text::from(lines)
