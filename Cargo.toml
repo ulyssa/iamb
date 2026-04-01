@@ -97,7 +97,7 @@ version = "0.18.0"
 [dependencies.matrix-sdk]
 version = "0.18.0"
 default-features = false
-features = ["e2e-encryption", "socks", "sqlite", "sso-login"]
+features = ["e2e-encryption", "socks", "sqlite", "sso-login", "qrcode"]
 
 [dependencies.matrix-sdk-crypto]
 version = "0.18.0"

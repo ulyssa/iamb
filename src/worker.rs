@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use gethostname::gethostname;
-use matrix_sdk::ruma::OwnedDeviceId;
 use matrix_sdk::ruma::events::key::verification::ready::{
     OriginalSyncKeyVerificationReadyEvent,
     ToDeviceKeyVerificationReadyEvent,
@@ -34,7 +33,6 @@ use matrix_sdk::{
     RoomMemberships,
     authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
-    encryption::verification::Verification,
     encryption::{BackupDownloadStrategy, EncryptionSettings},
     event_handler::Ctx,
     reqwest,
@@ -98,6 +96,7 @@ use crate::config::{ImagePreviewSize, ProxyUrl};
 use crate::message::{Message, MessageEvent, MessageId, MessageKey};
 use crate::notifications::register_notifications;
 use crate::preview::PreviewKind;
+use crate::verifications;
 use crate::{
     ApplicationSettings,
     base::{
@@ -981,88 +980,6 @@ impl Requester {
     }
 }
 
-async fn handle_verify_request(
-    flow_id: String,
-    other_user_id: OwnedUserId,
-    other_device_id: OwnedDeviceId,
-    client: Client,
-    store: AsyncProgramStore,
-) {
-    let own_user_id = client.user_id().unwrap();
-    let own_device_id = client.device_id().unwrap();
-    if other_user_id == own_user_id && other_device_id == own_device_id {
-        tracing::debug!("ignoring the verification request we sent");
-        return;
-    }
-
-    let Some(request) = client
-        .encryption()
-        .get_verification_request(&other_user_id, &flow_id)
-        .await
-    else {
-        tracing::warn!("couldn't find verification request in crypto store");
-        return;
-    };
-
-    tracing::debug!("received a verification request");
-
-    store.lock().await.application.verifications.insert(flow_id, request);
-}
-
-async fn handle_verify_ready(
-    flow_id: String,
-    other_user_id: OwnedUserId,
-    client: Client,
-    store: AsyncProgramStore,
-) {
-    let Some(request) = client
-        .encryption()
-        .get_verification_request(&other_user_id, &flow_id)
-        .await
-    else {
-        tracing::warn!("couldn't find verification request in crypto store");
-        return;
-    };
-
-    // We only support one verification method. Therefore we can start the process
-    // without querying the user.
-
-    match request.start_sas().await {
-        Ok(Some(_)) => {
-            tracing::debug!("started SAS verification flow");
-        },
-        Ok(None) => {
-            tracing::info!(
-                "ignoring ready verification since we have no common verification methods"
-            );
-        },
-        Err(err) => {
-            tracing::warn!("unable to start SAS verification process: {err}");
-        },
-    }
-
-    // Insert the request in case we missed it. Not sure if this is needed.
-    // Might happen with room verification requests if the client is restarted.
-    store.lock().await.application.verifications.insert(flow_id, request);
-}
-
-async fn handle_verify_start(flow_id: String, other_user_id: OwnedUserId, client: Client) {
-    match client.encryption().get_verification(&other_user_id, &flow_id).await {
-        Some(Verification::SasV1(sas)) => {
-            tracing::debug!("accepting SAS verification flow");
-            if let Err(err) = sas.accept().await {
-                tracing::warn!("unable to accept SAS verification flow: {err}");
-            }
-        },
-        Some(_) => {
-            tracing::info!("ignoring verification start with unsupported method");
-        },
-        None => {
-            tracing::warn!("couldn't find verification request in crypto store");
-        },
-    }
-}
-
 pub struct ClientWorker {
     initialized: bool,
     settings: ApplicationSettings,
@@ -1222,7 +1139,7 @@ impl ClientWorker {
                     if let Some(msg) = ev.as_original() &&
                         let MessageType::VerificationRequest(content) = &msg.content.msgtype
                     {
-                        handle_verify_request(
+                        verifications::handle_request(
                             ev.event_id().into(),
                             ev.sender().into(),
                             content.from_device.clone(),
@@ -1379,7 +1296,7 @@ impl ClientWorker {
                     other_device_id = ?ev.content.from_device,
                     flow_id = ?ev.content.transaction_id,
                 );
-                handle_verify_request(
+                verifications::handle_request(
                     ev.content.transaction_id.into(),
                     ev.sender,
                     ev.content.from_device,
@@ -1400,8 +1317,13 @@ impl ClientWorker {
                     other_device_id = ?ev.content.from_device,
                     flow_id = ?ev.content.transaction_id,
                 );
-                handle_verify_ready(ev.content.transaction_id.into(), ev.sender, client, store.0)
-                    .instrument(span)
+                verifications::handle_ready(
+                    ev.content.transaction_id.into(),
+                    ev.sender,
+                    client,
+                    store.0,
+                )
+                .instrument(span)
             },
         );
 
@@ -1415,7 +1337,7 @@ impl ClientWorker {
                     other_device_id = ?ev.content.from_device,
                     flow_id = ?ev.content.relates_to.event_id,
                 );
-                handle_verify_ready(
+                verifications::handle_ready(
                     ev.content.relates_to.event_id.into(),
                     ev.sender,
                     client,
@@ -1433,7 +1355,7 @@ impl ClientWorker {
                     other_device_id = ?ev.content.from_device,
                     flow_id = ?ev.content.transaction_id,
                 );
-                handle_verify_start(ev.content.transaction_id.into(), ev.sender, client)
+                verifications::handle_start(ev.content.transaction_id.into(), ev.sender, client)
                     .instrument(span)
             },
         );
@@ -1446,8 +1368,12 @@ impl ClientWorker {
                     other_device_id = ?ev.content.from_device,
                     flow_id = ?ev.content.relates_to.event_id
                 );
-                handle_verify_start(ev.content.relates_to.event_id.into(), ev.sender, client)
-                    .instrument(span)
+                verifications::handle_start(
+                    ev.content.relates_to.event_id.into(),
+                    ev.sender,
+                    client,
+                )
+                .instrument(span)
             },
         );
 
