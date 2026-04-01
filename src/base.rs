@@ -93,6 +93,7 @@ use crate::config::ImagePreviewProtocolValues;
 use crate::message::ImageStatus;
 use crate::notifications::NotificationHandle;
 use crate::preview::{source_from_event, spawn_insert_preview};
+use crate::verifications::VerifyAction;
 use crate::{
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     worker::Requester,
@@ -119,22 +120,6 @@ const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
 /// Empty type used solely to implement [ApplicationInfo].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambInfo {}
-
-/// An action taken against an ongoing verification request.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum VerifyAction {
-    /// Accept a verification request.
-    Accept,
-
-    /// Cancel an in-progress verification.
-    Cancel,
-
-    /// Confirm an in-progress verification.
-    Confirm,
-
-    /// Reject an in-progress verification due to mismatched Emoji.
-    Mismatch,
-}
 
 /// An action taken against the currently selected message.
 #[derive(Clone, Debug, Eq, PartialEq)]
