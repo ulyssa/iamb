@@ -96,6 +96,7 @@ use modalkit::{
 
 use crate::config::ImagePreviewSize;
 use crate::preview::PreviewKind;
+use crate::verifications::VerifyAction;
 use crate::{
     config::{ApplicationSettings, ImagePreviewProtocolValues},
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
@@ -124,22 +125,6 @@ const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
 /// Empty type used solely to implement [ApplicationInfo].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambInfo {}
-
-/// An action taken against an ongoing verification request.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum VerifyAction {
-    /// Accept a verification request.
-    Accept,
-
-    /// Cancel an in-progress verification.
-    Cancel,
-
-    /// Confirm an in-progress verification.
-    Confirm,
-
-    /// Reject an in-progress verification due to mismatched Emoji.
-    Mismatch,
-}
 
 /// An action taken against the currently selected message.
 #[derive(Clone, Debug, Eq, PartialEq)]
