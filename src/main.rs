@@ -30,9 +30,9 @@ use std::time::{Duration, Instant};
 use clap::Parser;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
 use matrix_sdk::ruma::matrix_uri::MatrixId;
-use matrix_sdk_crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::{MatrixToUri, MatrixUri, OwnedUserId};
-use matrix_sdk::OwnedServerName;
+use matrix_sdk::{OwnedServerName, RoomState};
+use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
 use rand::distr::Alphanumeric;
 use rand::RngExt as _;
@@ -201,7 +201,7 @@ fn resolve_mxid(
     via: &[OwnedServerName],
     join_or_create: bool,
 ) -> IambResult<Result<IambId, String>> {
-    let mut room_name = String::new();
+    let room_name;
     let room_id = match id {
         MatrixId::Room(id) => {
             room_name = id.to_string();
@@ -212,13 +212,15 @@ fn resolve_mxid(
             store.application.worker.resolve_alias(alias_id)?
         },
         MatrixId::User(user_id) => {
-            match store.application.worker.client.get_dm_room(&user_id) {
+            let id = match store.application.worker.client.get_dm_room(&user_id) {
                 Some(room) => room.room_id().to_owned(),
                 None if join_or_create => {
                     store.application.worker.join_room(user_id.to_string(), via.to_owned())?
                 },
                 None => return Ok(Err(format!("No dm with {user_id} found. Create new DM?"))),
-            }
+            };
+            room_name = id.to_string();
+            id
         },
         MatrixId::Event(owned_room_or_alias_id, _event_id) => {
             // ignore event id for now
@@ -240,12 +242,11 @@ fn resolve_mxid(
         .application
         .worker
         .client
-        .joined_rooms()
-        .iter()
-        .any(|room| room.room_id() == room_id)
+        .get_room(&room_id)
+        .is_none_or(|room| room.state() != RoomState::Joined)
     {
         if join_or_create {
-            store.application.worker.join_room(room_id.to_string(), via.to_owned())?;
+            store.application.worker.join_room(room_name, via.to_owned())?;
         } else {
             return Ok(Err(format!("Join room {room_name:?}?")));
         }
