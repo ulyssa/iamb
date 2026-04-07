@@ -194,6 +194,22 @@ Set the room's canonical alias to the one provided, and make the previous one an
 Delete the room's canonical alias.
 .It Sy ":room canon show"
 Show the room's canonical alias, if any is set.
+.It Sy ":room history show"
+Show the history visibility setting for the current room.
+.It Sy ":room history set [mode]" .\" TODO: get options
+Set the history visibility for the current room.
+Valid modes are
+.Dq invited
+(new events after invitation),
+.Dq joined
+(new events after join),
+.Dq shared
+(whole history after join),
+.Dq world_readable
+(whole history for unjoined users).
+.It Sy ":room history unset"
+Reset the room visibility setting to
+.Dq joined .
 .It Sy ":room ban [user] [reason]"
 Ban a user from this room with an optional reason.
 .It Sy ":room unban [user] [reason]"
@@ -204,7 +220,7 @@ Kick a user from this room with an optional reason.
 
 .Sh "SPACE COMMANDS"
 .Bl -tag -width Ds
-.It Sy ":space child set [room_id] [arguments]"
+.It Sy ":space child set [room] [arguments]"
 Add a room to the currently focused space.
 .Dq ++suggested
 marks the room as a suggested child.

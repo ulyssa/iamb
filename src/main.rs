@@ -80,6 +80,7 @@ mod util;
 mod windows;
 mod worker;
 
+mod completions;
 #[cfg(test)]
 mod tests;
 
@@ -89,7 +90,6 @@ use crate::{
         ChatStore,
         HomeserverAction,
         IambAction,
-        IambCompleter,
         IambError,
         IambId,
         IambInfo,
@@ -99,6 +99,7 @@ use crate::{
         ProgramContext,
         ProgramStore,
     },
+    completions::IambCompleter,
     config::{ApplicationSettings, Iamb},
     windows::IambWindow,
     worker::{create_room, ClientWorker, LoginStyle, Requester},
