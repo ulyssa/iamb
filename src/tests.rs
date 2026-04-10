@@ -216,6 +216,7 @@ pub fn mock_settings() -> ApplicationSettings {
         profile_name: "test".into(),
         profile: ProfileConfig {
             user_id: user_id!("@user:example.com").to_owned(),
+            password_file: None,
             url: None,
             settings: None,
             dirs: None,
