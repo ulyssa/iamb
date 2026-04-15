@@ -711,14 +711,21 @@ async fn create_client_inner(
     let req_timeout = Duration::from_secs(settings.tunables.request_timeout);
 
     // Set up the HTTP client.
-    let http = reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .user_agent(IAMB_USER_AGENT)
         .timeout(req_timeout)
         .pool_idle_timeout(Duration::from_secs(60))
         .pool_max_idle_per_host(10)
-        .tcp_keepalive(Duration::from_secs(10))
-        .build()
-        .unwrap();
+        .tcp_keepalive(Duration::from_secs(10));
+
+    if let Some(proxy_url) = &settings.proxy_url {
+        builder = builder.proxy(
+            reqwest::Proxy::all(proxy_url.as_str())
+                .expect("Invalid [proxy] url in configuration"),
+        );
+    }
+
+    let http = builder.build().expect("Failed to build HTTP client");
 
     let req_config = RequestConfig::new().timeout(req_timeout).max_retry_time(req_timeout);
 

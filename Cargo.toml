@@ -94,6 +94,11 @@ version = "0.14.0"
 default-features = false
 features = ["e2e-encryption", "sqlite", "sso-login"]
 
+[dependencies.reqwest]
+version = "0.12"
+default-features = false
+features = ["socks"]
+
 [dependencies.tokio]
 version = "1.24.1"
 features = ["macros", "net", "rt-multi-thread", "sync", "time"]

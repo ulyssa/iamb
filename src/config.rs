@@ -809,6 +809,20 @@ pub enum WindowLayout {
     Split { split: Vec<WindowLayout> },
 }
 
+#[derive(Clone, Default, Deserialize)]
+pub struct ProxyConfig {
+    /// Proxy URL (e.g. socks5://127.0.0.1:1080). Requires reqwest's socks feature.
+    pub url: Option<String>,
+}
+
+impl ProxyConfig {
+    fn merge(self, other: Self) -> Self {
+        ProxyConfig {
+            url: self.url.or(other.url),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase", tag = "style")]
 pub enum Layout {
@@ -831,6 +845,7 @@ pub struct ProfileConfig {
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
+    pub proxy: Option<ProxyConfig>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -841,6 +856,7 @@ pub struct IambConfig {
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
+    pub proxy: Option<ProxyConfig>,
 }
 
 impl IambConfig {
@@ -872,6 +888,8 @@ pub struct ApplicationSettings {
     pub dirs: DirectoryValues,
     pub layout: Layout,
     pub macros: Macros,
+    /// Proxy URL for the HTTP client (e.g. socks5://127.0.0.1:1080), from [proxy] url.
+    pub proxy_url: Option<String>,
 }
 
 impl ApplicationSettings {
@@ -915,6 +933,7 @@ impl ApplicationSettings {
             settings: global,
             layout,
             macros,
+            proxy: global_proxy,
         } = config;
 
         validate_profile_names(&profiles);
@@ -958,6 +977,7 @@ impl ApplicationSettings {
 
         let macros = merge_maps(profile.macros.take(), macros).unwrap_or_default();
         let layout = profile.layout.take().or(layout).unwrap_or_default();
+        let proxy_url = profile.proxy.take().unwrap_or_default().merge(global_proxy.unwrap_or_default()).url;
 
         let tunables = global.unwrap_or_default();
         let tunables = profile.settings.take().unwrap_or_default().merge(tunables);
@@ -1011,6 +1031,7 @@ impl ApplicationSettings {
             dirs,
             layout,
             macros,
+            proxy_url,
         };
 
         Ok(settings)

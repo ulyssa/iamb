@@ -52,6 +52,11 @@ split = [
 [macros."normal|visual"]
 "V" = "<C-W>m"
 
+[proxy]
+# SOCKS5 proxy URL for all Matrix HTTP traffic (requires reqwest socks feature).
+# Omit this section or leave unset to use no proxy (or the system proxy from ALL_PROXY).
+# url = "socks5://127.0.0.1:1080"
+
 [dirs]
 cache = "/home/user/.cache/iamb/"
 logs = "/home/user/.local/share/iamb/logs/"

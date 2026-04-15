@@ -66,7 +66,32 @@ Configure the directories to use for data, logs, and more.
 See
 .Sx DIRECTORIES
 for the possible values you can set in this object.
+.It Sy proxy
+Configure an HTTP/SOCKS proxy for Matrix traffic.
+See
+.Sx PROXY .
 .El
+.Sh PROXY
+The
+.Sy [proxy]
+section configures a proxy for all outgoing Matrix HTTP requests.
+If unset, no proxy is used for the built-in client (environment variables
+such as
+.Ev ALL_PROXY
+are not read by default).
+.Bl -tag -width Ds
+.It Sy url
+Proxy URL, e.g.
+.Dq socks5://127.0.0.1:1080
+for a SOCKS5 proxy.
+Requires the reqwest
+.Sy socks
+feature (enabled in this build).
+.El
+.Pp
+.Sy proxy
+can be overridden per profile under
+.Sx PROFILES .
 .Sh PROFILES
 These options are configured as fields in the
 .Sy profiles
@@ -94,6 +119,8 @@ per-profile overrides of their global values:
 .Sy macros
 .It
 .Sy settings
+.It
+.Sy proxy
 .El
 .Ss Example 1: A single profile
 .Bd -literal -offset indent

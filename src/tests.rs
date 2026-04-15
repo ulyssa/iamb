@@ -221,11 +221,13 @@ pub fn mock_settings() -> ApplicationSettings {
             dirs: None,
             layout: None,
             macros: None,
+            proxy: None,
         },
         tunables: mock_tunables(),
         dirs: mock_dirs(),
         layout: Default::default(),
         macros: HashMap::default(),
+        proxy_url: None,
     }
 }
 
