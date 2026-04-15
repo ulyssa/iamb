@@ -11,6 +11,7 @@
 //!
 //! Most rendering logic lives under the [windows] module, but [Matrix messages][message] have
 //! their own module.
+#![recursion_limit = "256"]
 #![allow(clippy::manual_range_contains)]
 #![allow(clippy::needless_return)]
 #![allow(clippy::result_large_err)]
