@@ -717,6 +717,7 @@ async fn create_client_inner(
         .pool_idle_timeout(Duration::from_secs(60))
         .pool_max_idle_per_host(10)
         .tcp_keepalive(Duration::from_secs(10))
+        .danger_accept_invalid_certs(!settings.tunables.ssl_verify)
         .build()
         .unwrap();
 
