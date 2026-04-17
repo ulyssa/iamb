@@ -723,7 +723,11 @@ async fn create_client_inner(
     // Set up the Matrix client for the selected profile.
     let builder = Client::builder()
         .http_client(http)
-        .sqlite_store(settings.sqlite_dir.as_path(), None)
+        .sqlite_store_with_cache_path(
+            settings.sqlite_dir.as_path(),
+            settings.sqlite_cache_dir.as_path(),
+            None,
+        )
         .request_config(req_config)
         .with_encryption_settings(DEFAULT_ENCRYPTION_SETTINGS);
 
