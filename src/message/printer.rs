@@ -25,7 +25,6 @@ pub struct TextPrinter<'a> {
     text: Text<'a>,
     width: usize,
     base_style: Style,
-    hide_reply: bool,
 
     alignment: Alignment,
     curr_spans: Vec<Span<'a>>,
@@ -37,17 +36,11 @@ pub struct TextPrinter<'a> {
 
 impl<'a> TextPrinter<'a> {
     /// Create a new printer.
-    pub fn new(
-        width: usize,
-        base_style: Style,
-        hide_reply: bool,
-        settings: &'a ApplicationSettings,
-    ) -> Self {
+    pub fn new(width: usize, base_style: Style, settings: &'a ApplicationSettings) -> Self {
         TextPrinter {
             text: Text::default(),
             width,
             base_style,
-            hide_reply,
 
             alignment: Alignment::Left,
             curr_spans: vec![],
@@ -67,11 +60,6 @@ impl<'a> TextPrinter<'a> {
     pub fn literal(mut self, literal: bool) -> Self {
         self.literal = literal;
         self
-    }
-
-    /// Indicates whether replies should be pushed to the printer.
-    pub fn hide_reply(&self) -> bool {
-        self.hide_reply
     }
 
     /// Indicates whether emojis should be replaced by shortcodes
@@ -98,7 +86,6 @@ impl<'a> TextPrinter<'a> {
             text: Text::default(),
             width: self.width.saturating_sub(indent),
             base_style: self.base_style,
-            hide_reply: self.hide_reply,
 
             alignment: self.alignment,
             curr_spans: vec![],
@@ -308,7 +295,7 @@ pub mod tests {
     #[test]
     fn test_push_nobreak() {
         let settings = mock_settings();
-        let mut printer = TextPrinter::new(5, Style::default(), false, &settings);
+        let mut printer = TextPrinter::new(5, Style::default(), &settings);
         printer.push_span_nobreak("hello world".into());
         let text = printer.finish();
         assert_eq!(text.lines.len(), 1);

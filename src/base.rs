@@ -1127,6 +1127,7 @@ impl RoomInfo {
         }
 
         msg.html = msg.event.html();
+        msg.event.strip_reply_fallback();
     }
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
