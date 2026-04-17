@@ -29,7 +29,7 @@ use std::time::{Duration, Instant};
 
 use clap::Parser;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
-use matrix_sdk::ruma::OwnedUserId;
+use matrix_sdk::ruma::UserId;
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
 use rand::distr::Alphanumeric;
@@ -85,6 +85,7 @@ mod worker;
 
 #[cfg(test)]
 mod tests;
+mod verifications;
 
 use crate::{
     base::{
@@ -616,19 +617,15 @@ impl Application {
                 None
             },
 
-            IambAction::Verify(act, user_dev) => {
-                if let Some(sas) = store.application.verifications.get(&user_dev) {
-                    self.worker.verify(act, sas.clone())?
-                } else {
-                    return Err(IambError::InvalidVerificationId(user_dev).into());
-                }
+            IambAction::Verify(act, flow_id) => {
+                return verifications::iamb_verify(act, flow_id, store).await;
             },
             IambAction::VerifyRequest(user_id) => {
-                if let Ok(user_id) = OwnedUserId::try_from(user_id.as_str()) {
-                    self.worker.verify_request(user_id)?
-                } else {
+                let Ok(user_id) = <&UserId>::try_from(user_id.as_str()) else {
                     return Err(IambError::InvalidUserId(user_id).into());
-                }
+                };
+
+                return verifications::iamb_verify_request(user_id, store).await;
             },
         };
 

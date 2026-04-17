@@ -6,14 +6,13 @@
 //! Additionally, some of the iamb commands delegate behaviour to the current UI element. For
 //! example, [sending messages][crate::base::SendAction] delegate to the [room window][RoomState],
 //! where we have the message bar and room ID easily accessible and resettable.
-use std::cmp::{Ord, Ordering, PartialOrd};
+use std::cmp::{Ord, Ordering};
 use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use matrix_sdk::{
-    encryption::verification::{format_emojis, SasVerification},
     room::{Room as MatrixRoom, RoomMember},
     ruma::{
         events::room::member::MembershipState,
@@ -78,6 +77,7 @@ use crate::base::{
     SpaceAction,
     UnreadInfo,
 };
+use crate::verifications::VerifyItem;
 
 use self::{room::RoomState, welcome::WelcomeState};
 use crate::message::MessageTimeStamp;
@@ -106,7 +106,7 @@ fn bold_spans(s: &str) -> Line<'_> {
 }
 
 #[inline]
-fn selected_style(selected: bool) -> Style {
+pub fn selected_style(selected: bool) -> Style {
     if selected {
         Style::default().add_modifier(StyleModifier::REVERSED)
     } else {
@@ -667,11 +667,20 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::VerifyList(state) => {
-                let verifications = &store.application.verifications;
-                let mut items = verifications.iter().map(VerifyItem::from).collect::<Vec<_>>();
+                let mut items = store
+                    .application
+                    .verifications
+                    .values()
+                    .cloned()
+                    .map(VerifyItem::new)
+                    .collect::<Vec<_>>();
 
                 // Sort the active verifications towards the top.
                 items.sort();
+
+                if let Some(item) = items.first_mut() {
+                    item.show_help();
+                }
 
                 state.set(items);
 
@@ -1316,208 +1325,6 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for SpaceItem {
         _: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
         room_prompt(self.room_id(), act, ctx)
-    }
-}
-
-#[derive(Clone)]
-pub struct VerifyItem {
-    user_dev: String,
-    sasv1: SasVerification,
-}
-
-impl VerifyItem {
-    fn new(user_dev: String, sasv1: SasVerification) -> Self {
-        VerifyItem { user_dev, sasv1 }
-    }
-
-    fn show_item(&self) -> String {
-        let state = if self.sasv1.is_done() {
-            "done"
-        } else if self.sasv1.is_cancelled() {
-            "cancelled"
-        } else if self.sasv1.emoji().is_some() {
-            "accepted"
-        } else {
-            "not accepted"
-        };
-
-        if self.sasv1.is_self_verification() {
-            let device = self.sasv1.other_device();
-
-            if let Some(display_name) = device.display_name() {
-                format!("Device verification with {display_name} ({state})")
-            } else {
-                format!("Device verification with device {} ({})", device.device_id(), state)
-            }
-        } else {
-            format!("User Verification with {} ({})", self.sasv1.other_user_id(), state)
-        }
-    }
-}
-
-impl PartialEq for VerifyItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.user_dev == other.user_dev
-    }
-}
-
-impl Eq for VerifyItem {}
-
-impl Ord for VerifyItem {
-    fn cmp(&self, other: &Self) -> Ordering {
-        fn state_val(sas: &SasVerification) -> usize {
-            if sas.is_done() {
-                return 3;
-            } else if sas.is_cancelled() {
-                return 2;
-            } else {
-                return 1;
-            }
-        }
-
-        fn device_val(sas: &SasVerification) -> usize {
-            if sas.is_self_verification() {
-                return 1;
-            } else {
-                return 2;
-            }
-        }
-
-        let state1 = state_val(&self.sasv1);
-        let state2 = state_val(&other.sasv1);
-
-        let dev1 = device_val(&self.sasv1);
-        let dev2 = device_val(&other.sasv1);
-
-        let scmp = state1.cmp(&state2);
-        let dcmp = dev1.cmp(&dev2);
-
-        scmp.then(dcmp).then_with(|| {
-            let did1 = self.sasv1.other_device().device_id();
-            let did2 = other.sasv1.other_device().device_id();
-
-            did1.cmp(did2)
-        })
-    }
-}
-
-impl PartialOrd for VerifyItem {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl From<(&String, &SasVerification)> for VerifyItem {
-    fn from((user_dev, sasv1): (&String, &SasVerification)) -> Self {
-        VerifyItem::new(user_dev.clone(), sasv1.clone())
-    }
-}
-
-impl Display for VerifyItem {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.sasv1.is_done() {
-            return Ok(());
-        }
-
-        if self.sasv1.is_cancelled() {
-            write!(f, ":verify request {}", self.sasv1.other_user_id())
-        } else if self.sasv1.emoji().is_some() {
-            write!(f, ":verify confirm {}", self.user_dev)
-        } else {
-            write!(f, ":verify accept {}", self.user_dev)
-        }
-    }
-}
-
-impl ListItem<IambInfo> for VerifyItem {
-    fn show(
-        &self,
-        selected: bool,
-        _: &ViewportContext<ListCursor>,
-        _: &mut ProgramStore,
-    ) -> Text<'_> {
-        let mut lines = vec![];
-
-        let bold = Style::default().add_modifier(StyleModifier::BOLD);
-        let item = Span::styled(self.show_item(), selected_style(selected));
-        lines.push(Line::from(item));
-
-        if self.sasv1.is_done() {
-            // Print nothing.
-        } else if self.sasv1.is_cancelled() {
-            if let Some(info) = self.sasv1.cancel_info() {
-                lines.push(Line::from(format!("    Cancelled: {}", info.reason())));
-                lines.push(Line::from(""));
-            }
-
-            lines.push(Line::from("    You can start a new verification request with:"));
-        } else if let Some(emoji) = self.sasv1.emoji() {
-            lines.push(Line::from(
-                "    Both devices should see the following Emoji sequence:".to_string(),
-            ));
-            lines.push(Line::from(""));
-
-            for line in format_emojis(emoji).lines() {
-                lines.push(Line::from(format!("    {line}")));
-            }
-
-            lines.push(Line::from(""));
-            lines.push(Line::from("    If they don't match, run:"));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!(":verify mismatch {}", self.user_dev),
-                bold,
-            )));
-            lines.push(Line::from(""));
-            lines.push(Line::from("    If everything looks right, you can confirm with:"));
-        } else {
-            lines.push(Line::from("    To accept this request, run:"));
-        }
-
-        let cmd = self.to_string();
-
-        if !cmd.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![Span::from("        "), Span::styled(cmd, bold)]));
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::from("You can copy the above command with "),
-                Span::styled("yy", bold),
-                Span::from(" and then execute it with "),
-                Span::styled("@\"", bold),
-            ]));
-        }
-
-        Text::from(lines)
-    }
-
-    fn get_word(&self) -> Option<String> {
-        None
-    }
-}
-
-impl Promptable<ProgramContext, ProgramStore, IambInfo> for VerifyItem {
-    fn prompt(
-        &mut self,
-        act: &PromptAction,
-        _: &ProgramContext,
-        _: &mut ProgramStore,
-    ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
-        match act {
-            PromptAction::Submit => Ok(vec![]),
-            PromptAction::Abort(_) => {
-                let msg = "Cannot abort entry inside a list";
-                let err = EditError::Failure(msg.into());
-
-                Err(err)
-            },
-            PromptAction::Recall(..) => {
-                let msg = "Cannot recall history inside a list";
-                let err = EditError::Failure(msg.into());
-
-                Err(err)
-            },
-        }
     }
 }
 

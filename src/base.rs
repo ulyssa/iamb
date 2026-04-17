@@ -12,6 +12,7 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
+use matrix_sdk::encryption::verification::VerificationRequest;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use ratatui::{
     buffer::Buffer,
@@ -32,7 +33,6 @@ use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 
 use matrix_sdk::{
-    encryption::verification::SasVerification,
     room::Room as MatrixRoom,
     ruma::{
         events::{
@@ -93,6 +93,7 @@ use crate::config::ImagePreviewProtocolValues;
 use crate::message::ImageStatus;
 use crate::notifications::NotificationHandle;
 use crate::preview::{source_from_event, spawn_insert_preview};
+use crate::verifications::VerifyAction;
 use crate::{
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     worker::Requester,
@@ -119,22 +120,6 @@ const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
 /// Empty type used solely to implement [ApplicationInfo].
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum IambInfo {}
-
-/// An action taken against an ongoing verification request.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum VerifyAction {
-    /// Accept a verification request.
-    Accept,
-
-    /// Cancel an in-progress verification.
-    Cancel,
-
-    /// Confirm an in-progress verification.
-    Confirm,
-
-    /// Reject an in-progress verification due to mismatched Emoji.
-    Mismatch,
-}
 
 /// An action taken against the currently selected message.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1586,7 +1571,8 @@ pub struct ChatStore {
     pub presences: CompletionMap<OwnedUserId, PresenceState>,
 
     /// In-progress and completed verifications.
-    pub verifications: HashMap<String, SasVerification>,
+    /// The map key is the `flow_id`.
+    pub verifications: HashMap<String, VerificationRequest>,
 
     /// Settings for the current profile loaded from config file.
     pub settings: ApplicationSettings,
@@ -1673,13 +1659,6 @@ impl ChatStore {
     /// Set the name for a room.
     pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
         self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
-    }
-
-    /// Insert a new E2EE verification.
-    pub fn insert_sas(&mut self, sas: SasVerification) {
-        let key = format!("{}/{}", sas.other_user_id(), sas.other_device().device_id());
-
-        self.verifications.insert(key, sas);
     }
 }
 
