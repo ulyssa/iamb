@@ -709,14 +709,24 @@ async fn create_client_inner(
     let req_timeout = Duration::from_secs(settings.tunables.request_timeout);
 
     // Set up the HTTP client.
-    let http = reqwest::Client::builder()
+    let mut builder = reqwest::Client::builder()
         .user_agent(IAMB_USER_AGENT)
         .timeout(req_timeout)
         .pool_idle_timeout(Duration::from_secs(60))
         .pool_max_idle_per_host(10)
-        .tcp_keepalive(Duration::from_secs(10))
-        .build()
-        .unwrap();
+        .tcp_keepalive(Duration::from_secs(10));
+
+    if let Some(proxy) = settings.tunables.proxy.as_deref() {
+        // interpret empty string as no proxy to allow profile specific override of global proxy
+        if proxy.is_empty() {
+            builder = builder.no_proxy();
+        } else {
+            builder = builder
+                .proxy(reqwest::Proxy::all(proxy).expect("proxy setting has invalid format"));
+        }
+    }
+
+    let http = builder.build().unwrap();
 
     let req_config = RequestConfig::new().timeout(req_timeout).max_retry_time(req_timeout);
 
