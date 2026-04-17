@@ -330,6 +330,10 @@ fn load_insert(
 
     match res {
         Ok((fetch_id, msgs)) => {
+            if let Some((msg, _)) = msgs.last() {
+                let key = (msg.origin_server_ts().into(), msg.event_id().to_owned());
+                info.fetch_event = Some(key);
+            }
             for (msg, receipts) in msgs.into_iter() {
                 let sender = msg.sender().to_owned();
                 let _ = presences.get_or_default(sender);
