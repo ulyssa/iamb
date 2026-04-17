@@ -26,6 +26,7 @@ use matrix_sdk::{
         OwnedUserId,
         RoomId,
     },
+    EncryptionState,
     RoomDisplayName,
     RoomState as MatrixRoomState,
 };
@@ -33,7 +34,7 @@ use matrix_sdk::{
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
-    style::{Modifier as StyleModifier, Style},
+    style::{Color, Modifier as StyleModifier, Style},
     text::{Line, Span, Text},
     widgets::{Paragraph, StatefulWidget, Widget},
 };
@@ -659,6 +660,8 @@ impl RoomState {
     }
 
     pub fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
+        let room = store.application.worker.client.get_room(self.id());
+
         let title = store.application.get_room_title(self.id());
         let style = Style::default().add_modifier(StyleModifier::BOLD);
         let mut spans = vec![];
@@ -671,13 +674,32 @@ impl RoomState {
 
         spans.push(Span::styled(title, style));
 
+        match room.map(|room| room.encryption_state()) {
+            Some(EncryptionState::Encrypted) => {
+                if store.application.settings.tunables.encryption_indicator.encrypted {
+                    spans.push(Span::styled(
+                        " \u{1F512}\u{FE0E}",
+                        Style::new().fg(Color::LightGreen),
+                    ));
+                }
+            },
+            Some(EncryptionState::NotEncrypted) => {
+                if store.application.settings.tunables.encryption_indicator.unencrypted {
+                    spans.push(Span::styled(" \u{1F513}\u{FE0E}", Style::new().fg(Color::Red)));
+                }
+            },
+            _ => (),
+        }
+
         match self.room().topic() {
             Some(desc) if !desc.is_empty() => {
                 spans.push(" (".into());
                 spans.push(desc.into());
                 spans.push(")".into());
             },
-            _ => {},
+            _ => {
+                spans.push(" ".into());
+            },
         }
 
         Line::from(spans)

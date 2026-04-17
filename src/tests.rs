@@ -27,6 +27,7 @@ use crate::{
         user_style_from_color,
         ApplicationSettings,
         DirectoryValues,
+        EncryptionIndicator,
         Notifications,
         NotifyVia,
         ProfileConfig,
@@ -170,6 +171,7 @@ pub fn mock_dirs() -> DirectoryValues {
 
 pub fn mock_tunables() -> TunableValues {
     TunableValues {
+        encryption_indicator: EncryptionIndicator::EncryptedOnly.into(),
         default_room: None,
         log_level: "warn".into(),
         max_log_files: 7,
