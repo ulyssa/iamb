@@ -125,6 +125,13 @@ key and can be overridden as described in
 .Sx PROFILES .
 .Bl -tag -width Ds
 
+.It Sy colors
+Change the colors of different elements in
+.Sy iamb .
+See
+.Sx "COLORSCHEME"
+for details on the format.
+
 .It Sy external_edit_file_suffix
 Suffix to append to temporary file names when using the :editor command. Defaults to .md.
 
@@ -274,6 +281,121 @@ reaction_shortcode_display = true
 .Bd -literal -offset indent
 [settings]
 request_timeout = 120
+.Ed
+
+.Sh COLORSCHEME
+
+The
+.Sy settings.colors
+subsection allows configuring the appearance of many elements.
+All settings take a color value that is either a named color, an 8-bit color value or a hex value.
+The named colors are:
+.Dq Sy black ,
+.Dq Sy red ,
+.Dq Sy green ,
+.Dq Sy yellow ,
+.Dq Sy blue ,
+.Dq Sy magenta ,
+.Dq Sy cyan ,
+.Dq Sy gray ,
+.Dq Sy dark-gray ,
+.Dq Sy light-red ,
+.Dq Sy light-green ,
+.Dq Sy light-yellow ,
+.Dq Sy light-blue ,
+.Dq Sy light-magenta ,
+.Dq Sy light-cyan ,
+.Dq Sy white ,
+and
+.Dq Sy reset ,
+The 8-bit ANSI color must in the range of 0 to 255 where the first 16 colors correspond to the named colors.
+The hex value is given as
+.Dq Sy #RRGGBB .
+If the terminal does not support truecolor, all hex colors will fall back to the default text color.
+All values must be given as a string.
+
+.Bl -tag -width Ds
+.It Sy border
+The border of the focused buffer.
+Defaults to the terminal foreground color.
+
+.It Sy border_unfocused
+The border of all unfocused buffers.
+Defaults to
+.Sy border .
+Note that this value is dimmed before use.
+
+.It Sy window_title
+The text at the top-left of the border.
+Defaults to the terminal foreground color.
+Note that this value is dimmed for unfocused buffers.
+
+.It Sy tab_title
+The active entry in the tab list.
+Defaults to the terminal foreground color.
+
+.It Sy tab_title_unfocused
+The inactive entries in the tab list.
+Defaults to
+.Sy tab_title .
+Note that this value is dimmed before use.
+
+.It Sy room_list
+Entry in a room list like the
+.Dq Sy :chats
+window.
+Defaults to the terminal foreground color.
+
+.It Sy room_list_unread
+Unread entry in a room list.
+Defaults to
+.Sy room_list .
+
+.It Sy message_time
+The timestamp to the right of messages.
+Defaults to the terminal foreground color.
+
+.It Sy message_date
+The date divider between different days in the message scrollback.
+Defaults to the terminal foreground color.
+Note that this value is used in bold with might make it brighter on some terminals.
+
+.It Sy message_normal
+The text color for text messages.
+Defaults to the terminal foreground color.
+
+.It Sy message_state
+The text color for state events like users joining rooms.
+Defaults to
+.Sy message_normal .
+
+.It Sy message_redacted
+The text color for redacted (deleted) messages.
+Defaults to
+.Sy message_normal .
+
+.It Sy message_notice
+The text color for automated messages.
+Defaults to
+.Sy message_state .
+
+.It Sy message_other
+The text color for other (mostly unsupported) message types.
+Defaults to
+.Sy message_normal .
+
+.It Sy codeblock_background
+Background color for code blocks in messages.
+Defaults to
+.Dq Sy 236
+(a dark shade of gray).
+.El
+
+.Ss Example: Make the code background a lighter gray and change the color of state events.
+.Bd -literal -offset indent
+[settings.colors]
+codeblock_background = "245"
+message_state = "cyan"
 .Ed
 
 .Sh MOUSE
@@ -437,25 +559,9 @@ Change the display name of the user.
 
 .It Sy color
 Change the color the user is shown as.
-Possible values are:
-.Dq Sy black ,
-.Dq Sy blue ,
-.Dq Sy cyan ,
-.Dq Sy dark-gray ,
-.Dq Sy gray ,
-.Dq Sy green ,
-.Dq Sy light-blue ,
-.Dq Sy light-cyan ,
-.Dq Sy light-green ,
-.Dq Sy light-magenta ,
-.Dq Sy light-red ,
-.Dq Sy light-yellow ,
-.Dq Sy magenta ,
-.Dq Sy none ,
-.Dq Sy red ,
-.Dq Sy white ,
-and
-.Dq Sy yellow .
+See the introduction of
+.Sx "COLORSCHEME"
+for the supported color format.
 .El
 
 .Ss Example 1: Override how @ada:example.com appears in chat

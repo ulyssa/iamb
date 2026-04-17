@@ -26,13 +26,13 @@ use crate::{
         user_color,
         user_style_from_color,
         ApplicationSettings,
+        Colorscheme,
         DirectoryValues,
         Notifications,
         NotifyVia,
         ProfileConfig,
         SortOverrides,
         TunableValues,
-        UserColor,
         UserDisplayStyle,
         UserDisplayTunables,
     },
@@ -185,7 +185,7 @@ pub fn mock_tunables() -> TunableValues {
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
-            color: Some(UserColor(Color::Black)),
+            color: Some(Color::Black),
             name: Some("USER 5".into()),
         })]
         .into_iter()
@@ -204,6 +204,7 @@ pub fn mock_tunables() -> TunableValues {
         image_preview: None,
         user_gutter_width: 30,
         tabstop: 4,
+        colors: Colorscheme::default().values(),
     }
 }
 

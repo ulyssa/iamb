@@ -658,24 +658,24 @@ impl RoomState {
         }
     }
 
-    pub fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
+    pub fn get_title(&self, store: &mut ProgramStore, style: Style) -> Line<'_> {
         let title = store.application.get_room_title(self.id());
-        let style = Style::default().add_modifier(StyleModifier::BOLD);
+        let bold_style = style.add_modifier(StyleModifier::BOLD);
         let mut spans = vec![];
 
         if let RoomState::Chat(chat) = self {
             if chat.thread().is_some() {
-                spans.push("Thread in ".into());
+                spans.push(Span::styled("Thread in ", style));
             }
         }
 
-        spans.push(Span::styled(title, style));
+        spans.push(Span::styled(title, bold_style));
 
         match self.room().topic() {
             Some(desc) if !desc.is_empty() => {
-                spans.push(" (".into());
-                spans.push(desc.into());
-                spans.push(")".into());
+                spans.push(Span::styled(" (", style));
+                spans.push(Span::styled(desc, style));
+                spans.push(Span::styled(")", style));
             },
             _ => {},
         }

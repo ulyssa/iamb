@@ -49,7 +49,7 @@ mime_guess = "2.0.4"
 nom = "8.0"
 open = "5.0.0"
 rand = "0.10"
-ratatui = "0.29.0"
+ratatui = { version = "0.29.0", features = ["serde"] }
 ratatui-image = { version = "8.0", features = ["serde"] }
 regex = "1.5"
 rpassword = "7.2"

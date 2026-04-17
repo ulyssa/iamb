@@ -20,6 +20,12 @@ typing_notice_send = true
 user_gutter_width = 30
 username_display = "username"
 
+[settings.colors]
+message_state = "cyan"
+message_redacted = "245" # light gray
+# commented out because some terminals don't support truecolor
+#room_list_unread = "#ff55bb" # pink
+
 [settings.image_preview]
 protocol.type = "sixel"
 size = { "width" = 66, "height" = 10 }
