@@ -23,16 +23,21 @@ use matrix_sdk::{
     authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
     deserialized_responses::DisplayName,
-    encryption::verification::{SasVerification, Verification},
-    encryption::{BackupDownloadStrategy, EncryptionSettings},
+    encryption::{
+        verification::{SasVerification, Verification},
+        BackupDownloadStrategy,
+        EncryptionSettings,
+    },
     event_handler::Ctx,
     reqwest,
     room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
             filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
-            room::create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
-            room::Visibility,
+            room::{
+                create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
+                Visibility,
+            },
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
         },
         assign,
@@ -46,8 +51,7 @@ use matrix_sdk::{
             },
             presence::PresenceEvent,
             reaction::ReactionEventContent,
-            receipt::ReceiptType,
-            receipt::{ReceiptEventContent, ReceiptThread},
+            receipt::{ReceiptEventContent, ReceiptThread, ReceiptType},
             room::{
                 encryption::RoomEncryptionEventContent,
                 member::OriginalSyncRoomMemberEvent,
@@ -57,11 +61,9 @@ use matrix_sdk::{
             },
             tag::Tags,
             typing::SyncTypingEvent,
-            AnyInitialStateEvent,
             AnyMessageLikeEvent,
             AnySyncStateEvent,
             AnyTimelineEvent,
-            EmptyStateKey,
             InitialStateEvent,
             SyncEphemeralRoomEvent,
             SyncMessageLikeEvent,
@@ -69,14 +71,12 @@ use matrix_sdk::{
         },
         room::RoomType,
         serde::Raw,
-        EventEncryptionAlgorithm,
         EventId,
         OwnedEventId,
         OwnedRoomId,
         OwnedRoomOrAliasId,
         OwnedUserId,
         RoomId,
-        RoomVersionId,
     },
     Client,
     ClientBuildError,
@@ -162,13 +162,11 @@ pub async fn create_room(
 
     // Set up encryption.
     if flags.contains(CreateRoomFlags::ENCRYPTED) {
-        // XXX: Once matrix-sdk uses ruma 0.8, then this can skip the cast.
-        let algo = EventEncryptionAlgorithm::MegolmV1AesSha2;
-        let content = RoomEncryptionEventContent::new(algo);
-        let encr = InitialStateEvent { content, state_key: EmptyStateKey };
-        let encr_raw = Raw::new(&encr).map_err(IambError::from)?;
-        let encr_raw = encr_raw.cast::<AnyInitialStateEvent>();
-        initial_state.push(encr_raw);
+        let ev = InitialStateEvent::with_empty_state_key(
+            RoomEncryptionEventContent::with_recommended_defaults(),
+        )
+        .to_raw_any();
+        initial_state.push(ev);
     }
 
     let request = assign!(CreateRoomRequest::new(), {
@@ -1095,16 +1093,10 @@ impl ClientWorker {
              store: Ctx<AsyncProgramStore>| {
                 async move {
                     let room_id = room.room_id();
-                    let room_info = room.clone_info();
-                    let rules = &room_info
-                        .room_version()
-                        .and_then(RoomVersionId::rules)
-                        .unwrap_or(RoomVersionId::V1.rules().unwrap())
-                        .redaction;
 
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
-                    info.redact(ev, rules);
+                    info.redact(ev);
                 }
             },
         );

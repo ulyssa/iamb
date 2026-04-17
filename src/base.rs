@@ -13,7 +13,6 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
-use matrix_sdk::ruma::room_version_rules::RedactionRules;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -1032,7 +1031,7 @@ impl RoomInfo {
         self.messages.get_mut(self.keys.get(event_id)?.to_message_key()?)
     }
 
-    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent, rules: &RedactionRules) {
+    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
         let Some(redacts) = &ev.redacts else {
             return;
         };
@@ -1042,20 +1041,20 @@ impl RoomInfo {
             Some(EventLocation::State(key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev, rules);
+                    msg.redact(ev);
                 }
             },
             Some(EventLocation::Message(None, key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev, rules);
+                    msg.redact(ev);
                 }
             },
             Some(EventLocation::Message(Some(root), key)) => {
                 if let Some(thread) = self.threads.get_mut(root) {
                     if let Some(msg) = thread.get_mut(key) {
                         let ev = SyncRoomRedactionEvent::Original(ev);
-                        msg.redact(ev, rules);
+                        msg.redact(ev);
                     }
                 }
             },
@@ -1119,7 +1118,7 @@ impl RoomInfo {
             MessageEvent::Local(_, content) => {
                 content.apply_replacement(new_msgtype);
             },
-            MessageEvent::Redacted(_) |
+            MessageEvent::Redacted(_, _) |
             MessageEvent::State(_) |
             MessageEvent::EncryptedOriginal(_) |
             MessageEvent::EncryptedRedacted(_) => {
@@ -2172,18 +2171,38 @@ fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
 
 #[cfg(test)]
 pub mod tests {
+    use std::iter::FromIterator as _;
+
     use super::*;
     use crate::config::user_style_from_color;
     use crate::tests::*;
     use matrix_sdk::ruma::{
-        events::{reaction::ReactionEventContent, relation::Annotation, MessageLikeUnsigned},
+        events::{reaction::ReactionEventContent, relation::Annotation},
         owned_event_id,
-        owned_room_id,
-        owned_user_id,
         MilliSecondsSinceUnixEpoch,
     };
     use pretty_assertions::assert_eq;
     use ratatui::style::Color;
+    use serde_json::{Map, Value};
+
+    fn create_reaction_event(
+        content: &ReactionEventContent,
+        event_id: &str,
+        sender: &str,
+    ) -> ReactionEvent {
+        serde_json::from_value(Value::Object(Map::from_iter([
+            ("type".to_owned(), Value::String("m.reaction".into())),
+            ("content".to_owned(), serde_json::to_value(content).unwrap()),
+            ("event_id".to_owned(), serde_json::to_value(event_id).unwrap()),
+            ("sender".to_owned(), Value::String(sender.into())),
+            (
+                "origin_server_ts".to_owned(),
+                serde_json::to_value(MilliSecondsSinceUnixEpoch::now()).unwrap(),
+            ),
+            ("room_id".to_owned(), Value::String("!foo:example.org".into())),
+        ])))
+        .unwrap()
+    }
 
     #[test]
     fn multiple_identical_reactions() {
@@ -2196,16 +2215,8 @@ pub mod tests {
 
         for i in 0..3 {
             let event_id = format!("$house_{i}");
-            info.insert_reaction(MessageLikeEvent::Original(
-                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
-                    content: content.clone(),
-                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
-                    sender: owned_user_id!("@foo:example.org"),
-                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
-                    room_id: owned_room_id!("!foo:example.org"),
-                    unsigned: MessageLikeUnsigned::new(),
-                },
-            ));
+            let react = create_reaction_event(&content, &event_id, "@foo:example.com");
+            info.insert_reaction(react);
         }
 
         let content = ReactionEventContent::new(Annotation::new(
@@ -2215,30 +2226,14 @@ pub mod tests {
 
         for i in 0..2 {
             let event_id = format!("$smile_{i}");
-            info.insert_reaction(MessageLikeEvent::Original(
-                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
-                    content: content.clone(),
-                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
-                    sender: owned_user_id!("@foo:example.org"),
-                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
-                    room_id: owned_room_id!("!foo:example.org"),
-                    unsigned: MessageLikeUnsigned::new(),
-                },
-            ));
+            let react = create_reaction_event(&content, &event_id, "@foo:example.com");
+            info.insert_reaction(react);
         }
 
         for i in 2..4 {
-            let event_id = format!("$smile_{i}");
-            info.insert_reaction(MessageLikeEvent::Original(
-                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
-                    content: content.clone(),
-                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
-                    sender: owned_user_id!("@bar:example.org"),
-                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
-                    room_id: owned_room_id!("!foo:example.org"),
-                    unsigned: MessageLikeUnsigned::new(),
-                },
-            ));
+            let event_id = format!("$smile2_{i}");
+            let react = create_reaction_event(&content, &event_id, "@bar:example.com");
+            info.insert_reaction(react);
         }
 
         assert_eq!(info.get_reactions(&owned_event_id!("$my_reaction")), vec![

@@ -21,78 +21,79 @@ desktop = ["dep:notify-rust", "modalkit/clipboard"]
 native-tls = ["matrix-sdk/native-tls"]
 rustls-tls = ["matrix-sdk/rustls-tls"]
 
-[build-dependencies.vergen]
-version = "8"
+[build-dependencies.vergen-gitcl]
+version = "9"
 default-features = false
-features = ["build", "git", "gitcl",]
+features = ["build"]
 
 [dependencies]
 anyhow = "1.0"
-bitflags = "^2.3"
+bitflags = "2.3"
 chrono = "0.4"
-clap = {version = "~4.3", features = ["derive"]}
+clap = {version = "4.3", features = ["derive"]}
 css-color-parser = "0.1.2"
-dirs = "4.0.0"
-emojis = "0.5"
-feruca = "0.10.1"
-futures = "0.3"
-gethostname = "0.4.1"
-html5ever = "0.26.0"
-image = "^0.25.6"
-libc = "0.2"
-markup5ever_rcdom = "0.2.0"
-mime = "^0.3.16"
-mime_guess = "^2.0.4"
-nom = "7.0.0"
-open = "3.2.0"
-rand = "0.8.5"
-ratatui = "0.29.0"
-ratatui-image = { version = "~8.0.1", features = ["serde"] }
-regex = "^1.5"
-rpassword = "^7.2"
-serde = "^1.0"
-serde_json = "^1.0"
-sled = "0.34.7"
-temp-dir = "0.1.12"
-thiserror = "^1.0.37"
-toml = "^0.8.12"
-tracing = "~0.1.36"
-tracing-appender = "~0.2.2"
-tracing-subscriber = "0.3.16"
-unicode-segmentation = "^1.7"
-unicode-width = "0.1.10"
-url = {version = "^2.2.2", features = ["serde"]}
+dirs = "6.0"
 edit = "0.1.4"
+emojis = "0.8"
+feruca = "0.11"
+futures = "0.3"
+gethostname = "1.1"
+html5ever = "0.38.0"
 humansize = "2.0.0"
+image = "0.25.6"
+libc = "0.2"
 linkify = "0.10.0"
-shellexpand = "3.1.1"
+markup5ever_rcdom = "0.38"
+mime = "0.3.16"
+mime_guess = "2.0.4"
+nom = "8.0"
+open = "5.0.0"
+rand = "0.10"
+ratatui = "0.29.0"
+ratatui-image = { version = "8.0", features = ["serde"] }
+regex = "1.5"
+rpassword = "7.2"
+serde = "1.0"
+serde_json = "1.0"
+shellexpand = "3.1"
+sled = "0.34.7"
+temp-dir = "0.2"
+thiserror = "2.0"
+toml = "1.1"
+tracing = "0.1.36"
+tracing-appender = "0.2.2"
+tracing-subscriber = { version = "0.3.16", features = ["env-filter"] }
+unicode-segmentation = "1.7"
+unicode-width = "0.2"
+url = {version = "2.2.2", features = ["serde"]}
 
 [dependencies.comrak]
-version = "0.22.0"
+version = "0.52.0"
 default-features = false
 features = ["shortcodes"]
 
 [dependencies.notify-rust]
-version = "~4.10.0"
-default-features = false
-features = ["zbus", "serde"]
+version = "4.12"
 optional = true
 
 [dependencies.modalkit]
-version = "0.0.24"
+version = "0.0.25"
 default-features = false
 #git = "https://github.com/ulyssa/modalkit"
 #rev = "e40dbb0bfeabe4cfd08facd2acb446080a330d75"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.24"
+version = "0.0.25"
 #git = "https://github.com/ulyssa/modalkit"
 #rev = "e40dbb0bfeabe4cfd08facd2acb446080a330d75"
 
 [dependencies.matrix-sdk]
-version = "0.14.0"
+version = "0.16.0"
 default-features = false
 features = ["e2e-encryption", "sqlite", "sso-login"]
+
+[dependencies.matrix-sdk-crypto]
+version = "0.16.0"
 
 [dependencies.tokio]
 version = "1.24.1"
