@@ -1091,7 +1091,7 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
         .filename_prefix(log_prefix)
         .max_log_files(max_log_files)
         .build(log_dir)
-        .unwrap();
+        .expect("can build appending tracing logger");
     let (appender, guard) = tracing_appender::non_blocking(appender);
 
     let filter = if let Ok(dirs) = std::env::var(EnvFilter::DEFAULT_ENV) {
