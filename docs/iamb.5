@@ -163,8 +163,19 @@ Possible values are:
 .Dq Sy trace ,
 .Dq Sy debug ,
 .Dq Sy info ,
-.Dq Sy warn , and
+.Dq Sy warn
+(the default), and
 .Dq Sy error .
+Also supports the syntax defined by
+.Lk https://docs.rs/tracing_subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
+
+.It Sy max_log_files
+Specifies how many daily log files should be saved.
+Set this to
+.Sy 0
+to disable automatically deleting log files.
+Defaults to 
+.Sy 7 .
 
 .It Sy message_shortcode_display
 Defines whether or not Emoji characters in messages should be replaced by their

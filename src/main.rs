@@ -36,7 +36,8 @@ use rand::distr::Alphanumeric;
 use rand::RngExt as _;
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
-use tracing_subscriber::FmtSubscriber;
+use tracing::Level;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use modalkit::crossterm::{
     self,
@@ -1079,6 +1080,44 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     Ok(())
 }
 
+fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocking::WorkerGuard {
+    let log_prefix = format!("iamb-log-{}", settings.profile_name);
+    let log_dir = settings.dirs.logs.as_path();
+    let max_log_files = settings.tunables.max_log_files;
+    let log_level = &settings.tunables.log_level;
+
+    let appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix(log_prefix)
+        .max_log_files(max_log_files)
+        .build(log_dir)
+        .expect("can build appending tracing logger");
+    let (appender, guard) = tracing_appender::non_blocking(appender);
+
+    let filter = if let Ok(dirs) = std::env::var(EnvFilter::DEFAULT_ENV) {
+        EnvFilter::builder()
+            .with_default_directive(Level::WARN.into())
+            .parse(dirs)
+            .map_err(|err| format!("Unable to parse {}: {err}", EnvFilter::DEFAULT_ENV))
+            .unwrap_or_else(print_exit)
+    } else {
+        EnvFilter::builder()
+            .with_default_directive(Level::WARN.into())
+            .parse(log_level)
+            .map_err(|err| format!("Unable to parse `log_level`: {err}"))
+            .unwrap_or_else(print_exit)
+    };
+
+    let subscriber = FmtSubscriber::builder()
+        .with_writer(appender)
+        .with_env_filter(filter)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    guard
+}
+
 fn main() -> IambResult<()> {
     // Parse command-line flags.
     let iamb = Iamb::parse();
@@ -1092,18 +1131,7 @@ fn main() -> IambResult<()> {
         libc::umask(0o077);
     };
 
-    // Set up the tracing subscriber so we can log client messages.
-    let log_prefix = format!("iamb-log-{}", settings.profile_name);
-    let log_dir = settings.dirs.logs.as_path();
-
-    let appender = tracing_appender::rolling::daily(log_dir, log_prefix);
-    let (appender, guard) = tracing_appender::non_blocking(appender);
-
-    let subscriber = FmtSubscriber::builder()
-        .with_writer(appender)
-        .with_max_level(settings.tunables.log_level)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    let guard = setup_logging(&settings);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
