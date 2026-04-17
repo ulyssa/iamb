@@ -23,7 +23,6 @@ use html5ever::{
     driver::{parse_fragment, ParseOpts},
     interface::{Attribute, QualName},
     local_name,
-    namespace_url,
     ns,
     tendril::{StrTendril, TendrilSink},
 };
@@ -848,6 +847,7 @@ pub fn parse_matrix_html(s: &str) -> StyleTree {
         ParseOpts::default(),
         QualName::new(None, ns!(html), local_name!("body")),
         vec![],
+        false,
     )
     .one(StrTendril::from(s));
 

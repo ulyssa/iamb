@@ -14,7 +14,7 @@ use sled::{Config, IVec};
 use std::path::Path;
 
 use crate::base::IambError;
-use matrix_sdk::crypto::olm::{ExportedRoomKey, InboundGroupSession, PickledInboundGroupSession};
+use matrix_sdk_crypto::olm::{ExportedRoomKey, InboundGroupSession, PickledInboundGroupSession};
 
 #[derive(Debug, thiserror::Error)]
 pub enum SledMigrationError {

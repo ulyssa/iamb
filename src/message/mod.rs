@@ -11,8 +11,6 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
-use matrix_sdk::ruma::room_version_rules::RedactionRules;
-use serde_json::json;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
@@ -37,7 +35,6 @@ use matrix_sdk::ruma::{
             redaction::SyncRoomRedactionEvent,
         },
         AnySyncStateEvent,
-        RedactContent,
         RedactedUnsigned,
     },
     EventId,
@@ -417,26 +414,12 @@ impl PartialOrd for MessageCursor {
     }
 }
 
-fn redaction_reason(ev: &SyncRoomRedactionEvent) -> Option<&str> {
+fn redaction_reason_event(ev: SyncRoomRedactionEvent) -> Option<String> {
     let SyncRoomRedactionEvent::Original(ev) = ev else {
         return None;
     };
 
-    return ev.content.reason.as_deref();
-}
-
-fn redaction_unsigned(ev: SyncRoomRedactionEvent) -> RedactedUnsigned {
-    let reason = redaction_reason(&ev);
-    let redacted_because = json!({
-        "content": {
-            "reason": reason
-        },
-        "event_id": ev.event_id(),
-        "sender": ev.sender(),
-        "origin_server_ts": ev.origin_server_ts(),
-        "unsigned": {},
-    });
-    RedactedUnsigned::new(serde_json::from_value(redacted_because).unwrap())
+    ev.content.reason
 }
 
 #[derive(Clone)]
@@ -444,7 +427,7 @@ pub enum MessageEvent {
     EncryptedOriginal(Box<OriginalRoomEncryptedEvent>),
     EncryptedRedacted(Box<RedactedRoomEncryptedEvent>),
     Original(Box<OriginalRoomMessageEvent>),
-    Redacted(Box<RedactedRoomMessageEvent>),
+    Redacted(OwnedEventId, Option<String>),
     State(Box<AnySyncStateEvent>),
     Local(OwnedEventId, Box<RoomMessageEventContent>),
 }
@@ -455,7 +438,7 @@ impl MessageEvent {
             MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
             MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
             MessageEvent::Original(ev) => ev.event_id.as_ref(),
-            MessageEvent::Redacted(ev) => ev.event_id.as_ref(),
+            MessageEvent::Redacted(event_id, _) => event_id.as_ref(),
             MessageEvent::State(ev) => ev.event_id(),
             MessageEvent::Local(event_id, _) => event_id.as_ref(),
         }
@@ -466,7 +449,7 @@ impl MessageEvent {
             MessageEvent::EncryptedOriginal(_) => None,
             MessageEvent::Original(ev) => Some(&ev.content),
             MessageEvent::EncryptedRedacted(_) => None,
-            MessageEvent::Redacted(_) => None,
+            MessageEvent::Redacted(_, _) => None,
             MessageEvent::State(_) => None,
             MessageEvent::Local(_, content) => Some(content),
         }
@@ -483,8 +466,10 @@ impl MessageEvent {
         match self {
             MessageEvent::EncryptedOriginal(_) => "[Unable to decrypt message]".into(),
             MessageEvent::Original(ev) => body_cow_content(&ev.content),
-            MessageEvent::EncryptedRedacted(ev) => body_cow_reason(&ev.unsigned),
-            MessageEvent::Redacted(ev) => body_cow_reason(&ev.unsigned),
+            MessageEvent::EncryptedRedacted(ev) => {
+                body_cow_reason(redaction_reason_unsigned(&ev.unsigned).as_deref())
+            },
+            MessageEvent::Redacted(_, reason) => body_cow_reason(reason.as_deref()),
             MessageEvent::State(ev) => body_cow_state(ev),
             MessageEvent::Local(_, content) => body_cow_content(content),
         }
@@ -495,7 +480,7 @@ impl MessageEvent {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
             MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_) => return None,
+            MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(ev) => return Some(html_state(ev)),
             MessageEvent::Local(_, content) => content,
         };
@@ -511,23 +496,17 @@ impl MessageEvent {
         }
     }
 
-    fn redact(&mut self, redaction: SyncRoomRedactionEvent, rules: &RedactionRules) {
+    fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
         match self {
             MessageEvent::EncryptedOriginal(_) => return,
             MessageEvent::EncryptedRedacted(_) => return,
-            MessageEvent::Redacted(_) => return,
+            MessageEvent::Redacted(_, _) => return,
             MessageEvent::State(_) => return,
             MessageEvent::Local(_, _) => return,
             MessageEvent::Original(ev) => {
-                let redacted = RedactedRoomMessageEvent {
-                    content: ev.content.clone().redact(rules),
-                    event_id: ev.event_id.clone(),
-                    sender: ev.sender.clone(),
-                    origin_server_ts: ev.origin_server_ts,
-                    room_id: ev.room_id.clone(),
-                    unsigned: redaction_unsigned(redaction),
-                };
-                *self = MessageEvent::Redacted(Box::new(redacted));
+                let event_id = ev.event_id.to_owned();
+                let reason = redaction_reason_event(redaction);
+                *self = MessageEvent::Redacted(event_id, reason);
             },
         }
     }
@@ -580,13 +559,15 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
     Cow::Borrowed(s)
 }
 
-fn body_cow_reason(unsigned: &RedactedUnsigned) -> Cow<'_, str> {
-    let reason = unsigned
+fn redaction_reason_unsigned(unsigned: &RedactedUnsigned) -> Option<String> {
+    unsigned
         .redacted_because
         .deserialize()
         .ok()
-        .and_then(|ev| ev.content.reason);
+        .and_then(|ev| ev.content.reason)
+}
 
+fn body_cow_reason(reason: Option<&str>) -> Cow<'static, str> {
     if let Some(r) = reason {
         Cow::Owned(format!("[Redacted: {r:?}]"))
     } else {
@@ -878,7 +859,7 @@ impl Message {
             MessageEvent::EncryptedRedacted(_) => return None,
             MessageEvent::Local(_, content) => content,
             MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_) => return None,
+            MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
         };
 
@@ -899,7 +880,7 @@ impl Message {
             MessageEvent::EncryptedRedacted(_) => return None,
             MessageEvent::Local(_, content) => content,
             MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_) => return None,
+            MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
         };
 
@@ -1139,8 +1120,8 @@ impl Message {
         Span::styled(sender, style).into()
     }
 
-    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, rules: &RedactionRules) {
-        self.event.redact(redaction, rules);
+    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
+        self.event.redact(redaction);
         self.html = None;
         self.downloaded = false;
         self.image_preview = ImageStatus::None;
@@ -1174,7 +1155,10 @@ impl From<RedactedRoomMessageEvent> for Message {
     fn from(event: RedactedRoomMessageEvent) -> Self {
         let timestamp = event.origin_server_ts.into();
         let user_id = event.sender.clone();
-        let content = MessageEvent::Redacted(event.into());
+
+        let event_id = event.event_id;
+        let reason = redaction_reason_unsigned(&event.unsigned);
+        let content = MessageEvent::Redacted(event_id, reason);
 
         Message::new(content, user_id, timestamp)
     }
