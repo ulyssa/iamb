@@ -864,13 +864,19 @@ impl EventLocation {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnreadInfo {
-    pub(crate) unread: bool,
+    pub(crate) unread_messages: u64,
+    pub(crate) unread_notifications: u64,
+    pub(crate) unread_mentions: u64,
     pub(crate) latest: Option<MessageTimeStamp>,
 }
 
 impl UnreadInfo {
     pub fn is_unread(&self) -> bool {
-        self.unread
+        self.unread_notifications > 0 || self.unread_mentions > 0
+    }
+
+    pub fn has_mention(&self) -> bool {
+        self.unread_mentions > 0
     }
 
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
@@ -1139,43 +1145,17 @@ impl RoomInfo {
     }
 
     /// Indicates whether this room has unread messages.
-    pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
+    pub fn unreads(&self, room: &matrix_sdk::Room) -> UnreadInfo {
         let last_message = self.messages.last_key_value();
 
-        let last_receipt = self
-            .user_receipts
-            .get(&ReceiptThread::Main)
-            .and_then(|receipts| receipts.get(&settings.profile.user_id));
-        let last_receipt = last_receipt.as_ref().and_then(|event_id| {
-            match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
-                EventLocation::Reaction(_) => None,
-            }
-        });
-
-        let last_unthreaded = self
-            .user_receipts
-            .get(&ReceiptThread::Unthreaded)
-            .and_then(|receipts| receipts.get(&settings.profile.user_id));
-        let last_unthreaded = last_unthreaded.as_ref().and_then(|event_id| {
-            match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
-                EventLocation::Reaction(_) => None,
-            }
-        });
-
-        let last_receipt = std::cmp::max(last_receipt, last_unthreaded);
-
-        match (last_message, last_receipt) {
-            (Some(((ts, _), _)), Some((read_ts, _))) => {
-                UnreadInfo { unread: ts > read_ts, latest: Some(*ts) }
-            },
-            (Some(((ts, _), _)), None) => {
-                // If we've never loaded/generated a room's receipt (example,
-                // a newly joined but never viewed room), show it as unread.
-                UnreadInfo { unread: true, latest: Some(*ts) }
-            },
-            (None, _) => UnreadInfo::default(),
+        // for some reason the two methods diverge in different directions for different rooms so
+        // get the higer one to be safe.
+        let counts = room.unread_notification_counts();
+        UnreadInfo {
+            unread_messages: room.num_unread_messages(),
+            unread_notifications: room.num_unread_notifications().max(counts.notification_count),
+            unread_mentions: room.num_unread_mentions().max(counts.highlight_count),
+            latest: last_message.map(|((ts, _), _)| ts.to_owned()),
         }
     }
 
@@ -1301,27 +1281,42 @@ impl RoomInfo {
         self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
     }
 
-    pub fn fully_read(&mut self, user_id: &UserId) {
-        let Some(((_, event_id), _)) = self.messages.last_key_value() else {
+    pub fn fully_read(&mut self, user_id: OwnedUserId, thread: ReceiptThread) {
+        let Some(messages) = (match &thread {
+            ReceiptThread::Main => self.get_thread(None),
+            ReceiptThread::Thread(root) => self.get_thread(Some(root)),
+            _ => None,
+        }) else {
             return;
         };
 
-        self.set_receipt(ReceiptThread::Main, user_id.to_owned(), event_id.clone());
-
-        let newest = self
-            .threads
+        let event_id = messages
             .iter()
-            .filter_map(|(thread_id, messages)| {
-                let thread = ReceiptThread::Thread(thread_id.to_owned());
-
-                messages
-                    .last_key_value()
-                    .map(|((_, event_id), _)| (thread, event_id.to_owned()))
+            .filter(|(_, msg)| msg.sender != user_id)
+            .filter(|(_, msg)| {
+                matches!(
+                    msg.event,
+                    MessageEvent::EncryptedOriginal(_) |
+                        MessageEvent::EncryptedRedacted(_) |
+                        MessageEvent::Original(_) |
+                        MessageEvent::Redacted(_)
+                )
             })
-            .collect::<Vec<_>>();
+            .map(|(_, msg)| msg.event.event_id().to_owned())
+            .next_back();
 
-        for (thread, event_id) in newest.into_iter() {
-            self.set_receipt(thread, user_id.to_owned(), event_id.clone());
+        if let Some(event_id) = event_id {
+            self.set_receipt(thread, user_id, event_id);
+        }
+    }
+
+    pub fn fully_read_all(&mut self, user_id: &UserId) {
+        self.fully_read(user_id.to_owned(), ReceiptThread::Main);
+
+        let threads: Vec<_> = self.threads.keys().map(|root| root.to_owned()).collect();
+
+        for thread in threads {
+            self.fully_read(user_id.to_owned(), ReceiptThread::Thread(thread));
         }
     }
 
@@ -1714,6 +1709,9 @@ pub enum IambId {
 
     /// The `:unreads` window.
     UnreadList,
+
+    /// The `:mentions` window.
+    MentionsList,
 }
 
 impl Display for IambId {
@@ -1735,6 +1733,7 @@ impl Display for IambId {
             IambId::Welcome => f.write_str("iamb://welcome"),
             IambId::ChatList => f.write_str("iamb://chats"),
             IambId::UnreadList => f.write_str("iamb://unreads"),
+            IambId::MentionsList => f.write_str("iamb://mentions"),
         }
     }
 }
@@ -1873,6 +1872,13 @@ impl Visitor<'_> for IambIdVisitor {
 
                 Ok(IambId::UnreadList)
             },
+            Some("mentions") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://message takes no path"));
+                }
+
+                Ok(IambId::UnreadList)
+            },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
         }
@@ -1943,6 +1949,9 @@ pub enum IambBufferId {
 
     /// The `:unreads` window.
     UnreadList,
+
+    /// The `:mentions` window.
+    MentionsList,
 }
 
 impl IambBufferId {
@@ -1959,6 +1968,7 @@ impl IambBufferId {
             IambBufferId::Welcome => IambId::Welcome,
             IambBufferId::ChatList => IambId::ChatList,
             IambBufferId::UnreadList => IambId::UnreadList,
+            IambBufferId::MentionsList => IambId::MentionsList,
         };
 
         Some(id)
@@ -2003,6 +2013,7 @@ impl Completer<IambInfo> for IambCompleter {
             IambBufferId::Welcome => vec![],
             IambBufferId::ChatList => vec![],
             IambBufferId::UnreadList => vec![],
+            IambBufferId::MentionsList => vec![],
         }
     }
 }
