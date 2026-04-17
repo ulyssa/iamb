@@ -540,6 +540,7 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub set_window_title: bool,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -569,6 +570,7 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    pub set_window_title: Option<bool>,
 }
 
 impl Tunables {
@@ -604,6 +606,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            set_window_title: self.set_window_title.or(other.set_window_title),
         }
     }
 
@@ -635,6 +638,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            set_window_title: self.set_window_title.unwrap_or(true),
         }
     }
 }
