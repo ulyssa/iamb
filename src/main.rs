@@ -11,6 +11,7 @@
 //!
 //! Most rendering logic lives under the [windows] module, but [Matrix messages][message] have
 //! their own module.
+#![recursion_limit = "256"]
 #![allow(clippy::manual_range_contains)]
 #![allow(clippy::needless_return)]
 #![allow(clippy::result_large_err)]
@@ -27,11 +28,12 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
+use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::distr::Alphanumeric;
+use rand::RngExt as _;
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::Level;
@@ -781,11 +783,7 @@ impl Application {
 }
 
 fn gen_passphrase() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(20)
-        .map(char::from)
-        .collect()
+    rand::rng().sample_iter(&Alphanumeric).take(20).map(char::from).collect()
 }
 
 fn read_response(question: &str) -> String {

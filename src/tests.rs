@@ -1,9 +1,9 @@
-use std::collections::HashMap;
 use std::path::PathBuf;
+use std::{collections::HashMap, iter::FromIterator as _};
 
 use matrix_sdk::ruma::{
     event_id,
-    events::room::message::{OriginalRoomMessageEvent, RoomMessageEventContent},
+    events::room::message::RoomMessageEventContent,
     server_name,
     user_id,
     EventId,
@@ -16,6 +16,7 @@ use matrix_sdk::ruma::{
 
 use lazy_static::lazy_static;
 use ratatui::style::{Color, Style};
+use serde_json::{Map, Value};
 use tokio::sync::mpsc::unbounded_channel;
 use url::Url;
 
@@ -78,19 +79,20 @@ pub fn mock_room1_message(
     sender: OwnedUserId,
     key: MessageKey,
 ) -> Message {
-    let origin_server_ts = key.0.as_millis().unwrap();
+    let timestamp = key.0.as_millis().unwrap();
     let event_id = key.1;
 
-    let event = OriginalRoomMessageEvent {
-        content,
-        event_id,
-        sender,
-        origin_server_ts,
-        room_id: TEST_ROOM1_ID.clone(),
-        unsigned: Default::default(),
-    };
+    let event = serde_json::from_value(Value::Object(Map::from_iter([
+        ("type".to_owned(), Value::String("m.room.message".into())),
+        ("content".to_owned(), serde_json::to_value(&content).unwrap()),
+        ("event_id".to_owned(), serde_json::to_value(&event_id).unwrap()),
+        ("sender".to_owned(), serde_json::to_value(&sender).unwrap()),
+        ("origin_server_ts".to_owned(), serde_json::to_value(timestamp).unwrap()),
+        ("room_id".to_owned(), serde_json::to_value(&*TEST_ROOM1_ID).unwrap()),
+    ])))
+    .unwrap();
 
-    event.into()
+    Message::new(MessageEvent::Original(event), sender, timestamp.into())
 }
 
 pub fn mock_message1() -> Message {
