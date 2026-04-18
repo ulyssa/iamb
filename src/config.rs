@@ -9,6 +9,7 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::str::FromStr;
 
 use clap::Parser;
 use matrix_sdk::authentication::matrix::MatrixSession;
@@ -17,9 +18,15 @@ use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
 use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer, Serialize};
+use strum_macros::{EnumDiscriminants, EnumProperty, EnumString, IntoStaticStr, VariantArray};
+use tracing::Level;
+use tracing_subscriber::fmt::format::{DefaultFields, Format};
+use tracing_subscriber::EnvFilter;
 use url::Url;
 
 use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
+
+use crate::base::{SortRoomVisitor, SortUserVisitor};
 
 use super::base::{
     IambError,
@@ -70,6 +77,14 @@ const COLORS: [Color; 13] = [
     Color::Reset,
     Color::Yellow,
 ];
+
+pub fn parse_env_logger(
+    directives: &str,
+) -> Result<EnvFilter, tracing_subscriber::filter::ParseError> {
+    EnvFilter::builder()
+        .with_default_directive(Level::WARN.into())
+        .parse(directives)
+}
 
 pub fn user_color(user: &str) -> Color {
     let mut hasher = DefaultHasher::new();
@@ -146,6 +161,21 @@ pub enum ConfigError {
 
     #[error("Error loading JSON configuration file: {0}")]
     InvalidJSON(#[from] serde_json::Error),
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum ReloadError {
+    #[error(transparent)]
+    Config(#[from] ConfigError),
+
+    #[error("invalid `log_level`: {0}")]
+    LogLevel(#[from] tracing_subscriber::filter::ParseError),
+
+    #[error("The current profile is not in the new config file")]
+    ProfileNotFound,
+
+    #[error("The user_id in the new config is different")]
+    UserIdChanged,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -342,8 +372,9 @@ where
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, EnumString)]
 #[serde(rename_all = "lowercase")]
+#[strum(serialize_all = "lowercase")]
 pub enum UserDisplayStyle {
     // The Matrix username for the sender (e.g., "@user:example.com").
     #[default]
@@ -511,6 +542,334 @@ impl SortOverrides {
         let members = self.members.unwrap_or_else(|| Vec::from(DEFAULT_MEMBERS_SORT));
 
         SortValues { rooms, members, chats, dms, spaces }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct LogLevelUpdate {
+    filter: EnvFilter,
+    directives: String,
+}
+
+impl LogLevelUpdate {
+    fn parse(directives: String) -> Result<Box<Self>, tracing_subscriber::filter::ParseError> {
+        let filter = parse_env_logger(&directives)?;
+        Ok(Box::new(Self { filter, directives }))
+    }
+}
+
+impl PartialEq for LogLevelUpdate {
+    fn eq(&self, other: &Self) -> bool {
+        self.directives == other.directives
+    }
+}
+impl Eq for LogLevelUpdate {}
+
+/// Error returned by [`TunablesUpdate::new`].
+#[derive(thiserror::Error, Debug)]
+pub enum TunablesUpdateError {
+    #[error("Unknown option")]
+    UnknownOption,
+
+    #[error(transparent)]
+    LogLevel(#[from] tracing_subscriber::filter::ParseError),
+
+    #[error("This option requires an argument")]
+    NoArguments,
+
+    #[error(transparent)]
+    ParseEnum(#[from] strum::ParseError),
+
+    #[error(transparent)]
+    ParseInt(#[from] std::num::ParseIntError),
+
+    #[error("Invalid user id: {0}")]
+    UserId(#[from] matrix_sdk::IdParseError),
+
+    #[error("{0}")]
+    Custom(String),
+}
+
+impl serde::de::Error for TunablesUpdateError {
+    fn custom<T>(msg: T) -> Self
+    where
+        T: fmt::Display,
+    {
+        Self::Custom(format!("{msg}"))
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum SortUpdate {
+    Chats(Vec<SortColumn<SortFieldRoom>>),
+    Dms(Vec<SortColumn<SortFieldRoom>>),
+    Rooms(Vec<SortColumn<SortFieldRoom>>),
+    Spaces(Vec<SortColumn<SortFieldRoom>>),
+    Members(Vec<SortColumn<SortFieldUser>>),
+}
+
+impl SortUpdate {
+    fn new(option: &str, value: &str) -> Result<Self, TunablesUpdateError> {
+        if option == "members" {
+            let order: Result<Vec<_>, TunablesUpdateError> = value
+                .split(',')
+                .filter(|v| !v.is_empty())
+                .map(|v| SortUserVisitor.visit_str(v))
+                .collect();
+            return Ok(Self::Members(order?));
+        }
+
+        let order: Result<Vec<_>, TunablesUpdateError> = value
+            .split(',')
+            .filter(|v| !v.is_empty())
+            .map(|v| SortRoomVisitor.visit_str(v))
+            .collect();
+
+        Ok(match option {
+            "chats" => Self::Chats(order?),
+            "dms" => Self::Dms(order?),
+            "rooms" => Self::Rooms(order?),
+            "spaces" => Self::Spaces(order?),
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        })
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum NotificationsUpdate {
+    Enabled(bool),
+    Via(NotifyVia),
+    ShowMessage(bool),
+    SoundHint(Option<String>),
+}
+
+impl NotificationsUpdate {
+    fn new(option: &str, value: Option<&str>) -> Result<Self, TunablesUpdateError> {
+        let res = match option {
+            "via" => {
+                if let Some(value) = value {
+                    let via = NotifyViaVisitor.visit_str::<TunablesUpdateError>(value)?;
+                    Self::Via(via)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "soundhint" => {
+                if let Some(value) = value {
+                    if value.is_empty() {
+                        Self::SoundHint(None)
+                    } else {
+                        Self::SoundHint(Some(value.to_owned()))
+                    }
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+
+            "enabled" => Self::Enabled(true),
+            "noenabled" => Self::Enabled(false),
+            "showmessage" => Self::ShowMessage(true),
+            "noshowmessage" => Self::ShowMessage(false),
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
+    }
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, VariantArray))]
+pub enum UserDisplayUpdate {
+    Name(Option<String>),
+    Color(Option<UserColor>),
+}
+
+impl UserDisplayUpdate {
+    fn new(option: &str, value: &str) -> Result<Self, TunablesUpdateError> {
+        let res = match option {
+            "name" => {
+                if value.is_empty() {
+                    Self::Name(None)
+                } else {
+                    Self::Name(Some(value.to_owned()))
+                }
+            },
+            "color" => {
+                if value.is_empty() {
+                    Self::Color(None)
+                } else {
+                    let color = UserColorVisitor.visit_str::<TunablesUpdateError>(value)?;
+                    Self::Color(Some(color))
+                }
+            },
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
+    }
+}
+
+/// A update for the [`TunableValues`] after invoking the `:set` command.
+#[derive(Debug, PartialEq, Eq, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(IntoStaticStr, EnumProperty, VariantArray))]
+pub enum TunablesUpdate {
+    // multilevel options
+    Sort(SortUpdate),
+    Notifications(NotificationsUpdate),
+    Users(OwnedUserId, UserDisplayUpdate),
+
+    // value options
+    LogLevel(Box<LogLevelUpdate>),
+    UsernameDisplay(UserDisplayStyle),
+    OpenCommand(Vec<String>),
+    ExternalEditFileSuffix(String),
+    UserGutterWidth(usize),
+    Tabstop(usize),
+
+    // bool options
+    #[strum_discriminants(strum(props(is_bool = true)))]
+    MessageShortcodeDisplay(bool),
+    #[strum_discriminants(strum(props(is_bool = true)))]
+    NormalAfterSend(bool),
+    #[strum_discriminants(strum(props(is_bool = true)))]
+    ReactionDisplay(bool),
+    #[strum_discriminants(strum(props(is_bool = true)))]
+    ReactionShortcodeDisplay(bool),
+    #[strum_discriminants(strum(props(is_bool = true)))]
+    ReadReceiptSend(bool),
+    #[strum_discriminants(strum(props(is_bool = true)))]
+    ReadReceiptDisplay(bool),
+    #[strum_discriminants(strum(props(is_bool = true)))]
+    TypingNoticeSend(bool),
+    #[strum_discriminants(strum(props(is_bool = true)))]
+    TypingNoticeDisplay(bool),
+    #[strum_discriminants(strum(props(is_bool = true)))]
+    MessageUserColor(bool),
+    // These may need to be adapted
+
+    // TODO: still save state events if display is `false`
+    // StateEventDisplay(bool),
+
+    // TODO: this might be complicated with the panic hook
+    // Mouse(Mouse),
+
+    // TODO: This will be possible/easier after #464 lands
+    // ImagePreview(Option<ImagePreviewValues>),
+}
+
+impl TunablesUpdate {
+    pub fn new(mut option: String, value: Option<&str>) -> Result<Self, TunablesUpdateError> {
+        option.retain(|c| c != '_');
+
+        // multilevel options
+        if let Some(sort_option) = option.strip_prefix("sort.") {
+            let Some(value) = value else {
+                return Err(TunablesUpdateError::NoArguments);
+            };
+
+            return Ok(Self::Sort(SortUpdate::new(sort_option, value)?));
+        }
+        if let Some(notification_option) = option.strip_prefix("notifications.") {
+            return Ok(Self::Notifications(NotificationsUpdate::new(notification_option, value)?));
+        }
+        if let Some(users_option) = option.strip_prefix("users.") {
+            let Some((user_id, user_option)) = users_option.rsplit_once('.') else {
+                return Err(TunablesUpdateError::UnknownOption);
+            };
+
+            let user_id = OwnedUserId::from_str(user_id)?;
+
+            let Some(value) = value else {
+                return Err(TunablesUpdateError::NoArguments);
+            };
+
+            let update = UserDisplayUpdate::new(user_option, value)?;
+
+            return Ok(Self::Users(user_id, update));
+        }
+
+        let res = match option.as_str() {
+            // value options
+            "loglevel" => {
+                if let Some(value) = value {
+                    Self::LogLevel(LogLevelUpdate::parse(value.to_owned())?)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "usernamedisplay" => {
+                if let Some(value) = value {
+                    let display = UserDisplayStyle::from_str(value)?;
+                    Self::UsernameDisplay(display)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "opencommand" => {
+                if let Some(value) = value {
+                    // TODO: use command parsing
+                    let args = value
+                        .split(' ')
+                        .filter(|arg| !arg.is_empty())
+                        .map(str::to_string)
+                        .collect();
+                    Self::OpenCommand(args)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "externaleditfilesuffix" => {
+                if let Some(value) = value {
+                    Self::ExternalEditFileSuffix(value.to_string())
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "usergutterwidth" => {
+                if let Some(value) = value {
+                    let width = usize::from_str(value)?;
+                    Self::UserGutterWidth(width)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "tabstop" => {
+                if let Some(value) = value {
+                    let tabstop = usize::from_str(value)?;
+                    Self::Tabstop(tabstop)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+
+            // bool options
+            "messageshortcodedisplay" => Self::MessageShortcodeDisplay(true),
+            "nomessageshortcodedisplay" => Self::MessageShortcodeDisplay(false),
+            "normalaftersend" => Self::NormalAfterSend(true),
+            "nonormalaftersend" => Self::NormalAfterSend(false),
+            "reactiondisplay" => Self::ReactionDisplay(true),
+            "noreactiondisplay" => Self::ReactionDisplay(false),
+            "reactionshortcodedisplay" => Self::ReactionShortcodeDisplay(true),
+            "noreactionshortcodedisplay" => Self::ReactionShortcodeDisplay(false),
+            "readreceiptsend" => Self::ReadReceiptSend(true),
+            "noreadreceiptsend" => Self::ReadReceiptSend(false),
+            "readreceiptdisplay" => Self::ReadReceiptDisplay(true),
+            "noreadreceiptdisplay" => Self::ReadReceiptDisplay(false),
+            "typingnoticesend" => Self::TypingNoticeSend(true),
+            "notypingnoticesend" => Self::TypingNoticeSend(false),
+            "typingnoticedisplay" => Self::TypingNoticeDisplay(true),
+            "notypingnoticedisplay" => Self::TypingNoticeDisplay(false),
+            "messageusercolor" => Self::MessageUserColor(true),
+            "nomessageusercolor" => Self::MessageUserColor(false),
+
+            _ => return Err(TunablesUpdateError::UnknownOption),
+        };
+
+        Ok(res)
     }
 }
 
@@ -822,6 +1181,33 @@ impl IambConfig {
 }
 
 #[derive(Clone)]
+pub enum SettingsFile {
+    Toml(PathBuf),
+    Json(PathBuf),
+}
+
+impl SettingsFile {
+    fn display(&self) -> std::path::Display<'_> {
+        match self {
+            Self::Toml(path) | Self::Json(path) => path.display(),
+        }
+    }
+}
+
+type ReloadHandle = tracing_subscriber::reload::Handle<
+    EnvFilter,
+    tracing_subscriber::layer::Layered<
+        tracing_subscriber::fmt::Layer<
+            tracing_subscriber::Registry,
+            DefaultFields,
+            Format,
+            tracing_appender::non_blocking::NonBlocking,
+        >,
+        tracing_subscriber::Registry,
+    >,
+>;
+
+#[derive(Clone)]
 pub struct ApplicationSettings {
     pub layout_json: PathBuf,
     pub session_json: PathBuf,
@@ -834,6 +1220,9 @@ pub struct ApplicationSettings {
     pub dirs: DirectoryValues,
     pub layout: Layout,
     pub macros: Macros,
+    pub log_level_handle: Option<ReloadHandle>,
+    /// The file the settings were loaded from.
+    pub load_file: SettingsFile,
 }
 
 impl ApplicationSettings {
@@ -841,7 +1230,7 @@ impl ApplicationSettings {
         env::var("XDG_CONFIG_HOME").ok().map(PathBuf::from)
     }
 
-    pub fn load(cli: Iamb) -> Result<Self, Box<dyn std::error::Error>> {
+    pub fn load(cli: Iamb) -> Result<Self, ConfigError> {
         let mut config_dir = cli
             .config_directory
             .or_else(Self::get_xdg_config_home)
@@ -858,10 +1247,10 @@ impl ApplicationSettings {
         let config_json = config_dir.join("config.json");
         let config_toml = config_dir.join("config.toml");
 
-        let config = if config_toml.is_file() {
-            IambConfig::load_toml(config_toml.as_path())?
+        let (config, load_file) = if config_toml.is_file() {
+            (IambConfig::load_toml(config_toml.as_path())?, SettingsFile::Toml(config_toml))
         } else if config_json.is_file() {
-            IambConfig::load_json(config_json.as_path())?
+            (IambConfig::load_json(config_json.as_path())?, SettingsFile::Json(config_json))
         } else {
             usage!(
                 "Please create a configuration file at {}\n\n\
@@ -886,7 +1275,7 @@ impl ApplicationSettings {
                 usage!(
                     "No configured profile with the name {:?} in {}",
                     profile,
-                    config_json.display()
+                    load_file.display()
                 );
             })
         } else if profiles.len() == 1 {
@@ -973,9 +1362,145 @@ impl ApplicationSettings {
             dirs,
             layout,
             macros,
+            log_level_handle: None,
+            load_file,
         };
 
         Ok(settings)
+    }
+
+    pub fn reload(&mut self, path: Option<SettingsFile>) -> Result<(), ReloadError> {
+        let load_file = path.unwrap_or_else(|| self.load_file.clone());
+
+        let config = match &load_file {
+            SettingsFile::Toml(path) => IambConfig::load_toml(path.as_path())?,
+            SettingsFile::Json(path) => IambConfig::load_json(path.as_path())?,
+        };
+
+        let IambConfig { mut profiles, dirs, settings: global, .. } = config;
+
+        // TODO: validate profiles?
+
+        let mut profile =
+            profiles.remove(&self.profile_name).ok_or(ReloadError::ProfileNotFound)?;
+
+        if profile.user_id != self.profile.user_id {
+            return Err(ReloadError::UserIdChanged);
+        }
+
+        // TODO: update macros
+
+        let tunables = global.unwrap_or_default();
+        let tunables = profile.settings.take().unwrap_or_default().merge(tunables);
+        let tunables = tunables.values();
+
+        let dirs = dirs.unwrap_or_default();
+        let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
+        let dirs = dirs.values();
+
+        // update values
+        self.tunables = tunables;
+        self.profile = profile;
+        self.load_file = load_file;
+        self.dirs.downloads = dirs.downloads;
+
+        // apply changes that need more setup
+
+        self.update(TunablesUpdate::LogLevel(LogLevelUpdate::parse(
+            self.tunables.log_level.to_owned(),
+        )?));
+
+        Ok(())
+    }
+
+    /// Update [`self.tunables`](`Self::tunables`) with `new`.
+    /// This will make sure that the updated value is applied.
+    pub fn update(&mut self, update: TunablesUpdate) {
+        match update {
+            TunablesUpdate::LogLevel(update) => {
+                if let Some(handle) = &mut self.log_level_handle {
+                    handle
+                        .reload(update.filter)
+                        .expect("cannot update appending tracing logger");
+                    self.tunables.log_level = update.directives;
+                }
+            },
+            TunablesUpdate::Sort(sort_update) => {
+                match sort_update {
+                    SortUpdate::Chats(order) => self.tunables.sort.chats = order,
+                    SortUpdate::Dms(order) => self.tunables.sort.dms = order,
+                    SortUpdate::Rooms(order) => self.tunables.sort.rooms = order,
+                    SortUpdate::Spaces(order) => self.tunables.sort.spaces = order,
+                    SortUpdate::Members(order) => self.tunables.sort.members = order,
+                }
+            },
+            TunablesUpdate::Notifications(notify_update) => {
+                match notify_update {
+                    NotificationsUpdate::Enabled(value) => {
+                        self.tunables.notifications.enabled = value
+                    },
+                    NotificationsUpdate::Via(value) => self.tunables.notifications.via = value,
+                    NotificationsUpdate::ShowMessage(value) => {
+                        self.tunables.notifications.show_message = value
+                    },
+                    NotificationsUpdate::SoundHint(value) => {
+                        self.tunables.notifications.sound_hint = value
+                    },
+                }
+            },
+            TunablesUpdate::Users(user_id, user_update) => {
+                let user = self.tunables.users.entry(user_id).or_default();
+
+                match user_update {
+                    UserDisplayUpdate::Name(name) => user.name = name,
+                    UserDisplayUpdate::Color(color) => user.color = color,
+                }
+            },
+            TunablesUpdate::OpenCommand(open_command) => {
+                if open_command.is_empty() {
+                    self.tunables.open_command = None;
+                } else {
+                    self.tunables.open_command = Some(open_command);
+                }
+            },
+            TunablesUpdate::UsernameDisplay(username_display) => {
+                self.tunables.username_display = username_display
+            },
+            TunablesUpdate::ExternalEditFileSuffix(external_edit_file_suffix) => {
+                self.tunables.external_edit_file_suffix = external_edit_file_suffix
+            },
+            TunablesUpdate::UserGutterWidth(user_gutter_width) => {
+                self.tunables.user_gutter_width = user_gutter_width
+            },
+            TunablesUpdate::Tabstop(tabstop) => self.tunables.tabstop = tabstop,
+            TunablesUpdate::MessageShortcodeDisplay(message_shortcode_display) => {
+                self.tunables.message_shortcode_display = message_shortcode_display
+            },
+            TunablesUpdate::NormalAfterSend(normal_after_send) => {
+                self.tunables.normal_after_send = normal_after_send
+            },
+            TunablesUpdate::ReactionDisplay(reaction_display) => {
+                self.tunables.reaction_display = reaction_display
+            },
+            TunablesUpdate::ReactionShortcodeDisplay(reaction_shortcode_display) => {
+                self.tunables.reaction_shortcode_display = reaction_shortcode_display
+            },
+            TunablesUpdate::ReadReceiptSend(read_receipt_send) => {
+                self.tunables.read_receipt_send = read_receipt_send
+            },
+            TunablesUpdate::ReadReceiptDisplay(read_receipt_display) => {
+                self.tunables.read_receipt_display = read_receipt_display
+            },
+            TunablesUpdate::TypingNoticeSend(typing_notice_send) => {
+                self.tunables.typing_notice_send = typing_notice_send
+            },
+            TunablesUpdate::TypingNoticeDisplay(typing_notice_display) => {
+                self.tunables.typing_notice_display = typing_notice_display
+            },
+            TunablesUpdate::MessageUserColor(message_user_color) => {
+                self.tunables.message_user_color = message_user_color
+            },
+        }
     }
 
     pub fn read_session(&self, path: impl AsRef<Path>) -> Result<Session, IambError> {

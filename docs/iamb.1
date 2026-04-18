@@ -69,6 +69,27 @@ Mark all rooms as read.
 View the startup Welcome window.
 .It Sy ":forget"
 Remove all left rooms from the internal database.
+.Id Sy ":reload"
+Reload the config.
+.It Sy ":se[t] {options}"
+Change config options at runtime.
+Use 
+.Dq {option}
+and
+.Dq no{option}
+for booleans and
+.Dq {option}={value}
+for other settings.
+
+.Ss Example 1: Disable notifications
+.Bd -literal -offset indent
+:set notifications.noenabled
+.Ed
+.El
+.Ss Example 2: Remove a username override
+.Bd -literal -offset indent
+:set users.@username:example.org.name=
+.Ed
 .El
 
 .Sh "E2EE COMMANDS"

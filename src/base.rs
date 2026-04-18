@@ -7,6 +7,8 @@ use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::hash::Hash;
+use std::ops::Deref;
+use std::path::PathBuf;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -28,6 +30,7 @@ use serde::{
     Serialize,
     Serializer,
 };
+use strum::{EnumProperty, VariantArray};
 use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 
@@ -89,7 +92,12 @@ use modalkit::{
     prelude::{CommandType, WordStyle},
 };
 
-use crate::config::ImagePreviewProtocolValues;
+use crate::config::{
+    ImagePreviewProtocolValues,
+    ReloadError,
+    TunablesUpdate,
+    TunablesUpdateDiscriminants,
+};
 use crate::message::ImageStatus;
 use crate::notifications::NotificationHandle;
 use crate::preview::{source_from_event, spawn_insert_preview};
@@ -296,7 +304,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldRoom> {
 }
 
 /// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
-struct SortRoomVisitor;
+pub(crate) struct SortRoomVisitor;
 
 impl Visitor<'_> for SortRoomVisitor {
     type Value = SortColumn<SortFieldRoom>;
@@ -349,7 +357,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldUser> {
 }
 
 /// [serde] visitor for deserializing [SortColumn] for users.
-struct SortUserVisitor;
+pub(crate) struct SortUserVisitor;
 
 impl Visitor<'_> for SortUserVisitor {
     type Value = SortColumn<SortFieldUser>;
@@ -506,6 +514,16 @@ pub enum KeysAction {
     Import(String, String),
 }
 
+/// An action performed on the application settings.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SettingsAction {
+    /// Change some settings.
+    Set(Vec<TunablesUpdate>),
+
+    /// Reload the (specified) config file.
+    Reload(Option<PathBuf>),
+}
+
 /// An action that the main program loop should.
 ///
 /// See [the commands module][super::commands] for where these are usually created.
@@ -522,6 +540,9 @@ pub enum IambAction {
 
     /// Perform an action on the current space.
     Space(SpaceAction),
+
+    /// Perform an action on the application settings.
+    Settings(SettingsAction),
 
     /// Open a URL.
     OpenLink(String),
@@ -570,6 +591,12 @@ impl From<SpaceAction> for IambAction {
     }
 }
 
+impl From<SettingsAction> for IambAction {
+    fn from(act: SettingsAction) -> Self {
+        IambAction::Settings(act)
+    }
+}
+
 impl From<RoomAction> for IambAction {
     fn from(act: RoomAction) -> Self {
         IambAction::Room(act)
@@ -593,6 +620,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
+            IambAction::Settings(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
@@ -609,6 +637,7 @@ impl ApplicationAction for IambAction {
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
+            IambAction::Settings(..) => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
@@ -625,6 +654,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
+            IambAction::Settings(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
@@ -640,6 +670,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => false,
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
+            IambAction::Settings(..) => false,
             IambAction::OpenLink(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
@@ -813,6 +844,10 @@ pub enum IambError {
     /// A failure while trying to show an image preview.
     #[error("Preview error: {0}")]
     Preview(String),
+
+    /// Config couldn't be reloaded
+    #[error("Reload error: {0}")]
+    ConfigReload(#[from] ReloadError),
 }
 
 impl From<IambError> for UIError<IambInfo> {
@@ -2129,7 +2164,7 @@ fn complete_cmdarg(
     match cmd.name.as_str() {
         "cancel" | "dms" | "edit" | "redact" | "reply" => vec![],
         "members" | "rooms" | "spaces" | "welcome" => vec![],
-        "download" | "keys" | "open" | "upload" => complete_path(text, cursor),
+        "download" | "keys" | "open" | "upload" | "reload" => complete_path(text, cursor),
         "react" | "unreact" => complete_emoji(text, cursor, store),
 
         "invite" => complete_users(text, cursor, store),
@@ -2138,6 +2173,27 @@ fn complete_cmdarg(
         "verify" => vec![],
         "vertical" | "horizontal" | "aboveleft" | "belowright" | "tab" => {
             complete_cmd(desc.arg.text.as_str(), text, cursor, store)
+        },
+        "set" => {
+            // TODO: improve once #520 is merged
+            let word = text
+                .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
+                .unwrap_or_else(EditRope::empty);
+            let word = Cow::from(&word);
+
+            TunablesUpdateDiscriminants::VARIANTS
+                .iter()
+                .flat_map(|variant| {
+                    let name = <_ as Into<&'static str>>::into(variant).to_lowercase();
+                    if variant.get_bool("is_bool") == Some(true) {
+                        vec![format!("no{name}"), name]
+                    } else {
+                        vec![name]
+                    }
+                })
+                .filter(|option| option.starts_with(word.deref()))
+                .map(|option| option.to_string())
+                .collect()
         },
         _ => vec![],
     }

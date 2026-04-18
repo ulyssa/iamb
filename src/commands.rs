@@ -27,9 +27,11 @@ use crate::base::{
     RoomAction,
     RoomField,
     SendAction,
+    SettingsAction,
     SpaceAction,
     VerifyAction,
 };
+use crate::config::TunablesUpdate;
 
 type ProgContext = CommandContext;
 type ProgResult = CommandResult<ProgramCommand>;
@@ -717,6 +719,43 @@ fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_set(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let args = desc.arg.strings()?;
+
+    let mut updates = vec![];
+
+    for arg in args {
+        let (option, value) = if let Some((option, value)) = arg.split_once('=') {
+            (option.to_string(), Some(value))
+        } else {
+            (arg.clone(), None)
+        };
+
+        match TunablesUpdate::new(option, value) {
+            Ok(update) => updates.push(update),
+            Err(err) => return Result::Err(CommandError::ParseFailed(format!("{err}: {arg}"))),
+        }
+    }
+
+    let iact = IambAction::from(SettingsAction::Set(updates));
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_reload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let iact = IambAction::from(SettingsAction::Reload(args.pop().map(Into::into)));
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand {
         name: "cancel".into(),
@@ -833,6 +872,16 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "logout".into(),
         aliases: vec![],
         f: iamb_logout,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "set".into(),
+        aliases: vec!["se".into()],
+        f: iamb_set,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "reload".into(),
+        aliases: vec![],
+        f: iamb_reload,
     });
 }
 
