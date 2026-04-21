@@ -7,6 +7,7 @@ url = "https://matrix.org"
 [settings]
 default_room = "#iamb-users:0x.badd.cafe"
 external_edit_file_suffix = ".md"
+# input_prompt = "❯ "  # Overrides the input-area prompt. Unset = default 🔒/🔓/> based on encryption state.
 log_level = "warn"
 message_shortcode_display = false
 open_command = ["my-open", "--file"]
