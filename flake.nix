@@ -1,6 +1,6 @@
 {
   description = "iamb";
-  nixConfig.bash-prompt = "\[nix-develop\]$ ";
+  nixConfig.bash-prompt = "\\[nix-develop\\]$ ";
 
   inputs = {
     nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
@@ -12,18 +12,16 @@
     };
   };
 
-  outputs =
-    {
-      self,
-      nixpkgs,
-      crane,
-      flake-utils,
-      fenix,
-      ...
-    }:
+  outputs = {
+    self,
+    nixpkgs,
+    crane,
+    flake-utils,
+    fenix,
+    ...
+  }:
     flake-utils.lib.eachDefaultSystem (
-      system:
-      let
+      system: let
         pkgs = nixpkgs.legacyPackages.${system};
         inherit (pkgs) lib;
 
@@ -60,29 +58,31 @@
         cargoArtifacts = craneLib.buildDepsOnly commonArgs;
 
         # Build the actual crate
-        iamb = craneLib.buildPackage (commonArgs // {
-          inherit cargoArtifacts;
-        });
-      in
-      {
+        iamb = craneLib.buildPackage (commonArgs
+          // {
+            inherit cargoArtifacts;
+          });
+      in {
         checks = {
           # Build the crate as part of `nix flake check`
           inherit iamb;
 
-          iamb-clippy = craneLib.cargoClippy (commonArgs // {
-            inherit cargoArtifacts;
-            cargoClippyExtraArgs = "--all-targets -- --deny warnings";
-          });
+          iamb-clippy = craneLib.cargoClippy (commonArgs
+            // {
+              inherit cargoArtifacts;
+              cargoClippyExtraArgs = "--all-targets -- --deny warnings";
+            });
 
           iamb-fmt = craneLibNightly.cargoFmt {
             inherit src;
           };
 
-          iamb-nextest = craneLib.cargoNextest (commonArgs // {
-            inherit cargoArtifacts;
-            partitions = 1;
-            partitionType = "count";
-          });
+          iamb-nextest = craneLib.cargoNextest (commonArgs
+            // {
+              inherit cargoArtifacts;
+              partitions = 1;
+              partitionType = "count";
+            });
         };
 
         packages.default = iamb;
