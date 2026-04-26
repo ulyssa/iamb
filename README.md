@@ -146,6 +146,14 @@ A snap for Linux distributions which [support](https://snapcraft.io/docs/install
 snap install iamb
 ```
 
+### Conda (Linux, macOS, Windows)
+
+A Conda [package](https://prefix.dev/channels/conda-forge/packages/iamb) is available on conda-forge. To install it simply run:
+
+```
+pixi global install iamb
+```
+
 ## License
 
 iamb is released under the [Apache License, Version 2.0].
