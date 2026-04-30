@@ -124,6 +124,9 @@ pub struct ScrollbackState {
     /// The currently selected message in the scrollback.
     cursor: MessageCursor,
 
+    /// The cursor position relative to the terminal viewport.
+    term_cursor: (u16, u16),
+
     /// Contextual info about the viewport used during rendering.
     viewctx: ViewportContext<MessageCursor>,
 
@@ -153,6 +156,7 @@ impl ScrollbackState {
             viewctx,
             jumped,
             show_full_on_redraw,
+            term_cursor: (0, 0),
         }
     }
 
@@ -595,6 +599,7 @@ impl WindowOps<IambInfo> for ScrollbackState {
             viewctx: self.viewctx.clone(),
             jumped: self.jumped.clone(),
             show_full_on_redraw: false,
+            term_cursor: (0, 0),
         }
     }
 
@@ -1244,7 +1249,11 @@ impl Searchable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
 impl TerminalCursor for ScrollbackState {
     fn get_term_cursor(&self) -> Option<(u16, u16)> {
-        None
+        self.term_cursor.into()
+    }
+
+    fn hide_term_cursor(&self) -> bool {
+        true
     }
 }
 
@@ -1298,6 +1307,8 @@ impl StatefulWidget for Scrollback<'_> {
     type State = ScrollbackState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        state.term_cursor = (area.left(), area.top());
+
         let info = self.store.application.rooms.get_or_default(state.room_id.clone());
         let settings = &self.store.application.settings;
         let area = if state.cursor.timestamp.is_some() {
@@ -1397,10 +1408,14 @@ impl StatefulWidget for Scrollback<'_> {
         let x = area.left();
 
         let mut image_previews = vec![];
-        for ((_, _), _, txt, line_preview) in lines.into_iter() {
+        for (key, row, txt, line_preview) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
             if let Some((backend, msg_x, _)) = line_preview {
                 image_previews.push((x + msg_x, y, backend));
+            }
+
+            if key == cursor_key && row == 0 {
+                state.term_cursor = (x, y);
             }
 
             y += 1;

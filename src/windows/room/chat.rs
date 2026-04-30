@@ -824,6 +824,9 @@ impl TerminalCursor for ChatState {
     fn get_term_cursor(&self) -> Option<(u16, u16)> {
         delegate!(self, w => w.get_term_cursor())
     }
+    fn hide_term_cursor(&self) -> bool {
+        delegate!(self, w => w.hide_term_cursor())
+    }
 }
 
 impl Jumpable<ProgramContext, IambInfo> for ChatState {

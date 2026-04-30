@@ -754,6 +754,9 @@ impl TerminalCursor for RoomState {
     fn get_term_cursor(&self) -> Option<TermOffset> {
         delegate!(self, w => w.get_term_cursor())
     }
+    fn hide_term_cursor(&self) -> bool {
+        delegate!(self, w => w.hide_term_cursor())
+    }
 }
 
 impl WindowOps<IambInfo> for RoomState {
