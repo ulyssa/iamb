@@ -184,6 +184,7 @@ pub fn mock_tunables() -> TunableValues {
         state_event_display: true,
         typing_notice_send: true,
         typing_notice_display: true,
+        message_time_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
             color: Some(UserColor(Color::Black)),
             name: Some("USER 5".into()),

@@ -1539,8 +1539,7 @@ dependencies = [
 [[package]]
 name = "editor-types"
 version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9e9e99679670f67825fcd24a23cb4eb655a0f92c82bd4d1c1a1357c0cd71e87"
+source = "git+https://github.com/vawvaw/modalkit?rev=cdef1998dc902894527ac87744b8d831e21d0c1c#cdef1998dc902894527ac87744b8d831e21d0c1c"
 dependencies = [
  "bitflags 2.11.0",
  "editor-types-macros",
@@ -1551,8 +1550,7 @@ dependencies = [
 [[package]]
 name = "editor-types-macros"
 version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42680de76cf91f231abd90cc623750d39077f7d2fadb7962325fb082871f4c66"
+source = "git+https://github.com/vawvaw/modalkit?rev=cdef1998dc902894527ac87744b8d831e21d0c1c#cdef1998dc902894527ac87744b8d831e21d0c1c"
 dependencies = [
  "editor-types-parser",
  "nom 7.1.3",
@@ -1564,8 +1562,7 @@ dependencies = [
 [[package]]
 name = "editor-types-parser"
 version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cac4b91fe830fbbe0a60c37ba0264b6e9ffc70e3664c028234dac59e79299ad4"
+source = "git+https://github.com/vawvaw/modalkit?rev=cdef1998dc902894527ac87744b8d831e21d0c1c#cdef1998dc902894527ac87744b8d831e21d0c1c"
 dependencies = [
  "nom 7.1.3",
  "thiserror 1.0.69",
@@ -2885,8 +2882,7 @@ dependencies = [
 [[package]]
 name = "keybindings"
 version = "0.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "19a726307ed87e05155c31329676130e6a237e62dda80211f7e1ed811e47630f"
+source = "git+https://github.com/vawvaw/modalkit?rev=cdef1998dc902894527ac87744b8d831e21d0c1c#cdef1998dc902894527ac87744b8d831e21d0c1c"
 dependencies = [
  "textwrap",
  "unicode-segmentation",
@@ -3562,8 +3558,7 @@ dependencies = [
 [[package]]
 name = "modalkit"
 version = "0.0.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "09c80ba31e8c8ae56606acf6d7b03b9e316779714489e9952f7d9ee07b909aee"
+source = "git+https://github.com/vawvaw/modalkit?rev=cdef1998dc902894527ac87744b8d831e21d0c1c#cdef1998dc902894527ac87744b8d831e21d0c1c"
 dependencies = [
  "anymap2",
  "arboard",
@@ -3585,8 +3580,7 @@ dependencies = [
 [[package]]
 name = "modalkit-ratatui"
 version = "0.0.25"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "824d1130ae8eebb40cb7291b59b26e4f44e9351522de33c6c9685c6944074d61"
+source = "git+https://github.com/vawvaw/modalkit?rev=cdef1998dc902894527ac87744b8d831e21d0c1c#cdef1998dc902894527ac87744b8d831e21d0c1c"
 dependencies = [
  "crossterm 0.29.0",
  "intervaltree",
