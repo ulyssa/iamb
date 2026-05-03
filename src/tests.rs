@@ -164,7 +164,6 @@ pub fn mock_dirs() -> DirectoryValues {
         data: PathBuf::new(),
         logs: PathBuf::new(),
         downloads: None,
-        image_previews: PathBuf::new(),
     }
 }
 
