@@ -322,8 +322,7 @@ impl Messages {
         let id = self
             .messages
             .iter()
-            .filter(|item| item.as_event().is_none_or(|item| filter(&item)))
-            .next_back()?
+            .rfind(|item| item.as_event().is_none_or(|item| filter(&item)))?
             .unique_id()
             .to_owned();
 
@@ -340,8 +339,7 @@ impl Messages {
         self.messages
             .iter()
             .filter_map(|item| item.as_event())
-            .filter(settings.filter_hidden_item())
-            .next_back()
+            .rfind(settings.filter_hidden_item())
     }
 
     pub fn range(
@@ -356,7 +354,7 @@ impl Messages {
         &self,
         range: impl RangeBounds<MessageKey>,
         filter: F,
-    ) -> std::iter::Filter<MessagesRange, F> {
+    ) -> std::iter::Filter<MessagesRange<'_>, F> {
         let mut next = match range.start_bound() {
             Bound::Included(start) => self.start_element.saturating_add_signed(start.offset()),
             Bound::Excluded(start) => self.start_element.saturating_add_signed(start.offset() + 1),

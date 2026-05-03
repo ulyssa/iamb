@@ -1708,18 +1708,19 @@ fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
 
 #[cfg(test)]
 pub mod tests {
+    use std::iter::FromIterator as _;
+
     use super::*;
     use crate::config::user_style_from_color;
     use crate::tests::*;
     use matrix_sdk::ruma::{
-        events::{reaction::ReactionEventContent, relation::Annotation, MessageLikeUnsigned},
+        events::{reaction::ReactionEventContent, relation::Annotation},
         owned_event_id,
-        owned_room_id,
-        owned_user_id,
         MilliSecondsSinceUnixEpoch,
     };
     use pretty_assertions::assert_eq;
     use ratatui::style::Color;
+    use serde_json::{Map, Value};
 
     #[test]
     fn test_typing_spans() {

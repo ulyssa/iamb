@@ -38,8 +38,10 @@ use matrix_sdk::{
     ruma::{
         api::client::{
             filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
-            room::create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
-            room::Visibility,
+            room::{
+                create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
+                Visibility,
+            },
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
         },
         assign,
@@ -54,13 +56,10 @@ use matrix_sdk::{
             presence::PresenceEvent,
             room::encryption::RoomEncryptionEventContent,
             typing::SyncTypingEvent,
-            AnyInitialStateEvent,
-            EmptyStateKey,
             InitialStateEvent,
         },
         room::RoomType,
         serde::Raw,
-        EventEncryptionAlgorithm,
         OwnedRoomId,
         OwnedRoomOrAliasId,
         OwnedUserId,
@@ -146,13 +145,11 @@ pub async fn create_room(
 
     // Set up encryption.
     if flags.contains(CreateRoomFlags::ENCRYPTED) {
-        // XXX: Once matrix-sdk uses ruma 0.8, then this can skip the cast.
-        let algo = EventEncryptionAlgorithm::MegolmV1AesSha2;
-        let content = RoomEncryptionEventContent::new(algo);
-        let encr = InitialStateEvent::new(EmptyStateKey, content);
-        let encr_raw = Raw::new(&encr).map_err(IambError::from)?;
-        let encr_raw = encr_raw.cast::<AnyInitialStateEvent>();
-        initial_state.push(encr_raw);
+        let ev = InitialStateEvent::with_empty_state_key(
+            RoomEncryptionEventContent::with_recommended_defaults(),
+        )
+        .to_raw_any();
+        initial_state.push(ev);
     }
 
     let request = assign!(CreateRoomRequest::new(), {

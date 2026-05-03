@@ -158,7 +158,8 @@ An optional object to override settings that will normally be guessed automatica
 .It Sy type
 An optional string set to one of the protocol types:
 .Dq Sy sixel ,
-.Dq Sy kitty , and
+.Dq Sy kitty ,
+and
 .Dq Sy halfblocks .
 .It Sy font_size
 An optional list of two numbers representing font width and height in pixels.
@@ -170,8 +171,25 @@ Possible values are:
 .Dq Sy trace ,
 .Dq Sy debug ,
 .Dq Sy info ,
-.Dq Sy warn , and
+.Dq Sy warn
+(the default), and
 .Dq Sy error .
+Also supports the syntax defined by
+.Lk https://docs.rs/tracing_subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
+
+.It Sy max_log_files
+Specifies how many daily log files should be saved.
+Set this to
+.Sy 0
+to disable automatically deleting log files.
+Defaults to 
+.Sy 7 .
+
+.It Sy mouse
+Enable mouse support
+See
+.Sx MOUSE
+for more details.
 
 .It Sy message_shortcode_display
 Defines whether or not Emoji characters in messages should be replaced by their
@@ -237,7 +255,8 @@ for details on the format.
 Defines how usernames are shown for message senders.
 Possible values are
 .Dq Sy username ,
-.Dq Sy localpart , or
+.Dq Sy localpart ,
+or
 .Dq Sy displayname .
 
 .It Sy user_gutter_width
@@ -263,6 +282,22 @@ reaction_shortcode_display = true
 [settings]
 request_timeout = 120
 .Ed
+
+.Sh MOUSE
+
+The
+.Sy settings.mouse
+subsection allows enabling mouse support.
+Currently the only difference is that scrolling moves the window view instead of changing the selection.
+
+The available fields in this subsection are:
+.Bl -tag -width Ds
+.It Sy enabled
+Defaults to
+.Sy false .
+Setting this field to
+.Sy true
+enables mouse support.
 
 .Sh NOTIFICATIONS
 
@@ -295,18 +330,29 @@ controls whether to show the message in the desktop notification, and defaults t
 Messages are truncated beyond a small length.
 The notification rules are stored server side, loaded once at startup, and are currently not configurable in iamb.
 In other words, you can simply change the rules with another client.
+
+.It Sy sound_hint
+Controls the notification sound name that is passed as a hint to the notification daemon.
 .El
 
 .Ss Example 1: Enable notifications with default options
 .Bd -literal -offset indent
-[settings]
-notifications = {}
+[settings.notifications]
+enabled = true
 .Ed
 .Ss Example 2: Enable notifications using terminal bell
 .Bd -literal -offset indent
 [settings.notifications]
+enabled = true
 via = "bell"
 show_message = false
+.Ed
+.Ss Example 3: Enable notifications using the instant message sound
+.Bd -literal -offset indent
+[settings.notifications]
+enabled = true
+sound_hint = "message-new-instant" # Linux
+sound_hint = "IM"                  # Windows
 .Ed
 
 .Sh "SORTING LISTS"
@@ -380,10 +426,14 @@ Put invites before other rooms.
 .El
 .El
 
-.Ss Example 1: Group room members by their server first
+Add a
+.Dq Sy ~
+in front of any value to flip the order.
+
+.Ss Example 1: Group room members by their server first and descending localpart second
 .Bd -literal -offset indent
 [settings.sort]
-members = ["server", "localpart"]
+members = ["server", "~localpart"]
 .Ed
 
 .Sh "USER OVERRIDES"

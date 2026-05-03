@@ -37,7 +37,6 @@ use modalkit::prelude::ViewportContext;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::{Line, Span, Text};
 use tokio::sync::mpsc::unbounded_channel;
-use tracing::Level;
 use url::Url;
 
 use crate::message::{
@@ -318,7 +317,8 @@ pub fn mock_dirs() -> DirectoryValues {
 pub fn mock_tunables() -> TunableValues {
     TunableValues {
         default_room: None,
-        log_level: Level::INFO,
+        log_level: "warn".into(),
+        max_log_files: 7,
         message_shortcode_display: false,
         normal_after_send: true,
         reaction_display: true,

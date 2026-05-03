@@ -297,6 +297,18 @@ Produces no effect in
 but will display aliens from Space Invaders in Matrix clients that support doing so.
 .El
 
+.Sh "ENVIRONMENT"
+The behaviour of
+.Nm
+is affected by the following environment variables.
+.Bl -tag -width Ds
+.It Sy "RUST_LOG"
+Overwrites the value set by the
+.Sy log_level
+config value.
+The syntax is defined at
+.Lk https://docs.rs/tracing-subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
+
 .Sh EXAMPLES
 .Ss Example 1: Starting with a specific profile
 To start with a profile named
