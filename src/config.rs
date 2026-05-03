@@ -13,6 +13,7 @@ use std::process;
 use clap::Parser;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use matrix_sdk_ui::timeline::TimelineItemContent;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
@@ -21,15 +22,9 @@ use url::Url;
 
 use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
 
-use super::base::{
-    IambError,
-    IambId,
-    RoomInfo,
-    SortColumn,
-    SortFieldRoom,
-    SortFieldUser,
-    SortOrder,
-};
+use crate::message::{Message, MessageItem, MessageKey};
+
+use super::base::{IambError, IambId, SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
 
@@ -319,6 +314,7 @@ fn merge_sorts(profile: SortOverrides, global: SortOverrides) -> SortOverrides {
         rooms: profile.rooms.or(global.rooms),
         spaces: profile.spaces.or(global.spaces),
         members: profile.members.or(global.members),
+        invites: profile.invites.or(global.invites),
     }
 }
 
@@ -447,12 +443,14 @@ pub struct Notifications {
 
 #[derive(Clone)]
 pub struct ImagePreviewValues {
+    pub lazy_load: bool,
     pub size: ImagePreviewSize,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct ImagePreview {
+    pub lazy_load: Option<bool>,
     pub size: Option<ImagePreviewSize>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
@@ -460,13 +458,14 @@ pub struct ImagePreview {
 impl ImagePreview {
     fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
+            lazy_load: self.lazy_load.unwrap_or(true),
             size: self.size.unwrap_or_default(),
             protocol: self.protocol,
         }
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Copy, Deserialize, Debug)]
 pub struct ImagePreviewSize {
     pub width: usize,
     pub height: usize,
@@ -490,6 +489,7 @@ pub struct SortValues {
     pub dms: Vec<SortColumn<SortFieldRoom>>,
     pub rooms: Vec<SortColumn<SortFieldRoom>>,
     pub spaces: Vec<SortColumn<SortFieldRoom>>,
+    pub invites: Vec<SortColumn<SortFieldRoom>>,
     pub members: Vec<SortColumn<SortFieldUser>>,
 }
 
@@ -499,6 +499,7 @@ pub struct SortOverrides {
     pub dms: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub rooms: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub spaces: Option<Vec<SortColumn<SortFieldRoom>>>,
+    pub invites: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub members: Option<Vec<SortColumn<SortFieldUser>>>,
 }
 
@@ -508,9 +509,10 @@ impl SortOverrides {
         let chats = self.chats.unwrap_or_else(|| rooms.clone());
         let dms = self.dms.unwrap_or_else(|| rooms.clone());
         let spaces = self.spaces.unwrap_or_else(|| rooms.clone());
+        let invites = self.invites.unwrap_or_else(|| rooms.clone());
         let members = self.members.unwrap_or_else(|| Vec::from(DEFAULT_MEMBERS_SORT));
 
-        SortValues { rooms, members, chats, dms, spaces }
+        SortValues { rooms, members, chats, dms, spaces, invites }
     }
 }
 
@@ -645,19 +647,17 @@ pub struct DirectoryValues {
     pub data: PathBuf,
     pub logs: PathBuf,
     pub downloads: Option<PathBuf>,
-    pub image_previews: PathBuf,
 }
 
 impl DirectoryValues {
     fn create_dir_all(&self) -> std::io::Result<()> {
         use std::fs::create_dir_all;
 
-        let Self { cache, data, logs, downloads, image_previews } = self;
+        let Self { cache, data, logs, downloads } = self;
 
         create_dir_all(cache)?;
         create_dir_all(data)?;
         create_dir_all(logs)?;
-        create_dir_all(image_previews)?;
 
         if let Some(downloads) = downloads {
             create_dir_all(downloads)?;
@@ -673,7 +673,6 @@ pub struct Directories {
     pub data: Option<String>,
     pub logs: Option<String>,
     pub downloads: Option<String>,
-    pub image_previews: Option<String>,
 }
 
 impl Directories {
@@ -683,7 +682,6 @@ impl Directories {
             data: self.data.or(other.data),
             logs: self.logs.or(other.logs),
             downloads: self.downloads.or(other.downloads),
-            image_previews: self.image_previews.or(other.image_previews),
         }
     }
 
@@ -738,20 +736,7 @@ impl Directories {
             })
             .or_else(dirs::download_dir);
 
-        let image_previews = self
-            .image_previews
-            .map(|dir| {
-                let dir = shellexpand::full(&dir)
-                    .expect("unable to expand shell variables in dirs.cache");
-                Path::new(dir.as_ref()).to_owned()
-            })
-            .unwrap_or_else(|| {
-                let mut dir = cache.clone();
-                dir.push("image_preview_downloads");
-                dir
-            });
-
-        DirectoryValues { cache, data, logs, downloads, image_previews }
+        DirectoryValues { cache, data, logs, downloads }
     }
 }
 
@@ -1037,7 +1022,11 @@ impl ApplicationSettings {
         user_style_from_color(self.get_user_color(user_id))
     }
 
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
+    pub fn get_user_span<'a>(
+        &self,
+        user_id: &'a UserId,
+        display_name: Option<&'a str>,
+    ) -> Span<'a> {
         let (color, name) = self.get_user_overrides(user_id);
 
         let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
@@ -1047,8 +1036,8 @@ impl ApplicationSettings {
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
             (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
             (None, UserDisplayStyle::DisplayName) => {
-                if let Some(display) = info.display_names.get(user_id) {
-                    Cow::Borrowed(display.as_str())
+                if let Some(display) = display_name {
+                    Cow::Borrowed(display)
                 } else {
                     Cow::Borrowed(user_id.as_str())
                 }
@@ -1056,6 +1045,27 @@ impl ApplicationSettings {
         };
 
         Span::styled(name, style)
+    }
+
+    pub fn filter_hidden_item(&self) -> impl Fn(&&Message) -> bool {
+        let show_state = self.tunables.state_event_display;
+
+        move |item| {
+            show_state ||
+                !matches!(
+                    item.content(),
+                    TimelineItemContent::MembershipChange(_) |
+                        TimelineItemContent::ProfileChange(_) |
+                        TimelineItemContent::OtherState(_) |
+                        TimelineItemContent::FailedToParseState { .. }
+                )
+        }
+    }
+
+    pub fn filter_hidden(&self) -> impl Fn(&(MessageKey, &MessageItem)) -> bool {
+        let filter = self.filter_hidden_item();
+
+        move |(_, item)| item.as_event().is_none_or(|item| filter(&item))
     }
 }
 

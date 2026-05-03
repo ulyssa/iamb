@@ -1,6 +1,12 @@
+use std::borrow::Cow;
+use std::ops::Deref;
 use std::path::PathBuf;
-use std::{collections::HashMap, iter::FromIterator as _};
+use std::sync::Arc;
+use std::{collections::HashMap, sync::Weak};
 
+use chrono::DateTime;
+use matrix_sdk::ruma::events::receipt::Receipt;
+use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::{
     event_id,
     events::room::message::RoomMessageEventContent,
@@ -11,17 +17,39 @@ use matrix_sdk::ruma::{
     OwnedRoomId,
     OwnedUserId,
     RoomId,
-    UInt,
 };
+use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, UserId};
 
 use lazy_static::lazy_static;
-use ratatui::style::{Color, Style};
-use serde_json::{Map, Value};
+use matrix_sdk_ui::eyeball_im::Vector;
+use matrix_sdk_ui::timeline::{
+    EventTimelineItem,
+    MsgLikeContent,
+    Profile,
+    TimelineDetails,
+    TimelineEventItemId,
+    TimelineItem,
+    TimelineItemContent,
+    TimelineUniqueId,
+    VirtualTimelineItem,
+};
+use modalkit::prelude::ViewportContext;
+use ratatui::style::{Color, Modifier as StyleModifier, Style};
+use ratatui::text::{Line, Span, Text};
 use tokio::sync::mpsc::unbounded_channel;
 use url::Url;
 
+use crate::message::{
+    MessageCursor,
+    MessageExt,
+    MessageTimeStamp,
+    ProtocolPreview,
+    TimelineItemExt,
+};
+use crate::preview::PreviewManager;
+use crate::util::space_span;
 use crate::{
-    base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
+    base::{ChatStore, ProgramStore, RoomInfo},
     config::{
         user_color,
         user_style_from_color,
@@ -36,13 +64,7 @@ use crate::{
         UserDisplayStyle,
         UserDisplayTunables,
     },
-    message::{
-        Message,
-        MessageEvent,
-        MessageKey,
-        MessageTimeStamp::{LocalEcho, OriginServer},
-        Messages,
-    },
+    message::{Message, MessageKey, Messages},
     worker::Requester,
 };
 
@@ -56,106 +78,231 @@ lazy_static! {
     pub static ref TEST_USER3: OwnedUserId = user_id!("@user3:example.com").to_owned();
     pub static ref TEST_USER4: OwnedUserId = user_id!("@user4:example.com").to_owned();
     pub static ref TEST_USER5: OwnedUserId = user_id!("@user5:example.com").to_owned();
-    pub static ref MSG1_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
-    pub static ref MSG2_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
-    pub static ref MSG3_EVID: OwnedEventId =
-        event_id!("$5jRz3KfVhaUzXtVj7k:example.com").to_owned();
-    pub static ref MSG4_EVID: OwnedEventId =
-        event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned();
-    pub static ref MSG5_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
-    pub static ref MSG1_KEY: MessageKey = (LocalEcho, MSG1_EVID.clone());
-    pub static ref MSG2_KEY: MessageKey = (OriginServer(UInt::new(1).unwrap()), MSG2_EVID.clone());
-    pub static ref MSG3_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG3_EVID.clone());
-    pub static ref MSG4_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG4_EVID.clone());
-    pub static ref MSG5_KEY: MessageKey = (OriginServer(UInt::new(8).unwrap()), MSG5_EVID.clone());
+    pub static ref MSG1_EVID: TimelineEventItemId =
+        TimelineEventItemId::EventId(EventId::new(server_name!("example.com")));
+    pub static ref MSG2_EVID: TimelineEventItemId =
+        TimelineEventItemId::EventId(EventId::new(server_name!("example.com")));
+    pub static ref MSG3_EVID: TimelineEventItemId =
+        TimelineEventItemId::EventId(event_id!("$5jRz3KfVhaUzXtVj7k:example.com").to_owned());
+    pub static ref MSG4_EVID: TimelineEventItemId =
+        TimelineEventItemId::EventId(event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned());
+    pub static ref MSG5_EVID: TimelineEventItemId =
+        TimelineEventItemId::EventId(EventId::new(server_name!("example.com")));
+    pub static ref MSG1_KEY: MessageKey =
+        MessageKey::new(6, TimelineUniqueId("MSG1_KEY".to_string()));
+    pub static ref MSG2_KEY: MessageKey =
+        MessageKey::new(1, TimelineUniqueId("MSG2_KEY".to_string()));
+    pub static ref MSG3_KEY: MessageKey =
+        MessageKey::new(2, TimelineUniqueId("MSG3_KEY".to_string()));
+    pub static ref MSG4_KEY: MessageKey =
+        MessageKey::new(3, TimelineUniqueId("MSG4_KEY".to_string()));
+    pub static ref MSG5_KEY: MessageKey =
+        MessageKey::new(4, TimelineUniqueId("MSG5_KEY".to_string()));
+    pub static ref DIVIDER1_KEY: MessageKey =
+        MessageKey::new(0, TimelineUniqueId("_divider1".to_string()));
+    pub static ref DIVIDER2_KEY: MessageKey =
+        MessageKey::new(5, TimelineUniqueId("_divider2".to_string()));
+}
+
+#[derive(Debug)]
+pub struct MockMessage {
+    text: &'static str,
+    content: TimelineItemContent,
+    sender: OwnedUserId,
+    id: TimelineEventItemId,
+}
+
+impl Deref for MockMessage {
+    type Target = EventTimelineItem;
+
+    fn deref(&self) -> &Self::Target {
+        unimplemented!()
+    }
+}
+
+impl MessageExt for MockMessage {
+    fn content(&self) -> &TimelineItemContent {
+        &self.content
+    }
+
+    fn sender(&self) -> &UserId {
+        &self.sender
+    }
+
+    fn sender_profile(&self) -> &TimelineDetails<Profile> {
+        &TimelineDetails::Pending
+    }
+
+    fn message_timestamp(&self) -> MessageTimeStamp {
+        unimplemented!()
+    }
+
+    fn identifier(&self) -> TimelineEventItemId {
+        self.id.clone()
+    }
+
+    fn is_local_echo(&self) -> bool {
+        matches!(self.identifier(), TimelineEventItemId::TransactionId(_))
+    }
+
+    fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)> {
+        vec![].into_iter()
+    }
+
+    fn is_edited(&self) -> bool {
+        false
+    }
+
+    // --- overrides ---
+
+    fn body(&self) -> Cow<'_, str> {
+        Cow::Borrowed(self.text)
+    }
+    fn image_preview(&self) -> Option<&MediaSource> {
+        None
+    }
+}
+
+impl MockMessage {
+    pub fn event_id(&self) -> Option<&EventId> {
+        None
+    }
+}
+
+#[derive(Debug)]
+pub struct MockMessageItem {
+    id: TimelineUniqueId,
+    /// Either a message or a date divider
+    inner: Option<MockMessage>,
+}
+
+impl Deref for MockMessageItem {
+    type Target = TimelineItem;
+
+    fn deref(&self) -> &Self::Target {
+        unimplemented!()
+    }
+}
+
+impl TimelineItemExt for MockMessageItem {
+    fn item(&self) -> &TimelineItem {
+        unimplemented!()
+    }
+
+    fn sender(&self) -> Option<&UserId> {
+        self.inner.as_ref().map(|inner| inner.sender())
+    }
+
+    fn show_with_preview<'a>(
+        &'a self,
+        prev_sender: Option<&UserId>,
+        selected: bool,
+        vwctx: &ViewportContext<MessageCursor>,
+        info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
+    ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
+        match &self.inner {
+            Some(inner) => {
+                inner.show_with_preview(prev_sender, selected, vwctx, info, settings, previews)
+            },
+            None => {
+                let time = DateTime::from_timestamp_nanos(0).format("%A, %B %d %Y").to_string();
+                let padding = vwctx.get_width().saturating_sub(time.len());
+                let leading = space_span(padding / 2, Style::default());
+                let trailing = space_span(padding.saturating_sub(padding / 2), Style::default());
+                let time = Span::styled(time, Style::new().add_modifier(StyleModifier::BOLD));
+
+                (Line::from(vec![leading, time, trailing]).into(), [None, None])
+            },
+        }
+    }
+}
+
+impl MockMessageItem {
+    fn new_message(
+        content: &'static str,
+        sender: OwnedUserId,
+        key: &MessageKey,
+        id: TimelineEventItemId,
+    ) -> Self {
+        Self {
+            id: key.id().to_owned(),
+            inner: Some(MockMessage {
+                id,
+                sender,
+                text: content,
+                content: TimelineItemContent::MsgLike(MsgLikeContent::redacted()),
+            }),
+        }
+    }
+
+    pub fn unique_id(&self) -> &TimelineUniqueId {
+        &self.id
+    }
+
+    pub fn as_event(&self) -> Option<&Message> {
+        self.inner.as_ref()
+    }
+
+    pub fn as_virtual(&self) -> Option<VirtualTimelineItem> {
+        if self.inner.is_none() {
+            Some(VirtualTimelineItem::DateDivider(MilliSecondsSinceUnixEpoch(0u16.into())))
+        } else {
+            None
+        }
+    }
+
+    pub fn is_timeline_start(&self) -> bool {
+        false
+    }
 }
 
 pub fn user_style(user: &str) -> Style {
     user_style_from_color(user_color(user))
 }
 
-pub fn mock_room1_message(
-    content: RoomMessageEventContent,
-    sender: OwnedUserId,
-    key: MessageKey,
-) -> Message {
-    let timestamp = key.0.as_millis().unwrap();
-    let event_id = key.1;
+pub fn mock_message1() -> MockMessageItem {
+    let content = "writhe";
 
-    let event = serde_json::from_value(Value::Object(Map::from_iter([
-        ("type".to_owned(), Value::String("m.room.message".into())),
-        ("content".to_owned(), serde_json::to_value(&content).unwrap()),
-        ("event_id".to_owned(), serde_json::to_value(&event_id).unwrap()),
-        ("sender".to_owned(), serde_json::to_value(&sender).unwrap()),
-        ("origin_server_ts".to_owned(), serde_json::to_value(timestamp).unwrap()),
-        ("room_id".to_owned(), serde_json::to_value(&*TEST_ROOM1_ID).unwrap()),
-    ])))
-    .unwrap();
-
-    Message::new(MessageEvent::Original(event), sender, timestamp.into())
+    MockMessageItem::new_message(content, TEST_USER1.clone(), &MSG1_KEY, MSG1_EVID.clone())
 }
 
-pub fn mock_message1() -> Message {
-    let content = RoomMessageEventContent::text_plain("writhe");
-    let content = MessageEvent::Local(MSG1_EVID.clone(), content.into());
+pub fn mock_message2() -> MockMessageItem {
+    let content = "helium";
 
-    Message::new(content, TEST_USER1.clone(), MSG1_KEY.0)
+    MockMessageItem::new_message(content, TEST_USER2.clone(), &MSG2_KEY, MSG2_EVID.clone())
 }
 
-pub fn mock_message2() -> Message {
-    let content = RoomMessageEventContent::text_plain("helium");
+pub fn mock_message3() -> MockMessageItem {
+    let content = "this\nis\na\nmultiline\nmessage";
 
-    mock_room1_message(content, TEST_USER2.clone(), MSG2_KEY.clone())
+    MockMessageItem::new_message(content, TEST_USER2.clone(), &MSG3_KEY, MSG3_EVID.clone())
 }
 
-pub fn mock_message3() -> Message {
-    let content = RoomMessageEventContent::text_plain("this\nis\na\nmultiline\nmessage");
+pub fn mock_message4() -> MockMessageItem {
+    let content = "help";
 
-    mock_room1_message(content, TEST_USER2.clone(), MSG3_KEY.clone())
+    MockMessageItem::new_message(content, TEST_USER1.clone(), &MSG4_KEY, MSG4_EVID.clone())
 }
 
-pub fn mock_message4() -> Message {
-    let content = RoomMessageEventContent::text_plain("help");
+pub fn mock_message5() -> MockMessageItem {
+    let content = "character";
 
-    mock_room1_message(content, TEST_USER1.clone(), MSG4_KEY.clone())
+    MockMessageItem::new_message(content, TEST_USER2.clone(), &MSG5_KEY, MSG5_EVID.clone())
 }
 
-pub fn mock_message5() -> Message {
-    let content = RoomMessageEventContent::text_plain("character");
-
-    mock_room1_message(content, TEST_USER2.clone(), MSG4_KEY.clone())
-}
-
-pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
-    let mut keys = HashMap::new();
-
-    keys.insert(MSG1_EVID.clone(), EventLocation::Message(None, MSG1_KEY.clone()));
-    keys.insert(MSG2_EVID.clone(), EventLocation::Message(None, MSG2_KEY.clone()));
-    keys.insert(MSG3_EVID.clone(), EventLocation::Message(None, MSG3_KEY.clone()));
-    keys.insert(MSG4_EVID.clone(), EventLocation::Message(None, MSG4_KEY.clone()));
-    keys.insert(MSG5_EVID.clone(), EventLocation::Message(None, MSG5_KEY.clone()));
-
-    keys
-}
-
-pub fn mock_messages() -> Messages {
-    let mut messages = Messages::main();
-
-    messages.insert(MSG1_KEY.clone(), mock_message1());
-    messages.insert(MSG2_KEY.clone(), mock_message2());
-    messages.insert(MSG3_KEY.clone(), mock_message3());
-    messages.insert(MSG4_KEY.clone(), mock_message4());
-    messages.insert(MSG5_KEY.clone(), mock_message5());
-
-    messages
-}
-
-pub fn mock_room() -> RoomInfo {
-    let mut room = RoomInfo::default();
-    room.name = Some("Watercooler Discussion".into());
-    room.keys = mock_keys();
-    *room.get_thread_mut(None) = mock_messages();
-    room
+pub fn mock_messages() -> Vector<Arc<MockMessageItem>> {
+    [
+        MockMessageItem { id: DIVIDER1_KEY.id().to_owned(), inner: None }.into(),
+        mock_message2().into(),
+        mock_message3().into(),
+        mock_message4().into(),
+        mock_message5().into(),
+        MockMessageItem { id: DIVIDER2_KEY.id().to_owned(), inner: None }.into(),
+        mock_message1().into(),
+    ]
+    .into()
 }
 
 pub fn mock_dirs() -> DirectoryValues {
@@ -164,7 +311,6 @@ pub fn mock_dirs() -> DirectoryValues {
         data: PathBuf::new(),
         logs: PathBuf::new(),
         downloads: None,
-        image_previews: PathBuf::new(),
     }
 }
 
@@ -235,7 +381,7 @@ pub async fn mock_store() -> ProgramStore {
     let (tx, _) = unbounded_channel();
     let homeserver = Url::parse("https://localhost").unwrap();
     let client = matrix_sdk::Client::new(homeserver).await.unwrap();
-    let worker = Requester { tx, client };
+    let worker = Requester { tx, client, store: Weak::new() };
 
     let mut store = ChatStore::new(worker, mock_settings());
 
@@ -247,10 +393,11 @@ pub async fn mock_store() -> ProgramStore {
     store.presences.get_or_default(TEST_USER5.clone());
 
     let room_id = TEST_ROOM1_ID.clone();
-    let info = mock_room();
+    let mut info = RoomInfo::mock_new();
+
+    info.get_thread_mut(None).unwrap().set_messages(mock_messages());
 
     store.rooms.insert(room_id.clone(), info);
     store.names.insert(TEST_ROOM1_ALIAS.to_string(), room_id);
-
     ProgramStore::new(store)
 }

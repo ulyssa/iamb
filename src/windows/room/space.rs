@@ -6,10 +6,7 @@ use std::time::{Duration, Instant};
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::ruma::OwnedSpaceChildOrder;
-use matrix_sdk::{
-    room::Room as MatrixRoom,
-    ruma::{OwnedRoomId, RoomId},
-};
+use matrix_sdk::{room::Room as MatrixRoom, ruma::OwnedRoomId};
 
 use modalkit::prelude::{EditInfo, InfoMessage};
 use ratatui::{
@@ -38,7 +35,7 @@ use crate::base::{
     SpaceAction,
 };
 
-use crate::windows::{room_fields_cmp, RoomItem, RoomLikeItem};
+use crate::windows::{room_fields_cmp, GenericChatItem, ItemTypeTag, RoomLikeItem};
 
 const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -46,7 +43,7 @@ const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 pub struct SpaceState {
     room_id: OwnedRoomId,
     room: MatrixRoom,
-    list: ListState<RoomItem, IambInfo>,
+    list: ListState<GenericChatItem, IambInfo>,
     last_fetch: Option<Instant>,
 }
 
@@ -60,18 +57,8 @@ impl SpaceState {
         SpaceState { room_id, room, list, last_fetch }
     }
 
-    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
-        if let Some(room) = store.application.worker.client.get_room(self.id()) {
-            self.room = room;
-        }
-    }
-
     pub fn room(&self) -> &MatrixRoom {
         &self.room
-    }
-
-    pub fn id(&self) -> &RoomId {
-        &self.room_id
     }
 
     pub fn dup(&self, store: &mut ProgramStore) -> Self {
@@ -164,7 +151,7 @@ impl TerminalCursor for SpaceState {
 }
 
 impl Deref for SpaceState {
-    type Target = ListState<RoomItem, IambInfo>;
+    type Target = ListState<GenericChatItem, IambInfo>;
 
     fn deref(&self) -> &Self::Target {
         &self.list
@@ -211,13 +198,29 @@ impl StatefulWidget for Space<'_> {
                 Ok(members) => {
                     let mut items = members
                         .into_iter()
-                        .filter_map(|id| {
-                            let (room, _, tags) =
-                                self.store.application.worker.get_room(id.clone()).ok()?;
-                            let room_info = std::sync::Arc::new((room, tags));
+                        .filter_map(|room_id| self.store.application.rooms.get(&room_id))
+                        .filter_map(|info| {
+                            let room_id = info.room().room_id();
+                            let is_dm = if self
+                                .store
+                                .application
+                                .sync_info
+                                .dms
+                                .iter()
+                                .any(|id| id == room_id)
+                            {
+                                ItemTypeTag::Dm
+                            } else {
+                                ItemTypeTag::Room
+                            };
 
-                            if id != state.room_id {
-                                Some(RoomItem::new(room_info, self.store))
+                            if room_id != state.room_id {
+                                Some(GenericChatItem::new(
+                                    info.room().clone(),
+                                    Some(info),
+                                    self.store,
+                                    is_dm,
+                                ))
                             } else {
                                 None
                             }

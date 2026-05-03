@@ -2,8 +2,7 @@
 //!
 //! The types defined here get used throughout iamb.
 use std::borrow::Cow;
-use std::collections::hash_map::IntoIter;
-use std::collections::{BTreeSet, HashMap, HashSet};
+use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::hash::Hash;
@@ -12,7 +11,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
-use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::sync::UnreadNotificationsCount;
+use matrix_sdk::{RoomDisplayName, RoomState};
+use matrix_sdk_ui::timeline::TimelineEventItemId;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -35,31 +36,14 @@ use matrix_sdk::{
     encryption::verification::SasVerification,
     room::Room as MatrixRoom,
     ruma::{
-        events::{
-            reaction::ReactionEvent,
-            relation::{Replacement, Thread},
-            room::encrypted::RoomEncryptedEvent,
-            room::message::{
-                OriginalRoomMessageEvent,
-                Relation,
-                RoomMessageEvent,
-                RoomMessageEventContent,
-                RoomMessageEventContentWithoutRelation,
-            },
-            room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
-            tag::{TagName, Tags},
-            AnySyncStateEvent,
-            MessageLikeEvent,
-        },
+        events::tag::{TagName, Tags},
         presence::PresenceState,
         EventId,
         OwnedEventId,
         OwnedRoomId,
         OwnedUserId,
         RoomId,
-        UserId,
     },
-    RoomState as MatrixRoomState,
 };
 
 use modalkit::{
@@ -90,11 +74,11 @@ use modalkit::{
 };
 
 use crate::config::ImagePreviewProtocolValues;
-use crate::message::ImageStatus;
+use crate::message::html::StyleTree;
 use crate::notifications::NotificationHandle;
-use crate::preview::{source_from_event, spawn_insert_preview};
+use crate::preview::PreviewManager;
 use crate::{
-    message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
+    message::{MessageTimeStamp, Messages},
     worker::Requester,
     ApplicationSettings,
 };
@@ -113,8 +97,6 @@ fn is_mxid_char(c: char) -> bool {
         c >= '0' && c <= '9' ||
         ":-./@_#!".contains(c);
 }
-
-const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
 
 /// Empty type used solely to implement [ApplicationInfo].
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -683,12 +665,6 @@ pub type AsyncProgramStore = Arc<AsyncMutex<ProgramStore>>;
 /// Alias for an action result.
 pub type IambResult<T> = UIResult<T, IambInfo>;
 
-/// Reaction events for some message.
-///
-/// The event identifier used as a key here is the ID for the reaction, and not for the message
-/// it's reacting to.
-pub type MessageReactions = HashMap<OwnedEventId, (String, OwnedUserId)>;
-
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
 pub enum IambError {
@@ -730,6 +706,10 @@ pub enum IambError {
     /// A failure from the Matrix client.
     #[error("Matrix client error: {0}")]
     Matrix(#[from] matrix_sdk::Error),
+
+    /// A failure from the Timeline.
+    #[error("Room timeline error: {0}")]
+    Timeline(#[from] matrix_sdk_ui::timeline::Error),
 
     /// A failure in the sled storage.
     #[error("Matrix client storage error: {0}")]
@@ -823,54 +803,16 @@ impl From<IambError> for UIError<IambInfo> {
 
 impl ApplicationError for IambError {}
 
-/// Status for tracking how much room scrollback we've fetched.
-#[derive(Default)]
-pub enum RoomFetchStatus {
-    /// Room history has been completely fetched.
-    Done,
-
-    /// More room history can be fetched.
-    HaveMore(String),
-
-    /// We have not yet started fetching history for this room.
-    #[default]
-    NotStarted,
-}
-
-/// Indicates where an [EventId] lives in the [ChatStore].
-pub enum EventLocation {
-    /// The [EventId] belongs to a message.
-    ///
-    /// If the first argument is [None], then it's part of the main scrollback. When [Some],
-    /// it specifies which thread it's in reply to.
-    Message(Option<OwnedEventId>, MessageKey),
-
-    /// The [EventId] belongs to a reaction to the given event.
-    Reaction(OwnedEventId),
-
-    /// The [EventId] belongs to a state event in the main timeline of the room.
-    State(MessageKey),
-}
-
-impl EventLocation {
-    fn to_message_key(&self) -> Option<&MessageKey> {
-        if let EventLocation::Message(_, key) = self {
-            Some(key)
-        } else {
-            None
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnreadInfo {
-    pub(crate) unread: bool,
+    pub(crate) notifications: u64,
+    pub(crate) highlights: u64,
     pub(crate) latest: Option<MessageTimeStamp>,
 }
 
 impl UnreadInfo {
     pub fn is_unread(&self) -> bool {
-        self.unread
+        self.notifications > 0 || self.highlights > 0
     }
 
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
@@ -878,76 +820,88 @@ impl UnreadInfo {
     }
 }
 
+type UserWithName = (OwnedUserId, Option<String>);
+
 /// Information about room's the user's joined.
 pub struct RoomInfo {
-    /// The display name for this room.
-    pub name: Option<String>,
-
     /// The tags placed on this room.
     pub tags: Option<Tags>,
-
-    /// A map of event IDs to where they are stored in this struct.
-    pub keys: HashMap<OwnedEventId, EventLocation>,
 
     /// The messages loaded for this room.
     messages: Messages,
 
-    /// A map of read markers to display on different events.
-    pub event_receipts: HashMap<ReceiptThread, HashMap<OwnedEventId, HashSet<OwnedUserId>>>,
-    /// A map of the most recent read marker for each user.
-    ///
-    /// Every receipt in this map should also have an entry in [`event_receipts`](`Self::event_receipts`),
-    /// however not every user has an entry. If a user's most recent receipt is
-    /// older than the oldest loaded event, that user will not be included.
-    pub user_receipts: HashMap<ReceiptThread, HashMap<OwnedUserId, OwnedEventId>>,
-    /// A map of message identifiers to a map of reaction events.
-    pub reactions: HashMap<OwnedEventId, MessageReactions>,
-
     /// A map of message identifiers to thread replies.
     threads: HashMap<OwnedEventId, Messages>,
 
-    /// Whether the scrollback for this room is currently being fetched.
-    pub fetching: bool,
-
-    /// Where to continue fetching from when we continue loading scrollback history.
-    pub fetch_id: RoomFetchStatus,
-
-    /// The time that we last fetched scrollback for this room.
-    pub fetch_last: Option<Instant>,
-
     /// Users currently typing in this room, and when we received notification of them doing so.
-    pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
-
-    /// The display names for users in this room.
-    pub display_names: HashMap<OwnedUserId, String>,
+    pub users_typing: Option<(Instant, Vec<UserWithName>)>,
 
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
-}
 
-impl Default for RoomInfo {
-    fn default() -> Self {
-        Self {
-            messages: Messages::new(ReceiptThread::Main),
-
-            name: Default::default(),
-            tags: Default::default(),
-            keys: Default::default(),
-            event_receipts: Default::default(),
-            user_receipts: Default::default(),
-            reactions: Default::default(),
-            threads: Default::default(),
-            fetching: Default::default(),
-            fetch_id: Default::default(),
-            fetch_last: Default::default(),
-            users_typing: Default::default(),
-            display_names: Default::default(),
-            draw_last: Default::default(),
-        }
-    }
+    /// Cache of html representation for messages in this room
+    pub htmls: HashMap<TimelineEventItemId, StyleTree>,
 }
 
 impl RoomInfo {
+    /// This must be called while `store` is locked and must be inserted in the store before it is
+    /// unlocked.
+    pub async fn new(
+        room: &MatrixRoom,
+        store: AsyncProgramStore,
+    ) -> Result<Self, matrix_sdk_ui::timeline::Error> {
+        let (messages, htmls) = Messages::new(room, None, store).await?;
+
+        Ok(Self {
+            messages,
+            htmls,
+
+            tags: Default::default(),
+            threads: Default::default(),
+            users_typing: Default::default(),
+            draw_last: Default::default(),
+        })
+    }
+
+    #[cfg(test)]
+    pub fn mock_new() -> Self {
+        Self {
+            messages: Messages::mock_new(),
+
+            htmls: Default::default(),
+            tags: Default::default(),
+            threads: Default::default(),
+            users_typing: Default::default(),
+            draw_last: Default::default(),
+        }
+    }
+
+    /// Create the thread if it didn't already exists.
+    ///
+    /// Returns whether a new thread was created.
+    pub fn ensure_thread(
+        &mut self,
+        root: &EventId,
+        worker: &Requester,
+    ) -> Result<bool, matrix_sdk_ui::timeline::Error> {
+        if self.threads.contains_key(root) {
+            return Ok(false);
+        }
+
+        let (messages, htmls) = worker.get_messages(self.room().clone(), Some(root.to_owned()))?;
+
+        self.htmls.extend(htmls);
+
+        self.threads.insert(root.to_owned(), messages);
+
+        Ok(true)
+    }
+
+    #[inline]
+    pub fn room(&self) -> &MatrixRoom {
+        self.messages.timeline().room()
+    }
+
     pub fn get_thread(&self, root: Option<&EventId>) -> Option<&Messages> {
         if let Some(thread_root) = root {
             self.threads.get(thread_root)
@@ -956,385 +910,29 @@ impl RoomInfo {
         }
     }
 
-    pub fn get_thread_mut(&mut self, root: Option<OwnedEventId>) -> &mut Messages {
+    pub fn get_thread_mut(&mut self, root: Option<&EventId>) -> Option<&mut Messages> {
         if let Some(thread_root) = root {
-            self.threads
-                .entry(thread_root.clone())
-                .or_insert_with(|| Messages::thread(thread_root))
+            self.threads.get_mut(thread_root)
         } else {
-            &mut self.messages
+            Some(&mut self.messages)
         }
-    }
-
-    /// Get the event for the last message in a thread (or the thread root if there are no
-    /// in-thread replies yet).
-    ///
-    /// This returns `None` if the event identifier isn't in the room.
-    pub fn get_thread_last<'a>(
-        &'a self,
-        thread_root: &OwnedEventId,
-    ) -> Option<&'a OriginalRoomMessageEvent> {
-        let last = self.threads.get(thread_root).and_then(|t| Some(t.last_key_value()?.1));
-
-        let msg = if let Some(last) = last {
-            &last.event
-        } else if let EventLocation::Message(_, key) = self.keys.get(thread_root)? {
-            let msg = self.messages.get(key)?;
-            &msg.event
-        } else {
-            return None;
-        };
-
-        if let MessageEvent::Original(ev) = &msg {
-            Some(ev)
-        } else {
-            None
-        }
-    }
-
-    /// Get the reactions and their counts for a message.
-    pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize)> {
-        if let Some(reacts) = self.reactions.get(event_id) {
-            let mut counts = HashMap::new();
-
-            let mut seen_user_reactions = BTreeSet::new();
-
-            for (key, user) in reacts.values() {
-                if !seen_user_reactions.contains(&(key, user)) {
-                    seen_user_reactions.insert((key, user));
-                    let count = counts.entry(key.as_str()).or_default();
-                    *count += 1;
-                }
-            }
-
-            let mut reactions = counts.into_iter().collect::<Vec<_>>();
-            reactions.sort();
-
-            reactions
-        } else {
-            vec![]
-        }
-    }
-
-    /// Map an event identifier to its [MessageKey].
-    pub fn get_message_key(&self, event_id: &EventId) -> Option<&MessageKey> {
-        self.keys.get(event_id)?.to_message_key()
-    }
-
-    /// Get an event for an identifier.
-    pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
-        self.messages.get(self.get_message_key(event_id)?)
-    }
-
-    /// Get an event for an identifier as mutable.
-    pub fn get_event_mut(&mut self, event_id: &EventId) -> Option<&mut Message> {
-        self.messages.get_mut(self.keys.get(event_id)?.to_message_key()?)
-    }
-
-    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
-        let Some(redacts) = &ev.redacts else {
-            return;
-        };
-
-        match self.keys.get(redacts) {
-            None => return,
-            Some(EventLocation::State(key)) => {
-                if let Some(msg) = self.messages.get_mut(key) {
-                    let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev);
-                }
-            },
-            Some(EventLocation::Message(None, key)) => {
-                if let Some(msg) = self.messages.get_mut(key) {
-                    let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev);
-                }
-            },
-            Some(EventLocation::Message(Some(root), key)) => {
-                if let Some(thread) = self.threads.get_mut(root) {
-                    if let Some(msg) = thread.get_mut(key) {
-                        let ev = SyncRoomRedactionEvent::Original(ev);
-                        msg.redact(ev);
-                    }
-                }
-            },
-            Some(EventLocation::Reaction(event_id)) => {
-                if let Some(reactions) = self.reactions.get_mut(event_id) {
-                    reactions.remove(redacts);
-                }
-
-                self.keys.remove(redacts);
-            },
-        }
-    }
-
-    /// Insert a reaction to a message.
-    pub fn insert_reaction(&mut self, react: ReactionEvent) {
-        match react {
-            MessageLikeEvent::Original(react) => {
-                let rel_id = react.content.relates_to.event_id;
-                let key = react.content.relates_to.key;
-
-                let message = self.reactions.entry(rel_id.clone()).or_default();
-                let event_id = react.event_id;
-                let user_id = react.sender;
-
-                message.insert(event_id.clone(), (key, user_id));
-
-                let loc = EventLocation::Reaction(rel_id);
-                self.keys.insert(event_id, loc);
-            },
-            MessageLikeEvent::Redacted(_) => {
-                return;
-            },
-        }
-    }
-
-    /// Insert an edit.
-    pub fn insert_edit(&mut self, msg: Replacement<RoomMessageEventContentWithoutRelation>) {
-        let event_id = msg.event_id;
-        let new_msgtype = msg.new_content;
-
-        let Some(EventLocation::Message(thread, key)) = self.keys.get(&event_id) else {
-            return;
-        };
-
-        let source = if let Some(thread) = thread {
-            self.threads
-                .entry(thread.clone())
-                .or_insert_with(|| Messages::thread(thread.clone()))
-        } else {
-            &mut self.messages
-        };
-
-        let Some(msg) = source.get_mut(key) else {
-            return;
-        };
-
-        match &mut msg.event {
-            MessageEvent::Original(orig) => {
-                orig.content.apply_replacement(new_msgtype);
-            },
-            MessageEvent::Local(_, content) => {
-                content.apply_replacement(new_msgtype);
-            },
-            MessageEvent::Redacted(_, _) |
-            MessageEvent::State(_) |
-            MessageEvent::EncryptedOriginal(_) |
-            MessageEvent::EncryptedRedacted(_) => {
-                return;
-            },
-        }
-
-        msg.html = msg.event.html();
-    }
-
-    pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
-        let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
-
-        let loc = EventLocation::State(key.clone());
-        self.keys.insert(event_id, loc);
-        self.messages.insert_message(key, msg);
     }
 
     /// Indicates whether this room has unread messages.
     pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
-        let last_message = self.messages.last_key_value();
+        let UnreadNotificationsCount { highlight_count, notification_count } =
+            self.room().unread_notification_counts();
 
-        let last_receipt = self
-            .user_receipts
-            .get(&ReceiptThread::Main)
-            .and_then(|receipts| receipts.get(&settings.profile.user_id));
-        let last_receipt = last_receipt.as_ref().and_then(|event_id| {
-            match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
-                EventLocation::Reaction(_) => None,
-            }
-        });
+        let latest = self.messages.last_message(settings).map(|item| item.timestamp().into());
 
-        let last_unthreaded = self
-            .user_receipts
-            .get(&ReceiptThread::Unthreaded)
-            .and_then(|receipts| receipts.get(&settings.profile.user_id));
-        let last_unthreaded = last_unthreaded.as_ref().and_then(|event_id| {
-            match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
-                EventLocation::Reaction(_) => None,
-            }
-        });
-
-        let last_receipt = std::cmp::max(last_receipt, last_unthreaded);
-
-        match (last_message, last_receipt) {
-            (Some(((ts, _), _)), Some((read_ts, _))) => {
-                UnreadInfo { unread: ts > read_ts, latest: Some(*ts) }
-            },
-            (Some(((ts, _), _)), None) => {
-                // If we've never loaded/generated a room's receipt (example,
-                // a newly joined but never viewed room), show it as unread.
-                UnreadInfo { unread: true, latest: Some(*ts) }
-            },
-            (None, _) => UnreadInfo::default(),
+        UnreadInfo {
+            notifications: self.room().num_unread_notifications().max(notification_count),
+            highlights: self.room().num_unread_mentions().max(highlight_count),
+            latest,
         }
     }
 
-    /// Inserts events that couldn't be decrypted into the scrollback.
-    pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
-        let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
-
-        self.keys.insert(event_id, EventLocation::Message(None, key.clone()));
-        self.messages.insert(key, msg.into());
-    }
-
-    /// Insert a new message.
-    pub fn insert_message(&mut self, msg: RoomMessageEvent) {
-        let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
-
-        let loc = EventLocation::Message(None, key.clone());
-        self.keys.insert(event_id, loc);
-        self.messages.insert_message(key, msg);
-    }
-
-    fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
-        let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
-
-        let replies = self
-            .threads
-            .entry(thread_root.clone())
-            .or_insert_with(|| Messages::thread(thread_root.clone()));
-        let loc = EventLocation::Message(Some(thread_root), key.clone());
-        self.keys.insert(event_id, loc);
-        replies.insert_message(key, msg);
-    }
-
-    /// Insert a new message event.
-    pub fn insert(&mut self, msg: RoomMessageEvent) {
-        match msg {
-            RoomMessageEvent::Original(OriginalRoomMessageEvent {
-                content: RoomMessageEventContent { relates_to: Some(ref relates_to), .. },
-                ..
-            }) => {
-                match relates_to {
-                    Relation::Replacement(repl) => self.insert_edit(repl.clone()),
-                    Relation::Thread(Thread { event_id, .. }) => {
-                        let event_id = event_id.clone();
-                        self.insert_thread(msg, event_id);
-                    },
-                    Relation::Reply { .. } => self.insert_message(msg),
-                    _ => self.insert_message(msg),
-                }
-            },
-            _ => self.insert_message(msg),
-        }
-    }
-
-    /// Insert a new message event, and spawn a task for image-preview if it has an image
-    /// attachment.
-    pub fn insert_with_preview(
-        &mut self,
-        room_id: OwnedRoomId,
-        store: AsyncProgramStore,
-        picker: Option<Picker>,
-        ev: RoomMessageEvent,
-        settings: &mut ApplicationSettings,
-        media: matrix_sdk::Media,
-    ) {
-        let source = picker.and_then(|_| source_from_event(&ev));
-        self.insert(ev);
-
-        if let Some((event_id, source)) = source {
-            if let (Some(msg), Some(image_preview)) =
-                (self.get_event_mut(&event_id), &settings.tunables.image_preview)
-            {
-                msg.image_preview = ImageStatus::Downloading(image_preview.size.clone());
-                spawn_insert_preview(
-                    store,
-                    room_id,
-                    event_id,
-                    source,
-                    media,
-                    settings.dirs.image_previews.clone(),
-                )
-            }
-        }
-    }
-
-    /// Indicates whether we've recently fetched scrollback for this room.
-    pub fn recently_fetched(&self) -> bool {
-        self.fetch_last.is_some_and(|i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
-    }
-
-    fn clear_receipt(&mut self, thread: &ReceiptThread, user_id: &OwnedUserId) -> Option<()> {
-        let old_event_id =
-            self.user_receipts.get(thread).and_then(|receipts| receipts.get(user_id))?;
-        let old_thread = self.event_receipts.get_mut(thread)?;
-        let old_receipts = old_thread.get_mut(old_event_id)?;
-        old_receipts.remove(user_id);
-
-        if old_receipts.is_empty() {
-            old_thread.remove(old_event_id);
-        }
-        if old_thread.is_empty() {
-            self.event_receipts.remove(thread);
-        }
-
-        None
-    }
-
-    pub fn set_receipt(
-        &mut self,
-        thread: ReceiptThread,
-        user_id: OwnedUserId,
-        event_id: OwnedEventId,
-    ) {
-        self.clear_receipt(&thread, &user_id);
-        self.event_receipts
-            .entry(thread.clone())
-            .or_default()
-            .entry(event_id.clone())
-            .or_default()
-            .insert(user_id.clone());
-        self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
-    }
-
-    pub fn fully_read(&mut self, user_id: &UserId) {
-        let Some(((_, event_id), _)) = self.messages.last_key_value() else {
-            return;
-        };
-
-        self.set_receipt(ReceiptThread::Main, user_id.to_owned(), event_id.clone());
-
-        let newest = self
-            .threads
-            .iter()
-            .filter_map(|(thread_id, messages)| {
-                let thread = ReceiptThread::Thread(thread_id.to_owned());
-
-                messages
-                    .last_key_value()
-                    .map(|((_, event_id), _)| (thread, event_id.to_owned()))
-            })
-            .collect::<Vec<_>>();
-
-        for (thread, event_id) in newest.into_iter() {
-            self.set_receipt(thread, user_id.to_owned(), event_id.clone());
-        }
-    }
-
-    pub fn receipts<'a>(
-        &'a self,
-        user_id: &'a UserId,
-    ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
-        self.user_receipts
-            .iter()
-            .filter_map(move |(t, rs)| rs.get(user_id).map(|r| (t, r)))
-    }
-
-    fn get_typers(&self) -> &[OwnedUserId] {
+    fn get_typers(&self) -> &[UserWithName] {
         if let Some((t, users)) = &self.users_typing {
             if t.elapsed() < Duration::from_secs(4) {
                 return users.as_ref();
@@ -1353,13 +951,20 @@ impl RoomInfo {
         match n {
             0 => Line::from(vec![]),
             1 => {
-                let user = settings.get_user_span(typers[0].as_ref(), self);
+                let user_id = &typers[0].0;
+                let display_name = typers[0].1.as_deref();
+                let user = settings.get_user_span(user_id, display_name);
 
                 Line::from(vec![user, Span::from(" is typing...")])
             },
             2 => {
-                let user1 = settings.get_user_span(typers[0].as_ref(), self);
-                let user2 = settings.get_user_span(typers[1].as_ref(), self);
+                let user_id = &typers[0].0;
+                let display_name = typers[0].1.as_deref();
+                let user1 = settings.get_user_span(user_id, display_name);
+
+                let user_id = &typers[1].0;
+                let display_name = typers[1].1.as_deref();
+                let user2 = settings.get_user_span(user_id, display_name);
 
                 Line::from(vec![
                     user1,
@@ -1373,14 +978,14 @@ impl RoomInfo {
         }
     }
 
-    /// Update typing information for this room.
-    pub fn set_typing(&mut self, user_ids: Vec<OwnedUserId>) {
-        self.users_typing = (Instant::now(), user_ids).into();
+    /// Update typing information for this room including the user display name.
+    pub fn set_typing(&mut self, users: Vec<UserWithName>) {
+        self.users_typing = (Instant::now(), users).into();
     }
 
     /// Create a [Rect] that displays what users are typing.
     pub fn render_typing(
-        &mut self,
+        &self,
         area: Rect,
         buf: &mut Buffer,
         settings: &ApplicationSettings,
@@ -1405,20 +1010,8 @@ impl RoomInfo {
         return top;
     }
 
-    /// Checks if a given user has reacted with the given emoji on the given event
-    pub fn user_reactions_contains(
-        &mut self,
-        user_id: &UserId,
-        event_id: &EventId,
-        emoji: &str,
-    ) -> bool {
-        if let Some(reactions) = self.reactions.get(event_id) {
-            reactions
-                .values()
-                .any(|(annotation, user)| annotation == emoji && user == user_id)
-        } else {
-            false
-        }
+    pub fn get_html(&self, id: &TimelineEventItemId) -> Option<&StyleTree> {
+        self.htmls.get(id)
     }
 }
 
@@ -1482,90 +1075,16 @@ fn picker_from_settings(settings: &ApplicationSettings) -> Option<Picker> {
 #[derive(Default)]
 pub struct SyncInfo {
     /// Spaces that the user is a member of.
-    pub spaces: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub spaces: Vec<OwnedRoomId>,
 
-    /// Rooms that the user is a member of.
-    pub rooms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    /// Normal rooms that the user is a member of.
+    pub rooms: Vec<OwnedRoomId>,
 
     /// DMs that the user is a member of.
-    pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
-}
+    pub dms: Vec<OwnedRoomId>,
 
-impl SyncInfo {
-    pub fn rooms(&self) -> impl Iterator<Item = &RoomId> {
-        self.rooms.iter().map(|r| r.0.room_id())
-    }
-
-    pub fn dms(&self) -> impl Iterator<Item = &RoomId> {
-        self.dms.iter().map(|r| r.0.room_id())
-    }
-
-    pub fn chats(&self) -> impl Iterator<Item = &RoomId> {
-        self.rooms().chain(self.dms())
-    }
-}
-
-static MESSAGE_NEED_TTL: u8 = 30;
-
-#[derive(Debug, PartialEq)]
-/// Load messages until the event is loaded or `ttl` loads are exceeded
-pub struct MessageNeed {
-    pub event_id: OwnedEventId,
-    pub ttl: u8,
-}
-
-#[derive(Default, Debug, PartialEq)]
-pub struct Need {
-    pub members: bool,
-    pub messages: Option<Vec<MessageNeed>>,
-}
-
-/// Things that need loading for different rooms.
-#[derive(Default)]
-pub struct RoomNeeds {
-    needs: HashMap<OwnedRoomId, Need>,
-}
-
-impl RoomNeeds {
-    /// Mark a room for needing to load members.
-    pub fn need_members(&mut self, room_id: OwnedRoomId) {
-        self.needs.entry(room_id).or_default().members = true;
-    }
-
-    /// Mark a room for needing to load messages.
-    pub fn need_messages(&mut self, room_id: OwnedRoomId) {
-        self.needs.entry(room_id).or_default().messages.get_or_insert_default();
-    }
-
-    /// Mark a room for needing to load messages until the given message is loaded or a retry limit
-    /// is exceeded.
-    pub fn need_message(&mut self, room_id: OwnedRoomId, event_id: OwnedEventId) {
-        let messages = &mut self.needs.entry(room_id).or_default().messages.get_or_insert_default();
-
-        messages.push(MessageNeed { event_id, ttl: MESSAGE_NEED_TTL });
-    }
-
-    pub fn need_messages_all(&mut self, room_id: OwnedRoomId, message_needs: Vec<MessageNeed>) {
-        self.needs
-            .entry(room_id)
-            .or_default()
-            .messages
-            .get_or_insert_default()
-            .extend(message_needs);
-    }
-
-    pub fn rooms(&self) -> usize {
-        self.needs.len()
-    }
-}
-
-impl IntoIterator for RoomNeeds {
-    type Item = (OwnedRoomId, Need);
-    type IntoIter = IntoIter<OwnedRoomId, Need>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.needs.into_iter()
-    }
+    /// Rooms that the user is invited to.
+    pub invites: Vec<OwnedRoomId>,
 }
 
 /// The main application state.
@@ -1591,17 +1110,14 @@ pub struct ChatStore {
     /// Settings for the current profile loaded from config file.
     pub settings: ApplicationSettings,
 
-    /// Set of rooms that need more messages loaded in their scrollback.
-    pub need_load: RoomNeeds,
-
     /// [CompletionMap] of Emoji shortcodes.
     pub emojis: CompletionMap<String, &'static Emoji>,
 
     /// Information gathered by the background thread.
     pub sync_info: SyncInfo,
 
-    /// Image preview "protocol" picker.
-    pub picker: Option<Picker>,
+    /// Rendered image previews.
+    pub previews: PreviewManager,
 
     /// Last draw time, used to match with RoomInfo's draw_last.
     pub draw_curr: Option<Instant>,
@@ -1627,7 +1143,7 @@ impl ChatStore {
         ChatStore {
             worker,
             settings,
-            picker,
+            previews: PreviewManager::new(picker),
             cmds: crate::commands::setup_commands(),
             emojis: emoji_map(),
 
@@ -1636,7 +1152,6 @@ impl ChatStore {
             rooms: Default::default(),
             presences: Default::default(),
             verifications: Default::default(),
-            need_load: Default::default(),
             sync_info: Default::default(),
             draw_curr: None,
             ring_bell: false,
@@ -1649,30 +1164,36 @@ impl ChatStore {
     pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
         let room = self.worker.client.get_room(room_id)?;
 
-        if room.state() == MatrixRoomState::Joined {
+        if room.state() == RoomState::Joined {
             Some(room)
         } else {
             None
         }
     }
 
+    pub fn join_room(&mut self, name: String) -> IambResult<&mut RoomInfo> {
+        let room = self.worker.join_room(name.clone())?;
+
+        let room_id = room.room_id().to_owned();
+
+        if self.rooms.get(&room_id).is_none() {
+            let info = self.worker.create_room_info(room).map_err(IambError::from)?;
+            self.rooms.insert(room_id.clone(), info);
+
+            self.names.insert(name, room_id.clone());
+        }
+
+        Ok(self.rooms.get_mut(&room_id).expect("value should have been inserted"))
+    }
+
     /// Get the title for a room.
     pub fn get_room_title(&self, room_id: &RoomId) -> String {
-        self.rooms
-            .get(room_id)
-            .and_then(|i| i.name.as_ref())
-            .map(String::from)
-            .unwrap_or_else(|| "Untitled Matrix Room".to_string())
-    }
-
-    /// Get the [RoomInfo] for a given room identifier.
-    pub fn get_room_info(&mut self, room_id: OwnedRoomId) -> &mut RoomInfo {
-        self.rooms.get_or_default(room_id)
-    }
-
-    /// Set the name for a room.
-    pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
-        self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
+        self.worker
+            .client
+            .get_room(room_id)
+            .and_then(|room| room.cached_display_name())
+            .unwrap_or(RoomDisplayName::Empty)
+            .to_string()
     }
 
     /// Insert a new E2EE verification.
@@ -1714,6 +1235,9 @@ pub enum IambId {
 
     /// The `:unreads` window.
     UnreadList,
+
+    /// The `:invites` window.
+    InviteList,
 }
 
 impl Display for IambId {
@@ -1735,6 +1259,7 @@ impl Display for IambId {
             IambId::Welcome => f.write_str("iamb://welcome"),
             IambId::ChatList => f.write_str("iamb://chats"),
             IambId::UnreadList => f.write_str("iamb://unreads"),
+            IambId::InviteList => f.write_str("iamb://invites"),
         }
     }
 }
@@ -1873,6 +1398,13 @@ impl Visitor<'_> for IambIdVisitor {
 
                 Ok(IambId::UnreadList)
             },
+            Some("invites") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://invites takes no path"));
+                }
+
+                Ok(IambId::UnreadList)
+            },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
         }
@@ -1943,6 +1475,9 @@ pub enum IambBufferId {
 
     /// The `:unreads` window.
     UnreadList,
+
+    /// The `:invits` window.
+    InviteList,
 }
 
 impl IambBufferId {
@@ -1959,6 +1494,7 @@ impl IambBufferId {
             IambBufferId::Welcome => IambId::Welcome,
             IambBufferId::ChatList => IambId::ChatList,
             IambBufferId::UnreadList => IambId::UnreadList,
+            IambBufferId::InviteList => IambId::InviteList,
         };
 
         Some(id)
@@ -2003,6 +1539,7 @@ impl Completer<IambInfo> for IambCompleter {
             IambBufferId::Welcome => vec![],
             IambBufferId::ChatList => vec![],
             IambBufferId::UnreadList => vec![],
+            IambBufferId::InviteList => vec![],
         }
     }
 }
@@ -2185,83 +1722,26 @@ pub mod tests {
     use ratatui::style::Color;
     use serde_json::{Map, Value};
 
-    fn create_reaction_event(
-        content: &ReactionEventContent,
-        event_id: &str,
-        sender: &str,
-    ) -> ReactionEvent {
-        serde_json::from_value(Value::Object(Map::from_iter([
-            ("type".to_owned(), Value::String("m.reaction".into())),
-            ("content".to_owned(), serde_json::to_value(content).unwrap()),
-            ("event_id".to_owned(), serde_json::to_value(event_id).unwrap()),
-            ("sender".to_owned(), Value::String(sender.into())),
-            (
-                "origin_server_ts".to_owned(),
-                serde_json::to_value(MilliSecondsSinceUnixEpoch::now()).unwrap(),
-            ),
-            ("room_id".to_owned(), Value::String("!foo:example.org".into())),
-        ])))
-        .unwrap()
-    }
-
-    #[test]
-    fn multiple_identical_reactions() {
-        let mut info = RoomInfo::default();
-
-        let content = ReactionEventContent::new(Annotation::new(
-            owned_event_id!("$my_reaction"),
-            "🏠".to_owned(),
-        ));
-
-        for i in 0..3 {
-            let event_id = format!("$house_{i}");
-            let react = create_reaction_event(&content, &event_id, "@foo:example.com");
-            info.insert_reaction(react);
-        }
-
-        let content = ReactionEventContent::new(Annotation::new(
-            owned_event_id!("$my_reaction"),
-            "🙂".to_owned(),
-        ));
-
-        for i in 0..2 {
-            let event_id = format!("$smile_{i}");
-            let react = create_reaction_event(&content, &event_id, "@foo:example.com");
-            info.insert_reaction(react);
-        }
-
-        for i in 2..4 {
-            let event_id = format!("$smile2_{i}");
-            let react = create_reaction_event(&content, &event_id, "@bar:example.com");
-            info.insert_reaction(react);
-        }
-
-        assert_eq!(info.get_reactions(&owned_event_id!("$my_reaction")), vec![
-            ("🏠", 1),
-            ("🙂", 2)
-        ]);
-    }
-
     #[test]
     fn test_typing_spans() {
-        let mut info = RoomInfo::default();
+        let mut info = RoomInfo::mock_new();
         let settings = mock_settings();
 
         let users0 = vec![];
-        let users1 = vec![TEST_USER1.clone()];
-        let users2 = vec![TEST_USER1.clone(), TEST_USER2.clone()];
+        let users1 = vec![(TEST_USER1.clone(), None)];
+        let users2 = vec![(TEST_USER1.clone(), None), (TEST_USER2.clone(), None)];
         let users4 = vec![
-            TEST_USER1.clone(),
-            TEST_USER2.clone(),
-            TEST_USER3.clone(),
-            TEST_USER4.clone(),
+            (TEST_USER1.clone(), None),
+            (TEST_USER2.clone(), None),
+            (TEST_USER3.clone(), None),
+            (TEST_USER4.clone(), None),
         ];
         let users5 = vec![
-            TEST_USER1.clone(),
-            TEST_USER2.clone(),
-            TEST_USER3.clone(),
-            TEST_USER4.clone(),
-            TEST_USER5.clone(),
+            (TEST_USER1.clone(), None),
+            (TEST_USER2.clone(), None),
+            (TEST_USER3.clone(), None),
+            (TEST_USER4.clone(), None),
+            (TEST_USER5.clone(), None),
         ];
 
         // Nothing set.
@@ -2308,7 +1788,7 @@ pub mod tests {
         assert_eq!(info.get_typing_spans(&settings), Line::from("Many people are typing..."));
 
         // Test that USER5 gets rendered using the configured color and name.
-        info.set_typing(vec![TEST_USER5.clone()]);
+        info.set_typing(vec![(TEST_USER5.clone(), Some("USER 5".into()))]);
         assert!(info.users_typing.is_some());
         assert_eq!(
             info.get_typing_spans(&settings),
@@ -2317,21 +1797,6 @@ pub mod tests {
                 Span::from(" is typing...")
             ])
         );
-    }
-
-    #[test]
-    fn test_need_load() {
-        let room_id = TEST_ROOM1_ID.clone();
-
-        let mut need_load = RoomNeeds::default();
-
-        need_load.need_messages(room_id.clone());
-        need_load.need_members(room_id.clone());
-
-        assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
-            room_id,
-            Need { members: true, messages: Some(Vec::new()) }
-        )],);
     }
 
     #[tokio::test]
@@ -2401,7 +1866,7 @@ pub mod tests {
         let text = EditRope::from("abo hor inv");
         let mut cursor = Cursor::new(0, 11);
         let res = complete_cmdbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec!["invite"]);
+        assert_eq!(res, vec!["invite", "invites"]);
 
         let text = EditRope::from("abo hor invite \n");
         let mut cursor = Cursor::new(0, 15);

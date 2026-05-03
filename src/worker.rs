@@ -5,32 +5,36 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
-use std::ops::{Deref, DerefMut};
+use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::sync::{Arc, Weak};
+use std::time::Duration;
 
-use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
+use matrix_sdk::room::Invite;
+use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
+use matrix_sdk::ruma::events::fully_read::FullyReadEventContent;
+use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::room::message::{MessageType, OriginalSyncRoomMessageEvent};
+use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::OwnedEventId;
+use matrix_sdk_ui::timeline::TimelineEventItemId;
+use ratatui_image::picker::Picker;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::Semaphore;
+use tokio::sync::{Mutex, Semaphore};
 use tokio::task::JoinHandle;
-use tracing::{error, warn};
+use tracing::error;
 use url::Url;
 
 use matrix_sdk::{
     authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
-    deserialized_responses::DisplayName,
-    encryption::{
-        verification::{SasVerification, Verification},
-        BackupDownloadStrategy,
-        EncryptionSettings,
-    },
+    encryption::verification::{SasVerification, Verification},
+    encryption::{BackupDownloadStrategy, EncryptionSettings},
     event_handler::Ctx,
     reqwest,
-    room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
+    room::{Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
             filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
@@ -50,57 +54,39 @@ use matrix_sdk::{
                 VerificationMethod,
             },
             presence::PresenceEvent,
-            reaction::ReactionEventContent,
-            receipt::{ReceiptEventContent, ReceiptThread, ReceiptType},
-            room::{
-                encryption::RoomEncryptionEventContent,
-                member::OriginalSyncRoomMemberEvent,
-                message::{MessageType, RoomMessageEventContent},
-                name::RoomNameEventContent,
-                redaction::OriginalSyncRoomRedactionEvent,
-            },
-            tag::Tags,
+            room::encryption::RoomEncryptionEventContent,
             typing::SyncTypingEvent,
-            AnyMessageLikeEvent,
-            AnySyncStateEvent,
-            AnyTimelineEvent,
             InitialStateEvent,
-            SyncEphemeralRoomEvent,
-            SyncMessageLikeEvent,
-            SyncStateEvent,
         },
         room::RoomType,
         serde::Raw,
-        EventId,
-        OwnedEventId,
         OwnedRoomId,
         OwnedRoomOrAliasId,
         OwnedUserId,
-        RoomId,
     },
     Client,
     ClientBuildError,
     Error as MatrixError,
-    RoomDisplayName,
     RoomMemberships,
 };
 
 use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
-use crate::base::MessageNeed;
+use crate::base::RoomInfo;
+use crate::config::ImagePreviewSize;
+use crate::message::html::StyleTree;
+use crate::message::Messages;
 use crate::notifications::register_notifications;
+use crate::preview::load_image;
 use crate::{
     base::{
         AsyncProgramStore,
-        ChatStore,
         CreateRoomFlags,
         CreateRoomType,
         IambError,
         IambResult,
         ProgramStore,
-        RoomFetchStatus,
-        RoomInfo,
         VerifyAction,
     },
     ApplicationSettings,
@@ -114,9 +100,6 @@ const DEFAULT_ENCRYPTION_SETTINGS: EncryptionSettings = EncryptionSettings {
 
 const IAMB_DEVICE_NAME: &str = "iamb";
 const IAMB_USER_AGENT: &str = "iamb";
-const MIN_MSG_LOAD: u32 = 50;
-
-type MessageFetchResult = IambResult<(Option<String>, Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>)>;
 
 fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
@@ -131,7 +114,7 @@ pub async fn create_room(
     room_alias_name: Option<String>,
     rt: CreateRoomType,
     flags: CreateRoomFlags,
-) -> IambResult<OwnedRoomId> {
+) -> IambResult<MatrixRoom> {
     let mut creation_content = None;
     let mut initial_state = vec![];
     let mut is_direct = false;
@@ -192,308 +175,120 @@ pub async fn create_room(
         }
     }
 
-    return Ok(resp.room_id().to_owned());
+    return Ok(resp);
 }
 
-async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id: &EventId) {
-    let receipts = match room
-        .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
-        .await
-    {
-        Ok(receipts) => receipts,
-        Err(e) => {
-            tracing::warn!(?event_id, "failed to get event receipts: {e}");
-            return;
+async fn refresh_matrix_room(room: &MatrixRoom, store: &mut ProgramStore) {
+    if let Some(alias) = room.canonical_alias() {
+        store
+            .application
+            .names
+            .insert(alias.to_string(), room.room_id().to_owned());
+    }
+
+    match room.members(RoomMemberships::ACTIVE).await {
+        Ok(members) => {
+            for member in members {
+                store.application.presences.get_or_default(member.user_id().to_owned());
+            }
         },
+        Err(err) => {
+            tracing::warn!(room_id = ?room.room_id(), "cannot load room members: {err}");
+        },
+    }
+
+    // pre-compute name
+    if let Err(err) = room.display_name().await {
+        tracing::warn!(room_id = ?room.room_id(), "cannot load room name: {err}");
     };
-
-    for (user_id, _) in receipts {
-        info.set_receipt(ReceiptThread::Main, user_id, event_id.to_owned());
-    }
-}
-
-#[derive(Debug)]
-enum Plan {
-    Messages(OwnedRoomId, Option<String>, Vec<MessageNeed>),
-    Members(OwnedRoomId),
-}
-
-async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
-    let mut locked = store.lock().await;
-    let ChatStore { need_load, rooms, .. } = &mut locked.application;
-    let mut plan = Vec::with_capacity(need_load.rooms() * 2);
-
-    for (room_id, need) in std::mem::take(need_load).into_iter() {
-        if let Some(message_need) = need.messages {
-            let info = rooms.get_or_default(room_id.clone());
-
-            if !info.recently_fetched() && !info.fetching {
-                info.fetch_last = Instant::now().into();
-                info.fetching = true;
-
-                let fetch_id = match &info.fetch_id {
-                    RoomFetchStatus::Done => continue,
-                    RoomFetchStatus::HaveMore(fetch_id) => Some(fetch_id.clone()),
-                    RoomFetchStatus::NotStarted => None,
-                };
-
-                plan.push(Plan::Messages(room_id.to_owned(), fetch_id, message_need));
-            }
-        }
-        if need.members {
-            plan.push(Plan::Members(room_id.to_owned()));
-        }
-    }
-
-    return plan;
-}
-
-async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permits: &Semaphore) {
-    let permit = permits.acquire().await;
-    match plan {
-        Plan::Messages(room_id, fetch_id, message_need) => {
-            let limit = MIN_MSG_LOAD;
-            let client = client.clone();
-            let store_clone = store.clone();
-
-            let res = load_older_one(&client, &room_id, fetch_id, limit).await;
-            let mut locked = store.lock().await;
-            load_insert(room_id, res, locked.deref_mut(), store_clone, message_need);
-        },
-        Plan::Members(room_id) => {
-            let res = members_load(client, &room_id).await;
-            let mut locked = store.lock().await;
-            members_insert(room_id, res, locked.deref_mut());
-        },
-    }
-    drop(permit);
-}
-
-async fn load_older_one(
-    client: &Client,
-    room_id: &RoomId,
-    fetch_id: Option<String>,
-    limit: u32,
-) -> MessageFetchResult {
-    if let Some(room) = client.get_room(room_id) {
-        // Update cached encryption state. This is a noop if the state is already cached.
-        let _ = room.request_encryption_state().await;
-
-        let mut opts = match &fetch_id {
-            Some(id) => MessagesOptions::backward().from(id.as_str()),
-            None => MessagesOptions::backward(),
-        };
-        opts.limit = limit.into();
-
-        let Messages { end, chunk, .. } = room.messages(opts).await.map_err(IambError::from)?;
-
-        let mut msgs = vec![];
-
-        for ev in chunk.into_iter() {
-            let Ok(msg) = ev.into_raw().deserialize() else {
-                continue;
-            };
-
-            let event_id = msg.event_id();
-            let receipts = match room
-                .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
-                .await
-            {
-                Ok(receipts) => receipts.into_iter().map(|(u, _)| u).collect(),
-                Err(e) => {
-                    tracing::warn!(?event_id, "failed to get event receipts: {e}");
-                    vec![]
-                },
-            };
-
-            let msg = msg.into_full_event(room_id.to_owned());
-            msgs.push((msg, receipts));
-        }
-
-        Ok((end, msgs))
-    } else {
-        Err(IambError::UnknownRoom(room_id.to_owned()).into())
-    }
-}
-
-fn load_insert(
-    room_id: OwnedRoomId,
-    res: MessageFetchResult,
-    locked: &mut ProgramStore,
-    store: AsyncProgramStore,
-    message_needs: Vec<MessageNeed>,
-) {
-    let ChatStore { presences, rooms, worker, picker, settings, .. } = &mut locked.application;
-    let info = rooms.get_or_default(room_id.clone());
-    info.fetching = false;
-    let client = &worker.client;
-
-    match res {
-        Ok((fetch_id, msgs)) => {
-            for (msg, receipts) in msgs.into_iter() {
-                let sender = msg.sender().to_owned();
-                let _ = presences.get_or_default(sender);
-
-                for user_id in receipts {
-                    info.set_receipt(ReceiptThread::Main, user_id, msg.event_id().to_owned());
-                }
-
-                match msg {
-                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
-                        info.insert_encrypted(msg);
-                    },
-                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
-                        info.insert_with_preview(
-                            room_id.clone(),
-                            store.clone(),
-                            picker.clone(),
-                            msg,
-                            settings,
-                            client.media(),
-                        );
-                    },
-                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
-                        info.insert_reaction(ev);
-                    },
-                    AnyTimelineEvent::MessageLike(_) => {
-                        continue;
-                    },
-                    AnyTimelineEvent::State(msg) => {
-                        if settings.tunables.state_event_display {
-                            info.insert_any_state(msg.into());
-                        }
-                    },
-                }
-            }
-
-            info.fetch_id = fetch_id.map_or(RoomFetchStatus::Done, RoomFetchStatus::HaveMore);
-
-            // check if more are needed
-            let needs: Vec<_> = message_needs
-                .into_iter()
-                .filter(|need| !info.keys.contains_key(&need.event_id) && need.ttl > 0)
-                .map(|mut need| {
-                    need.ttl -= 1;
-                    need
-                })
-                .collect();
-            if !needs.is_empty() {
-                locked.application.need_load.need_messages_all(room_id, needs);
-            }
-        },
-        Err(e) => {
-            warn!(room_id = room_id.as_str(), err = e.to_string(), "Failed to load older messages");
-
-            // Wait and try again.
-            locked.application.need_load.need_messages_all(room_id, message_needs);
-        },
-    }
-}
-
-async fn load_older(client: &Client, store: &AsyncProgramStore) -> usize {
-    // This is an arbitrary limit on how much work we do in parallel to avoid
-    // spawning too many tasks at startup and overwhelming the client. We
-    // should normally only surpass this limit at startup when doing an initial.
-    // fetch for each room.
-    const LIMIT: usize = 15;
-
-    // Plans are run in parallel. Any room *may* have several plans.
-    let plans = load_plans(store).await;
-    let permits = Semaphore::new(LIMIT);
-
-    plans
-        .into_iter()
-        .map(|plan| run_plan(client, store, plan, &permits))
-        .collect::<FuturesUnordered<_>>()
-        .count()
-        .await
-}
-
-async fn members_load(client: &Client, room_id: &RoomId) -> IambResult<Vec<RoomMember>> {
-    if let Some(room) = client.get_room(room_id) {
-        Ok(room
-            .members_no_sync(RoomMemberships::all())
-            .await
-            .map_err(IambError::from)?)
-    } else {
-        Err(IambError::UnknownRoom(room_id.to_owned()).into())
-    }
-}
-
-fn members_insert(
-    room_id: OwnedRoomId,
-    res: IambResult<Vec<RoomMember>>,
-    store: &mut ProgramStore,
-) {
-    if let Ok(members) = res {
-        let ChatStore { rooms, .. } = &mut store.application;
-        let info = rooms.get_or_default(room_id);
-
-        for member in members {
-            let user_id = member.user_id();
-            let display_name =
-                member.display_name().map_or(user_id.to_string(), |str| str.to_string());
-            info.display_names.insert(user_id.to_owned(), display_name);
-        }
-    }
-    // else ???
-}
-
-async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
-    // Load any pending older messages or members every 2 seconds.
-    let mut interval = tokio::time::interval(Duration::from_secs(2));
-
-    loop {
-        interval.tick().await;
-        load_older(client, store).await;
-    }
 }
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
-    let mut names = vec![];
-
     let mut spaces = vec![];
     let mut rooms = vec![];
     let mut dms = vec![];
-
-    for room in client.invited_rooms().into_iter() {
-        let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
-        let tags = room.tags().await.unwrap_or_default();
-
-        names.push((room.room_id().to_owned(), name));
-
-        if is_direct(&room).await {
-            dms.push(Arc::new((room, tags)));
-        } else if room.is_space() {
-            spaces.push(Arc::new((room, tags)));
-        } else {
-            rooms.push(Arc::new((room, tags)));
-        }
-    }
-
-    for room in client.joined_rooms().into_iter() {
-        let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
-        let tags = room.tags().await.unwrap_or_default();
-
-        names.push((room.room_id().to_owned(), name));
-
-        if is_direct(&room).await {
-            dms.push(Arc::new((room, tags)));
-        } else if room.is_space() {
-            spaces.push(Arc::new((room, tags)));
-        } else {
-            rooms.push(Arc::new((room, tags)));
-        }
-    }
+    let mut invites = vec![];
 
     let mut locked = store.lock().await;
+
+    for room in client.invited_rooms() {
+        refresh_matrix_room(&room, &mut locked).await;
+        invites.push(room.room_id().to_owned());
+    }
+
+    for room in client.joined_rooms() {
+        refresh_matrix_room(&room, &mut locked).await;
+
+        if room.is_space() {
+            spaces.push(room.room_id().to_owned());
+            continue;
+        }
+
+        if is_direct(&room).await {
+            dms.push(room.room_id().to_owned());
+        } else {
+            rooms.push(room.room_id().to_owned());
+        }
+
+        // only create `RoomInfo` for chats
+
+        if locked.application.rooms.get(room.room_id()).is_none() {
+            let info = match RoomInfo::new(&room, Arc::clone(store)).await {
+                Ok(info) => info,
+                Err(err) => {
+                    tracing::warn!(room_id = ?room.room_id(), "cannot create room info: {err}");
+                    continue;
+                },
+            };
+
+            match room.account_data_static::<FullyReadEventContent>().await {
+                Ok(Some(_)) => (),
+                Ok(None) => {
+                    // initialize with normal read marker
+                    if let Some((event_id, _)) = info
+                        .get_thread(None)
+                        .unwrap()
+                        .timeline()
+                        .latest_user_read_receipt(client.user_id().unwrap())
+                        .await
+                    {
+                        if let Err(err) = room
+                            .send_single_receipt(
+                                ReceiptType::FullyRead,
+                                ReceiptThread::Unthreaded,
+                                event_id,
+                            )
+                            .await
+                        {
+                            tracing::warn!(room_id = ?room.room_id(), "cannot set default fully_read marker: {err}");
+                        }
+                    }
+                },
+                Err(err) => {
+                    tracing::warn!(room_id = ?room.room_id(), "failed to load fully_read marker: {err}");
+                },
+            };
+
+            locked.application.rooms.insert(room.room_id().to_owned(), info);
+        }
+        let info = locked
+            .application
+            .rooms
+            .get_mut(room.room_id())
+            .expect("value should have been inserted");
+
+        match room.tags().await {
+            Ok(tags) => info.tags = tags,
+            Err(err) => {
+                tracing::warn!(room_id = ?room.room_id(), "cannot to load room tags: {err}");
+            },
+        }
+    }
+
     locked.application.sync_info.spaces = spaces;
     locked.application.sync_info.rooms = rooms;
     locked.application.sync_info.dms = dms;
-
-    for (room_id, name) in names {
-        locked.application.set_room_name(&room_id, &name);
-    }
+    locked.application.sync_info.invites = invites;
 }
 
 async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
@@ -502,57 +297,6 @@ async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
     loop {
         refresh_rooms(client, store).await;
         interval.tick().await;
-    }
-}
-
-async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
-    let mut interval = tokio::time::interval(Duration::from_secs(2));
-    let mut sent: HashMap<OwnedRoomId, HashMap<ReceiptThread, OwnedEventId>> = Default::default();
-
-    loop {
-        interval.tick().await;
-
-        let mut locked = store.lock().await;
-        let ChatStore { settings, open_notifications, rooms, .. } = &mut locked.application;
-        let user_id = &settings.profile.user_id;
-
-        let mut updates = Vec::new();
-        for room in client.joined_rooms() {
-            let room_id = room.room_id();
-            let Some(info) = rooms.get(room_id) else {
-                continue;
-            };
-
-            let changed = info.receipts(user_id).filter_map(|(thread, new_receipt)| {
-                let old_receipt = sent.get(room_id).and_then(|ts| ts.get(thread));
-                let changed = Some(new_receipt) != old_receipt;
-                if changed {
-                    open_notifications.remove(room_id);
-                }
-                changed.then(|| (room_id.to_owned(), thread.to_owned(), new_receipt.to_owned()))
-            });
-
-            updates.extend(changed);
-        }
-        drop(locked);
-
-        for (room_id, thread, new_receipt) in updates {
-            use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
-
-            let Some(room) = client.get_room(&room_id) else {
-                continue;
-            };
-
-            match room
-                .send_single_receipt(ReceiptType::Read, thread.to_owned(), new_receipt.clone())
-                .await
-            {
-                Ok(()) => {
-                    sent.entry(room_id).or_default().insert(thread, new_receipt);
-                },
-                Err(e) => tracing::warn!(?room_id, "Failed to set read receipt: {e}"),
-            }
-        }
     }
 }
 
@@ -573,20 +317,6 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
 
     // Populate sync_info with our initial set of rooms/dms/spaces.
     refresh_rooms(client, store).await;
-
-    // Insert Need::Messages to fetch accurate recent timestamps in the background.
-    let mut locked = store.lock().await;
-    let ChatStore { sync_info, need_load, .. } = &mut locked.application;
-
-    for room in sync_info.rooms.iter() {
-        let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.need_messages(room_id);
-    }
-
-    for room in sync_info.dms.iter() {
-        let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.need_messages(room_id);
-    }
 
     Ok(())
 }
@@ -621,20 +351,23 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
     return (reply, response);
 }
 
-pub type FetchedRoom = (MatrixRoom, RoomDisplayName, Option<Tags>);
+pub type MessagesResult =
+    Result<(Messages, HashMap<TimelineEventItemId, StyleTree>), matrix_sdk_ui::timeline::Error>;
 
 pub enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     Logout(String, ClientReply<IambResult<EditInfo>>),
-    GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
-    GetRoom(OwnedRoomId, ClientReply<IambResult<FetchedRoom>>),
-    JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
+    GetInviter(MatrixRoom, ClientReply<Result<Invite, matrix_sdk::Error>>),
+    GetMessages(MatrixRoom, Option<OwnedEventId>, ClientReply<MessagesResult>),
+    JoinRoom(String, ClientReply<IambResult<MatrixRoom>>),
+    CreateRoomInfo(MatrixRoom, ClientReply<Result<RoomInfo, matrix_sdk_ui::timeline::Error>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     TypingNotice(OwnedRoomId),
     Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
     VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
+    LoadImage(MediaSource, ImagePreviewSize, Arc<Picker>, Arc<Semaphore>),
 }
 
 impl Debug for WorkerTask {
@@ -658,15 +391,22 @@ impl Debug for WorkerTask {
             WorkerTask::GetInviter(invite, _) => {
                 f.debug_tuple("WorkerTask::GetInviter").field(invite).finish()
             },
-            WorkerTask::GetRoom(room_id, _) => {
-                f.debug_tuple("WorkerTask::GetRoom")
-                    .field(room_id)
+            WorkerTask::GetMessages(room, thread, _) => {
+                f.debug_tuple("WorkerTask::GetMessages")
+                    .field(&room.room_id())
+                    .field(thread)
                     .field(&format_args!("_"))
                     .finish()
             },
             WorkerTask::JoinRoom(s, _) => {
                 f.debug_tuple("WorkerTask::JoinRoom")
                     .field(s)
+                    .field(&format_args!("_"))
+                    .finish()
+            },
+            WorkerTask::CreateRoomInfo(room, _) => {
+                f.debug_tuple("WorkerTask::CreateRoomInfo")
+                    .field(room)
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -695,6 +435,14 @@ impl Debug for WorkerTask {
             WorkerTask::VerifyRequest(user_id, _) => {
                 f.debug_tuple("WorkerTask::VerifyRequest")
                     .field(user_id)
+                    .field(&format_args!("_"))
+                    .finish()
+            },
+            WorkerTask::LoadImage(source, size, _, _) => {
+                f.debug_tuple("WorkerTask::RenderImage")
+                    .field(source)
+                    .field(size)
+                    .field(&format_args!("_"))
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -757,6 +505,7 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
 pub struct Requester {
     pub client: Client,
     pub tx: UnboundedSender<WorkerTask>,
+    pub store: Weak<Mutex<ProgramStore>>,
 }
 
 impl Requester {
@@ -784,7 +533,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn get_inviter(&self, invite: MatrixRoom) -> IambResult<Option<RoomMember>> {
+    pub fn get_inviter(&self, invite: MatrixRoom) -> Result<Invite, matrix_sdk::Error> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::GetInviter(invite, reply)).unwrap();
@@ -792,18 +541,29 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn get_room(&self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
+    pub fn get_messages(&self, room: MatrixRoom, thread: Option<OwnedEventId>) -> MessagesResult {
         let (reply, response) = oneshot();
 
-        self.tx.send(WorkerTask::GetRoom(room_id, reply)).unwrap();
+        self.tx.send(WorkerTask::GetMessages(room, thread, reply)).unwrap();
 
         return response.recv();
     }
 
-    pub fn join_room(&self, name: String) -> IambResult<OwnedRoomId> {
+    pub fn join_room(&self, name: String) -> IambResult<MatrixRoom> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::JoinRoom(name, reply)).unwrap();
+
+        return response.recv();
+    }
+
+    pub fn create_room_info(
+        &self,
+        room: MatrixRoom,
+    ) -> Result<RoomInfo, matrix_sdk_ui::timeline::Error> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::CreateRoomInfo(room, reply)).unwrap();
 
         return response.recv();
     }
@@ -843,6 +603,16 @@ impl Requester {
 
         return response.recv();
     }
+
+    pub fn load_image(
+        &self,
+        source: MediaSource,
+        size: ImagePreviewSize,
+        picker: Arc<Picker>,
+        permits: Arc<Semaphore>,
+    ) {
+        self.tx.send(WorkerTask::LoadImage(source, size, picker, permits)).unwrap();
+    }
 }
 
 pub struct ClientWorker {
@@ -851,6 +621,9 @@ pub struct ClientWorker {
     client: Client,
     load_handle: Option<JoinHandle<()>>,
     sync_handle: Option<JoinHandle<()>>,
+
+    /// Take care when locking since worker commands are sent with the lock already hold
+    store: Option<AsyncProgramStore>,
 }
 
 impl ClientWorker {
@@ -863,13 +636,14 @@ impl ClientWorker {
             client: client.clone(),
             load_handle: None,
             sync_handle: None,
+            store: None,
         };
 
         tokio::spawn(async move {
             worker.work(rx).await;
         });
 
-        return Requester { client, tx };
+        return Requester { client, tx, store: Weak::new() };
     }
 
     async fn work(&mut self, mut rx: UnboundedReceiver<WorkerTask>) {
@@ -900,13 +674,17 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.join_room(room_id).await);
             },
+            WorkerTask::CreateRoomInfo(room, reply) => {
+                assert!(self.initialized);
+                reply.send(RoomInfo::new(&room, Arc::clone(self.store.as_ref().unwrap())).await);
+            },
             WorkerTask::GetInviter(invited, reply) => {
                 assert!(self.initialized);
-                reply.send(self.get_inviter(invited).await);
+                reply.send(invited.invite_details().await);
             },
-            WorkerTask::GetRoom(room_id, reply) => {
+            WorkerTask::GetMessages(room, thread, reply) => {
                 assert!(self.initialized);
-                reply.send(self.get_room(room_id).await);
+                reply.send(self.get_messages(room, thread).await);
             },
             WorkerTask::Login(style, reply) => {
                 assert!(self.initialized);
@@ -936,26 +714,47 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.verify_request(user_id).await);
             },
+            WorkerTask::LoadImage(source, size, picker, permits) => {
+                assert!(self.initialized);
+                tokio::spawn(load_image(
+                    self.store.clone().unwrap(),
+                    self.client.media(),
+                    source,
+                    picker,
+                    permits,
+                    size,
+                ));
+            },
         }
     }
 
     async fn init(&mut self, store: AsyncProgramStore) {
+        store.lock().await.application.worker.store = Arc::downgrade(&store);
         self.client.add_event_handler_context(store.clone());
 
         let _ = self.client.add_event_handler(
             |ev: SyncTypingEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
                 async move {
-                    let room_id = room.room_id().to_owned();
                     let mut locked = store.lock().await;
 
-                    let users = ev
-                        .content
-                        .user_ids
-                        .into_iter()
-                        .filter(|u| u != &locked.application.settings.profile.user_id)
-                        .collect();
+                    let mut users = vec![];
 
-                    locked.application.get_room_info(room_id).set_typing(users);
+                    for user_id in ev.content.user_ids {
+                        if user_id == locked.application.settings.profile.user_id {
+                            continue;
+                        }
+
+                        let display_name =
+                            room.get_member_no_sync(&user_id).await.ok().flatten().and_then(
+                                |member| member.display_name().map(|name| name.to_owned()),
+                            );
+
+                        users.push((user_id, display_name));
+                    }
+
+                    if let Some(info) = locked.application.rooms.get_mut(room.room_id()) {
+                        info.set_typing(users);
+                    }
                 }
             },
         );
@@ -969,170 +768,21 @@ impl ClientWorker {
                     }
                 });
 
-        let _ = self.client.add_event_handler(
-            |ev: SyncStateEvent<RoomNameEventContent>,
-             room: MatrixRoom,
-             store: Ctx<AsyncProgramStore>| {
-                async move {
-                    if let SyncStateEvent::Original(ev) = ev {
-                        let room_id = room.room_id().to_owned();
-                        let room_name = Some(ev.content.name);
-                        let mut locked = store.lock().await;
-                        let info = locked.application.rooms.get_or_default(room_id.clone());
-                        info.name = room_name;
-                    }
-                }
-            },
-        );
-
-        let _ = self.client.add_event_handler(
-            |ev: SyncMessageLikeEvent<RoomMessageEventContent>,
-             room: MatrixRoom,
-             client: Client,
-             store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let room_id = room.room_id();
-
-                    if let Some(msg) = ev.as_original() {
-                        if let MessageType::VerificationRequest(_) = msg.content.msgtype {
+        let _ =
+            self.client
+                .add_event_handler(|ev: OriginalSyncRoomMessageEvent, client: Client| {
+                    async move {
+                        if let MessageType::VerificationRequest(_) = ev.content.msgtype {
                             if let Some(request) = client
                                 .encryption()
-                                .get_verification_request(ev.sender(), ev.event_id())
+                                .get_verification_request(&ev.sender, &ev.event_id)
                                 .await
                             {
                                 request.accept().await.expect("Failed to accept request");
                             }
                         }
                     }
-
-                    let mut locked = store.lock().await;
-
-                    let sender = ev.sender().to_owned();
-                    let _ = locked.application.presences.get_or_default(sender);
-
-                    let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
-                    let info = rooms.get_or_default(room_id.to_owned());
-
-                    update_event_receipts(info, &room, ev.event_id()).await;
-
-                    let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_with_preview(
-                        room_id.to_owned(),
-                        store.clone(),
-                        picker.clone(),
-                        full_ev,
-                        settings,
-                        client.media(),
-                    );
-                }
-            },
-        );
-
-        let _ = self.client.add_event_handler(
-            |ev: SyncMessageLikeEvent<ReactionEventContent>,
-             room: MatrixRoom,
-             store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let room_id = room.room_id();
-
-                    let mut locked = store.lock().await;
-
-                    let sender = ev.sender().to_owned();
-                    let _ = locked.application.presences.get_or_default(sender);
-
-                    let info = locked.application.get_room_info(room_id.to_owned());
-                    update_event_receipts(info, &room, ev.event_id()).await;
-                    info.insert_reaction(ev.into_full_event(room_id.to_owned()));
-                }
-            },
-        );
-
-        let _ = self.client.add_event_handler(
-            |ev: SyncEphemeralRoomEvent<ReceiptEventContent>,
-             room: MatrixRoom,
-             store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let room_id = room.room_id();
-
-                    let mut locked = store.lock().await;
-
-                    let info = locked.application.get_room_info(room_id.to_owned());
-                    for (event_id, receipts) in ev.content.0.into_iter() {
-                        let Some(receipts) = receipts.get(&ReceiptType::Read) else {
-                            continue;
-                        };
-                        for (user_id, rcpt) in receipts.iter() {
-                            info.set_receipt(
-                                rcpt.thread.clone(),
-                                user_id.to_owned(),
-                                event_id.clone(),
-                            );
-                        }
-                    }
-                }
-            },
-        );
-
-        if self.settings.tunables.state_event_display {
-            let _ = self.client.add_event_handler(
-                |ev: AnySyncStateEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
-                    async move {
-                        let room_id = room.room_id();
-                        let mut locked = store.lock().await;
-
-                        let info = locked.application.get_room_info(room_id.to_owned());
-                        info.insert_any_state(ev);
-                    }
-                },
-            );
-        }
-
-        let _ = self.client.add_event_handler(
-            |ev: OriginalSyncRoomRedactionEvent,
-             room: MatrixRoom,
-             store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let room_id = room.room_id();
-
-                    let mut locked = store.lock().await;
-                    let info = locked.application.get_room_info(room_id.to_owned());
-                    info.redact(ev);
-                }
-            },
-        );
-
-        let _ = self.client.add_event_handler(
-            |ev: OriginalSyncRoomMemberEvent,
-             room: MatrixRoom,
-             client: Client,
-             store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let room_id = room.room_id();
-                    let user_id = ev.state_key;
-
-                    let ambiguous_name = DisplayName::new(
-                        ev.content.displayname.as_deref().unwrap_or_else(|| user_id.as_str()),
-                    );
-                    let ambiguous = client
-                        .state_store()
-                        .get_users_with_display_name(room_id, &ambiguous_name)
-                        .await
-                        .map(|users| users.len() > 1)
-                        .unwrap_or_default();
-
-                    let mut locked = store.lock().await;
-                    let info = locked.application.get_room_info(room_id.to_owned());
-
-                    if ambiguous {
-                        info.display_names.remove(&user_id);
-                    } else if let Some(display) = ev.content.displayname {
-                        info.display_names.insert(user_id, display);
-                    } else {
-                        info.display_names.remove(&user_id);
-                    }
-                }
-            },
-        );
+                });
 
         let _ = self.client.add_event_handler(
             |ev: OriginalSyncKeyVerificationStartEvent,
@@ -1247,6 +897,8 @@ impl ClientWorker {
             },
         );
 
+        self.store = Some(store.clone());
+
         self.load_handle = tokio::spawn({
             let client = self.client.clone();
             let settings = self.settings.clone();
@@ -1256,11 +908,9 @@ impl ClientWorker {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
 
-                let load = load_older_forever(&client, &store);
-                let rcpt = send_receipts_forever(&client, &store);
                 let room = refresh_rooms_forever(&client, &store);
                 let notifications = register_notifications(&client, &settings, &store);
-                let ((), (), (), ()) = tokio::join!(load, rcpt, room, notifications);
+                let ((), ()) = tokio::join!(room, notifications);
             }
         })
         .into();
@@ -1312,9 +962,21 @@ impl ClientWorker {
 
         self.sync_handle = tokio::spawn(async move {
             loop {
-                let settings = SyncSettings::default();
+                let mut room = RoomEventFilter::default();
+                room.lazy_load_options =
+                    LazyLoadOptions::Enabled { include_redundant_members: false };
 
-                let _ = client.sync(settings).await;
+                let mut room_ev = RoomFilter::default();
+                room_ev.state = room;
+
+                let mut filter = FilterDefinition::default();
+                filter.room = room_ev;
+
+                let settings = SyncSettings::new().filter(filter.into());
+
+                if let Err(err) = client.sync(settings).await {
+                    tracing::warn!("sync error: {err}");
+                };
             }
         })
         .into();
@@ -1347,14 +1009,14 @@ impl ClientWorker {
         Ok(Some(InfoMessage::from("Successfully logged out")))
     }
 
-    async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<OwnedRoomId> {
+    async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<MatrixRoom> {
         for room in self.client.rooms() {
             if !is_direct(&room).await {
                 continue;
             }
 
             if room.get_member(user.as_ref()).await.map_err(IambError::from)?.is_some() {
-                return Ok(room.room_id().to_owned());
+                return Ok(room);
             }
         }
 
@@ -1373,27 +1035,19 @@ impl ClientWorker {
         })
     }
 
-    async fn get_inviter(&mut self, invited: MatrixRoom) -> IambResult<Option<RoomMember>> {
-        let details = invited.invite_details().await.map_err(IambError::from)?;
-
-        Ok(details.inviter)
+    async fn get_messages(
+        &mut self,
+        room: MatrixRoom,
+        thread: Option<OwnedEventId>,
+    ) -> MessagesResult {
+        let store = self.store.clone().unwrap();
+        Messages::new(&room, thread, store).await
     }
 
-    async fn get_room(&mut self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
-        if let Some(room) = self.client.get_room(&room_id) {
-            let name = room.cached_display_name().ok_or_else(|| IambError::UnknownRoom(room_id))?;
-            let tags = room.tags().await.map_err(IambError::from)?;
-
-            Ok((room, name, tags))
-        } else {
-            Err(IambError::UnknownRoom(room_id).into())
-        }
-    }
-
-    async fn join_room(&mut self, name: String) -> IambResult<OwnedRoomId> {
-        if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
+    async fn join_room(&mut self, name: String) -> IambResult<MatrixRoom> {
+        let room = if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
             match self.client.join_room_by_id_or_alias(&alias_id, &[]).await {
-                Ok(resp) => Ok(resp.room_id().to_owned()),
+                Ok(resp) => resp,
                 Err(e) => {
                     let msg = e.to_string();
                     let err = UIError::Failure(msg);
@@ -1402,13 +1056,20 @@ impl ClientWorker {
                 },
             }
         } else if let Ok(user) = OwnedUserId::try_from(name.as_str()) {
-            self.direct_message(user).await
+            self.direct_message(user).await?
         } else {
             let msg = format!("{:?} is not a valid room or user name", name.as_str());
             let err = UIError::Failure(msg);
 
             return Err(err);
-        }
+        };
+
+        // pre-compute name
+        if let Err(err) = room.display_name().await {
+            tracing::warn!(room_id = ?room.room_id(), "cannot load room name: {err}");
+        };
+
+        Ok(room)
     }
 
     async fn members(&mut self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
@@ -1433,7 +1094,9 @@ impl ClientWorker {
 
     async fn typing_notice(&mut self, room_id: OwnedRoomId) {
         if let Some(room) = self.client.get_room(room_id.as_ref()) {
-            let _ = room.typing_notice(true).await;
+            if let Err(err) = room.typing_notice(true).await {
+                tracing::warn!("cannot send typing notice: {err}");
+            };
         }
     }
 

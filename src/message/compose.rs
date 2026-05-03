@@ -12,7 +12,7 @@ use nom::{
 use matrix_sdk::ruma::events::room::message::{
     EmoteMessageEventContent,
     MessageType,
-    RoomMessageEventContent,
+    RoomMessageEventContentWithoutRelation,
     TextMessageEventContent,
 };
 
@@ -172,12 +172,12 @@ fn text_to_message_content(input: String) -> TextMessageEventContent {
     }
 }
 
-pub fn text_to_message(input: String) -> RoomMessageEventContent {
+pub fn text_to_message(input: String) -> RoomMessageEventContentWithoutRelation {
     let msg = parse_slash_command(input.as_str())
         .and_then(|(input, slash)| slash.to_message(input))
         .unwrap_or_else(|_| MessageType::Text(text_to_message_content(input)));
 
-    RoomMessageEventContent::new(msg)
+    RoomMessageEventContentWithoutRelation::new(msg)
 }
 
 #[cfg(test)]

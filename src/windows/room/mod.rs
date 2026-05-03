@@ -19,23 +19,21 @@ use matrix_sdk::{
                 name::RoomNameEventContent,
                 topic::RoomTopicEventContent,
             },
-            tag::{TagInfo, Tags},
+            tag::TagInfo,
         },
         OwnedEventId,
         OwnedRoomAliasId,
         OwnedUserId,
         RoomId,
     },
-    RoomDisplayName,
-    RoomState as MatrixRoomState,
 };
 
 use ratatui::{
     buffer::Buffer,
-    layout::{Alignment, Rect},
+    layout::Rect,
     style::{Modifier as StyleModifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Paragraph, StatefulWidget, Widget},
+    text::{Line, Span},
+    widgets::StatefulWidget,
 };
 
 use modalkit::actions::{
@@ -52,21 +50,24 @@ use modalkit::prelude::*;
 use modalkit::{editing::completion::CompletionList, keybindings::dialog::PromptYesNo};
 use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
 
-use crate::base::{
-    IambAction,
-    IambError,
-    IambId,
-    IambInfo,
-    IambResult,
-    MemberUpdateAction,
-    MessageAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomAction,
-    RoomField,
-    SendAction,
-    SpaceAction,
+use crate::{
+    base::{
+        IambAction,
+        IambError,
+        IambId,
+        IambInfo,
+        IambResult,
+        MemberUpdateAction,
+        MessageAction,
+        ProgramAction,
+        ProgramContext,
+        ProgramStore,
+        RoomAction,
+        RoomField,
+        SendAction,
+        SpaceAction,
+    },
+    windows::room::invite::InviteState,
 };
 
 use self::chat::ChatState;
@@ -75,6 +76,7 @@ use self::space::{Space, SpaceState};
 use std::convert::TryFrom;
 
 mod chat;
+mod invite;
 mod scrollback;
 mod space;
 
@@ -83,6 +85,7 @@ macro_rules! delegate {
         match $s {
             RoomState::Chat($id) => $e,
             RoomState::Space($id) => $e,
+            RoomState::Invite($id) => $e,
         }
     };
 }
@@ -122,6 +125,7 @@ fn hist_visibility_mode(name: impl Into<String>) -> IambResult<HistoryVisibility
 pub enum RoomState {
     Chat(Box<ChatState>),
     Space(Box<SpaceState>),
+    Invite(Box<InviteState>),
 }
 
 impl From<ChatState> for RoomState {
@@ -136,71 +140,34 @@ impl From<SpaceState> for RoomState {
     }
 }
 
+impl From<InviteState> for RoomState {
+    fn from(invite: InviteState) -> Self {
+        RoomState::Invite(Box::new(invite))
+    }
+}
+
 impl RoomState {
     pub fn new(
         room: MatrixRoom,
         thread: Option<OwnedEventId>,
-        name: RoomDisplayName,
-        tags: Option<Tags>,
         store: &mut ProgramStore,
-    ) -> Self {
-        let room_id = room.room_id().to_owned();
-        let info = store.application.get_room_info(room_id);
-        info.name = name.to_string().into();
-        info.tags = tags;
+    ) -> IambResult<Self> {
+        if room.state() == matrix_sdk::RoomState::Invited {
+            return Ok(InviteState::new(room, store)?.into());
+        }
 
         if room.is_space() {
-            SpaceState::new(room).into()
+            Ok(SpaceState::new(room).into())
         } else {
-            ChatState::new(room, thread, store).into()
+            Ok(ChatState::new(room, thread, store)?.into())
         }
     }
 
     pub fn thread(&self) -> Option<&OwnedEventId> {
         match self {
             RoomState::Chat(chat) => chat.thread(),
-            RoomState::Space(_) => None,
+            RoomState::Space(_) | RoomState::Invite(_) => None,
         }
-    }
-
-    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
-        match self {
-            RoomState::Chat(chat) => chat.refresh_room(store),
-            RoomState::Space(space) => space.refresh_room(store),
-        }
-    }
-
-    fn draw_invite(
-        &self,
-        invited: MatrixRoom,
-        area: Rect,
-        buf: &mut Buffer,
-        store: &mut ProgramStore,
-    ) {
-        let inviter = store.application.worker.get_inviter(invited.clone());
-
-        let name = match invited.canonical_alias() {
-            Some(alias) => alias.to_string(),
-            None => format!("{:?}", store.application.get_room_title(self.id())),
-        };
-
-        let mut invited = vec![Span::from(format!("You have been invited to join {name}"))];
-
-        if let Ok(Some(inviter)) = &inviter {
-            let info = store.application.rooms.get_or_default(self.id().to_owned());
-            invited.push(Span::from(" by "));
-            invited.push(store.application.settings.get_user_span(inviter.user_id(), info));
-        }
-
-        let l1 = Line::from(invited);
-        let l2 = Line::from(
-            "You can run `:invite accept` or `:invite reject` to accept or reject this invitation.",
-        );
-        let text = Text::from(vec![l1, l2]);
-
-        Paragraph::new(text).alignment(Alignment::Center).render(area, buf);
-
-        return;
     }
 
     pub async fn message_command(
@@ -212,6 +179,7 @@ impl RoomState {
         match self {
             RoomState::Chat(chat) => chat.message_command(act, ctx, store).await,
             RoomState::Space(_) => Err(IambError::NoSelectedMessage.into()),
+            RoomState::Invite(_) => Err(IambError::NotJoined.into()),
         }
     }
 
@@ -224,6 +192,7 @@ impl RoomState {
         match self {
             RoomState::Space(space) => space.space_command(act, ctx, store).await,
             RoomState::Chat(_) => Err(IambError::NoSelectedSpace.into()),
+            RoomState::Invite(_) => Err(IambError::NotJoined.into()),
         }
     }
 
@@ -236,6 +205,7 @@ impl RoomState {
         match self {
             RoomState::Chat(chat) => chat.send_command(act, ctx, store).await,
             RoomState::Space(_) => Err(IambError::NoSelectedRoom.into()),
+            RoomState::Invite(_) => Err(IambError::NotJoined.into()),
         }
     }
 
@@ -247,21 +217,17 @@ impl RoomState {
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         match act {
             RoomAction::InviteAccept => {
-                if let Some(room) = store.application.worker.client.get_room(self.id()) {
-                    let details = room.invite_details().await.map_err(IambError::from)?;
-                    let details = details.invitee.event().original_content();
-                    let is_direct = details.and_then(|ev| ev.is_direct).unwrap_or_default();
+                let Self::Invite(invited) = self else {
+                    return Err(IambError::NotInvited.into());
+                };
 
-                    room.join().await.map_err(IambError::from)?;
+                let info = store.application.join_room(invited.room().room_id().to_string())?;
 
-                    if is_direct {
-                        room.set_is_direct(true).await.map_err(IambError::from)?;
-                    }
+                let room = Self::new(info.room().clone(), None, store)?;
 
-                    Ok(vec![])
-                } else {
-                    Err(IambError::NotInvited.into())
-                }
+                *self = room;
+
+                Ok(vec![])
             },
             RoomAction::InviteReject => {
                 if let Some(room) = store.application.worker.client.get_room(self.id()) {
@@ -686,7 +652,7 @@ impl RoomState {
     pub fn focus_toggle(&mut self) {
         match self {
             RoomState::Chat(chat) => chat.focus_toggle(),
-            RoomState::Space(_) => return,
+            RoomState::Space(_) | RoomState::Invite(_) => return,
         }
     }
 
@@ -694,14 +660,12 @@ impl RoomState {
         match self {
             RoomState::Chat(chat) => chat.room(),
             RoomState::Space(space) => space.room(),
+            RoomState::Invite(invite) => invite.room(),
         }
     }
 
     pub fn id(&self) -> &RoomId {
-        match self {
-            RoomState::Chat(chat) => chat.id(),
-            RoomState::Space(space) => space.id(),
-        }
+        self.room().room_id()
     }
 }
 
@@ -758,34 +722,21 @@ impl TerminalCursor for RoomState {
 
 impl WindowOps<IambInfo> for RoomState {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
-        if self.room().state() == MatrixRoomState::Invited {
-            self.refresh_room(store);
-        }
-
-        if self.room().state() == MatrixRoomState::Invited {
-            self.draw_invite(self.room().clone(), area, buf, store);
-        }
-
         match self {
             RoomState::Chat(chat) => chat.draw(area, buf, focused, store),
             RoomState::Space(space) => {
                 Space::new(store).focus(focused).render(area, buf, space);
             },
+            RoomState::Invite(invite) => invite.draw(area, buf, focused, store),
         }
     }
 
     fn dup(&self, store: &mut ProgramStore) -> Self {
-        match self {
-            RoomState::Chat(chat) => RoomState::Chat(Box::new(chat.dup(store))),
-            RoomState::Space(space) => RoomState::Space(Box::new(space.dup(store))),
-        }
+        delegate!(self, w => w.dup(store).into())
     }
 
     fn close(&mut self, flags: CloseFlags, store: &mut ProgramStore) -> bool {
-        match self {
-            RoomState::Chat(chat) => chat.close(flags, store),
-            RoomState::Space(space) => space.close(flags, store),
-        }
+        delegate!(self, w => w.close(flags, store))
     }
 
     fn write(
@@ -794,31 +745,19 @@ impl WindowOps<IambInfo> for RoomState {
         flags: WriteFlags,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
-        match self {
-            RoomState::Chat(chat) => chat.write(path, flags, store),
-            RoomState::Space(space) => space.write(path, flags, store),
-        }
+        delegate!(self, w => w.write(path, flags, store))
     }
 
     fn get_completions(&self) -> Option<CompletionList> {
-        match self {
-            RoomState::Chat(chat) => chat.get_completions(),
-            RoomState::Space(space) => space.get_completions(),
-        }
+        delegate!(self, w => w.get_completions())
     }
 
     fn get_cursor_word(&self, style: &WordStyle) -> Option<String> {
-        match self {
-            RoomState::Chat(chat) => chat.get_cursor_word(style),
-            RoomState::Space(space) => space.get_cursor_word(style),
-        }
+        delegate!(self, w => w.get_cursor_word(style))
     }
 
     fn get_selected_word(&self) -> Option<String> {
-        match self {
-            RoomState::Chat(chat) => chat.get_selected_word(),
-            RoomState::Space(space) => space.get_selected_word(),
-        }
+        delegate!(self, w => w.get_selected_word())
     }
 }
 

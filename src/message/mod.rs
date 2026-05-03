@@ -2,42 +2,46 @@
 use std::borrow::Cow;
 use std::cmp::{Ord, Ordering, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
-use std::collections::BTreeMap;
+use std::collections::HashMap;
 use std::convert::{TryFrom, TryInto};
-use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
+use std::ops::{Bound, RangeBounds};
+use std::sync::Arc;
 
+use alternating_iter::AlternatingExt;
 use chrono::{DateTime, Local as LocalTz};
+use futures::StreamExt;
 use humansize::{format_size, DECIMAL};
-use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::receipt::{Receipt, ReceiptThread};
+use matrix_sdk::ruma::events::room::message::TextMessageEventContent;
+use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::{EventId, OwnedRoomId, RoomId, UserId};
+use matrix_sdk::Room;
+use matrix_sdk_ui::eyeball_im::{Vector, VectorDiff};
+use matrix_sdk_ui::timeline::{
+    EmbeddedEvent,
+    EventTimelineItem,
+    MsgLikeContent,
+    MsgLikeKind,
+    Profile,
+    ReactionsByKeyBySender,
+    RoomExt,
+    TimelineDetails,
+    TimelineEventItemId,
+    TimelineFocus,
+    TimelineItem,
+    TimelineItemContent,
+    TimelineItemKind,
+    TimelineReadReceiptTracking,
+    TimelineUniqueId,
+    VirtualTimelineItem,
+};
+use matrix_sdk_ui::Timeline;
+use ratatui::style::Color;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
-    events::{
-        relation::Thread,
-        room::{
-            encrypted::{
-                OriginalRoomEncryptedEvent,
-                RedactedRoomEncryptedEvent,
-                RoomEncryptedEvent,
-            },
-            message::{
-                FormattedBody,
-                MessageFormat,
-                MessageType,
-                OriginalRoomMessageEvent,
-                RedactedRoomMessageEvent,
-                Relation,
-                RoomMessageEvent,
-                RoomMessageEventContent,
-            },
-            redaction::SyncRoomRedactionEvent,
-        },
-        AnySyncStateEvent,
-        RedactedUnsigned,
-    },
-    EventId,
+    events::room::message::{FormattedBody, MessageFormat, MessageType},
     MilliSecondsSinceUnixEpoch,
     OwnedEventId,
     OwnedUserId,
@@ -54,7 +58,12 @@ use modalkit::editing::cursor::Cursor;
 use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
+use crate::base::{AsyncProgramStore, ChatStore, ProgramStore};
 use crate::config::ImagePreviewSize;
+use crate::message::html::StyleTreeNode;
+use crate::message::state::{body_cow_membership, body_cow_profile, html_membership, html_profile};
+use crate::preview::{ImageStatus, PreviewManager};
+use crate::util::TimelineDetailsExt;
 use crate::{
     base::RoomInfo,
     config::ApplicationSettings,
@@ -62,8 +71,9 @@ use crate::{
     util::{replace_emojis_in_str, space, space_span, take_width, wrapped_text},
 };
 
+pub(super) mod html;
+
 mod compose;
-mod html;
 mod printer;
 mod state;
 
@@ -71,50 +81,522 @@ pub use self::compose::text_to_message;
 use self::state::{body_cow_state, html_state};
 pub use html::TreeGenState;
 
-type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
+const MIN_MSG_LOAD: u16 = 50;
 
-pub type MessageKey = (MessageTimeStamp, OwnedEventId);
+pub(crate) type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
-pub struct Messages(BTreeMap<MessageKey, Message>, pub ReceiptThread);
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct MessageKey {
+    offset: isize,
+    id: TimelineUniqueId,
+}
 
-impl Deref for Messages {
-    type Target = BTreeMap<MessageKey, Message>;
-
-    fn deref(&self) -> &Self::Target {
-        &self.0
+impl MessageKey {
+    pub const fn new(offset: isize, id: TimelineUniqueId) -> Self {
+        Self { offset, id }
+    }
+    pub fn id(&self) -> &TimelineUniqueId {
+        &self.id
+    }
+    pub fn offset(&self) -> isize {
+        self.offset
     }
 }
 
-impl DerefMut for Messages {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.0
+impl Ord for MessageKey {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.offset.cmp(&other.offset)
     }
+}
+
+impl PartialOrd for MessageKey {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+fn handle_update(
+    room_id: &RoomId,
+    thread: Option<&EventId>,
+    update: VectorDiff<Arc<MessageItem>>,
+    store: &mut ProgramStore,
+) {
+    let ChatStore { rooms, settings, previews, worker, .. } = &mut store.application;
+
+    let Some(info) = rooms.get_mut(room_id) else {
+        tracing::warn!("received update for unknown room");
+        return;
+    };
+
+    match &update {
+        VectorDiff::PushFront { value } |
+        VectorDiff::PushBack { value } |
+        VectorDiff::Insert { value, .. } |
+        VectorDiff::Set { value, .. } => {
+            if let Some(item) = value.as_event() {
+                if let Some(html) = generate_html(item) {
+                    info.htmls.insert(item.identifier(), html);
+                } else {
+                    info.htmls.remove(&item.identifier());
+                }
+                if let Some(source) = item.image_preview() {
+                    previews.register_preview(settings, source, worker);
+                }
+            }
+        },
+        VectorDiff::PopFront | VectorDiff::Clear | VectorDiff::Remove { .. } => (),
+        _ => {
+            unimplemented!("these vector operations aren't used by the sdk: {update:?}")
+        },
+    }
+
+    let Some(messages) = info.get_thread_mut(thread) else {
+        tracing::warn!("received update for unknown thread");
+        return;
+    };
+
+    let remove_htmls: Vec<_> = match &update {
+        VectorDiff::Clear => {
+            messages.start_element = 0;
+            messages
+                .messages
+                .iter()
+                .filter_map(|item| item.as_event())
+                .map(|item| item.identifier())
+                .collect()
+        },
+        VectorDiff::PushFront { .. } => {
+            messages.start_element += 1;
+            vec![]
+        },
+        VectorDiff::PushBack { .. } => vec![],
+        VectorDiff::Insert { index, .. } => {
+            if *index <= messages.start_element {
+                messages.start_element += 1;
+            }
+            vec![]
+        },
+        VectorDiff::Set { index, value } => {
+            match (messages.messages[*index].as_event(), value.as_event()) {
+                (Some(old), Some(new)) => {
+                    if old.identifier() != new.identifier() {
+                        vec![old.identifier()]
+                    } else {
+                        vec![]
+                    }
+                },
+                _ => vec![],
+            }
+        },
+        VectorDiff::Remove { index } => {
+            if *index <= messages.start_element {
+                messages.start_element = messages.start_element.saturating_sub(1);
+            }
+            if let Some(item) = messages.messages[*index].as_event() {
+                vec![item.identifier()]
+            } else {
+                vec![]
+            }
+        },
+        VectorDiff::PopFront => {
+            messages.start_element = messages.start_element.saturating_sub(1);
+
+            if let Some(item) = messages.messages.get(0).and_then(|msg| msg.as_event()) {
+                vec![item.identifier()]
+            } else {
+                vec![]
+            }
+        },
+        _ => {
+            unimplemented!("these vector operations aren't used by the sdk")
+        },
+    };
+
+    update.apply(&mut messages.messages);
+
+    for id in remove_htmls {
+        info.htmls.remove(&id);
+    }
+}
+
+#[tracing::instrument(level = "debug", skip(store, stream))]
+async fn handle_updates(
+    room_id: OwnedRoomId,
+    thread: Option<OwnedEventId>,
+    store: AsyncProgramStore,
+    stream: impl futures::Stream<Item = Vec<VectorDiff<Arc<MessageItem>>>>,
+) {
+    futures::pin_mut!(stream);
+
+    while let Some(updates) = stream.next().await {
+        let mut locked = store.lock().await;
+        for update in updates {
+            handle_update(&room_id, thread.as_deref(), update, &mut locked);
+        }
+    }
+}
+
+#[cfg(not(test))]
+pub type MessageItem = TimelineItem;
+
+#[cfg(test)]
+pub type MessageItem = crate::tests::MockMessageItem;
+
+pub struct Messages {
+    #[cfg(not(test))]
+    timeline: Arc<Timeline>,
+
+    /// The thread root of the timeline
+    thread: Option<OwnedEventId>,
+
+    messages: Vector<Arc<MessageItem>>,
+
+    /// This is the index of the first element in the vector when this object was created. This is
+    /// used by [`MessageKey`] as a referenc because the vector can be extended in both directions.
+    start_element: usize,
+
+    /// Whether more history is currently being loaded.
+    pub fetching: bool,
 }
 
 impl Messages {
-    pub fn new(thread: ReceiptThread) -> Self {
-        Self(Default::default(), thread)
+    pub fn timeline(&self) -> &Arc<Timeline> {
+        #[cfg(test)]
+        {
+            unimplemented!()
+        }
+        #[cfg(not(test))]
+        {
+            &self.timeline
+        }
     }
 
-    pub fn main() -> Self {
-        Self::new(ReceiptThread::Main)
+    pub fn get_message(&self, key: &MessageKey) -> Option<&Message> {
+        let index = self.start_element.checked_add_signed(key.offset())?;
+        let item = self.messages.get(index)?;
+
+        if item.unique_id() != key.id() {
+            // This should only happen if the fully read marker moves, thereby shifting the
+            // timeline. Search a few messages around the indec to account for that. But if we
+            // search to many messages we might be trying to use the fully read marker at its new
+            // position.
+
+            let item = self
+                .messages
+                .iter()
+                .skip(index + 1)
+                .alternate_with_all(self.messages.iter().take(index.saturating_sub(1)).rev())
+                .take(4)
+                .find(|item| item.unique_id() == key.id());
+
+            if item.is_none() {
+                tracing::warn!(
+                    room_id = ?self.timeline().room().room_id(),
+                    id = ?key.id(),
+                    "message key not found in timeline"
+                );
+            }
+
+            return item.and_then(|item| item.as_event());
+        }
+
+        item.as_event()
     }
 
-    pub fn thread(root: OwnedEventId) -> Self {
-        Self::new(ReceiptThread::Thread(root))
+    pub fn first_key(&self, settings: &ApplicationSettings) -> Option<MessageKey> {
+        let filter = settings.filter_hidden_item();
+        let id = self
+            .messages
+            .iter()
+            .find(|item| item.as_event().is_none_or(|item| filter(&item)))?
+            .unique_id()
+            .to_owned();
+
+        let offset = 0isize.checked_sub_unsigned(self.start_element)?;
+
+        MessageKey::new(offset, id).into()
     }
 
-    pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
-        let event_id = key.1.clone();
-        let msg = msg.into();
+    pub fn last_key(&self, settings: &ApplicationSettings) -> Option<MessageKey> {
+        let filter = settings.filter_hidden_item();
+        let id = self
+            .messages
+            .iter()
+            .rfind(|item| item.as_event().is_none_or(|item| filter(&item)))?
+            .unique_id()
+            .to_owned();
 
-        self.0.insert(key, msg);
+        let offset = self
+            .messages
+            .len()
+            .cast_signed()
+            .checked_sub_unsigned(self.start_element + 1)?;
 
-        // Remove any echo.
-        let key = (MessageTimeStamp::LocalEcho, event_id);
-        let _ = self.0.remove(&key);
+        MessageKey::new(offset, id).into()
+    }
+
+    pub fn last_message(&self, settings: &ApplicationSettings) -> Option<&Message> {
+        self.messages
+            .iter()
+            .filter_map(|item| item.as_event())
+            .rfind(settings.filter_hidden_item())
+    }
+
+    pub fn range(
+        &self,
+        range: impl RangeBounds<MessageKey>,
+        settings: &ApplicationSettings,
+    ) -> impl DoubleEndedIterator<Item = (MessageKey, &MessageItem)> {
+        self.range_filtered(range, settings.filter_hidden())
+    }
+
+    pub fn range_filtered<F: FnMut(&(MessageKey, &MessageItem)) -> bool>(
+        &self,
+        range: impl RangeBounds<MessageKey>,
+        filter: F,
+    ) -> std::iter::Filter<MessagesRange<'_>, F> {
+        let mut next = match range.start_bound() {
+            Bound::Included(start) => self.start_element.saturating_add_signed(start.offset()),
+            Bound::Excluded(start) => self.start_element.saturating_add_signed(start.offset() + 1),
+            Bound::Unbounded => 0,
+        };
+        let mut last = match range.end_bound() {
+            Bound::Included(end) => self.start_element.saturating_add_signed(end.offset()).into(),
+            Bound::Excluded(end) => {
+                self.start_element.saturating_add_signed(end.offset()).checked_sub(1)
+            },
+            Bound::Unbounded => self.messages.len().checked_sub(1),
+        };
+
+        if last.is_some_and(|last| last >= self.messages.len()) {
+            last = self.messages.len().checked_sub(1);
+        }
+
+        let last = match last {
+            Some(last) => last,
+            None => {
+                next = 1;
+                0
+            },
+        };
+
+        MessagesRange { messages: self, next, last }.filter(filter)
+    }
+
+    pub fn range_messages(
+        &self,
+        range: impl RangeBounds<MessageKey>,
+        settings: &ApplicationSettings,
+    ) -> impl DoubleEndedIterator<Item = (MessageKey, &Message)> {
+        self.range(range, settings)
+            .filter_map(|(key, item)| item.as_event().map(|event| (key, event)))
+    }
+
+    /// This must be called while `store` is locked and must be inserted in the store before it is
+    /// unlocked.
+    #[cfg_attr(test, allow(unused, clippy::diverging_sub_expression))]
+    pub async fn new(
+        room: &Room,
+        thread: Option<OwnedEventId>,
+        store: AsyncProgramStore,
+    ) -> Result<(Self, HashMap<TimelineEventItemId, StyleTree>), matrix_sdk_ui::timeline::Error>
+    {
+        let focus = match thread.clone() {
+            Some(root_event_id) => TimelineFocus::Thread { root_event_id },
+            None => TimelineFocus::Live { hide_threaded_events: true },
+        };
+        let timeline = room
+            .timeline_builder()
+            .with_focus(focus)
+            .track_read_marker_and_receipts(TimelineReadReceiptTracking::AllEvents)
+            .build()
+            .await?;
+
+        let (messages, updates) = timeline.subscribe().await;
+
+        #[cfg(test)]
+        let (messages, updates): (Vector<Arc<MessageItem>>, futures::stream::Empty<_>) =
+            unimplemented!();
+
+        tokio::spawn(handle_updates(
+            room.room_id().to_owned(),
+            thread.clone(),
+            Arc::clone(&store),
+            updates,
+        ));
+
+        let htmls = messages
+            .iter()
+            .filter_map(|item| item.as_event())
+            .filter_map(|item| generate_html(item).map(|html| (item.identifier(), html)))
+            .collect();
+
+        let start_element = messages
+            .iter()
+            .enumerate()
+            .rev()
+            .find_map(|(i, item)| {
+                if item.as_event().is_some() {
+                    Some(i)
+                } else {
+                    None
+                }
+            })
+            .unwrap_or(0);
+
+        let messages = Self {
+            #[cfg(not(test))]
+            timeline: timeline.into(),
+
+            messages,
+            start_element,
+            thread,
+            fetching: false,
+        };
+
+        messages.paginate_backwards_count(Arc::clone(&store), 10);
+
+        messages.register_image_previews(store);
+
+        Ok((messages, htmls))
+    }
+
+    fn register_image_previews(&self, store: AsyncProgramStore) {
+        let room_id = self.timeline().room().room_id().to_owned();
+        let thread = self.thread.clone();
+
+        tokio::spawn(async move {
+            let mut locked = store.lock().await;
+            let ChatStore { rooms, settings, previews, worker, .. } = &mut locked.application;
+
+            let messages = rooms
+                .get(&room_id)
+                .expect("internal state inconsistent")
+                .get_thread(thread.as_deref())
+                .expect("internal state inconsistent");
+
+            for (_, item) in messages.range_messages(.., settings) {
+                if let Some(source) = item.image_preview() {
+                    previews.register_preview(settings, source, worker);
+                }
+            }
+        });
+    }
+
+    #[inline]
+    pub fn paginate_backwards(&self, store: AsyncProgramStore) {
+        self.paginate_backwards_count(store, MIN_MSG_LOAD);
+    }
+
+    fn paginate_backwards_count(&self, store: AsyncProgramStore, num_events: u16) {
+        let room_id = self.timeline().room().room_id().to_owned();
+        let thread = self.thread.clone();
+        let timeline = Arc::clone(self.timeline());
+
+        tokio::spawn(async move {
+            if std::mem::replace(
+                &mut store
+                    .lock()
+                    .await
+                    .application
+                    .rooms
+                    .get_mut(&room_id)
+                    .expect("internal state inconsistent")
+                    .get_thread_mut(thread.as_deref())
+                    .expect("internal state inconsistent")
+                    .fetching,
+                true,
+            ) {
+                return;
+            }
+
+            if let Err(err) = timeline.paginate_backwards(num_events).await {
+                tracing::warn!(?room_id, ?thread, "error while loading message history: {err}");
+                return;
+            }
+
+            store
+                .lock()
+                .await
+                .application
+                .rooms
+                .get_mut(&room_id)
+                .expect("internal state inconsistent")
+                .get_thread_mut(thread.as_deref())
+                .expect("internal state inconsistent")
+                .fetching = false;
+        });
     }
 }
+
+#[cfg(test)]
+impl Messages {
+    pub fn mock_new() -> Self {
+        Self {
+            thread: None,
+            messages: Vector::new(),
+            start_element: 0,
+            fetching: false,
+        }
+    }
+
+    pub fn set_messages(&mut self, messages: Vector<Arc<MessageItem>>) {
+        self.messages = messages;
+    }
+}
+
+pub struct MessagesRange<'a> {
+    messages: &'a Messages,
+    next: usize,
+    last: usize,
+}
+
+impl<'a> Iterator for MessagesRange<'a> {
+    type Item = (MessageKey, &'a MessageItem);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.next > self.last {
+            return None;
+        }
+
+        let item = &self.messages.messages[self.next];
+
+        let offset = self.next.cast_signed().checked_sub_unsigned(self.messages.start_element)?;
+        let key = MessageKey::new(offset, item.unique_id().to_owned());
+
+        self.next += 1;
+
+        Some((key, &**item))
+    }
+    fn size_hint(&self) -> (usize, Option<usize>) {
+        let size = (self.last + 1).saturating_sub(self.next);
+
+        (size, Some(size))
+    }
+}
+
+impl DoubleEndedIterator for MessagesRange<'_> {
+    fn next_back(&mut self) -> Option<Self::Item> {
+        if self.next > self.last {
+            return None;
+        }
+
+        let item = &self.messages.messages[self.last];
+
+        let offset = self.last.cast_signed().checked_sub_unsigned(self.messages.start_element)?;
+        let key = MessageKey::new(offset, item.unique_id().to_owned());
+
+        if self.last == 0 {
+            self.next = 1;
+        } else {
+            self.last -= 1;
+        }
+
+        Some((key, &**item))
+    }
+}
+
+impl ExactSizeIterator for MessagesRange<'_> {}
 
 const fn span_static(s: &'static str) -> Span<'static> {
     Span {
@@ -128,14 +610,6 @@ const fn span_static(s: &'static str) -> Span<'static> {
         },
     }
 }
-
-const BOLD_STYLE: Style = Style {
-    fg: None,
-    bg: None,
-    add_modifier: StyleModifier::BOLD,
-    sub_modifier: StyleModifier::empty(),
-    underline_color: None,
-};
 
 const TIME_GUTTER: usize = 12;
 const READ_GUTTER: usize = 5;
@@ -155,8 +629,8 @@ fn hash_finish_usize(hasher: DefaultHasher) -> Option<usize> {
     }
 }
 
-/// Hash an [EventId] into a [usize].
-fn hash_event_id(event_id: &EventId) -> Option<usize> {
+/// Hash an [`TimelineUniqueId`] into a [usize].
+fn hash_event_id(event_id: &TimelineUniqueId) -> Option<usize> {
     let mut hasher = DefaultHasher::new();
     event_id.hash(&mut hasher);
     hash_finish_usize(hasher)
@@ -194,13 +668,6 @@ fn placeholder_frame(
     Some(placeholder)
 }
 
-#[inline]
-fn millis_to_datetime(ms: UInt) -> DateTime<LocalTz> {
-    let time = i64::from(ms) / 1000;
-    let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
-    time.into()
-}
-
 #[derive(thiserror::Error, Debug)]
 pub enum TimeStampIntError {
     #[error("Integer conversion error: {0}")]
@@ -210,83 +677,33 @@ pub enum TimeStampIntError {
     UIntError(<UInt as TryFrom<u64>>::Error),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MessageTimeStamp {
-    OriginServer(UInt),
-    LocalEcho,
-}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub struct MessageTimeStamp(UInt);
 
 impl MessageTimeStamp {
     fn as_datetime(&self) -> DateTime<LocalTz> {
-        match self {
-            MessageTimeStamp::OriginServer(ms) => millis_to_datetime(*ms),
-            MessageTimeStamp::LocalEcho => LocalTz::now(),
-        }
+        let time = i64::from(self.0) / 1000;
+        let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
+        time.into()
     }
 
-    fn same_day(&self, other: &Self) -> bool {
-        let dt1 = self.as_datetime();
-        let dt2 = other.as_datetime();
+    fn show_time(&self) -> Span<'static> {
+        let time = self.as_datetime().format("%T");
+        let time = format!("  [{time}]");
 
-        dt1.date_naive() == dt2.date_naive()
-    }
-
-    fn show_date(&self) -> Option<Span<'_>> {
-        let time = self.as_datetime().format("%A, %B %d %Y").to_string();
-
-        Span::styled(time, BOLD_STYLE).into()
-    }
-
-    fn show_time(&self) -> Option<Span<'_>> {
-        match self {
-            MessageTimeStamp::OriginServer(ms) => {
-                let time = millis_to_datetime(*ms).format("%T");
-                let time = format!("  [{time}]");
-
-                Span::raw(time).into()
-            },
-            MessageTimeStamp::LocalEcho => None,
-        }
-    }
-
-    fn is_local_echo(&self) -> bool {
-        matches!(self, MessageTimeStamp::LocalEcho)
-    }
-
-    pub fn as_millis(&self) -> Option<MilliSecondsSinceUnixEpoch> {
-        match self {
-            MessageTimeStamp::OriginServer(ms) => MilliSecondsSinceUnixEpoch(*ms).into(),
-            MessageTimeStamp::LocalEcho => None,
-        }
-    }
-}
-
-impl Ord for MessageTimeStamp {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (MessageTimeStamp::OriginServer(_), MessageTimeStamp::LocalEcho) => Ordering::Less,
-            (MessageTimeStamp::OriginServer(a), MessageTimeStamp::OriginServer(b)) => a.cmp(b),
-            (MessageTimeStamp::LocalEcho, MessageTimeStamp::OriginServer(_)) => Ordering::Greater,
-            (MessageTimeStamp::LocalEcho, MessageTimeStamp::LocalEcho) => Ordering::Equal,
-        }
-    }
-}
-
-impl PartialOrd for MessageTimeStamp {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
+        Span::raw(time)
     }
 }
 
 impl From<UInt> for MessageTimeStamp {
     fn from(millis: UInt) -> Self {
-        MessageTimeStamp::OriginServer(millis)
+        Self(millis)
     }
 }
 
 impl From<MilliSecondsSinceUnixEpoch> for MessageTimeStamp {
     fn from(millis: MilliSecondsSinceUnixEpoch) -> Self {
-        MessageTimeStamp::OriginServer(millis.0)
+        Self(millis.0)
     }
 }
 
@@ -294,10 +711,7 @@ impl TryFrom<&MessageTimeStamp> for usize {
     type Error = TimeStampIntError;
 
     fn try_from(ts: &MessageTimeStamp) -> Result<Self, Self::Error> {
-        let n = match ts {
-            MessageTimeStamp::LocalEcho => 0,
-            MessageTimeStamp::OriginServer(u) => usize::try_from(u64::from(*u))?,
-        };
+        let n = usize::try_from(u64::from(ts.0))?;
 
         Ok(n)
     }
@@ -307,22 +721,18 @@ impl TryFrom<usize> for MessageTimeStamp {
     type Error = TimeStampIntError;
 
     fn try_from(u: usize) -> Result<Self, Self::Error> {
-        if u == 0 {
-            Ok(MessageTimeStamp::LocalEcho)
-        } else {
-            let n = u64::try_from(u)?;
-            let n = UInt::try_from(n).map_err(TimeStampIntError::UIntError)?;
+        let n = u64::try_from(u)?;
+        let n = UInt::try_from(n).map_err(TimeStampIntError::UIntError)?;
 
-            Ok(MessageTimeStamp::from(n))
-        }
+        Ok(Self::from(n))
     }
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct MessageCursor {
-    /// When timestamp is None, the corner is determined by moving backwards from
+    /// When `key` is None, the corner is determined by moving backwards from
     /// the most recently received message.
-    pub timestamp: Option<MessageKey>,
+    pub key: Option<MessageKey>,
 
     /// A row within the [Text] representation of a [Message].
     pub text_row: usize,
@@ -330,7 +740,7 @@ pub struct MessageCursor {
 
 impl MessageCursor {
     pub fn new(timestamp: MessageKey, text_row: usize) -> Self {
-        MessageCursor { timestamp: Some(timestamp), text_row }
+        MessageCursor { key: Some(timestamp), text_row }
     }
 
     /// Get a cursor that refers to the most recent message.
@@ -338,43 +748,54 @@ impl MessageCursor {
         MessageCursor::default()
     }
 
-    pub fn to_key<'a>(&'a self, thread: &'a Messages) -> Option<&'a MessageKey> {
-        if let Some(ref key) = self.timestamp {
-            Some(key)
+    pub fn to_key<'a>(
+        &'a self,
+        thread: &'a Messages,
+        settings: &ApplicationSettings,
+    ) -> Option<MessageKey> {
+        if let Some(key) = &self.key {
+            Some(key.clone())
         } else {
-            Some(thread.last_key_value()?.0)
+            thread.range_messages(.., settings).next_back().map(|(key, _)| key)
         }
     }
 
-    pub fn from_cursor(cursor: &Cursor, thread: &Messages) -> Option<Self> {
+    pub fn from_cursor(
+        cursor: &Cursor,
+        thread: &Messages,
+        settings: &ApplicationSettings,
+    ) -> Option<Self> {
         let ev_hash = cursor.get_x();
-        let ev_term = OwnedEventId::try_from("$").ok()?;
+        let ev_term = TimelineUniqueId(String::new());
 
-        let ts_start = MessageTimeStamp::try_from(cursor.get_y()).ok()?;
-        let start = (ts_start, ev_term);
+        let offset_start = isize::MIN.wrapping_add_unsigned(cursor.get_y());
+        let start = MessageKey::new(offset_start, ev_term);
 
-        for ((ts, event_id), _) in thread.range(&start..) {
-            if hash_event_id(event_id)? == ev_hash {
-                return Self::from((*ts, event_id.clone())).into();
+        let iter = thread
+            .range(&start.., settings)
+            .alternate_with_all(thread.range(..&start, settings).rev());
+        for (key, _) in iter {
+            if hash_event_id(key.id())? == ev_hash {
+                return Self::from(key.to_owned()).into();
             }
 
-            if ts > &ts_start {
+            if key.offset() > offset_start {
                 break;
             }
         }
 
         // If we can't find the cursor, then go to the nearest timestamp.
         thread
-            .range(start..)
+            .range(start.., settings)
             .next()
-            .map(|((ts, ev), _)| Self::from((*ts, ev.clone())))
+            .map(|(key, _)| Self::from(key.clone()))
     }
 
-    pub fn to_cursor(&self, thread: &Messages) -> Option<Cursor> {
-        let (ts, event_id) = self.to_key(thread)?;
+    pub fn to_cursor(&self, thread: &Messages, settings: &ApplicationSettings) -> Option<Cursor> {
+        let key = self.to_key(thread, settings)?;
 
-        let y = usize::try_from(ts).ok()?;
-        let x = hash_event_id(event_id)?;
+        let y = key.offset().abs_diff(isize::MIN);
+        let x = hash_event_id(key.id())?;
 
         Cursor::new(y, x).into()
     }
@@ -382,19 +803,19 @@ impl MessageCursor {
 
 impl From<Option<MessageKey>> for MessageCursor {
     fn from(key: Option<MessageKey>) -> Self {
-        MessageCursor { timestamp: key, text_row: 0 }
+        MessageCursor { key, text_row: 0 }
     }
 }
 
 impl From<MessageKey> for MessageCursor {
     fn from(key: MessageKey) -> Self {
-        MessageCursor { timestamp: Some(key), text_row: 0 }
+        MessageCursor { key: Some(key), text_row: 0 }
     }
 }
 
 impl Ord for MessageCursor {
     fn cmp(&self, other: &Self) -> Ordering {
-        match (&self.timestamp, &other.timestamp) {
+        match (&self.key, &other.key) {
             (None, None) => self.text_row.cmp(&other.text_row),
             (None, Some(_)) => Ordering::Greater,
             (Some(_), None) => Ordering::Less,
@@ -411,104 +832,6 @@ impl Ord for MessageCursor {
 impl PartialOrd for MessageCursor {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
         Some(self.cmp(other))
-    }
-}
-
-fn redaction_reason_event(ev: SyncRoomRedactionEvent) -> Option<String> {
-    let SyncRoomRedactionEvent::Original(ev) = ev else {
-        return None;
-    };
-
-    ev.content.reason
-}
-
-#[derive(Clone)]
-pub enum MessageEvent {
-    EncryptedOriginal(Box<OriginalRoomEncryptedEvent>),
-    EncryptedRedacted(Box<RedactedRoomEncryptedEvent>),
-    Original(Box<OriginalRoomMessageEvent>),
-    Redacted(OwnedEventId, Option<String>),
-    State(Box<AnySyncStateEvent>),
-    Local(OwnedEventId, Box<RoomMessageEventContent>),
-}
-
-impl MessageEvent {
-    pub fn event_id(&self) -> &EventId {
-        match self {
-            MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
-            MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
-            MessageEvent::Original(ev) => ev.event_id.as_ref(),
-            MessageEvent::Redacted(event_id, _) => event_id.as_ref(),
-            MessageEvent::State(ev) => ev.event_id(),
-            MessageEvent::Local(event_id, _) => event_id.as_ref(),
-        }
-    }
-
-    pub fn content(&self) -> Option<&RoomMessageEventContent> {
-        match self {
-            MessageEvent::EncryptedOriginal(_) => None,
-            MessageEvent::Original(ev) => Some(&ev.content),
-            MessageEvent::EncryptedRedacted(_) => None,
-            MessageEvent::Redacted(_, _) => None,
-            MessageEvent::State(_) => None,
-            MessageEvent::Local(_, content) => Some(content),
-        }
-    }
-
-    pub fn is_emote(&self) -> bool {
-        matches!(
-            self.content(),
-            Some(RoomMessageEventContent { msgtype: MessageType::Emote(_), .. })
-        )
-    }
-
-    pub fn body(&self) -> Cow<'_, str> {
-        match self {
-            MessageEvent::EncryptedOriginal(_) => "[Unable to decrypt message]".into(),
-            MessageEvent::Original(ev) => body_cow_content(&ev.content),
-            MessageEvent::EncryptedRedacted(ev) => {
-                body_cow_reason(redaction_reason_unsigned(&ev.unsigned).as_deref())
-            },
-            MessageEvent::Redacted(_, reason) => body_cow_reason(reason.as_deref()),
-            MessageEvent::State(ev) => body_cow_state(ev),
-            MessageEvent::Local(_, content) => body_cow_content(content),
-        }
-    }
-
-    pub fn html(&self) -> Option<StyleTree> {
-        let content = match self {
-            MessageEvent::EncryptedOriginal(_) => return None,
-            MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_, _) => return None,
-            MessageEvent::State(ev) => return Some(html_state(ev)),
-            MessageEvent::Local(_, content) => content,
-        };
-
-        if let MessageType::Text(content) = &content.msgtype {
-            if let Some(FormattedBody { format: MessageFormat::Html, body }) = &content.formatted {
-                Some(parse_matrix_html(body.as_str()))
-            } else {
-                None
-            }
-        } else {
-            None
-        }
-    }
-
-    fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
-        match self {
-            MessageEvent::EncryptedOriginal(_) => return,
-            MessageEvent::EncryptedRedacted(_) => return,
-            MessageEvent::Redacted(_, _) => return,
-            MessageEvent::State(_) => return,
-            MessageEvent::Local(_, _) => return,
-            MessageEvent::Original(ev) => {
-                let event_id = ev.event_id.to_owned();
-                let reason = redaction_reason_event(redaction);
-                *self = MessageEvent::Redacted(event_id, reason);
-            },
-        }
     }
 }
 
@@ -533,8 +856,24 @@ macro_rules! display_file_to_text {
     };
 }
 
-fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
-    let s = match &content.msgtype {
+fn body_cow_msglike(content: &MsgLikeContent) -> Cow<'_, str> {
+    match &content.kind {
+        MsgLikeKind::Message(message) => body_cow_content(message.msgtype()),
+        MsgLikeKind::Sticker(sticker) => Cow::Owned(format!("Alt: {}", sticker.content().body)),
+        MsgLikeKind::Poll(_) => {
+            // TODO: implement polls
+            Cow::Borrowed("[Poll]")
+        },
+        MsgLikeKind::Redacted => Cow::Borrowed("[Redacted]"),
+        MsgLikeKind::UnableToDecrypt(_) => Cow::Borrowed("[Unable to decrypt message]"),
+        MsgLikeKind::Other(other) => {
+            Cow::Owned(format!("[Unsupported event: {}]", other.event_type()))
+        },
+    }
+}
+
+fn body_cow_content(msgtype: &MessageType) -> Cow<'_, str> {
+    let s = match msgtype {
         MessageType::Text(content) => content.body.as_str(),
         MessageType::VerificationRequest(_) => "[Verification Request]",
         MessageType::Emote(content) => content.body.as_ref(),
@@ -553,25 +892,46 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
         MessageType::Video(content) => {
             display_file_to_text!(Video, content);
         },
-        _ => content.body(),
+        _ => msgtype.body(),
     };
 
     Cow::Borrowed(s)
 }
 
-fn redaction_reason_unsigned(unsigned: &RedactedUnsigned) -> Option<String> {
-    unsigned
-        .redacted_because
-        .deserialize()
-        .ok()
-        .and_then(|ev| ev.content.reason)
-}
+fn generate_html(item: &EventTimelineItem) -> Option<StyleTree> {
+    match item.content() {
+        TimelineItemContent::MsgLike(content) => {
+            if let MsgLikeKind::Message(message) = &content.kind {
+                if let MessageType::Text(TextMessageEventContent {
+                    formatted: Some(FormattedBody { format: MessageFormat::Html, body }),
+                    ..
+                }) = message.msgtype()
+                {
+                    Some(parse_matrix_html(body))
+                } else {
+                    None
+                }
+            } else {
+                None
+            }
+        },
+        TimelineItemContent::MembershipChange(change) => Some(html_membership(change)),
+        TimelineItemContent::ProfileChange(change) => Some(html_profile(change)),
+        TimelineItemContent::OtherState(change) => Some(html_state(change)),
 
-fn body_cow_reason(reason: Option<&str>) -> Cow<'static, str> {
-    if let Some(r) = reason {
-        Cow::Owned(format!("[Redacted: {r:?}]"))
-    } else {
-        Cow::Borrowed("[Redacted]")
+        TimelineItemContent::FailedToParseMessageLike { error, .. } => {
+            let msg = format!("[Failed to parse message: {error}]");
+            let text = StyleTreeNode::Text(Cow::Owned(msg));
+            let styled = StyleTreeNode::Style(Box::new(text), Style::new().fg(Color::Red));
+            Some(StyleTree { children: vec![styled] })
+        },
+        TimelineItemContent::FailedToParseState { error, .. } => {
+            let msg = format!("[Failed to parse state event: {error}]");
+            let text = StyleTreeNode::Text(Cow::Owned(msg));
+            let styled = StyleTreeNode::Style(Box::new(text), Style::new().fg(Color::Red));
+            Some(StyleTree { children: vec![styled] })
+        },
+        TimelineItemContent::CallInvite | TimelineItemContent::RtcNotification => None,
     }
 }
 
@@ -599,14 +959,11 @@ impl MessageColumns {
     }
 }
 
-struct MessageFormatter<'a> {
+pub struct MessageFormatter<'a> {
     settings: &'a ApplicationSettings,
 
     /// How many columns to print.
     cols: MessageColumns,
-
-    /// The full, original width.
-    orig: usize,
 
     /// The width that the message contents need to fill.
     fill: usize,
@@ -616,9 +973,6 @@ struct MessageFormatter<'a> {
 
     /// The time the message was sent.
     time: Option<Span<'a>>,
-
-    /// The date the message was sent.
-    date: Option<Span<'a>>,
 
     /// The users who have read up to this message.
     read: Vec<OwnedUserId>,
@@ -631,15 +985,6 @@ impl<'a> MessageFormatter<'a> {
 
     #[inline]
     fn push_spans(&mut self, prev_line: Line<'a>, style: Style, text: &mut Text<'a>) {
-        if let Some(date) = self.date.take() {
-            let len = date.content.as_ref().len();
-            let padding = self.orig.saturating_sub(len);
-            let leading = space_span(padding / 2, Style::default());
-            let trailing = space_span(padding.saturating_sub(padding / 2), Style::default());
-
-            text.lines.push(Line::from(vec![leading, date, trailing]));
-        }
-
         let user_gutter_empty_span =
             space_span(self.settings.tunables.user_gutter_width, Style::default());
 
@@ -707,22 +1052,70 @@ impl<'a> MessageFormatter<'a> {
 
     fn push_in_reply(
         &mut self,
-        msg: &'a Message,
+        msg: &'a TimelineDetails<Box<EmbeddedEvent>>,
         style: Style,
         text: &mut Text<'a>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
     ) -> Option<ProtocolPreview<'a>> {
+        let width = self.width();
+        let w = width.saturating_sub(2);
+
+        let msg = match msg {
+            TimelineDetails::Unavailable => {
+                let msg = "Message not loaded";
+                let trailing = w.saturating_sub(msg.len());
+                let line = Line::from(vec![
+                    Span::styled(" ", style),
+                    Span::styled(THICK_VERTICAL, style),
+                    Span::styled(msg, style),
+                    space_span(trailing, style),
+                ]);
+
+                self.push_spans(line, style, text);
+
+                return None;
+            },
+            TimelineDetails::Pending => {
+                let msg = "Message loading";
+                let trailing = w.saturating_sub(msg.len());
+                let line = Line::from(vec![
+                    Span::styled(" ", style),
+                    Span::styled(THICK_VERTICAL, style),
+                    Span::styled(msg, style),
+                    space_span(trailing, style),
+                ]);
+
+                self.push_spans(line, style, text);
+
+                return None;
+            },
+            TimelineDetails::Error(error) => {
+                let style = style.patch(Style::new().fg(Color::Red));
+                let msg = error.to_string();
+                let mut error = wrapped_text(msg, w, style);
+
+                for line in error.lines.iter_mut() {
+                    line.spans.insert(0, Span::styled(THICK_VERTICAL, style));
+                    line.spans.insert(0, Span::styled(" ", style));
+                }
+
+                self.push_text(error, style, text);
+
+                return None;
+            },
+            TimelineDetails::Ready(msg) => msg,
+        };
+
         let reply_style = if settings.tunables.message_user_color {
-            style.patch(settings.get_user_color(&msg.sender))
+            style.patch(settings.get_user_color(msg.sender()))
         } else {
             style
         };
 
-        let width = self.width();
-        let w = width.saturating_sub(2);
-        let (mut replied, proto) = msg.show_msg(w, reply_style, true, settings);
-        let mut sender = msg.sender_span(info, self.settings);
+        let (mut replied, proto) = msg.show_msg(w, reply_style, true, info, settings, previews);
+        let mut sender = msg.sender_span(self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
 
@@ -758,12 +1151,17 @@ impl<'a> MessageFormatter<'a> {
         proto
     }
 
-    fn push_reactions(&mut self, counts: Vec<(&'a str, usize)>, style: Style, text: &mut Text<'a>) {
+    fn push_reactions(
+        &mut self,
+        reactions: &'a ReactionsByKeyBySender,
+        style: Style,
+        text: &mut Text<'a>,
+    ) {
         let mut emojis = printer::TextPrinter::new(self.width(), style, false, self.settings);
-        let mut reactions = 0;
+        let mut n_pushed = 0;
 
-        for (key, count) in counts {
-            if reactions != 0 {
+        for (key, counts) in reactions.iter() {
+            if n_pushed != 0 {
                 emojis.push_str(" ", style);
             }
 
@@ -788,18 +1186,18 @@ impl<'a> MessageFormatter<'a> {
             emojis.push_str("[", style);
             emojis.push_str(name, style);
             emojis.push_str(" ", style);
-            emojis.push_span_nobreak(Span::styled(count.to_string(), style));
+            emojis.push_span_nobreak(Span::styled(counts.len().to_string(), style));
             emojis.push_str("]", style);
 
-            reactions += 1;
+            n_pushed += 1;
         }
 
-        if reactions > 0 {
+        if n_pushed > 0 {
             self.push_text(emojis.finish(), style, text);
         }
     }
 
-    fn push_thread_reply_count(&mut self, len: usize, text: &mut Text<'a>) {
+    fn push_thread_reply_count(&mut self, len: u32, text: &mut Text<'a>) {
         if len == 0 {
             return;
         }
@@ -822,77 +1220,126 @@ impl<'a> MessageFormatter<'a> {
     }
 }
 
-pub enum ImageStatus {
-    None,
-    Downloading(ImagePreviewSize),
-    Loaded(Protocol),
-    Error(String),
+#[cfg(not(test))]
+pub type Message = EventTimelineItem;
+
+#[cfg(test)]
+pub type Message = crate::tests::MockMessage;
+
+impl MessageExt for EventTimelineItem {
+    fn content(&self) -> &TimelineItemContent {
+        self.content()
+    }
+
+    fn sender(&self) -> &UserId {
+        self.sender()
+    }
+
+    fn sender_profile(&self) -> &TimelineDetails<Profile> {
+        self.sender_profile()
+    }
+
+    fn message_timestamp(&self) -> MessageTimeStamp {
+        self.timestamp().into()
+    }
+
+    fn identifier(&self) -> TimelineEventItemId {
+        self.identifier()
+    }
+
+    fn is_local_echo(&self) -> bool {
+        self.is_local_echo()
+    }
+
+    fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)> {
+        self.read_receipts().iter()
+    }
+
+    fn is_edited(&self) -> bool {
+        self.content().as_message().is_some_and(|msg| msg.is_edited())
+    }
 }
 
-pub struct Message {
-    pub event: MessageEvent,
-    pub sender: OwnedUserId,
-    pub timestamp: MessageTimeStamp,
-    pub downloaded: bool,
-    pub html: Option<StyleTree>,
-    pub image_preview: ImageStatus,
+impl MessageExt for EmbeddedEvent {
+    fn content(&self) -> &TimelineItemContent {
+        &self.content
+    }
+
+    fn sender(&self) -> &UserId {
+        &self.sender
+    }
+
+    fn sender_profile(&self) -> &TimelineDetails<Profile> {
+        &self.sender_profile
+    }
+
+    fn message_timestamp(&self) -> MessageTimeStamp {
+        self.timestamp.into()
+    }
+
+    fn identifier(&self) -> TimelineEventItemId {
+        self.identifier.clone()
+    }
+
+    fn is_local_echo(&self) -> bool {
+        false
+    }
+
+    fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)> {
+        vec![].into_iter()
+    }
+
+    fn is_edited(&self) -> bool {
+        false
+    }
 }
 
-impl Message {
-    pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
-        let html = event.html();
-        let downloaded = false;
+pub trait MessageExt {
+    fn content(&self) -> &TimelineItemContent;
+    fn sender(&self) -> &UserId;
+    fn sender_profile(&self) -> &TimelineDetails<Profile>;
+    fn message_timestamp(&self) -> MessageTimeStamp;
+    fn identifier(&self) -> TimelineEventItemId;
+    fn is_local_echo(&self) -> bool;
+    fn read_receipts(&self) -> impl Iterator<Item = (&OwnedUserId, &Receipt)>;
+    fn is_edited(&self) -> bool;
 
-        Message {
-            event,
-            sender,
-            timestamp,
-            downloaded,
-            html,
-            image_preview: ImageStatus::None,
+    fn body(&self) -> Cow<'_, str> {
+        match self.content() {
+            TimelineItemContent::MsgLike(content) => body_cow_msglike(content),
+            TimelineItemContent::MembershipChange(change) => body_cow_membership(change),
+            TimelineItemContent::ProfileChange(change) => body_cow_profile(change),
+            TimelineItemContent::OtherState(change) => body_cow_state(change),
+            TimelineItemContent::FailedToParseMessageLike { error, .. } => {
+                let msg = format!("[Failed to parse message: {error}]");
+                Cow::Owned(msg)
+            },
+            TimelineItemContent::FailedToParseState { error, .. } => {
+                let msg = format!("[Failed to parse state event: {error}]");
+                Cow::Owned(msg)
+            },
+            TimelineItemContent::RtcNotification | TimelineItemContent::CallInvite => {
+                Cow::Borrowed("* started a call")
+            },
         }
     }
 
-    pub fn reply_to(&self) -> Option<OwnedEventId> {
-        let content = match &self.event {
-            MessageEvent::EncryptedOriginal(_) => return None,
-            MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, content) => content,
-            MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_, _) => return None,
-            MessageEvent::State(_) => return None,
-        };
-
-        match &content.relates_to {
-            Some(Relation::Reply { in_reply_to }) => Some(in_reply_to.event_id.clone()),
-            Some(Relation::Thread(Thread {
-                in_reply_to: Some(in_reply_to),
-                is_falling_back: false,
-                ..
-            })) => Some(in_reply_to.event_id.clone()),
-            Some(_) | None => None,
+    fn image_preview(&self) -> Option<&MediaSource> {
+        if let MessageType::Image(c) = self.content().as_message()?.msgtype() {
+            Some(&c.source)
+        } else {
+            None
         }
     }
 
-    fn thread_root(&self) -> Option<OwnedEventId> {
-        let content = match &self.event {
-            MessageEvent::EncryptedOriginal(_) => return None,
-            MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, content) => content,
-            MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_, _) => return None,
-            MessageEvent::State(_) => return None,
-        };
+    fn is_emote(&self) -> bool {
+        self.content()
+            .as_message()
+            .is_some_and(|msg| matches!(msg.msgtype(), MessageType::Emote(_)))
+    }
 
-        match &content.relates_to {
-            Some(Relation::Thread(Thread {
-                event_id,
-                in_reply_to: Some(in_reply_to),
-                is_falling_back: true,
-                ..
-            })) if event_id == &in_reply_to.event_id => Some(event_id.clone()),
-            Some(_) | None => None,
-        }
+    fn reply_to(&self) -> Option<OwnedEventId> {
+        Some(self.content().as_msglike()?.in_reply_to.as_ref()?.event_id.clone())
     }
 
     fn get_render_style(&self, selected: bool, settings: &ApplicationSettings) -> Style {
@@ -902,12 +1349,12 @@ impl Message {
             style = style.add_modifier(StyleModifier::REVERSED)
         }
 
-        if self.timestamp.is_local_echo() {
+        if self.is_local_echo() {
             style = style.add_modifier(StyleModifier::ITALIC);
         }
 
         if settings.tunables.message_user_color {
-            let color = settings.get_user_color(&self.sender);
+            let color = settings.get_user_color(self.sender());
             style = style.fg(color);
         }
 
@@ -916,16 +1363,10 @@ impl Message {
 
     fn get_render_format<'a>(
         &'a self,
-        prev: Option<&Message>,
+        prev_sender: Option<&UserId>,
         width: usize,
-        info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> MessageFormatter<'a> {
-        let orig = width;
-        let date = match &prev {
-            Some(prev) if prev.timestamp.same_day(&self.timestamp) => None,
-            _ => self.timestamp.show_date(),
-        };
         let user_gutter = settings.tunables.user_gutter_width;
 
         if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
@@ -933,82 +1374,79 @@ impl Message {
         {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
-            let user = self.show_sender(prev, true, info, settings);
-            let time = self.timestamp.show_time();
-            let read = info
-                .event_receipts
-                .values()
-                .filter_map(|receipts| receipts.get(self.event.event_id()))
-                .flat_map(|read| read.iter())
-                .map(|user_id| user_id.to_owned())
+            let user = self.show_sender(prev_sender, true, settings);
+            let time = Some(self.message_timestamp().show_time());
+            let read = self
+                .read_receipts()
+                .filter(|(_, receipt)| !matches!(receipt.thread, ReceiptThread::Unthreaded))
+                .map(|(user_id, _)| user_id.to_owned())
                 .collect();
 
-            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
+            MessageFormatter { settings, cols, fill, user, time, read }
         } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
-            let user = self.show_sender(prev, true, info, settings);
-            let time = self.timestamp.show_time();
+            let user = self.show_sender(prev_sender, true, settings);
+            let time = Some(self.message_timestamp().show_time());
             let read = Vec::new();
 
-            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
+            MessageFormatter { settings, cols, fill, user, time, read }
         } else if user_gutter + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Two;
             let fill = width - user_gutter;
-            let user = self.show_sender(prev, true, info, settings);
+            let user = self.show_sender(prev_sender, true, settings);
             let time = None;
             let read = Vec::new();
 
-            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
+            MessageFormatter { settings, cols, fill, user, time, read }
         } else {
             let cols = MessageColumns::One;
             let fill = width.saturating_sub(2);
-            let user = self.show_sender(prev, false, info, settings);
+            let user = self.show_sender(prev_sender, false, settings);
             let time = None;
             let read = Vec::new();
 
-            MessageFormatter { settings, cols, orig, fill, user, date, time, read }
+            MessageFormatter { settings, cols, fill, user, time, read }
         }
     }
 
     /// Render the message as a [Text] object for the terminal.
     ///
     /// This will also get the image preview Protocol with an x/y offset.
-    pub fn show_with_preview<'a>(
+    fn show_with_preview<'a>(
         &'a self,
-        prev: Option<&Message>,
+        prev_sender: Option<&UserId>,
         selected: bool,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
     ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
         let width = vwctx.get_width();
 
         let style = self.get_render_style(selected, settings);
-        let mut fmt = self.get_render_format(prev, width, info, settings);
+        let mut fmt = self.get_render_format(prev_sender, width, settings);
         let mut text = Text::default();
         let width = fmt.width();
 
         // Show the message that this one replied to, if any.
         let reply = self
-            .reply_to()
-            .or_else(|| self.thread_root())
-            .and_then(|e| info.get_event(&e));
+            .content()
+            .as_msglike()
+            .and_then(|msg| msg.in_reply_to.as_ref())
+            .map(|details| &details.event);
         let proto_reply = reply.as_ref().and_then(|r| {
             // Format the reply header, push it into the `Text` buffer, and get any image.
-            fmt.push_in_reply(r, style, &mut text, info, settings)
+            fmt.push_in_reply(r, style, &mut text, info, settings, previews)
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings);
+        let (msg, proto) = self.show_msg(width, style, reply.is_some(), info, settings, previews);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
             let y_off = text.lines.len() as u16;
             let x_off = fmt.cols.user_gutter_width(settings);
-            // Adjust y_off by 1 if a date was printed before the message to account for
-            // the extra line we're going to print.
-            let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
             (p, x_off, y_off)
         });
 
@@ -1019,27 +1457,30 @@ impl Message {
             fmt.push_spans(space_span(width, style).into(), style, &mut text);
         }
 
-        if settings.tunables.reaction_display {
-            let reactions = info.get_reactions(self.event.event_id());
-            fmt.push_reactions(reactions, style, &mut text);
+        if self.is_edited() {
+            fmt.push_spans(
+                Line::from(vec![
+                    Span::styled("(edited)", style.fg(Color::Gray)),
+                    space_span(fmt.width() - 8, style),
+                ]),
+                style,
+                &mut text,
+            );
         }
 
-        if let Some(thread) = info.get_thread(Some(self.event.event_id())) {
-            fmt.push_thread_reply_count(thread.len(), &mut text);
+        if settings.tunables.reaction_display {
+            if let Some(msg) = self.content().as_msglike() {
+                fmt.push_reactions(&msg.reactions, style, &mut text);
+            }
+        }
+
+        if let Some(thread) =
+            self.content().as_msglike().and_then(|msg| msg.thread_summary.as_ref())
+        {
+            fmt.push_thread_reply_count(thread.num_replies, &mut text);
         }
 
         (text, [proto_main, proto_reply])
-    }
-
-    pub fn show<'a>(
-        &'a self,
-        prev: Option<&Message>,
-        selected: bool,
-        vwctx: &ViewportContext<MessageCursor>,
-        info: &'a RoomInfo,
-        settings: &'a ApplicationSettings,
-    ) -> Text<'a> {
-        self.show_with_preview(prev, selected, vwctx, info, settings).0
     }
 
     fn show_msg<'a>(
@@ -1047,31 +1488,32 @@ impl Message {
         width: usize,
         style: Style,
         hide_reply: bool,
+        info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
     ) -> (Text<'a>, Option<&'a Protocol>) {
-        if let Some(html) = &self.html {
+        if let Some(html) = info.get_html(&self.identifier()) {
             (html.to_text(width, style, hide_reply, settings), None)
         } else {
-            let mut msg = self.event.body();
+            let mut msg = self.body();
             if settings.tunables.message_shortcode_display {
                 msg = Cow::Owned(replace_emojis_in_str(msg.as_ref()));
             }
 
-            if self.downloaded {
-                msg.to_mut().push_str(" \u{2705}");
-            }
-
             let mut proto = None;
-            let placeholder = match &self.image_preview {
-                ImageStatus::None => None,
-                ImageStatus::Downloading(image_preview_size) => {
+            let placeholder = match self.image_preview().and_then(|source| previews.get(source)) {
+                None => None,
+                Some(ImageStatus::Queued(image_preview_size)) => {
+                    placeholder_frame(Some("Queued..."), width, image_preview_size)
+                },
+                Some(ImageStatus::Downloading(image_preview_size)) => {
                     placeholder_frame(Some("Downloading..."), width, image_preview_size)
                 },
-                ImageStatus::Loaded(backend) => {
+                Some(ImageStatus::Loaded(backend)) => {
                     proto = Some(backend);
                     placeholder_frame(Some("No Space..."), width, &backend.area().into())
                 },
-                ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
+                Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
             };
 
             if let Some(placeholder) = placeholder {
@@ -1082,31 +1524,29 @@ impl Message {
         }
     }
 
-    fn sender_span<'a>(
-        &'a self,
-        info: &'a RoomInfo,
-        settings: &'a ApplicationSettings,
-    ) -> Span<'a> {
-        settings.get_user_span(self.sender.as_ref(), info)
+    fn sender_span<'a>(&'a self, settings: &'a ApplicationSettings) -> Span<'a> {
+        let name = if let Some(profile) = self.sender_profile().ready() {
+            profile.display_name.as_deref()
+        } else {
+            None
+        };
+
+        settings.get_user_span(self.sender(), name)
     }
 
     fn show_sender<'a>(
         &'a self,
-        prev: Option<&Message>,
+        prev_sender: Option<&UserId>,
         align_right: bool,
-        info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Option<Span<'a>> {
-        if let Some(prev) = prev {
-            if self.sender == prev.sender &&
-                self.timestamp.same_day(&prev.timestamp) &&
-                !self.event.is_emote()
-            {
+        if let Some(prev) = prev_sender {
+            if self.sender() == prev && !self.is_emote() {
                 return None;
             }
         }
 
-        let Span { content, style } = self.sender_span(info, settings);
+        let Span { content, style } = self.sender_span(settings);
         let user_gutter = settings.tunables.user_gutter_width;
         let ((truncated, width), _) = take_width(content, user_gutter - 2);
         let padding = user_gutter - 2 - width;
@@ -1119,73 +1559,67 @@ impl Message {
 
         Span::styled(sender, style).into()
     }
+}
 
-    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
-        self.event.redact(redaction);
-        self.html = None;
-        self.downloaded = false;
-        self.image_preview = ImageStatus::None;
+impl TimelineItemExt for TimelineItem {
+    fn item(&self) -> &TimelineItem {
+        self
     }
 }
 
-impl From<RoomEncryptedEvent> for Message {
-    fn from(event: RoomEncryptedEvent) -> Self {
-        let timestamp = event.origin_server_ts().into();
-        let user_id = event.sender().to_owned();
-        let content = match event {
-            RoomEncryptedEvent::Original(ev) => MessageEvent::EncryptedOriginal(ev.into()),
-            RoomEncryptedEvent::Redacted(ev) => MessageEvent::EncryptedRedacted(ev.into()),
-        };
+pub trait TimelineItemExt {
+    fn item(&self) -> &TimelineItem;
 
-        Message::new(content, user_id, timestamp)
+    fn sender(&self) -> Option<&UserId> {
+        self.item().as_event().map(|event| event.sender())
     }
-}
 
-impl From<OriginalRoomMessageEvent> for Message {
-    fn from(event: OriginalRoomMessageEvent) -> Self {
-        let timestamp = event.origin_server_ts.into();
-        let user_id = event.sender.clone();
-        let content = MessageEvent::Original(event.into());
+    /// Render the message as a [Text] object for the terminal.
+    ///
+    /// This will also get the image preview Protocol with an x/y offset.
+    fn show_with_preview<'a>(
+        &'a self,
+        prev_sender: Option<&UserId>,
+        selected: bool,
+        vwctx: &ViewportContext<MessageCursor>,
+        info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
+    ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
+        match self.item().kind() {
+            TimelineItemKind::Event(item) => {
+                item.show_with_preview(prev_sender, selected, vwctx, info, settings, previews)
+            },
+            TimelineItemKind::Virtual(VirtualTimelineItem::ReadMarker) => {
+                ("-".repeat(vwctx.get_width()).into(), [None, None])
+            },
+            TimelineItemKind::Virtual(VirtualTimelineItem::TimelineStart) => {
+                ("--- Timeline Start ---".into(), [None, None])
+            },
+            TimelineItemKind::Virtual(VirtualTimelineItem::DateDivider(date)) => {
+                let ts = MessageTimeStamp(date.0);
+                let time = ts.as_datetime().format("%A, %B %d %Y").to_string();
+                let padding = vwctx.get_width().saturating_sub(time.len());
+                let leading = space_span(padding / 2, Style::default());
+                let trailing = space_span(padding.saturating_sub(padding / 2), Style::default());
+                let time = Span::styled(time, Style::new().add_modifier(StyleModifier::BOLD));
 
-        Message::new(content, user_id, timestamp)
-    }
-}
-
-impl From<RedactedRoomMessageEvent> for Message {
-    fn from(event: RedactedRoomMessageEvent) -> Self {
-        let timestamp = event.origin_server_ts.into();
-        let user_id = event.sender.clone();
-
-        let event_id = event.event_id;
-        let reason = redaction_reason_unsigned(&event.unsigned);
-        let content = MessageEvent::Redacted(event_id, reason);
-
-        Message::new(content, user_id, timestamp)
-    }
-}
-
-impl From<RoomMessageEvent> for Message {
-    fn from(event: RoomMessageEvent) -> Self {
-        match event {
-            RoomMessageEvent::Original(ev) => ev.into(),
-            RoomMessageEvent::Redacted(ev) => ev.into(),
+                (Line::from(vec![leading, time, trailing]).into(), [None, None])
+            },
         }
     }
-}
 
-impl From<AnySyncStateEvent> for Message {
-    fn from(event: AnySyncStateEvent) -> Self {
-        let timestamp = event.origin_server_ts().into();
-        let user_id = event.sender().to_owned();
-        let event = MessageEvent::State(event.into());
-
-        Message::new(event, user_id, timestamp)
-    }
-}
-
-impl Display for Message {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.event.body())
+    fn show<'a>(
+        &'a self,
+        prev_sender: Option<&UserId>,
+        selected: bool,
+        vwctx: &ViewportContext<MessageCursor>,
+        info: &'a RoomInfo,
+        settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
+    ) -> Text<'a> {
+        self.show_with_preview(prev_sender, selected, vwctx, info, settings, previews)
+            .0
     }
 }
 
@@ -1255,7 +1689,9 @@ pub mod tests {
 
     #[test]
     fn test_mc_to_key() {
-        let messages = mock_messages();
+        let settings = mock_settings();
+        let mut messages = Messages::mock_new();
+        messages.set_messages(mock_messages());
         let mc1 = MessageCursor::from(MSG1_KEY.clone());
         let mc2 = MessageCursor::from(MSG2_KEY.clone());
         let mc3 = MessageCursor::from(MSG3_KEY.clone());
@@ -1263,31 +1699,33 @@ pub mod tests {
         let mc5 = MessageCursor::from(MSG5_KEY.clone());
         let mc6 = MessageCursor::latest();
 
-        let k1 = mc1.to_key(&messages).unwrap();
-        let k2 = mc2.to_key(&messages).unwrap();
-        let k3 = mc3.to_key(&messages).unwrap();
-        let k4 = mc4.to_key(&messages).unwrap();
-        let k5 = mc5.to_key(&messages).unwrap();
-        let k6 = mc6.to_key(&messages).unwrap();
+        let k1 = mc1.to_key(&messages, &settings).unwrap();
+        let k2 = mc2.to_key(&messages, &settings).unwrap();
+        let k3 = mc3.to_key(&messages, &settings).unwrap();
+        let k4 = mc4.to_key(&messages, &settings).unwrap();
+        let k5 = mc5.to_key(&messages, &settings).unwrap();
+        let k6 = mc6.to_key(&messages, &settings).unwrap();
 
         // These should all be equal to their MSGN_KEYs.
-        assert_eq!(k1, &MSG1_KEY.clone());
-        assert_eq!(k2, &MSG2_KEY.clone());
-        assert_eq!(k3, &MSG3_KEY.clone());
-        assert_eq!(k4, &MSG4_KEY.clone());
-        assert_eq!(k5, &MSG5_KEY.clone());
+        assert_eq!(k1, MSG1_KEY.clone());
+        assert_eq!(k2, MSG2_KEY.clone());
+        assert_eq!(k3, MSG3_KEY.clone());
+        assert_eq!(k4, MSG4_KEY.clone());
+        assert_eq!(k5, MSG5_KEY.clone());
 
         // MessageCursor::latest() turns into the largest key (our local echo message).
-        assert_eq!(k6, &MSG1_KEY.clone());
+        assert_eq!(k6, MSG1_KEY.clone());
 
         // MessageCursor::latest() fails to convert for a room w/o messages.
-        let messages_empty = Messages::new(ReceiptThread::Main);
-        assert_eq!(mc6.to_key(&messages_empty), None);
+        let messages_empty = Messages::mock_new();
+        assert_eq!(mc6.to_key(&messages_empty, &settings), None);
     }
 
     #[test]
     fn test_mc_to_from_cursor() {
-        let messages = mock_messages();
+        let settings = mock_settings();
+        let mut messages = Messages::mock_new();
+        messages.set_messages(mock_messages());
         let mc1 = MessageCursor::from(MSG1_KEY.clone());
         let mc2 = MessageCursor::from(MSG2_KEY.clone());
         let mc3 = MessageCursor::from(MSG3_KEY.clone());
@@ -1296,9 +1734,9 @@ pub mod tests {
         let mc6 = MessageCursor::latest();
 
         let identity = |mc: &MessageCursor| {
-            let c = mc.to_cursor(&messages).unwrap();
+            let c = mc.to_cursor(&messages, &settings).unwrap();
 
-            MessageCursor::from_cursor(&c, &messages).unwrap()
+            MessageCursor::from_cursor(&c, &messages, &settings).unwrap()
         };
 
         // These should all convert to a Cursor and back to the original value.
@@ -1418,78 +1856,78 @@ pub mod tests {
     #[test]
     fn test_display_attachment_size() {
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            body_cow_content(&MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::default()))
-            ))),
+            )),
             "[Attached Image: Alt text]".to_string()
         );
 
         let mut info = ImageInfo::default();
         info.size = Some(442630_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            body_cow_content(&MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Image: Alt text (442.63 kB)]".to_string()
         );
 
         let mut info = ImageInfo::default();
         info.size = Some(12_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Image(
+            body_cow_content(&MessageType::Image(
                 ImageMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Image: Alt text (12 B)]".to_string()
         );
 
         let mut info = AudioInfo::default();
         info.size = Some(4294967295_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Audio(
+            body_cow_content(&MessageType::Audio(
                 AudioMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Audio: Alt text (4.29 GB)]".to_string()
         );
 
         let mut info = FileInfo::default();
         info.size = Some(4426300_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::File(
+            body_cow_content(&MessageType::File(
                 FileMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached File: Alt text (4.43 MB)]".to_string()
         );
 
         let mut info = VideoInfo::default();
         info.size = Some(44000_u32.into());
         assert_eq!(
-            body_cow_content(&RoomMessageEventContent::new(MessageType::Video(
+            body_cow_content(&MessageType::Video(
                 VideoMessageEventContent::plain(
                     "Alt text".to_string(),
                     "mxc://matrix.org/jDErsDugkNlfavzLTjJNUKAH".into()
                 )
                 .info(Some(Box::new(info)))
-            ))),
+            )),
             "[Attached Video: Alt text (44 kB)]".to_string()
         );
     }

@@ -18,8 +18,8 @@ build = "build.rs"
 default = ["bundled", "desktop"]
 bundled = ["matrix-sdk/bundled-sqlite", "rustls-tls"]
 desktop = ["dep:notify-rust", "modalkit/clipboard"]
-native-tls = ["matrix-sdk/native-tls"]
-rustls-tls = ["matrix-sdk/rustls-tls"]
+native-tls = ["matrix-sdk/native-tls", "matrix-sdk-ui/native-tls"]
+rustls-tls = ["matrix-sdk/rustls-tls", "matrix-sdk-ui/rustls-tls"]
 
 [build-dependencies.vergen-gitcl]
 version = "9"
@@ -27,6 +27,7 @@ default-features = false
 features = ["build"]
 
 [dependencies]
+alternating-iter = "0.3.1"
 anyhow = "1.0"
 bitflags = "2.3"
 chrono = "0.4"
@@ -55,7 +56,7 @@ regex = "1.5"
 rpassword = "7.2"
 serde = "1.0"
 serde_json = "1.0"
-shellexpand = "3.1"
+shellexpand = "3.1.1"
 sled = "0.34.7"
 temp-dir = "0.2"
 thiserror = "2.0"
@@ -79,7 +80,7 @@ optional = true
 [dependencies.modalkit]
 version = "0.0.25"
 default-features = false
-#git = "https://github.com/ulyssa/modalkit"
+# git = "https://github.com/ulyssa/modalkit"
 #rev = "e40dbb0bfeabe4cfd08facd2acb446080a330d75"
 
 [dependencies.modalkit-ratatui]
@@ -91,6 +92,10 @@ version = "0.0.25"
 version = "0.16.0"
 default-features = false
 features = ["e2e-encryption", "sqlite", "sso-login"]
+
+[dependencies.matrix-sdk-ui]
+version = "0.16.0"
+default-features = false
 
 [dependencies.matrix-sdk-crypto]
 version = "0.16.0"

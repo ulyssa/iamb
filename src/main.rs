@@ -16,6 +16,8 @@
 #![allow(clippy::needless_return)]
 #![allow(clippy::result_large_err)]
 #![allow(clippy::bool_assert_comparison)]
+#![cfg_attr(test, allow(unused_imports, dead_code))]
+
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::Display;
@@ -24,11 +26,12 @@ use std::io::{stdout, BufWriter, Stdout, Write};
 use std::ops::DerefMut;
 use std::process;
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use clap::Parser;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
+use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
 use matrix_sdk::ruma::OwnedUserId;
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
@@ -154,14 +157,14 @@ fn config_tab_to_desc(
             let window = match window {
                 config::WindowPath::UserId(user_id) => {
                     let name = user_id.to_string();
-                    let room_id = worker.join_room(name.clone())?;
+                    let room_id = worker.join_room(name.clone())?.room_id().to_owned();
                     names.insert(name, room_id.clone());
                     IambId::Room(room_id, None)
                 },
                 config::WindowPath::RoomId(room_id) => IambId::Room(room_id, None),
                 config::WindowPath::AliasId(alias) => {
                     let name = alias.to_string();
-                    let room_id = worker.join_room(name.clone())?;
+                    let room_id = worker.join_room(name.clone())?.room_id().to_owned();
                     names.insert(name, room_id.clone());
                     IambId::Room(room_id, None)
                 },
@@ -562,16 +565,25 @@ impl Application {
 
         let info = match action {
             IambAction::ClearUnreads => {
-                let user_id = &store.application.settings.profile.user_id;
-
                 // Clear any notifications we displayed:
                 store.application.open_notifications.clear();
 
-                for room_id in store.application.sync_info.chats() {
-                    if let Some(room) = store.application.rooms.get_mut(room_id) {
-                        room.fully_read(user_id);
+                let store = Weak::upgrade(&store.application.worker.store).unwrap();
+                tokio::spawn(async move {
+                    let locked = store.lock().await;
+
+                    for (room_id, info) in locked.application.rooms.iter() {
+                        if let Err(err) = info
+                            .get_thread(None)
+                            .unwrap()
+                            .timeline()
+                            .mark_as_read(ReceiptType::ReadPrivate)
+                            .await
+                        {
+                            tracing::warn!(?room_id, "cannot mark room as read: {err}");
+                        };
                     }
-                }
+                });
 
                 None
             },
@@ -644,7 +656,11 @@ impl Application {
         match action {
             HomeserverAction::CreateRoom(alias, vis, flags) => {
                 let client = &store.application.worker.client;
-                let room_id = create_room(client, alias, vis, flags).await?;
+                let room = create_room(client, alias, vis, flags).await?;
+                let room_id = room.room_id().to_owned();
+
+                store.application.join_room(room_id.to_string())?;
+
                 let room = IambId::Room(room_id, None);
                 let target = OpenTarget::Application(room);
                 let action = WindowAction::Switch(target);

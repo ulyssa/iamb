@@ -1,42 +1,25 @@
 //! Window for Matrix rooms
-use std::borrow::Cow;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
+use std::sync::Weak;
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
+use matrix_sdk::room::edit::EditedContent;
+use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
 use matrix_sdk::EncryptionState;
+use matrix_sdk_ui::timeline::{AttachmentConfig, AttachmentSource};
 use modalkit::editing::store::RegisterError;
 use ratatui::style::{Color, Style};
 use std::process::Command;
 use tokio;
 use url::Url;
 
-use matrix_sdk::{
-    attachment::AttachmentConfig,
-    media::{MediaFormat, MediaRequestParameters},
-    room::Room as MatrixRoom,
-    ruma::{
-        events::reaction::ReactionEventContent,
-        events::relation::{Annotation, Replacement},
-        events::room::message::{
-            AddMentions,
-            ForwardThread,
-            MessageType,
-            OriginalRoomMessageEvent,
-            Relation,
-            ReplyWithinThread,
-            RoomMessageEventContent,
-            TextMessageEventContent,
-        },
-        OwnedEventId,
-        OwnedRoomId,
-        RoomId,
-    },
-    RoomState,
-};
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
+use matrix_sdk::room::Room as MatrixRoom;
+use matrix_sdk::ruma::events::room::message::MessageType;
+use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, RoomId};
 
 use ratatui::{
     buffer::Buffer,
@@ -73,6 +56,7 @@ use modalkit::errors::{EditError, EditResult, UIError};
 use modalkit::prelude::*;
 
 use crate::base::{
+    ChatStore,
     DownloadFlags,
     IambAction,
     IambBufferId,
@@ -84,19 +68,11 @@ use crate::base::{
     ProgramContext,
     ProgramStore,
     RoomFocus,
-    RoomInfo,
     SendAction,
 };
 
-use crate::message::{
-    text_to_message,
-    Message,
-    MessageEvent,
-    MessageKey,
-    MessageTimeStamp,
-    TreeGenState,
-};
-use crate::worker::Requester;
+use crate::message::{text_to_message, MessageExt, MessageKey, TreeGenState};
+use crate::util::TimelineDetailsExt;
 
 use super::scrollback::{Scrollback, ScrollbackState};
 
@@ -117,14 +93,29 @@ pub struct ChatState {
 }
 
 impl ChatState {
-    pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
+    pub fn new(
+        room: MatrixRoom,
+        thread: Option<OwnedEventId>,
+        store: &mut ProgramStore,
+    ) -> IambResult<Self> {
         let room_id = room.room_id().to_owned();
+
+        let ChatStore { rooms, worker, .. } = &mut store.application;
+
+        let Some(info) = rooms.get_mut(&room_id) else {
+            return Err(UIError::Application(IambError::UnknownRoom(room_id)));
+        };
+
+        if let Some(root) = thread.as_deref() {
+            info.ensure_thread(root, worker).map_err(IambError::from)?;
+        }
+
         let scrollback = ScrollbackState::new(room_id.clone(), thread.clone());
         let id = IambBufferId::Room(room_id.clone(), thread, RoomFocus::MessageBar);
         let ebuf = store.load_buffer(id);
         let tbox = TextBoxState::new(ebuf);
 
-        ChatState {
+        Ok(ChatState {
             room_id,
             room,
 
@@ -137,35 +128,11 @@ impl ChatState {
 
             reply_to: None,
             editing: None,
-        }
+        })
     }
 
     pub fn thread(&self) -> Option<&OwnedEventId> {
         self.scrollback.thread()
-    }
-
-    fn get_joined(&self, worker: &Requester) -> Result<MatrixRoom, IambError> {
-        let Some(room) = worker.client.get_room(self.id()) else {
-            return Err(IambError::NotJoined);
-        };
-
-        if room.state() == RoomState::Joined {
-            Ok(room)
-        } else {
-            Err(IambError::NotJoined)
-        }
-    }
-
-    fn get_reply_to<'a>(&self, info: &'a RoomInfo) -> Option<&'a OriginalRoomMessageEvent> {
-        let thread = self.scrollback.get_thread(info)?;
-        let key = self.reply_to.as_ref()?;
-        let msg = thread.get(key)?;
-
-        if let MessageEvent::Original(ev) = &msg.event {
-            Some(ev)
-        } else {
-            None
-        }
     }
 
     fn reset(&mut self) -> EditRope {
@@ -174,24 +141,21 @@ impl ChatState {
         self.tbox.reset()
     }
 
-    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
-        if let Some(room) = store.application.worker.client.get_room(self.id()) {
-            self.room = room;
-        }
-    }
-
     pub async fn message_command(
         &mut self,
         act: MessageAction,
         _: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
-        let client = &store.application.worker.client;
-
-        let settings = &store.application.settings;
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
-
-        let msg = self.scrollback.get_mut(info).ok_or(IambError::NoSelectedMessage)?;
+        let ChatStore { worker, rooms, settings, .. } = &mut store.application;
+        let client = &worker.client;
+        let Some(info) = rooms.get(&self.room_id) else {
+            return Err(IambError::NoSelectedRoom.into());
+        };
+        let Some(thread) = self.scrollback.get_thread(info) else {
+            return Err(IambError::NoSelectedRoom.into());
+        };
+        let msg = self.scrollback.get(info, settings).ok_or(IambError::NoSelectedMessage)?;
 
         match act {
             MessageAction::Cancel(skip_confirm) => {
@@ -212,159 +176,166 @@ impl ChatState {
                 Err(UIError::NeedConfirm(prompt))
             },
             MessageAction::Download(filename, flags) => {
-                if let MessageEvent::Original(ev) = &msg.event {
-                    let media = client.media();
+                let Some(ev) = msg.content().as_message() else {
+                    return Err(IambError::NoAttachment.into());
+                };
+                let media = client.media();
 
-                    let mut filename = match (filename, &settings.dirs.downloads) {
-                        (Some(f), _) => PathBuf::from(f),
-                        (None, Some(downloads)) => downloads.clone(),
-                        (None, None) => return Err(IambError::NoDownloadDir.into()),
-                    };
+                let mut filename = match (filename, &settings.dirs.downloads) {
+                    (Some(f), _) => PathBuf::from(f),
+                    (None, Some(downloads)) => downloads.clone(),
+                    (None, None) => return Err(IambError::NoDownloadDir.into()),
+                };
 
-                    let (source, msg_filename) = match &ev.content.msgtype {
-                        MessageType::Audio(c) => (c.source.clone(), c.filename()),
-                        MessageType::File(c) => (c.source.clone(), c.filename()),
-                        MessageType::Image(c) => (c.source.clone(), c.filename()),
-                        MessageType::Video(c) => (c.source.clone(), c.filename()),
-                        _ => {
-                            if !flags.contains(DownloadFlags::OPEN) {
-                                return Err(IambError::NoAttachment.into());
-                            }
-
-                            let links = if let Some(html) = &msg.html {
-                                html.get_links()
-                            } else {
-                                linkify::LinkFinder::new()
-                                    .links(&msg.event.body())
-                                    .filter_map(|u| Url::parse(u.as_str()).ok())
-                                    .scan(TreeGenState { link_num: 0 }, |state, u| {
-                                        state.next_link_char().map(|c| (c, u))
-                                    })
-                                    .collect()
-                            };
-
-                            if links.is_empty() {
-                                return Err(IambError::NoAttachment.into());
-                            }
-
-                            let choices = links
-                                .into_iter()
-                                .map(|l| {
-                                    let url = l.1.to_string();
-                                    let act = IambAction::OpenLink(url.clone()).into();
-                                    MultiChoiceItem::new(l.0, url, vec![act])
-                                })
-                                .collect();
-                            let dialog = MultiChoice::new(choices);
-                            let err = UIError::NeedConfirm(Box::new(dialog));
-
-                            return Err(err);
-                        },
-                    };
-
-                    if filename.is_dir() {
-                        filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
-                    }
-
-                    if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
-                        // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
-                        if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
-                            let ext = filename.extension();
-                            let mut filename_incr = filename.clone();
-                            for n in 1..=1000 {
-                                if let Some(ext) = ext.and_then(OsStr::to_str) {
-                                    filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
-                                } else {
-                                    filename_incr.set_file_name(format!("{stem}-{n}"));
-                                }
-
-                                if !filename_incr.exists() {
-                                    filename = filename_incr;
-                                    break;
-                                }
-                            }
+                let (source, msg_filename) = match &ev.msgtype() {
+                    MessageType::Audio(c) => (c.source.clone(), c.filename()),
+                    MessageType::File(c) => (c.source.clone(), c.filename()),
+                    MessageType::Image(c) => (c.source.clone(), c.filename()),
+                    MessageType::Video(c) => (c.source.clone(), c.filename()),
+                    _ => {
+                        if !flags.contains(DownloadFlags::OPEN) {
+                            return Err(IambError::NoAttachment.into());
                         }
-                    }
 
-                    if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
-                        let req = MediaRequestParameters { source, format: MediaFormat::File };
+                        let links = if let Some(html) = info.get_html(&msg.identifier()) {
+                            html.get_links()
+                        } else {
+                            linkify::LinkFinder::new()
+                                .links(&msg.body())
+                                .filter_map(|u| Url::parse(u.as_str()).ok())
+                                .scan(TreeGenState { link_num: 0 }, |state, u| {
+                                    state.next_link_char().map(|c| (c, u))
+                                })
+                                .collect()
+                        };
 
-                        let bytes =
-                            media.get_media_content(&req, true).await.map_err(IambError::from)?;
+                        if links.is_empty() {
+                            return Err(IambError::NoAttachment.into());
+                        }
 
-                        fs::write(filename.as_path(), bytes.as_slice())?;
-
-                        msg.downloaded = true;
-                    } else if !flags.contains(DownloadFlags::OPEN) {
-                        let msg = format!(
-                            "The file {} already exists; add ! to end of command to overwrite it.",
-                            filename.display()
-                        );
-                        let err = UIError::Failure(msg);
+                        let choices = links
+                            .into_iter()
+                            .map(|l| {
+                                let url = l.1.to_string();
+                                let act = IambAction::OpenLink(url.clone()).into();
+                                MultiChoiceItem::new(l.0, url, vec![act])
+                            })
+                            .collect();
+                        let dialog = MultiChoice::new(choices);
+                        let err = UIError::NeedConfirm(Box::new(dialog));
 
                         return Err(err);
-                    }
+                    },
+                };
 
-                    let info = if flags.contains(DownloadFlags::OPEN) {
-                        let target = filename.clone().into_os_string();
-                        match open_command(
-                            store.application.settings.tunables.open_command.as_ref(),
-                            target,
-                        ) {
-                            Ok(_) => {
-                                InfoMessage::from(format!(
-                                    "Attachment downloaded to {} and opened",
-                                    filename.display()
-                                ))
-                            },
-                            Err(err) => {
-                                return Err(err);
-                            },
-                        }
-                    } else {
-                        InfoMessage::from(format!(
-                            "Attachment downloaded to {}",
-                            filename.display()
-                        ))
-                    };
-
-                    return Ok(info.into());
+                if filename.is_dir() {
+                    filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
                 }
 
-                Err(IambError::NoAttachment.into())
+                if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
+                    // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
+                    if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
+                        let ext = filename.extension();
+                        let mut filename_incr = filename.clone();
+                        for n in 1..=1000 {
+                            if let Some(ext) = ext.and_then(OsStr::to_str) {
+                                filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
+                            } else {
+                                filename_incr.set_file_name(format!("{stem}-{n}"));
+                            }
+
+                            if !filename_incr.exists() {
+                                filename = filename_incr;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
+                    let req = MediaRequestParameters { source, format: MediaFormat::File };
+
+                    let bytes =
+                        media.get_media_content(&req, true).await.map_err(IambError::from)?;
+
+                    fs::write(filename.as_path(), bytes.as_slice())?;
+                } else if !flags.contains(DownloadFlags::OPEN) {
+                    let msg = format!(
+                        "The file {} already exists; add ! to end of command to overwrite it.",
+                        filename.display()
+                    );
+                    let err = UIError::Failure(msg);
+
+                    return Err(err);
+                }
+
+                let info = if flags.contains(DownloadFlags::OPEN) {
+                    let target = filename.clone().into_os_string();
+                    match open_command(
+                        store.application.settings.tunables.open_command.as_ref(),
+                        target,
+                    ) {
+                        Ok(_) => {
+                            InfoMessage::from(format!(
+                                "Attachment downloaded to {} and opened",
+                                filename.display()
+                            ))
+                        },
+                        Err(err) => {
+                            return Err(err);
+                        },
+                    }
+                } else {
+                    InfoMessage::from(format!("Attachment downloaded to {}", filename.display()))
+                };
+
+                Ok(info.into())
             },
             MessageAction::Edit => {
-                if msg.sender != settings.profile.user_id {
-                    let msg = "Cannot edit messages sent by someone else";
+                if !msg.is_editable() {
+                    let msg = "Cannot edit this message";
                     let err = UIError::Failure(msg.into());
 
                     return Err(err);
                 }
 
-                let ev = match &msg.event {
-                    MessageEvent::Original(ev) => &ev.content,
-                    MessageEvent::Local(_, ev) => ev.deref(),
-                    _ => {
-                        let msg = "Cannot edit a redacted message";
+                let Some(text) = msg.content().as_message().and_then(|msg| {
+                    match msg.msgtype() {
+                        MessageType::Text(msg) => Some(msg.body.as_str()),
+                        _ => None,
+                    }
+                }) else {
+                    let msg = "Cannot edit a non-text message";
+                    let err = UIError::Failure(msg.into());
+
+                    return Err(err);
+                };
+
+                let key = self.scrollback.get_key(info, settings).unwrap();
+
+                if let Some(reply_to) = msg.reply_to() {
+                    let Some(reply_to) =
+                        thread.range_messages(..key, settings).find_map(|(key, item)| {
+                            if item.event_id() == Some(&reply_to) {
+                                Some(key)
+                            } else {
+                                None
+                            }
+                        })
+                    else {
+                        let msg = "Replied to message not loaded";
                         let err = UIError::Failure(msg.into());
 
                         return Err(err);
-                    },
-                };
+                    };
 
-                let text = match &ev.msgtype {
-                    MessageType::Text(msg) => msg.body.as_str(),
-                    _ => {
-                        let msg = "Cannot edit a non-text message";
-                        let err = UIError::Failure(msg.into());
-
-                        return Err(err);
-                    },
-                };
+                    self.reply_to = Some(reply_to);
+                } else {
+                    self.reply_to = None;
+                }
 
                 self.tbox.set_text(text);
-                self.reply_to = msg.reply_to().and_then(|id| info.get_message_key(&id)).cloned();
-                self.editing = self.scrollback.get_key(info);
+                self.editing = self.scrollback.get_key(info, settings);
                 self.focus = RoomFocus::MessageBar;
 
                 Ok(None)
@@ -385,31 +356,23 @@ impl ChatState {
                     return Err(UIError::NeedConfirm(prompt));
                 };
 
-                let room = self.get_joined(&store.application.worker)?;
-                let event_id = match &msg.event {
-                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
-                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
-                    MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_, _) => {
-                        let msg = "Cannot react to a redacted message";
-                        let err = UIError::Failure(msg.into());
-
-                        return Err(err);
-                    },
-                };
-
-                if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
+                if msg
+                    .content()
+                    .reactions()
+                    .and_then(|reactions| reactions.get(&emoji))
+                    .is_some_and(|reactions| reactions.contains_key(&settings.profile.user_id))
+                {
                     let msg = format!("You’ve already reacted to this message with {emoji}");
                     let err = UIError::Failure(msg);
 
                     return Err(err);
                 }
 
-                let reaction = Annotation::new(event_id, emoji);
-                let msg = ReactionEventContent::new(reaction);
-                let _ = room.send(msg).await.map_err(IambError::from)?;
+                thread
+                    .timeline()
+                    .toggle_reaction(&msg.identifier(), &emoji)
+                    .await
+                    .map_err(IambError::from)?;
 
                 Ok(None)
             },
@@ -423,46 +386,62 @@ impl ChatState {
                     return Err(UIError::NeedConfirm(prompt));
                 }
 
-                let room = self.get_joined(&store.application.worker)?;
-                let event_id = match &msg.event {
-                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
-                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
-                    MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_, _) => {
-                        let msg = "Cannot redact already redacted message";
-                        let err = UIError::Failure(msg.into());
+                if msg.content().is_redacted() {
+                    let msg = "Cannot redact already redacted message";
+                    let err = UIError::Failure(msg.into());
 
-                        return Err(err);
-                    },
-                };
+                    return Err(err);
+                }
 
-                let event_id = event_id.as_ref();
-                let reason = reason.as_deref();
-                let _ = room.redact(event_id, reason, None).await.map_err(IambError::from)?;
+                thread
+                    .timeline()
+                    .redact(&msg.identifier(), reason.as_deref())
+                    .await
+                    .map_err(IambError::from)?;
 
                 Ok(None)
             },
             MessageAction::Reply => {
-                self.reply_to = self.scrollback.get_key(info);
-                self.focus = RoomFocus::MessageBar;
+                if msg.event_id().is_some() {
+                    let key = self.scrollback.get_key(info, settings).unwrap();
+                    self.reply_to = Some(key);
+                    self.focus = RoomFocus::MessageBar;
+                    Ok(None)
+                } else {
+                    let msg = "Cannot reply to a local echo";
+                    let err = UIError::Failure(msg.into());
 
-                Ok(None)
+                    Err(err)
+                }
             },
             MessageAction::Replied => {
-                let Some(reply) = msg.reply_to() else {
+                let Some(reply_to) = msg.reply_to() else {
                     let msg = "Selected message is not a reply";
                     return Err(UIError::Failure(msg.into()));
                 };
 
-                let Some(key) = info.get_message_key(&reply) else {
-                    store.application.need_load.need_message(self.room_id.clone(), reply);
+                let key = self.scrollback.get_key(info, settings).unwrap();
+                let Some(reply_to) =
+                    thread.range_messages(..key, settings).find_map(|(key, item)| {
+                        if item.event_id() == Some(&reply_to) {
+                            Some(key)
+                        } else {
+                            None
+                        }
+                    })
+                else {
+                    if let Some(store) = Weak::upgrade(&worker.store) {
+                        thread.paginate_backwards(store);
+                    }
+
                     let msg = "Replied to message will be loaded in the background";
-                    return Err(UIError::Failure(msg.into()));
+                    let err = UIError::Failure(msg.into());
+                    return Err(err);
                 };
 
-                self.scrollback.goto_message(key.clone());
+                // TODO: maybe switch to event focused timeline
+
+                self.scrollback.goto_message(reply_to);
                 Ok(None)
             },
             MessageAction::Unreact(reaction, literal) => {
@@ -486,44 +465,27 @@ impl ChatState {
                     None => None,
                 };
 
-                let room = self.get_joined(&store.application.worker)?;
-                let event_id = match &msg.event {
-                    MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
-                    MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
-                    MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_, _) => {
-                        let msg = "Cannot unreact to a redacted message";
-                        let err = UIError::Failure(msg.into());
+                let reactions = msg.content().reactions();
 
-                        return Err(err);
-                    },
-                };
-
-                let reactions = match info.reactions.get(&event_id) {
-                    Some(r) => r,
-                    None => return Ok(None),
-                };
-
-                let reactions = reactions.iter().filter_map(|(event_id, (reaction, user_id))| {
-                    if user_id != &settings.profile.user_id {
-                        return None;
-                    }
-
-                    if let Some(emoji) = &emoji {
-                        if emoji == reaction {
-                            return Some(event_id);
-                        } else {
-                            return None;
-                        }
-                    } else {
-                        return Some(event_id);
-                    }
-                });
+                let reactions = reactions
+                    .iter()
+                    .flat_map(|reactions| {
+                        reactions.iter().filter_map(|(key, users)| {
+                            if users.contains_key(&settings.profile.user_id) {
+                                Some(key)
+                            } else {
+                                None
+                            }
+                        })
+                    })
+                    .filter(|key| emoji.as_ref().is_none_or(|emoji| &emoji == key));
 
                 for reaction in reactions {
-                    let _ = room.redact(reaction, None, None).await.map_err(IambError::from)?;
+                    thread
+                        .timeline()
+                        .toggle_reaction(&msg.identifier(), reaction)
+                        .await
+                        .map_err(IambError::from)?;
                 }
 
                 Ok(None)
@@ -537,11 +499,16 @@ impl ChatState {
         _: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
-        let room = self.get_joined(&store.application.worker)?;
-        let info = store.application.rooms.get_or_default(self.id().to_owned());
-        let mut show_echo = true;
+        let Some(info) = store.application.rooms.get(self.id()) else {
+            return Err(IambError::NoSelectedRoom.into());
+        };
+        let Some(thread) = info.get_thread(self.scrollback.thread().map(|id| &**id)) else {
+            return Err(IambError::NoSelectedRoom.into());
+        };
 
-        let (event_id, msg) = match act {
+        let timeline = thread.timeline();
+
+        match act {
             SendAction::Submit | SendAction::SubmitFromEditor => {
                 let msg = self.tbox.get();
 
@@ -562,59 +529,51 @@ impl ChatState {
                     msg.trim_end().to_string()
                 };
 
-                let mut msg = text_to_message(msg);
+                let msg = text_to_message(msg);
 
-                if let Some((_, event_id)) = &self.editing {
-                    msg.relates_to = Some(Relation::Replacement(Replacement::new(
-                        event_id.clone(),
-                        msg.msgtype.clone().into(),
-                    )));
+                if let Some(key) = &self.editing {
+                    let Some(editing) = thread.get_message(key).map(|event| event.identifier())
+                    else {
+                        self.editing = None;
+                        return Err(UIError::Failure(
+                            "Edited message not found. Please retry".into(),
+                        ));
+                    };
 
-                    show_echo = false;
-                } else if let Some(thread_root) = self.scrollback.thread() {
-                    if let Some(m) = self.get_reply_to(info) {
-                        msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::No);
-                    } else if let Some(m) = info.get_thread_last(thread_root) {
-                        msg = msg.make_for_thread(m, ReplyWithinThread::No, AddMentions::No);
-                    } else {
-                        // Internal state is wonky?
-                    }
-                } else if let Some(m) = self.get_reply_to(info) {
-                    msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
+                    timeline
+                        .edit(&editing, EditedContent::RoomMessage(msg))
+                        .await
+                        .map_err(IambError::from)?;
+                } else if let Some(key) = &self.reply_to {
+                    let Some(reply_to) = thread.get_message(key).and_then(|event| event.event_id())
+                    else {
+                        self.reply_to = None;
+                        return Err(UIError::Failure(
+                            "Replied to message not found. Please retry".into(),
+                        ));
+                    };
+
+                    timeline
+                        .send_reply(msg, reply_to.to_owned())
+                        .await
+                        .map_err(IambError::from)?;
+                } else {
+                    let msg = AnyMessageLikeEventContent::RoomMessage(msg.into());
+                    timeline.send(msg).await.map_err(IambError::from)?;
                 }
-
-                // XXX: second parameter can be a locally unique transaction id.
-                // Useful for doing retries.
-                let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
-                let event_id = resp.event_id;
 
                 // Reset message bar state now that it's been sent.
                 self.reset();
-
-                (event_id, msg)
             },
             SendAction::Upload(file) => {
                 let path = Path::new(file.as_str());
                 let mime = mime_guess::from_path(path).first_or(mime::APPLICATION_OCTET_STREAM);
+                let config = AttachmentConfig::default();
 
-                let bytes = fs::read(path)?;
-                let name = path
-                    .file_name()
-                    .map(OsStr::to_string_lossy)
-                    .unwrap_or_else(|| Cow::from("Attachment"));
-                let config = AttachmentConfig::new();
-
-                let resp = room
-                    .send_attachment(name.as_ref(), &mime, bytes, config)
+                timeline
+                    .send_attachment(AttachmentSource::File(path.to_owned()), mime, config)
                     .await
                     .map_err(IambError::from)?;
-
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
             },
             SendAction::UploadImage(width, height, bytes) => {
                 // Convert to png because arboard does not give us the mime type.
@@ -630,30 +589,14 @@ impl ChatState {
                         })?;
                 let mime = mime::IMAGE_PNG;
 
-                let name = "Clipboard.png";
-                let config = AttachmentConfig::new();
+                let filename = "Clipboard.png".to_string();
+                let config = AttachmentConfig::default();
 
-                let resp = room
-                    .send_attachment(name, &mime, bytes, config)
+                timeline
+                    .send_attachment(AttachmentSource::Data { bytes, filename }, mime, config)
                     .await
                     .map_err(IambError::from)?;
-
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
             },
-        };
-
-        if show_echo {
-            let user = store.application.settings.profile.user_id.clone();
-            let key = (MessageTimeStamp::LocalEcho, event_id.clone());
-            let msg = MessageEvent::Local(event_id, msg.into());
-            let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
-            let thread = self.scrollback.get_thread_mut(info);
-            thread.insert(key, msg);
         }
 
         // Jump to the end of the scrollback to show the message.
@@ -951,24 +894,38 @@ impl StatefulWidget for Chat<'_> {
         // Determine whether we have a description to show for the message bar.
         let desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
             (None, None, None) => None,
-            (None, None, Some(_)) => Some(Line::from("Replying in thread")),
+            (None, None, Some(_)) => Some(Line::from("Writing in thread")),
             (Some(_), None, None) => Some(Line::from("Editing message")),
             (Some(_), None, Some(_)) => Some(Line::from("Editing message in thread")),
-            (editing, Some(_), thread) => {
-                self.store.application.rooms.get(state.id()).and_then(|room| {
-                    let msg = state.get_reply_to(room)?;
-                    let user =
-                        self.store.application.settings.get_user_span(msg.sender.as_ref(), room);
-                    let prefix = match (editing.is_some(), thread.is_some()) {
-                        (true, false) => Span::from("Editing reply to "),
-                        (true, true) => Span::from("Editing reply in thread to "),
-                        (false, false) => Span::from("Replying to "),
-                        (false, true) => Span::from("Replying in thread to "),
-                    };
-                    let spans = Line::from(vec![prefix, user]);
+            (editing, Some(reply_to), thread) => {
+                let orig_sender = self
+                    .store
+                    .application
+                    .rooms
+                    .get(state.id())
+                    .and_then(|info| info.get_thread(state.thread().map(|id| &**id)))
+                    .and_then(|thread| thread.get_message(reply_to))
+                    .map(|msg| {
+                        let sender = msg.sender();
+                        let display_name = msg
+                            .sender_profile()
+                            .ready()
+                            .and_then(|profile| profile.display_name.as_deref());
+                        self.store.application.settings.get_user_span(sender, display_name)
+                    });
+                let prefix = match (editing.is_some(), thread.is_some()) {
+                    (true, false) => Span::from("Editing reply"),
+                    (true, true) => Span::from("Editing reply in thread"),
+                    (false, false) => Span::from("Replying"),
+                    (false, true) => Span::from("Replying in thread"),
+                };
 
-                    spans.into()
-                })
+                if let Some(orig_sender) = orig_sender {
+                    let infix = Span::from(" to ");
+                    Line::from(vec![prefix, infix, orig_sender]).into()
+                } else {
+                    Line::from(vec![prefix]).into()
+                }
             },
         };
 

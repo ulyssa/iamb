@@ -220,14 +220,18 @@ fn is_missing_mention(body: &Option<String>, mode: RoomNotificationMode, client:
     false
 }
 
-fn is_open(locked: &mut ProgramStore, room_id: &RoomId) -> bool {
+fn is_open(locked: &ProgramStore, room_id: &RoomId) -> bool {
     if let Some(draw_curr) = locked.application.draw_curr {
-        let info = locked.application.get_room_info(room_id.to_owned());
-        if let Some(draw_last) = info.draw_last {
-            return draw_last == draw_curr;
-        }
+        let draw_last = locked
+            .application
+            .rooms
+            .get(room_id)
+            .and_then(|info| info.draw_last.as_ref());
+
+        draw_last == Some(&draw_curr)
+    } else {
+        false
     }
-    false
 }
 
 fn is_focused(locked: &ProgramStore) -> bool {
@@ -235,9 +239,9 @@ fn is_focused(locked: &ProgramStore) -> bool {
 }
 
 async fn is_visible_room(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
-    let mut locked = store.lock().await;
+    let locked = store.lock().await;
 
-    is_focused(&locked) && is_open(&mut locked, room_id)
+    is_focused(&locked) && is_open(&locked, room_id)
 }
 
 pub async fn parse_full_notification(
