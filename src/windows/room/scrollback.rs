@@ -55,6 +55,7 @@ use crate::{
     },
     config::ApplicationSettings,
     message::{Message, MessageCursor, MessageKey, Messages},
+    preview::{PreviewKind, PreviewManager},
 };
 
 fn no_msgs() -> EditError<IambInfo> {
@@ -270,6 +271,7 @@ impl ScrollbackState {
         pos: MovePosition,
         info: &RoomInfo,
         settings: &ApplicationSettings,
+        previews: &PreviewManager,
     ) {
         let Some(thread) = self.get_thread(info) else {
             return;
@@ -292,7 +294,8 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = selidx == key;
                     let prev = prevmsg(key, thread);
-                    let len = item.show(prev, sel, &self.viewctx, info, settings).lines.len();
+                    let len =
+                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
 
                     if key == &idx {
                         lines += len / 2;
@@ -315,7 +318,8 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = key == selidx;
                     let prev = prevmsg(key, thread);
-                    let len = item.show(prev, sel, &self.viewctx, info, settings).lines.len();
+                    let len =
+                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
 
                     lines += len;
 
@@ -338,7 +342,12 @@ impl ScrollbackState {
         self.jumped.push(self.cursor.clone());
     }
 
-    fn shift_cursor(&mut self, info: &RoomInfo, settings: &ApplicationSettings) {
+    fn shift_cursor(
+        &mut self,
+        info: &RoomInfo,
+        settings: &ApplicationSettings,
+        previews: &PreviewManager,
+    ) {
         let Some(thread) = self.get_thread(info) else {
             return;
         };
@@ -368,7 +377,10 @@ impl ScrollbackState {
                 break;
             }
 
-            lines += item.show(prev, false, &self.viewctx, info, settings).height().max(1);
+            lines += item
+                .show(prev, false, &self.viewctx, info, settings, previews)
+                .height()
+                .max(1);
 
             if lines >= self.viewctx.get_height() {
                 // We've reached the end of the viewport; move cursor into it.
@@ -1067,6 +1079,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
     ) -> EditResult<EditInfo, IambInfo> {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let settings = &store.application.settings;
+        let previews = &store.application.previews;
         let mut corner = self.viewctx.corner.clone();
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
@@ -1094,7 +1107,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 for (key, item) in thread.range(..=&corner_key).rev() {
                     let sel = key == cursor_key;
                     let prev = prevmsg(key, thread);
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1122,7 +1135,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in thread.range(&corner_key..) {
                     let sel = key == cursor_key;
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1160,7 +1173,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         }
 
         self.viewctx.corner = corner;
-        self.shift_cursor(info, settings);
+        self.shift_cursor(info, settings, previews);
 
         Ok(None)
     }
@@ -1182,10 +1195,11 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             Axis::Vertical => {
                 let info = store.application.rooms.get_or_default(self.room_id.clone());
                 let settings = &store.application.settings;
+                let previews = &store.application.previews;
                 let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
                 if let Some(key) = self.cursor.to_key(thread).cloned() {
-                    self.scrollview(key, pos, info, settings);
+                    self.scrollview(key, pos, info, settings, previews);
                 }
 
                 Ok(None)
@@ -1345,10 +1359,47 @@ impl StatefulWidget for Scrollback<'_> {
         let mut sawit = false;
         let mut prev = prevmsg(&corner_key, thread);
 
+        // load image previews
+        for ((_, event_id), item) in thread.range(&corner_key..).rev() {
+            if let Some(source) = &item.image_preview {
+                self.store.application.previews.load(
+                    source,
+                    PreviewKind::Message,
+                    &self.store.application.worker,
+                );
+            }
+            let reply = item
+                .reply_to()
+                .or_else(|| item.thread_root())
+                .and_then(|e| info.get_event(&e))
+                .and_then(|msg| msg.image_preview.as_ref());
+            if let Some(source) = reply {
+                self.store.application.previews.load(
+                    source,
+                    PreviewKind::Message,
+                    &self.store.application.worker,
+                );
+            }
+            let reactions = info.reactions.get(event_id).map(|reactions| {
+                reactions.iter().filter_map(|(_, (_, _, source))| source.as_ref())
+            });
+            if let Some(reactions) = reactions {
+                for source in reactions {
+                    self.store.application.previews.load(
+                        source,
+                        PreviewKind::Reaction,
+                        &self.store.application.worker,
+                    );
+                }
+            }
+        }
+
+        let previews = &self.store.application.previews;
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
-            let (txt, [mut msg_preview, mut reply_preview]) =
-                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings);
+
+            let (txt, mut msg_previews) =
+                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings, previews);
 
             let incomplete_ok = !full || !sel;
 
@@ -1364,17 +1415,9 @@ impl StatefulWidget for Scrollback<'_> {
                     continue;
                 }
 
-                // Only take the preview into the matching row number.
-                // `reply` and `msg` previews are on rows,
-                // so an `or` works to pick the one that matches (if any)
-                let line_preview = match msg_preview {
-                    Some((_, _, y)) if y as usize == row => msg_preview.take(),
-                    _ => None,
-                }
-                .or(match reply_preview {
-                    Some((_, _, y)) if y as usize == row => reply_preview.take(),
-                    _ => None,
-                });
+                // Only take the previews into the matching row number.
+                let line_preview: Vec<_> =
+                    msg_previews.extract_if(.., |(_, _, y)| *y as usize == row).collect();
 
                 lines.push((key, row, line, line_preview));
                 sawit |= sel;
@@ -1399,9 +1442,9 @@ impl StatefulWidget for Scrollback<'_> {
         let mut image_previews = vec![];
         for ((_, _), _, txt, line_preview) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
-            if let Some((backend, msg_x, _)) = line_preview {
-                image_previews.push((x + msg_x, y, backend));
-            }
+            image_previews.extend(
+                line_preview.into_iter().map(|(backend, msg_x, _)| (x + msg_x, y, backend)),
+            );
 
             y += 1;
         }
