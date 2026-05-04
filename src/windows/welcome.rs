@@ -44,6 +44,9 @@ impl TerminalCursor for WelcomeState {
     fn get_term_cursor(&self) -> Option<TermOffset> {
         self.tbox.get_term_cursor()
     }
+    fn hide_term_cursor(&self) -> bool {
+        self.tbox.hide_term_cursor()
+    }
 }
 
 impl WindowOps<IambInfo> for WelcomeState {
