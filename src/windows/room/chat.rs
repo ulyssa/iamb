@@ -1,5 +1,6 @@
 //! Window for Matrix rooms
 use std::borrow::Cow;
+use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::ops::Deref;
@@ -7,6 +8,7 @@ use std::path::{Path, PathBuf};
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
+use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
 use matrix_sdk::EncryptionState;
 use modalkit::editing::store::RegisterError;
 use ratatui::style::{Color, Style};
@@ -668,6 +670,11 @@ impl ChatState {
                     config.caption =
                         text_to_text_message_event_content(caption.trim_end().to_string());
                 }
+                config.info = Some(AttachmentInfo::Image(BaseImageInfo {
+                    height: height.try_into().ok(),
+                    width: width.try_into().ok(),
+                    ..Default::default()
+                }));
 
                 let resp = room
                     .send_attachment(name, &mime, bytes, config)
