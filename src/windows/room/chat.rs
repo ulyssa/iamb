@@ -45,7 +45,7 @@ use ratatui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
-use modalkit::keybindings::dialog::{MultiChoice, MultiChoiceItem, PromptYesNo};
+use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem, PromptYesNo};
 
 use modalkit_ratatui::{
     textbox::{TextBox, TextBoxState},
@@ -90,6 +90,7 @@ use crate::base::{
 
 use crate::message::{
     text_to_message,
+    text_to_text_message_event_content,
     Message,
     MessageEvent,
     MessageKey,
@@ -593,7 +594,26 @@ impl ChatState {
 
                 (event_id, msg)
             },
-            SendAction::Upload(file) => {
+            SendAction::Upload(file, add_caption) => {
+                let caption = self.tbox.get();
+
+                if !caption.is_blank() && add_caption.is_none() {
+                    let msg = "Would you like to use the message bar as a caption?";
+
+                    let yes_act = SendAction::Upload(file.clone(), Some(true));
+                    let no_act = SendAction::Upload(file, Some(false));
+
+                    let yes_choice =
+                        MultiChoiceItem::new('y', msg, vec![IambAction::from(yes_act).into()]);
+                    let no_choice =
+                        MultiChoiceItem::new('n', "", vec![IambAction::from(no_act).into()]);
+
+                    let prompt = MultiChoice::new(vec![yes_choice, no_choice]);
+                    let prompt = Box::new(prompt);
+
+                    return Err(UIError::NeedConfirm(prompt));
+                }
+
                 let path = Path::new(file.as_str());
                 let mime = mime_guess::from_path(path).first_or(mime::APPLICATION_OCTET_STREAM);
 
@@ -602,12 +622,22 @@ impl ChatState {
                     .file_name()
                     .map(OsStr::to_string_lossy)
                     .unwrap_or_else(|| Cow::from("Attachment"));
-                let config = AttachmentConfig::new();
+
+                let mut config = AttachmentConfig::new();
+
+                if Some(true) == add_caption {
+                    config.caption =
+                        text_to_text_message_event_content(caption.trim_end().to_string());
+                }
 
                 let resp = room
                     .send_attachment(name.as_ref(), &mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
+
+                if Some(true) == add_caption {
+                    self.reset();
+                }
 
                 // Mock up the local echo message for the scrollback.
                 let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
@@ -616,7 +646,7 @@ impl ChatState {
 
                 (resp.event_id, msg)
             },
-            SendAction::UploadImage(width, height, bytes) => {
+            SendAction::UploadImage(width, height, bytes, add_caption) => {
                 // Convert to png because arboard does not give us the mime type.
                 let bytes =
                     image::ImageBuffer::from_raw(width as _, height as _, bytes.into_owned())
@@ -631,12 +661,22 @@ impl ChatState {
                 let mime = mime::IMAGE_PNG;
 
                 let name = "Clipboard.png";
-                let config = AttachmentConfig::new();
+                let mut config = AttachmentConfig::new();
+
+                let caption = self.tbox.get();
+                if add_caption && !caption.is_blank() {
+                    config.caption =
+                        text_to_text_message_event_content(caption.trim_end().to_string());
+                }
 
                 let resp = room
                     .send_attachment(name, &mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
+
+                if add_caption {
+                    self.reset();
+                }
 
                 // Mock up the local echo message for the scrollback.
                 let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
@@ -807,11 +847,32 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
                 delegate!(self, w => w.editor_command(act, ctx, store))
             },
             Err(EditError::Register(RegisterError::ClipboardImage(data))) => {
-                let msg = "Do you really want to upload the image from your system clipboard?";
-                let send =
-                    IambAction::Send(SendAction::UploadImage(data.width, data.height, data.bytes));
-                let prompt = PromptYesNo::new(msg, vec![Action::from(send)]);
-                let prompt = Box::new(prompt);
+                let prompt = if self.tbox.get().is_blank() {
+                    let msg = "Do you really want to upload the image from your system clipboard?";
+                    let send = IambAction::Send(SendAction::UploadImage(
+                        data.width,
+                        data.height,
+                        data.bytes,
+                        false,
+                    ));
+                    let prompt = PromptYesNo::new(msg, vec![Action::from(send)]);
+                    Box::new(prompt) as Box<dyn Dialog<_>>
+                } else {
+                    let yes_msg = "Upload clipboard image with messagebar as caption";
+                    let yes_act =
+                        SendAction::UploadImage(data.width, data.height, data.bytes.clone(), true);
+                    let yes_choice =
+                        MultiChoiceItem::new('y', yes_msg, vec![IambAction::from(yes_act).into()]);
+
+                    let no_msg = "Upload clipboard image without caption";
+                    let no_act =
+                        SendAction::UploadImage(data.width, data.height, data.bytes.clone(), false);
+                    let no_choice =
+                        MultiChoiceItem::new('n', no_msg, vec![IambAction::from(no_act).into()]);
+
+                    let prompt = MultiChoice::new(vec![yes_choice, no_choice]);
+                    Box::new(prompt) as Box<dyn Dialog<_>>
+                };
 
                 Err(EditError::NeedConfirm(prompt))
             },
