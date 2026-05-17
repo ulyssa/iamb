@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
 use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
+use matrix_sdk::room::reply::{EnforceThread, Reply};
 use matrix_sdk::EncryptionState;
 use modalkit::editing::store::RegisterError;
 use ratatui::style::{Color, Style};
@@ -534,6 +535,43 @@ impl ChatState {
         }
     }
 
+    /// Generate a [`Reply`] setting thread info and reply_to (if `set_reply` is true)
+    fn generate_reply_info(&self, info: &RoomInfo, set_reply: bool) -> Option<Reply> {
+        if let Some(thread_root) = self.scrollback.thread() {
+            if let Some(last) = info.get_thread_last(thread_root) {
+                // XXX: combine these conditions after updating to rust 2024 edition
+                if set_reply {
+                    if let Some(m) = self.get_reply_to(info) {
+                        // thread reply
+                        return Some(Reply {
+                            event_id: m.event_id.to_owned(),
+                            enforce_thread: EnforceThread::Threaded(ReplyWithinThread::Yes),
+                        });
+                    }
+                }
+
+                // thread message
+                return Some(Reply {
+                    event_id: last.event_id.to_owned(),
+                    enforce_thread: EnforceThread::Threaded(ReplyWithinThread::No),
+                });
+            } else {
+                // Internal state is wonky?
+            }
+            // XXX: combine these conditions after updating to rust 2024 edition
+        } else if let Some(m) = self.get_reply_to(info) {
+            if set_reply {
+                // normal reply
+                return Some(Reply {
+                    event_id: m.event_id.to_owned(),
+                    enforce_thread: EnforceThread::Unthreaded,
+                });
+            }
+        }
+
+        None
+    }
+
     pub async fn send_command(
         &mut self,
         act: SendAction,
@@ -599,7 +637,9 @@ impl ChatState {
             SendAction::Upload(file, add_caption) => {
                 let caption = self.tbox.get();
 
-                if !caption.is_blank() && add_caption.is_none() {
+                if add_caption.is_none() &&
+                    (!caption.is_blank() || self.get_reply_to(info).is_some())
+                {
                     let msg = "Would you like to use the message bar as a caption?";
 
                     let yes_act = SendAction::Upload(file.clone(), Some(true));
@@ -631,6 +671,8 @@ impl ChatState {
                     config.caption =
                         text_to_text_message_event_content(caption.trim_end().to_string());
                 }
+
+                config.reply = self.generate_reply_info(info, add_caption.unwrap_or(false));
 
                 let resp = room
                     .send_attachment(name.as_ref(), &mime, bytes, config)
@@ -675,6 +717,8 @@ impl ChatState {
                     width: width.try_into().ok(),
                     ..Default::default()
                 }));
+
+                config.reply = self.generate_reply_info(info, add_caption);
 
                 let resp = room
                     .send_attachment(name, &mime, bytes, config)
@@ -854,7 +898,8 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
                 delegate!(self, w => w.editor_command(act, ctx, store))
             },
             Err(EditError::Register(RegisterError::ClipboardImage(data))) => {
-                let prompt = if self.tbox.get().is_blank() {
+                let info = store.application.rooms.get_or_default(self.id().to_owned());
+                let prompt = if self.tbox.get().is_blank() && self.get_reply_to(info).is_none() {
                     let msg = "Do you really want to upload the image from your system clipboard?";
                     let send = IambAction::Send(SendAction::UploadImage(
                         data.width,
