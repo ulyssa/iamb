@@ -95,7 +95,7 @@ impl InputBindings<TerminalKey, IambStep> for ApplicationSettings {
                 .actions(vec![WindowAction::Split(
                     OpenTarget::Cursor(MATRIX_ID_WORD.clone()),
                     Axis::Vertical,
-                    MoveDir1D::Previous,
+                    MoveDir1D::Next,
                     1.into(),
                 )
                 .into()])
