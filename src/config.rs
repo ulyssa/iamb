@@ -360,6 +360,14 @@ pub enum UserDisplayStyle {
     DisplayName,
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitDirection {
+    #[default]
+    Horizontal,
+    Vertical,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NotifyVia {
     /// Deliver notifications via terminal bell.
@@ -540,6 +548,7 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub default_split: SplitDirection,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -569,6 +578,7 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    pub default_split: Option<SplitDirection>,
 }
 
 impl Tunables {
@@ -604,6 +614,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            default_split: self.default_split.or(other.default_split),
         }
     }
 
@@ -635,6 +646,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            default_split: self.default_split.unwrap_or_default(),
         }
     }
 }
