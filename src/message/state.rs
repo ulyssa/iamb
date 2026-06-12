@@ -282,6 +282,12 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
         }) => {
             return Cow::Borrowed("* updated the pinned events for the room");
         },
+        AnyStateEventContentChange::RoomPolicy(StateEventContentChange::Original {
+            content,
+            ..
+        }) => {
+            format!("* updated the room policy server to {}", content.via)
+        },
         AnyStateEventContentChange::RoomPowerLevels(StateEventContentChange::Original {
             ..
         }) => {
@@ -388,6 +394,9 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
         },
         AnyStateEventContentChange::RoomPinnedEvents(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the pinned events for the room (redacted)");
+        },
+        AnyStateEventContentChange::RoomPolicy(StateEventContentChange::Redacted(_)) => {
+            return Cow::Borrowed("* updated the room policy server (redacted)");
         },
         AnyStateEventContentChange::RoomPowerLevels(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the power levels for the room (redacted)");
@@ -727,6 +736,14 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                 "* updated the pinned events for the room".into(),
             )]
         },
+        AnyStateEventContentChange::RoomPolicy(StateEventContentChange::Original {
+            content,
+            ..
+        }) => {
+            let prefix = StyleTreeNode::Text("* updated the room policy server to ".into());
+            let server = bold(format!("{}", content.via));
+            vec![prefix, server]
+        },
         AnyStateEventContentChange::RoomPowerLevels(StateEventContentChange::Original {
             ..
         }) => {
@@ -882,6 +899,11 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
         AnyStateEventContentChange::RoomPinnedEvents(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the pinned events for the room (redacted)".into(),
+            )]
+        },
+        AnyStateEventContentChange::RoomPolicy(StateEventContentChange::Redacted(_)) => {
+            vec![StyleTreeNode::Text(
+                "* updated the room policy server (redacted)".into(),
             )]
         },
         AnyStateEventContentChange::RoomPowerLevels(StateEventContentChange::Redacted(_)) => {
