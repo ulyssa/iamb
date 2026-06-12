@@ -756,7 +756,11 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
         res => res,
     };
 
-    res.expect("Failed to instantiate client")
+    let client = res.expect("Failed to instantiate client");
+
+    client.event_cache().subscribe().expect("Failed to start event cache");
+
+    client
 }
 
 #[derive(Clone)]
