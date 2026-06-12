@@ -56,13 +56,13 @@ lazy_static! {
     pub static ref TEST_USER3: OwnedUserId = user_id!("@user3:example.com").to_owned();
     pub static ref TEST_USER4: OwnedUserId = user_id!("@user4:example.com").to_owned();
     pub static ref TEST_USER5: OwnedUserId = user_id!("@user5:example.com").to_owned();
-    pub static ref MSG1_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
-    pub static ref MSG2_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
+    pub static ref MSG1_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
+    pub static ref MSG2_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
     pub static ref MSG3_EVID: OwnedEventId =
         event_id!("$5jRz3KfVhaUzXtVj7k:example.com").to_owned();
     pub static ref MSG4_EVID: OwnedEventId =
         event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned();
-    pub static ref MSG5_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
+    pub static ref MSG5_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
     pub static ref MSG1_KEY: MessageKey = (LocalEcho, MSG1_EVID.clone());
     pub static ref MSG2_KEY: MessageKey = (OriginServer(UInt::new(1).unwrap()), MSG2_EVID.clone());
     pub static ref MSG3_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG3_EVID.clone());
