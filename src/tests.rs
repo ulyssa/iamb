@@ -18,7 +18,6 @@ use lazy_static::lazy_static;
 use ratatui::style::{Color, Style};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::unbounded_channel;
-use url::Url;
 
 use crate::{
     base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
@@ -233,8 +232,13 @@ pub fn mock_settings() -> ApplicationSettings {
 
 pub async fn mock_store() -> ProgramStore {
     let (tx, _) = unbounded_channel();
-    let homeserver = Url::parse("https://localhost").unwrap();
-    let client = matrix_sdk::Client::new(homeserver).await.unwrap();
+    let client = matrix_sdk::Client::builder()
+        .homeserver_url("https://localhost")
+        // don't panic if no certs are available like in a nix build sandbox
+        .disable_ssl_verification()
+        .build()
+        .await
+        .unwrap();
     let worker = Requester { tx, client };
 
     let mut store = ChatStore::new(worker, mock_settings());
