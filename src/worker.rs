@@ -506,6 +506,8 @@ async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
 }
 
 async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
+    use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
+
     let mut interval = tokio::time::interval(Duration::from_secs(2));
     let mut sent: HashMap<OwnedRoomId, HashMap<ReceiptThread, OwnedEventId>> = Default::default();
 
@@ -534,17 +536,21 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
 
             updates.extend(changed);
         }
+
+        let receipt_type = if locked.application.settings.tunables.read_receipt_send {
+            ReceiptType::Read
+        } else {
+            ReceiptType::ReadPrivate
+        };
         drop(locked);
 
         for (room_id, thread, new_receipt) in updates {
-            use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
-
             let Some(room) = client.get_room(&room_id) else {
                 continue;
             };
 
             match room
-                .send_single_receipt(ReceiptType::Read, thread.to_owned(), new_receipt.clone())
+                .send_single_receipt(receipt_type.clone(), thread.to_owned(), new_receipt.clone())
                 .await
             {
                 Ok(()) => {
@@ -750,7 +756,11 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
         res => res,
     };
 
-    res.expect("Failed to instantiate client")
+    let client = res.expect("Failed to instantiate client");
+
+    client.event_cache().subscribe().expect("Failed to start event cache");
+
+    client
 }
 
 #[derive(Clone)]
