@@ -1146,15 +1146,16 @@ impl RoomInfo {
 
     /// Indicates whether this room has unread messages.
     pub fn unreads(&self, room: &matrix_sdk::Room) -> UnreadInfo {
-        let last_message = self.messages.last_key_value();
+        let last_message = self
+            .messages
+            .iter()
+            .rev()
+            .find(|(_, msg)| !matches!(&msg.event, MessageEvent::State(..)));
 
-        // for some reason the two methods diverge in different directions for different rooms so
-        // get the higer one to be safe.
-        let counts = room.unread_notification_counts();
         UnreadInfo {
             unread_messages: room.num_unread_messages(),
-            unread_notifications: room.num_unread_notifications().max(counts.notification_count),
-            unread_mentions: room.num_unread_mentions().max(counts.highlight_count),
+            unread_notifications: room.num_unread_notifications(),
+            unread_mentions: room.num_unread_mentions(),
             latest: last_message.map(|((ts, _), _)| ts.to_owned()),
         }
     }
