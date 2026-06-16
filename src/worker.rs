@@ -556,6 +556,14 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
+async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore) {
+    let mut receiver = client.send_queue().subscribe();
+
+    while let Ok(update) = receiver.recv().await {
+        todo!()
+    }
+}
+
 pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result<(), MatrixError> {
     // Perform an initial, lazily-loaded sync.
     let mut room = RoomEventFilter::default();
@@ -570,6 +578,8 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
     let settings = SyncSettings::new().filter(filter.into()).timeout(Duration::from_secs(0));
 
     client.sync_once(settings).await?;
+
+    client.send_queue().respawn_tasks_for_rooms_with_unsent_requests().await;
 
     // Populate sync_info with our initial set of rooms/dms/spaces.
     refresh_rooms(client, store).await;

@@ -28,8 +28,6 @@ use matrix_sdk::{
             OriginalRoomMessageEvent,
             Relation,
             ReplyWithinThread,
-            RoomMessageEventContent,
-            TextMessageEventContent,
         },
         OwnedEventId,
         OwnedRoomId,
@@ -88,14 +86,7 @@ use crate::base::{
     SendAction,
 };
 
-use crate::message::{
-    text_to_message,
-    Message,
-    MessageEvent,
-    MessageKey,
-    MessageTimeStamp,
-    TreeGenState,
-};
+use crate::message::{text_to_message, MessageEvent, MessageKey, TreeGenState};
 use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
@@ -539,9 +530,8 @@ impl ChatState {
     ) -> IambResult<EditInfo> {
         let room = self.get_joined(&store.application.worker)?;
         let info = store.application.rooms.get_or_default(self.id().to_owned());
-        let mut show_echo = true;
 
-        let (event_id, msg) = match act {
+        match act {
             SendAction::Submit | SendAction::SubmitFromEditor => {
                 let msg = self.tbox.get();
 
@@ -569,8 +559,6 @@ impl ChatState {
                         event_id.clone(),
                         msg.msgtype.clone().into(),
                     )));
-
-                    show_echo = false;
                 } else if let Some(thread_root) = self.scrollback.thread() {
                     if let Some(m) = self.get_reply_to(info) {
                         msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::No);
@@ -583,15 +571,10 @@ impl ChatState {
                     msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
                 }
 
-                // XXX: second parameter can be a locally unique transaction id.
-                // Useful for doing retries.
-                let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
-                let event_id = resp.event_id;
+                room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
 
                 // Reset message bar state now that it's been sent.
                 self.reset();
-
-                (event_id, msg)
             },
             SendAction::Upload(file) => {
                 let path = Path::new(file.as_str());
@@ -604,17 +587,10 @@ impl ChatState {
                     .unwrap_or_else(|| Cow::from("Attachment"));
                 let config = AttachmentConfig::new();
 
-                let resp = room
-                    .send_attachment(name.as_ref(), &mime, bytes, config)
+                room.send_queue()
+                    .send_attachment(name.as_ref(), mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
-
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
             },
             SendAction::UploadImage(width, height, bytes) => {
                 // Convert to png because arboard does not give us the mime type.
@@ -633,27 +609,11 @@ impl ChatState {
                 let name = "Clipboard.png";
                 let config = AttachmentConfig::new();
 
-                let resp = room
-                    .send_attachment(name, &mime, bytes, config)
+                room.send_queue()
+                    .send_attachment(name, mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
-
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
             },
-        };
-
-        if show_echo {
-            let user = store.application.settings.profile.user_id.clone();
-            let key = (MessageTimeStamp::LocalEcho, event_id.clone());
-            let msg = MessageEvent::Local(event_id, msg.into());
-            let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
-            let thread = self.scrollback.get_thread_mut(info);
-            thread.insert(key, msg);
         }
 
         // Jump to the end of the scrollback to show the message.

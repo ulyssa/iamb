@@ -731,6 +731,10 @@ pub enum IambError {
     #[error("Matrix client error: {0}")]
     Matrix(#[from] matrix_sdk::Error),
 
+    /// A failure when sending a message.
+    #[error("Send queue error: {0}")]
+    SendQueue(#[from] matrix_sdk::send_queue::RoomSendQueueError),
+
     /// A failure in the sled storage.
     #[error("Matrix client storage error: {0}")]
     Store(#[from] matrix_sdk::StoreError),
