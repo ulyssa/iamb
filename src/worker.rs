@@ -561,60 +561,76 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
+fn insert_local_echo(
+    own_user_id: OwnedUserId,
+    info: &mut RoomInfo,
+    echo: LocalEcho,
+) -> Result<(), serde_json::Error> {
+    let LocalEcho { transaction_id, content } = echo;
+
+    match content {
+        LocalEchoContent::Event { serialized_event, send_handle, .. } => {
+            let content = serialized_event.deserialize()?;
+            let AnyMessageLikeEventContent::RoomMessage(msg) = content else {
+                // XXX: Handle other event types
+                return Ok(());
+            };
+
+            let thread = msg.relates_to.as_ref().and_then(|relation| {
+                match relation {
+                    Relation::Replacement(Replacement { event_id, .. }) => {
+                        info.keys.get(event_id).and_then(|location| {
+                            if let EventLocation::Message(thread, _) = location {
+                                thread.to_owned()
+                            } else {
+                                None
+                            }
+                        })
+                    },
+                    Relation::Thread(Thread { event_id, .. }) => Some(event_id.to_owned()),
+                    _ => None,
+                }
+            });
+
+            let ts = send_handle.created_at.into();
+            let key = MessageKey { ts, id: MessageId::Local(transaction_id.clone()) };
+            let msg = MessageEvent::Local(transaction_id.clone(), send_handle, msg.into());
+            let msg = Message::new(msg, own_user_id, ts);
+
+            info.echo_keys
+                .insert(transaction_id, EchoLocation::Message(thread.clone(), key.clone()));
+
+            let thread = info.get_thread_mut(thread);
+            thread.insert(key, msg);
+        },
+        LocalEchoContent::React { .. } => {
+            // XXX: Handle reactions to local echos
+        },
+    }
+    Ok(())
+}
+
 async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore) {
+    let own_user_id = client.user_id().unwrap();
     let mut receiver = client.send_queue().subscribe();
+
+    // load unsent requests
+    if let Ok(room_echos) = client.send_queue().local_echoes().await {
+        let mut locked = store.lock().await;
+        for (room_id, echos) in room_echos {
+            let info = locked.application.get_room_info(room_id);
+            for echo in echos {
+                let _ = insert_local_echo(own_user_id.to_owned(), info, echo);
+            }
+        }
+    }
 
     while let Ok(SendQueueUpdate { room_id, update }) = receiver.recv().await {
         let mut locked = store.lock().await;
         let info = locked.application.get_room_info(room_id);
         match update {
-            RoomSendQueueUpdate::NewLocalEvent(LocalEcho { transaction_id, content }) => {
-                match content {
-                    LocalEchoContent::Event { serialized_event, send_handle, .. } => {
-                        let Ok(content) = serialized_event.deserialize() else {
-                            continue;
-                        };
-                        let AnyMessageLikeEventContent::RoomMessage(msg) = content else {
-                            // XXX: Handle other event types
-                            continue;
-                        };
-
-                        let thread = msg.relates_to.as_ref().and_then(|relation| {
-                            match relation {
-                                Relation::Replacement(Replacement { event_id, .. }) => {
-                                    info.keys.get(event_id).and_then(|location| {
-                                        if let EventLocation::Message(thread, _) = location {
-                                            thread.to_owned()
-                                        } else {
-                                            None
-                                        }
-                                    })
-                                },
-                                Relation::Thread(Thread { event_id, .. }) => {
-                                    Some(event_id.to_owned())
-                                },
-                                _ => None,
-                            }
-                        });
-
-                        let ts = send_handle.created_at.into();
-                        let key = MessageKey { ts, id: MessageId::Local(transaction_id.clone()) };
-                        let msg =
-                            MessageEvent::Local(transaction_id.clone(), send_handle, msg.into());
-                        let msg = Message::new(msg, client.user_id().unwrap().to_owned(), ts);
-
-                        info.echo_keys.insert(
-                            transaction_id,
-                            EchoLocation::Message(thread.clone(), key.clone()),
-                        );
-
-                        let thread = info.get_thread_mut(thread);
-                        thread.insert(key, msg);
-                    },
-                    LocalEchoContent::React { .. } => {
-                        // XXX: Handle reactions to local echos
-                    },
-                }
+            RoomSendQueueUpdate::NewLocalEvent(echo) => {
+                let _ = insert_local_echo(own_user_id.to_owned(), info, echo);
             },
             RoomSendQueueUpdate::ReplacedLocalEvent { transaction_id, new_content } => {
                 let Some(EchoLocation::Message(thread, key)) =
