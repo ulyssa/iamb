@@ -409,7 +409,8 @@ impl ChatState {
 
                 let reaction = Annotation::new(event_id, emoji);
                 let msg = ReactionEventContent::new(reaction);
-                let _ = room.send(msg).await.map_err(IambError::from)?;
+
+                room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
 
                 Ok(None)
             },
