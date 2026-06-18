@@ -334,7 +334,7 @@ impl ChatState {
 
                 let ev = match &msg.event {
                     MessageEvent::Original(ev) => &ev.content,
-                    MessageEvent::Local(_, ev) => ev.deref(),
+                    MessageEvent::Local(_, _, ev) => ev.deref(),
                     _ => {
                         let msg = "Cannot edit a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -381,7 +381,7 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Local(..) => todo!(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot react to a redacted message";
@@ -419,7 +419,7 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Local(..) => todo!(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot redact already redacted message";
@@ -482,7 +482,7 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Local(..) => todo!(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot unreact to a redacted message";
@@ -554,9 +554,12 @@ impl ChatState {
 
                 let mut msg = text_to_message(msg);
 
-                if let Some((_, event_id)) = &self.editing {
+                if let Some(key) = &self.editing {
+                    let Some(id) = key.id.as_origin() else {
+                        todo!()
+                    };
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(
-                        event_id.clone(),
+                        id.to_owned(),
                         msg.msgtype.clone().into(),
                     )));
                 } else if let Some(thread_root) = self.scrollback.thread() {

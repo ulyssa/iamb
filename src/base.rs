@@ -1119,7 +1119,7 @@ impl RoomInfo {
             MessageEvent::Original(orig) => {
                 orig.content.apply_replacement(new_msgtype);
             },
-            MessageEvent::Local(_, content) => {
+            MessageEvent::Local(_, _, content) => {
                 content.apply_replacement(new_msgtype);
             },
             MessageEvent::Redacted(_, _) |
@@ -1135,7 +1135,10 @@ impl RoomInfo {
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
         let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
+        let key = MessageKey {
+            ts: msg.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
 
         let loc = EventLocation::State(key.clone());
         self.keys.insert(event_id, loc);
@@ -1171,13 +1174,13 @@ impl RoomInfo {
         let last_receipt = std::cmp::max(last_receipt, last_unthreaded);
 
         match (last_message, last_receipt) {
-            (Some(((ts, _), _)), Some((read_ts, _))) => {
-                UnreadInfo { unread: ts > read_ts, latest: Some(*ts) }
+            (Some((key, _)), Some(read_key)) => {
+                UnreadInfo { unread: key.ts > read_key.ts, latest: Some(key.ts) }
             },
-            (Some(((ts, _), _)), None) => {
+            (Some((key, _)), None) => {
                 // If we've never loaded/generated a room's receipt (example,
                 // a newly joined but never viewed room), show it as unread.
-                UnreadInfo { unread: true, latest: Some(*ts) }
+                UnreadInfo { unread: true, latest: Some(key.ts) }
             },
             (None, _) => UnreadInfo::default(),
         }
@@ -1186,32 +1189,42 @@ impl RoomInfo {
     /// Inserts events that couldn't be decrypted into the scrollback.
     pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
         let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
+        let key = MessageKey {
+            ts: msg.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
 
-        self.keys.insert(event_id, EventLocation::Message(None, key.clone()));
+        self.keys
+            .insert(event_id.into(), EventLocation::Message(None, key.clone()));
         self.messages.insert(key, msg.into());
     }
 
     /// Insert a new message.
     pub fn insert_message(&mut self, msg: RoomMessageEvent) {
         let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
+        let key = MessageKey {
+            ts: msg.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
 
         let loc = EventLocation::Message(None, key.clone());
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.into(), loc);
         self.messages.insert_message(key, msg);
     }
 
     fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
         let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
+        let key = MessageKey {
+            ts: msg.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
 
         let replies = self
             .threads
             .entry(thread_root.clone())
             .or_insert_with(|| Messages::thread(thread_root.clone()));
         let loc = EventLocation::Message(Some(thread_root), key.clone());
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.into(), loc);
         replies.insert_message(key, msg);
     }
 
@@ -1306,11 +1319,12 @@ impl RoomInfo {
     }
 
     pub fn fully_read(&mut self, user_id: &UserId) {
-        let Some(((_, event_id), _)) = self.messages.last_key_value() else {
+        let Some(event_id) = self.messages.iter().rev().find_map(|(key, _)| key.id.as_origin())
+        else {
             return;
         };
 
-        self.set_receipt(ReceiptThread::Main, user_id.to_owned(), event_id.clone());
+        self.set_receipt(ReceiptThread::Main, user_id.to_owned(), event_id.to_owned());
 
         let newest = self
             .threads
@@ -1319,13 +1333,15 @@ impl RoomInfo {
                 let thread = ReceiptThread::Thread(thread_id.to_owned());
 
                 messages
-                    .last_key_value()
-                    .map(|((_, event_id), _)| (thread, event_id.to_owned()))
+                    .iter()
+                    .rev()
+                    .find_map(|(key, _)| key.id.as_origin())
+                    .map(|id| (thread, id.to_owned()))
             })
             .collect::<Vec<_>>();
 
         for (thread, event_id) in newest.into_iter() {
-            self.set_receipt(thread, user_id.to_owned(), event_id.clone());
+            self.set_receipt(thread, user_id.to_owned(), event_id);
         }
     }
 

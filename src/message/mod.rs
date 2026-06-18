@@ -11,6 +11,8 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::OwnedTransactionId;
+use matrix_sdk::send_queue::SendHandle;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
@@ -73,7 +75,11 @@ pub use html::TreeGenState;
 
 type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
-pub type MessageKey = (MessageTimeStamp, OwnedEventId);
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
+pub struct MessageKey {
+    pub ts: MessageTimeStamp,
+    pub id: MessageId,
+}
 
 pub struct Messages(BTreeMap<MessageKey, Message>, pub ReceiptThread);
 
@@ -105,14 +111,13 @@ impl Messages {
     }
 
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
-        let event_id = key.1.clone();
+        let event_id = key.id.clone();
         let msg = msg.into();
 
         self.0.insert(key, msg);
 
         // Remove any echo.
-        let key = (MessageTimeStamp::LocalEcho, event_id);
-        let _ = self.0.remove(&key);
+        todo!()
     }
 }
 
@@ -155,10 +160,10 @@ fn hash_finish_usize(hasher: DefaultHasher) -> Option<usize> {
     }
 }
 
-/// Hash an [EventId] into a [usize].
-fn hash_event_id(event_id: &EventId) -> Option<usize> {
+/// Hash an [`MessageId`] into a [`usize`].
+fn hash_message_id(id: &MessageId) -> Option<usize> {
     let mut hasher = DefaultHasher::new();
-    event_id.hash(&mut hasher);
+    id.hash(&mut hasher);
     hash_finish_usize(hasher)
 }
 
@@ -194,11 +199,25 @@ fn placeholder_frame(
     Some(placeholder)
 }
 
-#[inline]
-fn millis_to_datetime(ms: UInt) -> DateTime<LocalTz> {
-    let time = i64::from(ms) / 1000;
-    let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
-    time.into()
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
+pub enum MessageId {
+    Origin(OwnedEventId),
+    Local(OwnedTransactionId),
+}
+
+impl MessageId {
+    pub fn as_origin(&self) -> Option<&EventId> {
+        match self {
+            Self::Origin(id) => Some(id),
+            _ => None,
+        }
+    }
+}
+
+impl From<OwnedEventId> for MessageId {
+    fn from(value: OwnedEventId) -> Self {
+        Self::Origin(value)
+    }
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -210,83 +229,40 @@ pub enum TimeStampIntError {
     UIntError(<UInt as TryFrom<u64>>::Error),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MessageTimeStamp {
-    OriginServer(UInt),
-    LocalEcho,
-}
+#[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
+pub struct MessageTimeStamp(pub MilliSecondsSinceUnixEpoch);
 
 impl MessageTimeStamp {
-    fn as_datetime(&self) -> DateTime<LocalTz> {
-        match self {
-            MessageTimeStamp::OriginServer(ms) => millis_to_datetime(*ms),
-            MessageTimeStamp::LocalEcho => LocalTz::now(),
-        }
+    fn as_datetime(self) -> DateTime<LocalTz> {
+        let time = i64::from(self.0 .0) / 1000;
+        let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
+        time.into()
     }
 
-    fn same_day(&self, other: &Self) -> bool {
+    fn same_day(self, other: Self) -> bool {
         let dt1 = self.as_datetime();
         let dt2 = other.as_datetime();
 
         dt1.date_naive() == dt2.date_naive()
     }
 
-    fn show_date(&self) -> Option<Span<'_>> {
+    fn show_date(self) -> Option<Span<'static>> {
         let time = self.as_datetime().format("%A, %B %d %Y").to_string();
 
         Span::styled(time, BOLD_STYLE).into()
     }
 
-    fn show_time(&self) -> Option<Span<'_>> {
-        match self {
-            MessageTimeStamp::OriginServer(ms) => {
-                let time = millis_to_datetime(*ms).format("%T");
-                let time = format!("  [{time}]");
+    fn show_time(self) -> Option<Span<'static>> {
+        let time = self.as_datetime().format("%T");
+        let time = format!("  [{time}]");
 
-                Span::raw(time).into()
-            },
-            MessageTimeStamp::LocalEcho => None,
-        }
-    }
-
-    fn is_local_echo(&self) -> bool {
-        matches!(self, MessageTimeStamp::LocalEcho)
-    }
-
-    pub fn as_millis(&self) -> Option<MilliSecondsSinceUnixEpoch> {
-        match self {
-            MessageTimeStamp::OriginServer(ms) => MilliSecondsSinceUnixEpoch(*ms).into(),
-            MessageTimeStamp::LocalEcho => None,
-        }
-    }
-}
-
-impl Ord for MessageTimeStamp {
-    fn cmp(&self, other: &Self) -> Ordering {
-        match (self, other) {
-            (MessageTimeStamp::OriginServer(_), MessageTimeStamp::LocalEcho) => Ordering::Less,
-            (MessageTimeStamp::OriginServer(a), MessageTimeStamp::OriginServer(b)) => a.cmp(b),
-            (MessageTimeStamp::LocalEcho, MessageTimeStamp::OriginServer(_)) => Ordering::Greater,
-            (MessageTimeStamp::LocalEcho, MessageTimeStamp::LocalEcho) => Ordering::Equal,
-        }
-    }
-}
-
-impl PartialOrd for MessageTimeStamp {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl From<UInt> for MessageTimeStamp {
-    fn from(millis: UInt) -> Self {
-        MessageTimeStamp::OriginServer(millis)
+        Span::raw(time).into()
     }
 }
 
 impl From<MilliSecondsSinceUnixEpoch> for MessageTimeStamp {
     fn from(millis: MilliSecondsSinceUnixEpoch) -> Self {
-        MessageTimeStamp::OriginServer(millis.0)
+        Self(millis)
     }
 }
 
@@ -294,10 +270,7 @@ impl TryFrom<&MessageTimeStamp> for usize {
     type Error = TimeStampIntError;
 
     fn try_from(ts: &MessageTimeStamp) -> Result<Self, Self::Error> {
-        let n = match ts {
-            MessageTimeStamp::LocalEcho => 0,
-            MessageTimeStamp::OriginServer(u) => usize::try_from(u64::from(*u))?,
-        };
+        let n = usize::try_from(u64::from(ts.0 .0))?;
 
         Ok(n)
     }
@@ -307,14 +280,10 @@ impl TryFrom<usize> for MessageTimeStamp {
     type Error = TimeStampIntError;
 
     fn try_from(u: usize) -> Result<Self, Self::Error> {
-        if u == 0 {
-            Ok(MessageTimeStamp::LocalEcho)
-        } else {
-            let n = u64::try_from(u)?;
-            let n = UInt::try_from(n).map_err(TimeStampIntError::UIntError)?;
+        let n = u64::try_from(u)?;
+        let n = UInt::try_from(n).map_err(TimeStampIntError::UIntError)?;
 
-            Ok(MessageTimeStamp::from(n))
-        }
+        Ok(MessageTimeStamp::from(MilliSecondsSinceUnixEpoch(n)))
     }
 }
 
@@ -348,33 +317,30 @@ impl MessageCursor {
 
     pub fn from_cursor(cursor: &Cursor, thread: &Messages) -> Option<Self> {
         let ev_hash = cursor.get_x();
-        let ev_term = OwnedEventId::try_from("$").ok()?;
+        let ev_term = OwnedEventId::try_from("$").ok()?.into();
 
         let ts_start = MessageTimeStamp::try_from(cursor.get_y()).ok()?;
-        let start = (ts_start, ev_term);
+        let start = MessageKey { ts: ts_start, id: ev_term };
 
-        for ((ts, event_id), _) in thread.range(&start..) {
-            if hash_event_id(event_id)? == ev_hash {
-                return Self::from((*ts, event_id.clone())).into();
+        for (key, _) in thread.range(&start..) {
+            if hash_message_id(&key.id)? == ev_hash {
+                return Self::from(key.clone()).into();
             }
 
-            if ts > &ts_start {
+            if key.ts > ts_start {
                 break;
             }
         }
 
         // If we can't find the cursor, then go to the nearest timestamp.
-        thread
-            .range(start..)
-            .next()
-            .map(|((ts, ev), _)| Self::from((*ts, ev.clone())))
+        thread.range(start..).next().map(|(key, _)| Self::from(key.clone()))
     }
 
     pub fn to_cursor(&self, thread: &Messages) -> Option<Cursor> {
-        let (ts, event_id) = self.to_key(thread)?;
+        let key = self.to_key(thread)?;
 
-        let y = usize::try_from(ts).ok()?;
-        let x = hash_event_id(event_id)?;
+        let y = usize::try_from(&key.ts).ok()?;
+        let x = hash_message_id(&key.id)?;
 
         Cursor::new(y, x).into()
     }
@@ -429,19 +395,19 @@ pub enum MessageEvent {
     Original(Box<OriginalRoomMessageEvent>),
     Redacted(OwnedEventId, Option<String>),
     State(Box<AnySyncStateEvent>),
-    Local(OwnedEventId, Box<RoomMessageEventContent>),
+    Local(OwnedTransactionId, SendHandle, Box<RoomMessageEventContent>),
 }
 
 impl MessageEvent {
-    pub fn event_id(&self) -> &EventId {
-        match self {
+    pub fn event_id(&self) -> Option<&EventId> {
+        Some(match self {
             MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
             MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
             MessageEvent::Original(ev) => ev.event_id.as_ref(),
             MessageEvent::Redacted(event_id, _) => event_id.as_ref(),
             MessageEvent::State(ev) => ev.event_id(),
-            MessageEvent::Local(event_id, _) => event_id.as_ref(),
-        }
+            MessageEvent::Local(..) => return None,
+        })
     }
 
     pub fn content(&self) -> Option<&RoomMessageEventContent> {
@@ -451,7 +417,7 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(_) => None,
             MessageEvent::Redacted(_, _) => None,
             MessageEvent::State(_) => None,
-            MessageEvent::Local(_, content) => Some(content),
+            MessageEvent::Local(_, _, content) => Some(content),
         }
     }
 
@@ -471,7 +437,7 @@ impl MessageEvent {
             },
             MessageEvent::Redacted(_, reason) => body_cow_reason(reason.as_deref()),
             MessageEvent::State(ev) => body_cow_state(ev),
-            MessageEvent::Local(_, content) => body_cow_content(content),
+            MessageEvent::Local(_, _, content) => body_cow_content(content),
         }
     }
 
@@ -482,7 +448,7 @@ impl MessageEvent {
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(ev) => return Some(html_state(ev)),
-            MessageEvent::Local(_, content) => content,
+            MessageEvent::Local(_, _, content) => content,
         };
 
         if let MessageType::Text(content) = &content.msgtype {
@@ -502,7 +468,7 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(_) => return,
             MessageEvent::Redacted(_, _) => return,
             MessageEvent::State(_) => return,
-            MessageEvent::Local(_, _) => return,
+            MessageEvent::Local(..) => return,
             MessageEvent::Original(ev) => {
                 let event_id = ev.event_id.to_owned();
                 let reason = redaction_reason_event(redaction);
@@ -857,7 +823,7 @@ impl Message {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, content) => content,
+            MessageEvent::Local(_, _, content) => content,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
@@ -878,7 +844,7 @@ impl Message {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, content) => content,
+            MessageEvent::Local(_, _, content) => content,
             MessageEvent::Original(ev) => &ev.content,
             MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
@@ -902,7 +868,7 @@ impl Message {
             style = style.add_modifier(StyleModifier::REVERSED)
         }
 
-        if self.timestamp.is_local_echo() {
+        if matches!(self.event, MessageEvent::Local(..)) {
             style = style.add_modifier(StyleModifier::ITALIC);
         }
 
@@ -923,7 +889,7 @@ impl Message {
     ) -> MessageFormatter<'a> {
         let orig = width;
         let date = match &prev {
-            Some(prev) if prev.timestamp.same_day(&self.timestamp) => None,
+            Some(prev) if prev.timestamp.same_day(self.timestamp) => None,
             _ => self.timestamp.show_date(),
         };
         let user_gutter = settings.tunables.user_gutter_width;
@@ -938,7 +904,7 @@ impl Message {
             let read = info
                 .event_receipts
                 .values()
-                .filter_map(|receipts| receipts.get(self.event.event_id()))
+                .filter_map(|receipts| self.event.event_id().and_then(|id| receipts.get(id)))
                 .flat_map(|read| read.iter())
                 .map(|user_id| user_id.to_owned())
                 .collect();
@@ -1020,11 +986,12 @@ impl Message {
         }
 
         if settings.tunables.reaction_display {
-            let reactions = info.get_reactions(self.event.event_id());
+            let reactions =
+                self.event.event_id().map(|id| info.get_reactions(id)).unwrap_or_default();
             fmt.push_reactions(reactions, style, &mut text);
         }
 
-        if let Some(thread) = info.get_thread(Some(self.event.event_id())) {
+        if let Some(thread) = self.event.event_id().and_then(|id| info.get_thread(Some(id))) {
             fmt.push_thread_reply_count(thread.len(), &mut text);
         }
 
@@ -1099,7 +1066,7 @@ impl Message {
     ) -> Option<Span<'a>> {
         if let Some(prev) = prev {
             if self.sender == prev.sender &&
-                self.timestamp.same_day(&prev.timestamp) &&
+                self.timestamp.same_day(prev.timestamp) &&
                 !self.event.is_emote()
             {
                 return None;
