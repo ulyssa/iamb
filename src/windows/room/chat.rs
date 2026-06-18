@@ -383,7 +383,14 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(..) => todo!(),
+                    MessageEvent::Local(..) => {
+                        // XXX: Implement reactions for local echos
+
+                        let msg = "Cannot react to a local echo";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot react to a redacted message";
@@ -421,7 +428,22 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(..) => todo!(),
+                    MessageEvent::Local(_, handle, _) => {
+                        let succeeded = handle
+                            .abort()
+                            .await
+                            .map_err(RoomSendQueueError::from)
+                            .map_err(IambError::from)?;
+
+                        if !succeeded {
+                            let msg = "local echo was already sent; please retry";
+                            let err = UIError::Failure(msg.into());
+
+                            return Err(err);
+                        }
+
+                        return Ok(None);
+                    },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot redact already redacted message";
@@ -484,7 +506,12 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(..) => todo!(),
+                    MessageEvent::Local(..) => {
+                        let msg = "Cannot unreact to a local echo";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot unreact to a redacted message";
@@ -568,23 +595,27 @@ impl ChatState {
                                         .and_then(|thread| thread.get(orig_key))
                                         .map(|msg| &msg.event)
                                     else {
-                                        return Err(UIError::Failure(
-                                            "local echo not found in store".into(),
-                                        ));
+                                        let msg = "local echo not found in store";
+                                        return Err(UIError::Failure(msg.into()));
                                     };
 
-                                    handle
+                                    let succeeded = handle
                                         .edit(msg.into())
                                         .await
                                         .map_err(RoomSendQueueError::from)
                                         .map_err(IambError::from)?;
+
+                                    if !succeeded {
+                                        let msg = "local echo was already sent; please retry";
+                                        return Err(UIError::Failure(msg.into()));
+                                    }
+
                                     self.reset();
                                     return Ok(None);
                                 },
                                 None => {
-                                    return Err(UIError::Failure(
-                                        "local echo not found in store".into(),
-                                    ))
+                                    let msg = "local echo not found in store";
+                                    return Err(UIError::Failure(msg.into()));
                                 },
                             }
                         },
