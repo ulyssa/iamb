@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
+use matrix_sdk::send_queue::RoomSendQueueError;
 use matrix_sdk::EncryptionState;
 use modalkit::editing::store::RegisterError;
 use ratatui::style::{Color, Style};
@@ -72,6 +73,7 @@ use modalkit::prelude::*;
 
 use crate::base::{
     DownloadFlags,
+    EchoLocation,
     IambAction,
     IambBufferId,
     IambError,
@@ -86,7 +88,7 @@ use crate::base::{
     SendAction,
 };
 
-use crate::message::{text_to_message, MessageEvent, MessageKey, TreeGenState};
+use crate::message::{text_to_message, MessageEvent, MessageId, MessageKey, TreeGenState};
 use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
@@ -555,9 +557,39 @@ impl ChatState {
                 let mut msg = text_to_message(msg);
 
                 if let Some(key) = &self.editing {
-                    let Some(id) = key.id.as_origin() else {
-                        todo!()
+                    let id = match &key.id {
+                        MessageId::Origin(id) => id,
+                        MessageId::Local(transaction_id) => {
+                            match info.echo_keys.get(transaction_id) {
+                                Some(EchoLocation::Replaced(id)) => id,
+                                Some(EchoLocation::Message(thread, orig_key)) => {
+                                    let Some(MessageEvent::Local(_, handle, _)) = info
+                                        .get_thread(thread.as_deref())
+                                        .and_then(|thread| thread.get(orig_key))
+                                        .map(|msg| &msg.event)
+                                    else {
+                                        return Err(UIError::Failure(
+                                            "local echo not found in store".into(),
+                                        ));
+                                    };
+
+                                    handle
+                                        .edit(msg.into())
+                                        .await
+                                        .map_err(RoomSendQueueError::from)
+                                        .map_err(IambError::from)?;
+                                    self.reset();
+                                    return Ok(None);
+                                },
+                                None => {
+                                    return Err(UIError::Failure(
+                                        "local echo not found in store".into(),
+                                    ))
+                                },
+                            }
+                        },
                     };
+
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(
                         id.to_owned(),
                         msg.msgtype.clone().into(),
