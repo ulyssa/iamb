@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::OwnedTransactionId;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -866,6 +867,19 @@ impl EventLocation {
     }
 }
 
+/// Indicates where a local echo lives in the [`ChatStore`].
+#[derive(Debug, Clone)]
+pub enum EchoLocation {
+    /// The [`OwnedTransactionId`] belongs to a message.
+    ///
+    /// If the first argument is [`None`], then it's part of the main scrollback. When [`Some`], it
+    /// specifies which thread it's in reply to.
+    Message(Option<OwnedEventId>, MessageKey),
+
+    /// The local echo has been replaced by an event with this event id.
+    Replaced(OwnedEventId),
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnreadInfo {
     pub(crate) unread: bool,
@@ -892,6 +906,7 @@ pub struct RoomInfo {
 
     /// A map of event IDs to where they are stored in this struct.
     pub keys: HashMap<OwnedEventId, EventLocation>,
+    pub echo_keys: HashMap<OwnedTransactionId, EchoLocation>,
 
     /// The messages loaded for this room.
     messages: Messages,
@@ -937,6 +952,7 @@ impl Default for RoomInfo {
             name: Default::default(),
             tags: Default::default(),
             keys: Default::default(),
+            echo_keys: Default::default(),
             event_receipts: Default::default(),
             user_receipts: Default::default(),
             reactions: Default::default(),
@@ -1194,8 +1210,7 @@ impl RoomInfo {
             id: event_id.clone().into(),
         };
 
-        self.keys
-            .insert(event_id.into(), EventLocation::Message(None, key.clone()));
+        self.keys.insert(event_id, EventLocation::Message(None, key.clone()));
         self.messages.insert(key, msg.into());
     }
 
@@ -1208,7 +1223,7 @@ impl RoomInfo {
         };
 
         let loc = EventLocation::Message(None, key.clone());
-        self.keys.insert(event_id.into(), loc);
+        self.keys.insert(event_id, loc);
         self.messages.insert_message(key, msg);
     }
 
@@ -1224,7 +1239,7 @@ impl RoomInfo {
             .entry(thread_root.clone())
             .or_insert_with(|| Messages::thread(thread_root.clone()));
         let loc = EventLocation::Message(Some(thread_root), key.clone());
-        self.keys.insert(event_id.into(), loc);
+        self.keys.insert(event_id, loc);
         replies.insert_message(key, msg);
     }
 

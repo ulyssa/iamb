@@ -13,6 +13,10 @@ use std::time::{Duration, Instant};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
+use matrix_sdk::ruma::events::relation::{Replacement, Thread};
+use matrix_sdk::ruma::events::room::message::Relation;
+use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
+use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -88,7 +92,8 @@ use matrix_sdk::{
 use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
-use crate::base::MessageNeed;
+use crate::base::{EchoLocation, EventLocation, MessageNeed};
+use crate::message::{Message, MessageEvent, MessageId, MessageKey};
 use crate::notifications::register_notifications;
 use crate::{
     base::{
@@ -559,8 +564,104 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
 async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore) {
     let mut receiver = client.send_queue().subscribe();
 
-    while let Ok(update) = receiver.recv().await {
-        todo!()
+    while let Ok(SendQueueUpdate { room_id, update }) = receiver.recv().await {
+        let mut locked = store.lock().await;
+        let info = locked.application.get_room_info(room_id);
+        match update {
+            RoomSendQueueUpdate::NewLocalEvent(LocalEcho { transaction_id, content }) => {
+                match content {
+                    LocalEchoContent::Event { serialized_event, send_handle, .. } => {
+                        let Ok(content) = serialized_event.deserialize() else {
+                            continue;
+                        };
+                        let AnyMessageLikeEventContent::RoomMessage(msg) = content else {
+                            // XXX: Handle other event types
+                            continue;
+                        };
+
+                        let thread = msg.relates_to.as_ref().and_then(|relation| {
+                            match relation {
+                                Relation::Replacement(Replacement { event_id, .. }) => {
+                                    info.keys.get(event_id).and_then(|location| {
+                                        if let EventLocation::Message(thread, _) = location {
+                                            thread.to_owned()
+                                        } else {
+                                            None
+                                        }
+                                    })
+                                },
+                                Relation::Thread(Thread { event_id, .. }) => {
+                                    Some(event_id.to_owned())
+                                },
+                                _ => None,
+                            }
+                        });
+
+                        let ts = send_handle.created_at.into();
+                        let key = MessageKey { ts, id: MessageId::Local(transaction_id.clone()) };
+                        let msg =
+                            MessageEvent::Local(transaction_id.clone(), send_handle, msg.into());
+                        let msg = Message::new(msg, client.user_id().unwrap().to_owned(), ts);
+
+                        info.echo_keys.insert(
+                            transaction_id,
+                            EchoLocation::Message(thread.clone(), key.clone()),
+                        );
+
+                        let thread = info.get_thread_mut(thread);
+                        thread.insert(key, msg);
+                    },
+                    LocalEchoContent::React { .. } => {
+                        // XXX: Handle reactions to local echos
+                    },
+                }
+            },
+            RoomSendQueueUpdate::ReplacedLocalEvent { transaction_id, new_content } => {
+                let Some(EchoLocation::Message(thread, key)) =
+                    info.echo_keys.get(&transaction_id).cloned()
+                else {
+                    continue;
+                };
+
+                let Ok(content) = new_content.deserialize() else {
+                    continue;
+                };
+                let AnyMessageLikeEventContent::RoomMessage(new_content) = content else {
+                    // XXX: Handle other event types
+                    continue;
+                };
+
+                let Some(msg) = info.get_thread_mut(thread).get_mut(&key) else {
+                    continue;
+                };
+
+                let MessageEvent::Local(_, _, msg) = &mut msg.event else {
+                    continue;
+                };
+
+                *msg = new_content.into();
+            },
+
+            RoomSendQueueUpdate::SendError { .. } => {
+                // XXX: Show the error to the user
+            },
+            RoomSendQueueUpdate::CancelledLocalEvent { transaction_id } => {
+                info.echo_keys.remove(&transaction_id);
+            },
+            RoomSendQueueUpdate::SentEvent { transaction_id, event_id } => {
+                if let Some(location) = info.echo_keys.get_mut(&transaction_id) {
+                    let location = std::mem::replace(location, EchoLocation::Replaced(event_id));
+
+                    if let EchoLocation::Message(thread, key) = location {
+                        info.get_thread_mut(thread).remove(&key);
+                    }
+                }
+            },
+
+            RoomSendQueueUpdate::RetryEvent { .. } | RoomSendQueueUpdate::MediaUpload { .. } => {
+                // Ignore these events
+            },
+        }
     }
 }
 
@@ -1270,7 +1371,8 @@ impl ClientWorker {
                 let rcpt = send_receipts_forever(&client, &store);
                 let room = refresh_rooms_forever(&client, &store);
                 let notifications = register_notifications(&client, &settings, &store);
-                let ((), (), (), ()) = tokio::join!(load, rcpt, room, notifications);
+                let sendqueue = subscribe_sendqueue_forever(&client, &store);
+                let ((), (), (), (), ()) = tokio::join!(load, rcpt, room, notifications, sendqueue);
             }
         })
         .into();

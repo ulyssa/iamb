@@ -111,13 +111,9 @@ impl Messages {
     }
 
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
-        let event_id = key.id.clone();
         let msg = msg.into();
 
         self.0.insert(key, msg);
-
-        // Remove any echo.
-        todo!()
     }
 }
 
