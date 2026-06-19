@@ -13,7 +13,7 @@ use std::time::{Duration, Instant};
 
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
-use matrix_sdk::ruma::events::relation::{Replacement, Thread};
+use matrix_sdk::ruma::events::relation::Thread;
 use matrix_sdk::ruma::events::room::message::Relation;
 use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
@@ -92,7 +92,7 @@ use matrix_sdk::{
 use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
-use crate::base::{EchoLocation, EventLocation, MessageNeed};
+use crate::base::{EchoLocation, MessageNeed};
 use crate::message::{Message, MessageEvent, MessageId, MessageKey};
 use crate::notifications::register_notifications;
 use crate::{
@@ -576,21 +576,14 @@ fn insert_local_echo(
                 return Ok(());
             };
 
-            let thread = msg.relates_to.as_ref().and_then(|relation| {
-                match relation {
-                    Relation::Replacement(Replacement { event_id, .. }) => {
-                        info.keys.get(event_id).and_then(|location| {
-                            if let EventLocation::Message(thread, _) = location {
-                                thread.to_owned()
-                            } else {
-                                None
-                            }
-                        })
-                    },
-                    Relation::Thread(Thread { event_id, .. }) => Some(event_id.to_owned()),
-                    _ => None,
-                }
-            });
+            let thread = match msg.relates_to.as_ref() {
+                Some(Relation::Replacement(..)) => {
+                    // XXX: Show echo on edited message
+                    return Ok(());
+                },
+                Some(Relation::Thread(Thread { event_id, .. })) => Some(event_id.to_owned()),
+                _ => None,
+            };
 
             let ts = send_handle.created_at.into();
             let key = MessageKey { ts, id: MessageId::Local(transaction_id.clone()) };
