@@ -1623,7 +1623,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matrix_sdk::ruma::{room_alias_id, server_name};
+    use matrix_sdk::ruma::{room_alias_id, server_name, MilliSecondsSinceUnixEpoch};
 
     #[derive(Debug, Eq, PartialEq)]
     struct TestRoomItem {
@@ -1753,7 +1753,7 @@ mod tests {
             name: "Room 2",
             unread: UnreadInfo {
                 unread: false,
-                latest: Some(MessageTimeStamp::OriginServer(40u32.into())),
+                latest: Some(MessageTimeStamp(MilliSecondsSinceUnixEpoch(40u32.into()))),
             },
             invite: false,
         };
@@ -1765,7 +1765,7 @@ mod tests {
             name: "Room 3",
             unread: UnreadInfo {
                 unread: false,
-                latest: Some(MessageTimeStamp::OriginServer(20u32.into())),
+                latest: Some(MessageTimeStamp(MilliSecondsSinceUnixEpoch(20u32.into()))),
             },
             invite: false,
         };
