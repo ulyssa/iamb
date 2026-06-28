@@ -167,6 +167,7 @@ pub fn mock_dirs() -> DirectoryValues {
 pub fn mock_tunables() -> TunableValues {
     TunableValues {
         default_markup: Default::default(),
+        case_insensitive_search: false,
         default_room: None,
         encryption: Encryption::default().values(),
         log_level: "warn".into(),

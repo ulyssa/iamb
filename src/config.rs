@@ -815,6 +815,7 @@ pub struct TerminalValues {
 pub struct TunableValues {
     pub encryption: EncryptionValues,
     pub default_markup: MarkupFormat,
+    pub case_insensitive_search: bool,
     pub log_level: String,
     pub max_log_files: usize,
     pub message_shortcode_display: bool,
@@ -869,6 +870,7 @@ pub struct Tunables {
     pub users: Option<UserOverrides>,
 
     pub default_markup: Option<MarkupFormat>,
+    pub case_insensitive_search: Option<bool>,
     pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
@@ -912,6 +914,7 @@ impl Tunables {
             proxy: self.proxy.or(other.proxy),
 
             default_markup: self.default_markup.or(other.default_markup),
+            case_insensitive_search: self.case_insensitive_search.or(other.case_insensitive_search),
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
@@ -958,6 +961,7 @@ impl Tunables {
 
             default_markup: self.default_markup.unwrap_or_default(),
             log_level: self.log_level.unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_owned()),
+            case_insensitive_search: self.case_insensitive_search.unwrap_or(false),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
