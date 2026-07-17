@@ -54,11 +54,13 @@
           ];
         };
 
-        commonArgs = {
+        commonArgs = rec {
           inherit src;
           strictDeps = true;
           pname = "iamb";
           version = self.shortRev or self.dirtyShortRev;
+
+          VERGEN_GIT_SHA = version;
         };
 
         # Build *just* the cargo dependencies, so we can reuse
