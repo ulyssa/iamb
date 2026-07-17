@@ -78,6 +78,13 @@
             install -D $src/docs/iamb.metainfo.xml $out/share/appdata/chat.iamb.iamb.appdata.xml
             install -D $src/iamb.desktop -t $out/share/applications
           '';
+
+          meta = {
+            description = "Matrix client for Vim addicts";
+            mainProgram = "iamb";
+            homepage = "https://github.com/ulyssa/iamb";
+            license = lib.licenses.asl20;
+          };
         });
       in
       {
