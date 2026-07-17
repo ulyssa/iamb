@@ -45,6 +45,12 @@
           fileset = lib.fileset.unions [
             (craneLib.fileset.commonCargoSources ./.)
             ./src/windows/welcome.md
+
+            ./docs/iamb.1
+            ./docs/iamb.5
+            ./docs/iamb.svg
+            ./docs/iamb.metainfo.xml
+            ./iamb.desktop
           ];
         };
 
@@ -62,6 +68,14 @@
         # Build the actual crate
         iamb = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
+
+          nativeBuildInputs = [ pkgs.installShellFiles ];
+          postInstall = ''
+            installManPage $src/docs/iamb.{1,5}
+            install -D $src/docs/iamb.svg -t $out/share/icons/hicolor/scalable/apps
+            install -D $src/docs/iamb.metainfo.xml $out/share/appdata/chat.iamb.iamb.appdata.xml
+            install -D $src/iamb.desktop -t $out/share/applications
+          '';
         });
       in
       {
