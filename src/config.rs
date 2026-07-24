@@ -792,6 +792,7 @@ pub enum Layout {
 #[derive(Clone, Deserialize)]
 pub struct ProfileConfig {
     pub user_id: OwnedUserId,
+    pub password_file: Option<PathBuf>,
     pub url: Option<Url>,
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,

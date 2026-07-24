@@ -812,6 +812,17 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
         return Ok(());
     }
 
+    if let Some(ref password_file) = settings.profile.password_file {
+        if let Err(e) = std::fs::read_to_string(password_file)
+            .map(|password| worker.login(LoginStyle::Password(password)))
+        {
+            println!("Failed to log in using password file {password_file:?}: {e}");
+            println!("Continuing on to interactive login");
+        } else {
+            return Ok(());
+        }
+    }
+
     loop {
         let login_style =
             match read_response("Please select login type: [p]assword / [s]ingle sign on")

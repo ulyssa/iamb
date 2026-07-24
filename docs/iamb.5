@@ -4,7 +4,7 @@
 .\" information, see <https://manpages.bsd.lv/mdoc.html>.
 .\"
 .\" You can preview this file with:
-.\"     $ man ./docs/iamb.1
+.\"     $ man ./docs/iamb.5
 .Dd Mar 24, 2024
 .Dt IAMB 5
 .Os
@@ -75,6 +75,8 @@ object.
 .It Sy user_id
 The user ID to use when connecting to the server.
 For example "user" in "@user:matrix.org".
+.It Sy password_file
+The path to the file containing the password to use when connecting to the server.
 .It Sy url
 The URL of the user's server.
 (For example "https://matrix.org" for "@user:matrix.org".)
