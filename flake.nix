@@ -73,6 +73,12 @@
 
           nativeBuildInputs = [ pkgs.installShellFiles ];
           postInstall = ''
+            mkdir -p completions
+            ./target/release/iamb --completions zsh > completions/_iamb
+            ./target/release/iamb --completions bash > completions/iamb.bash
+            ./target/release/iamb --completions fish > completions/iamb.fish
+            installShellCompletion --cmd iamb completions/*
+
             installManPage $src/docs/iamb.{1,5}
             install -D $src/docs/iamb.svg -t $out/share/icons/hicolor/scalable/apps
             install -D $src/docs/iamb.metainfo.xml $out/share/appdata/chat.iamb.iamb.appdata.xml
