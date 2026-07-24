@@ -1563,8 +1563,8 @@ impl ListItem<IambInfo> for MemberItem {
         if let Some(name) = name {
             spans.push(Span::styled(name, style));
             parens = true;
-        } else if let Some((display, _)) = info.display_names.get(user_id) {
-            spans.push(Span::styled(display.clone(), style));
+        } else if let Some(display) = info.display_names.get(user_id) {
+            spans.push(Span::styled(display.into_owned(), style));
             parens = true;
         }
 

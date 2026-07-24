@@ -431,45 +431,10 @@ fn members_insert(
         for member in members {
             let user_id = member.user_id().to_owned();
             let name = member.display_name().map(|s| s.to_owned());
-            member_set_display_name(info, user_id, name);
+            info.display_names.set(user_id, name);
         }
     }
     // else ???
-}
-
-fn member_set_display_name(info: &mut RoomInfo, user_id: OwnedUserId, name: Option<String>) {
-    let to_remove;
-    if let Some(display_name) = name {
-        let ambiguous = info.display_names.iter_mut().any(|(_, (name, is_ambiguous))| {
-            if name == &display_name {
-                *is_ambiguous = true;
-                true
-            } else {
-                false
-            }
-        });
-
-        to_remove = info.display_names.insert(user_id, (display_name, ambiguous));
-    } else {
-        to_remove = info.display_names.remove(&user_id);
-    }
-    if let Some((display_name, _)) = to_remove {
-        let mut names: Vec<_> = info
-            .display_names
-            .iter_mut()
-            .filter_map(|(_, (name, is_ambiguous))| {
-                if name == &display_name {
-                    Some(is_ambiguous)
-                } else {
-                    None
-                }
-            })
-            .collect();
-
-        if names.len() == 1 {
-            *names[0] = false;
-        }
-    }
 }
 
 async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
@@ -1142,8 +1107,7 @@ impl ClientWorker {
 
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
-
-                    member_set_display_name(info, user_id, ev.content.displayname);
+                    info.display_names.set(user_id, ev.content.displayname);
                 }
             },
         );
