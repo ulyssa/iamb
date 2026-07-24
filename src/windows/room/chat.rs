@@ -231,17 +231,21 @@ impl ChatState {
                                 return Err(IambError::NoAttachment.into());
                             }
 
-                            let links = if let Some(html) = &msg.html {
+                            let mut links = if let Some(html) = &msg.html {
                                 html.get_links()
                             } else {
-                                linkify::LinkFinder::new()
+                                vec![]
+                            };
+
+                            if links.is_empty() {
+                                links = linkify::LinkFinder::new()
                                     .links(&msg.event.body())
                                     .filter_map(|u| Url::parse(u.as_str()).ok())
                                     .scan(TreeGenState { link_num: 0 }, |state, u| {
                                         state.next_link_char().map(|c| (c, u))
                                     })
-                                    .collect()
-                            };
+                                    .collect();
+                            }
 
                             if links.is_empty() {
                                 return Err(IambError::NoAttachment.into());
@@ -392,7 +396,7 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot react to a redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -430,7 +434,7 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot redact already redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -493,7 +497,7 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot unreact to a redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -586,7 +590,7 @@ impl ChatState {
                 // XXX: second parameter can be a locally unique transaction id.
                 // Useful for doing retries.
                 let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
-                let event_id = resp.event_id;
+                let event_id = resp.response.event_id;
 
                 // Reset message bar state now that it's been sent.
                 self.reset();
