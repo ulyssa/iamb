@@ -541,9 +541,10 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 if need_fetch {
                     if let Ok(mems) = store.application.worker.members(room_id.clone()) {
+                        let case_insensitive = store.application.settings.tunables.ignorecase;
                         let mut items = mems
                             .into_iter()
-                            .map(|m| MemberItem::new(m, room_id.clone()))
+                            .map(|m| MemberItem::new(m, room_id.clone(), case_insensitive))
                             .collect::<Vec<_>>();
                         let fields = &store.application.settings.tunables.sort.members;
                         items.sort_by(|a, b| user_fields_cmp(a, b, fields));
@@ -879,6 +880,18 @@ impl Window<IambInfo> for IambWindow {
     }
 }
 
+// `needle` comes from modalkit already compiled case-sensitively, so recompile
+// it when the user wants case-insensitive search.
+fn matches_search(needle: &regex::Regex, case_insensitive: bool, haystacks: &[&str]) -> bool {
+    if case_insensitive {
+        if let Ok(re) = crate::util::compile_search(needle.as_str(), true) {
+            return haystacks.iter().any(|h| re.is_match(h));
+        }
+    }
+
+    haystacks.iter().any(|h| needle.is_match(h))
+}
+
 #[derive(Clone)]
 pub struct GenericChatItem {
     room_info: MatrixRoomInfo,
@@ -886,6 +899,7 @@ pub struct GenericChatItem {
     alias: Option<OwnedRoomAliasId>,
     unread: UnreadInfo,
     is_dm: bool,
+    case_insensitive: bool,
 }
 
 impl GenericChatItem {
@@ -903,7 +917,16 @@ impl GenericChatItem {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
         }
 
-        GenericChatItem { room_info, name, alias, is_dm, unread }
+        let case_insensitive = store.application.settings.tunables.ignorecase;
+
+        GenericChatItem {
+            room_info,
+            name,
+            alias,
+            is_dm,
+            unread,
+            case_insensitive,
+        }
     }
 
     #[inline]
@@ -986,6 +1009,10 @@ impl ListItem<IambInfo> for GenericChatItem {
     fn get_word(&self) -> Option<String> {
         self.room_id().to_string().into()
     }
+
+    fn matches(&self, needle: &regex::Regex) -> bool {
+        matches_search(needle, self.case_insensitive, &[self.name.as_str()])
+    }
 }
 
 impl Promptable<ProgramContext, ProgramStore, IambInfo> for GenericChatItem {
@@ -1005,6 +1032,7 @@ pub struct RoomItem {
     name: String,
     alias: Option<OwnedRoomAliasId>,
     unread: UnreadInfo,
+    case_insensitive: bool,
 }
 
 impl RoomItem {
@@ -1022,7 +1050,9 @@ impl RoomItem {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
         }
 
-        RoomItem { room_info, name, alias, unread }
+        let case_insensitive = store.application.settings.tunables.ignorecase;
+
+        RoomItem { room_info, name, alias, unread, case_insensitive }
     }
 
     #[inline]
@@ -1100,6 +1130,10 @@ impl ListItem<IambInfo> for RoomItem {
     fn get_word(&self) -> Option<String> {
         self.room_id().to_string().into()
     }
+
+    fn matches(&self, needle: &regex::Regex) -> bool {
+        matches_search(needle, self.case_insensitive, &[self.name.as_str()])
+    }
 }
 
 impl Promptable<ProgramContext, ProgramStore, IambInfo> for RoomItem {
@@ -1119,6 +1153,7 @@ pub struct DirectItem {
     name: String,
     alias: Option<OwnedRoomAliasId>,
     unread: UnreadInfo,
+    case_insensitive: bool,
 }
 
 impl DirectItem {
@@ -1131,7 +1166,9 @@ impl DirectItem {
         let unread = info.unreads(&store.application.settings);
         info.tags.clone_from(&room_info.deref().1);
 
-        DirectItem { room_info, name, alias, unread }
+        let case_insensitive = store.application.settings.tunables.ignorecase;
+
+        DirectItem { room_info, name, alias, unread, case_insensitive }
     }
 
     #[inline]
@@ -1209,6 +1246,10 @@ impl ListItem<IambInfo> for DirectItem {
     fn get_word(&self) -> Option<String> {
         self.room_id().to_string().into()
     }
+
+    fn matches(&self, needle: &regex::Regex) -> bool {
+        matches_search(needle, self.case_insensitive, &[self.name.as_str()])
+    }
 }
 
 impl Promptable<ProgramContext, ProgramStore, IambInfo> for DirectItem {
@@ -1227,6 +1268,7 @@ pub struct SpaceItem {
     room_info: MatrixRoomInfo,
     name: String,
     alias: Option<OwnedRoomAliasId>,
+    case_insensitive: bool,
 }
 
 impl SpaceItem {
@@ -1244,7 +1286,9 @@ impl SpaceItem {
             store.application.names.insert(alias.to_string(), room_id.to_owned());
         }
 
-        SpaceItem { room_info, name, alias }
+        let case_insensitive = store.application.settings.tunables.ignorecase;
+
+        SpaceItem { room_info, name, alias, case_insensitive }
     }
 
     #[inline]
@@ -1305,6 +1349,10 @@ impl ListItem<IambInfo> for SpaceItem {
 
     fn get_word(&self) -> Option<String> {
         self.room_id().to_string().into()
+    }
+
+    fn matches(&self, needle: &regex::Regex) -> bool {
+        matches_search(needle, self.case_insensitive, &[self.name.as_str()])
     }
 }
 
@@ -1525,11 +1573,12 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for VerifyItem {
 pub struct MemberItem {
     member: RoomMember,
     room_id: OwnedRoomId,
+    case_insensitive: bool,
 }
 
 impl MemberItem {
-    fn new(member: RoomMember, room_id: OwnedRoomId) -> Self {
-        Self { member, room_id }
+    fn new(member: RoomMember, room_id: OwnedRoomId, case_insensitive: bool) -> Self {
+        Self { member, room_id, case_insensitive }
     }
 }
 
@@ -1591,7 +1640,10 @@ impl ListItem<IambInfo> for MemberItem {
     }
 
     fn matches(&self, needle: &regex::Regex) -> bool {
-        needle.is_match(self.member.name()) || needle.is_match(self.member.user_id().as_str())
+        matches_search(needle, self.case_insensitive, &[
+            self.member.name(),
+            self.member.user_id().as_str(),
+        ])
     }
 }
 
@@ -1624,6 +1676,24 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 mod tests {
     use super::*;
     use matrix_sdk::ruma::{room_alias_id, server_name};
+
+    #[test]
+    fn test_matches_search() {
+        let needle = regex::Regex::new("alice").unwrap();
+
+        // Case-sensitive (the default) only matches the exact case.
+        assert!(matches_search(&needle, false, &["alice in the room"]));
+        assert!(!matches_search(&needle, false, &["Alice in the room"]));
+
+        // Case-insensitive matches regardless of case.
+        assert!(matches_search(&needle, true, &["Alice in the room"]));
+        assert!(matches_search(&needle, true, &["ALICE"]));
+
+        // Any of the haystacks matching is enough (e.g. name or user id).
+        let needle = regex::Regex::new("bob").unwrap();
+        assert!(matches_search(&needle, true, &["Display Name", "@BOB:example.com"]));
+        assert!(!matches_search(&needle, false, &["Display Name", "@BOB:example.com"]));
+    }
 
     #[derive(Debug, Eq, PartialEq)]
     struct TestRoomItem {

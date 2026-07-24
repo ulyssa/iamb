@@ -1,6 +1,7 @@
 //! # Utility functions
 use std::borrow::Cow;
 
+use regex::{Regex, RegexBuilder};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -167,9 +168,27 @@ pub fn replace_emojis_in_line(line: &mut Line) {
     }
 }
 
+/// Compile a search pattern, optionally ignoring case.
+pub fn compile_search(pattern: &str, case_insensitive: bool) -> Result<Regex, regex::Error> {
+    RegexBuilder::new(pattern).case_insensitive(case_insensitive).build()
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[test]
+    fn test_compile_search_case_insensitive() {
+        let re = compile_search("chicken", true).unwrap();
+        assert!(re.is_match("CHICKEN"));
+        assert!(re.is_match("Chicken"));
+        assert!(re.is_match("chicken"));
+
+        let re = compile_search("chicken", false).unwrap();
+        assert!(!re.is_match("CHICKEN"));
+        assert!(!re.is_match("Chicken"));
+        assert!(re.is_match("chicken"));
+    }
 
     #[test]
     fn test_wrapped_lines_ascii() {
