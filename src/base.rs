@@ -57,7 +57,6 @@ use matrix_sdk::{
         OwnedRoomId,
         OwnedUserId,
         RoomId,
-        RoomVersionId,
         UserId,
     },
     RoomState as MatrixRoomState,
@@ -168,6 +167,9 @@ pub enum MessageAction {
 
     /// Reply to a message.
     Reply,
+
+    /// Go to the message the hovered message replied to.
+    Replied,
 
     /// Unreact to a message.
     ///
@@ -491,6 +493,8 @@ pub enum HomeserverAction {
     /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
     Logout(String, bool),
+    /// Forget all left rooms
+    Forget,
 }
 
 /// An action performed against the user's room keys.
@@ -783,6 +787,10 @@ pub enum IambError {
     #[error("Invalid room alias id: {0}")]
     InvalidRoomAliasId(#[from] matrix_sdk::ruma::IdParseError),
 
+    /// An invalid space child order was specified.
+    #[error("Invalid space child order: {0}")]
+    InvalidSpaceChildOrder(matrix_sdk::ruma::IdParseError),
+
     /// A failure occurred during verification.
     #[error("Verification request error: {0}")]
     VerificationRequestError(#[from] matrix_sdk::encryption::identities::RequestVerificationError),
@@ -1023,7 +1031,7 @@ impl RoomInfo {
         self.messages.get_mut(self.keys.get(event_id)?.to_message_key()?)
     }
 
-    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent, room_version: &RoomVersionId) {
+    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
         let Some(redacts) = &ev.redacts else {
             return;
         };
@@ -1033,20 +1041,20 @@ impl RoomInfo {
             Some(EventLocation::State(key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev, room_version);
+                    msg.redact(ev);
                 }
             },
             Some(EventLocation::Message(None, key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev, room_version);
+                    msg.redact(ev);
                 }
             },
             Some(EventLocation::Message(Some(root), key)) => {
                 if let Some(thread) = self.threads.get_mut(root) {
                     if let Some(msg) = thread.get_mut(key) {
                         let ev = SyncRoomRedactionEvent::Original(ev);
-                        msg.redact(ev, room_version);
+                        msg.redact(ev);
                     }
                 }
             },
@@ -1110,7 +1118,7 @@ impl RoomInfo {
             MessageEvent::Local(_, content) => {
                 content.apply_replacement(new_msgtype);
             },
-            MessageEvent::Redacted(_) |
+            MessageEvent::Redacted(_, _) |
             MessageEvent::State(_) |
             MessageEvent::EncryptedOriginal(_) |
             MessageEvent::EncryptedRedacted(_) => {
@@ -1119,6 +1127,7 @@ impl RoomInfo {
         }
 
         msg.html = msg.event.html();
+        msg.event.strip_reply_fallback();
     }
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
@@ -1133,14 +1142,34 @@ impl RoomInfo {
     /// Indicates whether this room has unread messages.
     pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
         let last_message = self.messages.last_key_value();
+
         let last_receipt = self
             .user_receipts
             .get(&ReceiptThread::Main)
             .and_then(|receipts| receipts.get(&settings.profile.user_id));
+        let last_receipt = last_receipt.as_ref().and_then(|event_id| {
+            match &self.keys.get(*event_id)? {
+                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
+                EventLocation::Reaction(_) => None,
+            }
+        });
+
+        let last_unthreaded = self
+            .user_receipts
+            .get(&ReceiptThread::Unthreaded)
+            .and_then(|receipts| receipts.get(&settings.profile.user_id));
+        let last_unthreaded = last_unthreaded.as_ref().and_then(|event_id| {
+            match &self.keys.get(*event_id)? {
+                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
+                EventLocation::Reaction(_) => None,
+            }
+        });
+
+        let last_receipt = std::cmp::max(last_receipt, last_unthreaded);
 
         match (last_message, last_receipt) {
-            (Some(((ts, recent), _)), Some(last_read)) => {
-                UnreadInfo { unread: last_read != recent, latest: Some(*ts) }
+            (Some(((ts, _), _)), Some((read_ts, _))) => {
+                UnreadInfo { unread: ts > read_ts, latest: Some(*ts) }
             },
             (Some(((ts, _), _)), None) => {
                 // If we've never loaded/generated a room's receipt (example,
@@ -1477,14 +1506,19 @@ impl SyncInfo {
     }
 }
 
-bitflags::bitflags! {
-    /// Load-needs
-    #[derive(Debug, Default, PartialEq)]
-    pub struct Need: u32 {
-        const EMPTY = 0b00000000;
-        const MESSAGES = 0b00000001;
-        const MEMBERS =  0b00000010;
-    }
+static MESSAGE_NEED_TTL: u8 = 30;
+
+#[derive(Debug, PartialEq)]
+/// Load messages until the event is loaded or `ttl` loads are exceeded
+pub struct MessageNeed {
+    pub event_id: OwnedEventId,
+    pub ttl: u8,
+}
+
+#[derive(Default, Debug, PartialEq)]
+pub struct Need {
+    pub members: bool,
+    pub messages: Option<Vec<MessageNeed>>,
 }
 
 /// Things that need loading for different rooms.
@@ -1494,9 +1528,31 @@ pub struct RoomNeeds {
 }
 
 impl RoomNeeds {
-    /// Mark a room for needing something to be loaded.
-    pub fn insert(&mut self, room_id: OwnedRoomId, need: Need) {
-        self.needs.entry(room_id).or_default().insert(need);
+    /// Mark a room for needing to load members.
+    pub fn need_members(&mut self, room_id: OwnedRoomId) {
+        self.needs.entry(room_id).or_default().members = true;
+    }
+
+    /// Mark a room for needing to load messages.
+    pub fn need_messages(&mut self, room_id: OwnedRoomId) {
+        self.needs.entry(room_id).or_default().messages.get_or_insert_default();
+    }
+
+    /// Mark a room for needing to load messages until the given message is loaded or a retry limit
+    /// is exceeded.
+    pub fn need_message(&mut self, room_id: OwnedRoomId, event_id: OwnedEventId) {
+        let messages = &mut self.needs.entry(room_id).or_default().messages.get_or_insert_default();
+
+        messages.push(MessageNeed { event_id, ttl: MESSAGE_NEED_TTL });
+    }
+
+    pub fn need_messages_all(&mut self, room_id: OwnedRoomId, message_needs: Vec<MessageNeed>) {
+        self.needs
+            .entry(room_id)
+            .or_default()
+            .messages
+            .get_or_insert_default()
+            .extend(message_needs);
     }
 
     pub fn rooms(&self) -> usize {
@@ -1993,7 +2049,7 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
         // Complete Emoji shortcodes.
         Some(':') => {
             let list = store.emojis.complete(&id[1..]);
-            let iter = list.into_iter().take(200).map(|s| format!(":{}:", s));
+            let iter = list.into_iter().take(200).map(|s| format!(":{s}:"));
 
             return iter.collect();
         },
@@ -2116,18 +2172,38 @@ fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
 
 #[cfg(test)]
 pub mod tests {
+    use std::iter::FromIterator as _;
+
     use super::*;
     use crate::config::user_style_from_color;
     use crate::tests::*;
     use matrix_sdk::ruma::{
-        events::{reaction::ReactionEventContent, relation::Annotation, MessageLikeUnsigned},
+        events::{reaction::ReactionEventContent, relation::Annotation},
         owned_event_id,
-        owned_room_id,
-        owned_user_id,
         MilliSecondsSinceUnixEpoch,
     };
     use pretty_assertions::assert_eq;
     use ratatui::style::Color;
+    use serde_json::{Map, Value};
+
+    fn create_reaction_event(
+        content: &ReactionEventContent,
+        event_id: &str,
+        sender: &str,
+    ) -> ReactionEvent {
+        serde_json::from_value(Value::Object(Map::from_iter([
+            ("type".to_owned(), Value::String("m.reaction".into())),
+            ("content".to_owned(), serde_json::to_value(content).unwrap()),
+            ("event_id".to_owned(), serde_json::to_value(event_id).unwrap()),
+            ("sender".to_owned(), Value::String(sender.into())),
+            (
+                "origin_server_ts".to_owned(),
+                serde_json::to_value(MilliSecondsSinceUnixEpoch::now()).unwrap(),
+            ),
+            ("room_id".to_owned(), Value::String("!foo:example.org".into())),
+        ])))
+        .unwrap()
+    }
 
     #[test]
     fn multiple_identical_reactions() {
@@ -2139,17 +2215,9 @@ pub mod tests {
         ));
 
         for i in 0..3 {
-            let event_id = format!("$house_{}", i);
-            info.insert_reaction(MessageLikeEvent::Original(
-                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
-                    content: content.clone(),
-                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
-                    sender: owned_user_id!("@foo:example.org"),
-                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
-                    room_id: owned_room_id!("!foo:example.org"),
-                    unsigned: MessageLikeUnsigned::new(),
-                },
-            ));
+            let event_id = format!("$house_{i}");
+            let react = create_reaction_event(&content, &event_id, "@foo:example.com");
+            info.insert_reaction(react);
         }
 
         let content = ReactionEventContent::new(Annotation::new(
@@ -2158,31 +2226,15 @@ pub mod tests {
         ));
 
         for i in 0..2 {
-            let event_id = format!("$smile_{}", i);
-            info.insert_reaction(MessageLikeEvent::Original(
-                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
-                    content: content.clone(),
-                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
-                    sender: owned_user_id!("@foo:example.org"),
-                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
-                    room_id: owned_room_id!("!foo:example.org"),
-                    unsigned: MessageLikeUnsigned::new(),
-                },
-            ));
+            let event_id = format!("$smile_{i}");
+            let react = create_reaction_event(&content, &event_id, "@foo:example.com");
+            info.insert_reaction(react);
         }
 
         for i in 2..4 {
-            let event_id = format!("$smile_{}", i);
-            info.insert_reaction(MessageLikeEvent::Original(
-                matrix_sdk::ruma::events::OriginalMessageLikeEvent {
-                    content: content.clone(),
-                    event_id: OwnedEventId::from_str(&event_id).unwrap(),
-                    sender: owned_user_id!("@bar:example.org"),
-                    origin_server_ts: MilliSecondsSinceUnixEpoch::now(),
-                    room_id: owned_room_id!("!foo:example.org"),
-                    unsigned: MessageLikeUnsigned::new(),
-                },
-            ));
+            let event_id = format!("$smile2_{i}");
+            let react = create_reaction_event(&content, &event_id, "@bar:example.com");
+            info.insert_reaction(react);
         }
 
         assert_eq!(info.get_reactions(&owned_event_id!("$my_reaction")), vec![
@@ -2274,12 +2326,12 @@ pub mod tests {
 
         let mut need_load = RoomNeeds::default();
 
-        need_load.insert(room_id.clone(), Need::MESSAGES);
-        need_load.insert(room_id.clone(), Need::MEMBERS);
+        need_load.need_messages(room_id.clone());
+        need_load.need_members(room_id.clone());
 
         assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
             room_id,
-            Need::MESSAGES | Need::MEMBERS,
+            Need { members: true, messages: Some(Vec::new()) }
         )],);
     }
 

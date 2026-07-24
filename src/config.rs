@@ -17,7 +17,6 @@ use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
 use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer, Serialize};
-use tracing::Level;
 use url::Url;
 
 use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
@@ -228,47 +227,6 @@ impl<'de> Deserialize<'de> for VimModes {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct LogLevel(pub Level);
-pub struct LogLevelVisitor;
-
-impl From<LogLevel> for Level {
-    fn from(level: LogLevel) -> Level {
-        level.0
-    }
-}
-
-impl Visitor<'_> for LogLevelVisitor {
-    type Value = LogLevel;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid log level (e.g. \"warn\" or \"debug\")")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: SerdeError,
-    {
-        match value {
-            "info" => Ok(LogLevel(Level::INFO)),
-            "debug" => Ok(LogLevel(Level::DEBUG)),
-            "warn" => Ok(LogLevel(Level::WARN)),
-            "error" => Ok(LogLevel(Level::ERROR)),
-            "trace" => Ok(LogLevel(Level::TRACE)),
-            _ => Err(E::custom("Could not parse log level")),
-        }
-    }
-}
-
-impl<'de> Deserialize<'de> for LogLevel {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(LogLevelVisitor)
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UserColor(pub Color);
 pub struct UserColorVisitor;
 
@@ -326,7 +284,7 @@ pub struct Session {
 impl From<Session> for MatrixSession {
     fn from(session: Session) -> Self {
         MatrixSession {
-            tokens: matrix_sdk::authentication::matrix::MatrixSessionTokens {
+            tokens: matrix_sdk::authentication::SessionTokens {
                 access_token: session.access_token,
                 refresh_token: session.refresh_token,
             },
@@ -486,6 +444,8 @@ pub struct Notifications {
     pub via: NotifyVia,
     #[serde(default = "default_true")]
     pub show_message: bool,
+    #[serde(default)]
+    pub sound_hint: Option<String>,
 }
 
 #[derive(Clone)]
@@ -559,7 +519,8 @@ impl SortOverrides {
 
 #[derive(Clone)]
 pub struct TunableValues {
-    pub log_level: Level,
+    pub log_level: String,
+    pub max_log_files: usize,
     pub message_shortcode_display: bool,
     pub normal_after_send: bool,
     pub reaction_display: bool,
@@ -582,11 +543,13 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub ssl_verify: bool,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
-    pub log_level: Option<LogLevel>,
+    pub log_level: Option<String>,
+    pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
     pub normal_after_send: Option<bool>,
     pub reaction_display: Option<bool>,
@@ -610,12 +573,14 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    pub ssl_verify: Option<bool>,
 }
 
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
             log_level: self.log_level.or(other.log_level),
+            max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
                 .message_shortcode_display
                 .or(other.message_shortcode_display),
@@ -644,12 +609,14 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            ssl_verify: self.ssl_verify.or(other.ssl_verify),
         }
     }
 
     fn values(self) -> TunableValues {
         TunableValues {
-            log_level: self.log_level.map(Level::from).unwrap_or(Level::INFO),
+            log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
+            max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
             reaction_display: self.reaction_display.unwrap_or(true),
@@ -674,6 +641,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            ssl_verify: self.ssl_verify.unwrap_or(true),
         }
     }
 }
@@ -708,11 +676,11 @@ impl DirectoryValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Directories {
-    pub cache: Option<PathBuf>,
-    pub data: Option<PathBuf>,
-    pub logs: Option<PathBuf>,
-    pub downloads: Option<PathBuf>,
-    pub image_previews: Option<PathBuf>,
+    pub cache: Option<String>,
+    pub data: Option<String>,
+    pub logs: Option<String>,
+    pub downloads: Option<String>,
+    pub image_previews: Option<String>,
 }
 
 impl Directories {
@@ -729,6 +697,11 @@ impl Directories {
     fn values(self) -> DirectoryValues {
         let cache = self
             .cache
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
             .or_else(|| {
                 let mut dir = dirs::cache_dir()?;
                 dir.push("iamb");
@@ -738,6 +711,11 @@ impl Directories {
 
         let data = self
             .data
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
             .or_else(|| {
                 let mut dir = dirs::data_dir()?;
                 dir.push("iamb");
@@ -745,19 +723,40 @@ impl Directories {
             })
             .expect("no dirs.data value configured!");
 
-        let logs = self.logs.unwrap_or_else(|| {
-            let mut dir = cache.clone();
-            dir.push("logs");
-            dir
-        });
+        let logs = self
+            .logs
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
+            .unwrap_or_else(|| {
+                let mut dir = cache.clone();
+                dir.push("logs");
+                dir
+            });
 
-        let downloads = self.downloads.or_else(dirs::download_dir);
+        let downloads = self
+            .downloads
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
+            .or_else(dirs::download_dir);
 
-        let image_previews = self.image_previews.unwrap_or_else(|| {
-            let mut dir = cache.clone();
-            dir.push("image_preview_downloads");
-            dir
-        });
+        let image_previews = self
+            .image_previews
+            .map(|dir| {
+                let dir = shellexpand::full(&dir)
+                    .expect("unable to expand shell variables in dirs.cache");
+                Path::new(dir.as_ref()).to_owned()
+            })
+            .unwrap_or_else(|| {
+                let mut dir = cache.clone();
+                dir.push("image_preview_downloads");
+                dir
+            });
 
         DirectoryValues { cache, data, logs, downloads, image_previews }
     }
@@ -796,6 +795,7 @@ pub enum Layout {
 #[derive(Clone, Deserialize)]
 pub struct ProfileConfig {
     pub user_id: OwnedUserId,
+    pub password_file: Option<PathBuf>,
     pub url: Option<Url>,
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
@@ -902,10 +902,7 @@ impl ApplicationSettings {
         } else {
             loop {
                 println!("\nNo profile specified. Available profiles:");
-                profiles
-                    .keys()
-                    .enumerate()
-                    .for_each(|(i, name)| println!("{}: {}", i, name));
+                profiles.keys().enumerate().for_each(|(i, name)| println!("{i}: {name}"));
 
                 print!("Select a number or 'q' to quit: ");
                 let _ = std::io::stdout().flush();
@@ -1004,7 +1001,7 @@ impl ApplicationSettings {
         Ok(())
     }
 
-    pub fn get_user_char_span(&self, user_id: &UserId) -> Span {
+    pub fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
         let (color, c) = self
             .tunables
             .users

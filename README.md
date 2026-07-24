@@ -41,7 +41,7 @@ You can create a basic configuration in `$CONFIG_DIR/iamb/config.toml` that look
 user_id = "@user:example.com"
 ```
 
-If you homeserver is located on a different domain than the server part of the
+If your homeserver is located on a different domain than the server part of the
 `user_id` and you don't have a [`/.well-known`][well_known_entry] entry, then
 you can explicitly specify the homeserver URL to use:
 
@@ -49,6 +49,15 @@ you can explicitly specify the homeserver URL to use:
 [profiles."example.com"]
 url = "https://example.com"
 user_id = "@user:example.com"
+```
+
+## Installation (from source)
+
+Install Rust and Cargo using [rustup], and then run from the directory
+containing the sources (ie: from a git clone):
+
+```
+cargo install --locked --path .
 ```
 
 ## Installation (via `crates.io`)
@@ -137,6 +146,14 @@ A snap for Linux distributions which [support](https://snapcraft.io/docs/install
 snap install iamb
 ```
 
+### Conda (Linux, macOS, Windows)
+
+A Conda [package](https://prefix.dev/channels/conda-forge/packages/iamb) is available on conda-forge. To install it simply run:
+
+```
+pixi global install iamb
+```
+
 ## License
 
 iamb is released under the [Apache License, Version 2.0].
@@ -145,3 +162,4 @@ iamb is released under the [Apache License, Version 2.0].
 [crates-io-iamb]: https://crates.io/crates/iamb
 [iamb.chat]: https://iamb.chat
 [well_known_entry]: https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixclient
+[rustup]: https://rustup.rs/

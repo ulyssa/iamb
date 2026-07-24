@@ -200,6 +200,17 @@ fn iamb_leave(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_forget(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let forget = IambAction::Homeserver(HomeserverAction::Forget);
+    let step = CommandStep::Continue(forget.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_cancel(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -270,6 +281,17 @@ fn iamb_reply(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 
     let ract = IambAction::from(MessageAction::Reply);
+    let step = CommandStep::Continue(ract.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_replied(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let ract = IambAction::from(MessageAction::Replied);
     let step = CommandStep::Continue(ract.into(), ctx.context.clone());
 
     return Ok(step);
@@ -732,6 +754,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_leave,
     });
     cmds.add_command(ProgramCommand {
+        name: "forget".into(),
+        aliases: vec![],
+        f: iamb_forget,
+    });
+    cmds.add_command(ProgramCommand {
         name: "members".into(),
         aliases: vec![],
         f: iamb_members,
@@ -750,6 +777,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "reply".into(),
         aliases: vec![],
         f: iamb_reply,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "replied".into(),
+        aliases: vec![],
+        f: iamb_replied,
     });
     cmds.add_command(ProgramCommand {
         name: "rooms".into(),

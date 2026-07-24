@@ -1,11 +1,12 @@
 //! Code for converting composed messages into content to send to the homeserver.
-use comrak::{markdown_to_html, ComrakOptions};
+use comrak::{markdown_to_html, options::Options};
 use nom::{
     branch::alt,
     bytes::complete::tag,
     character::complete::space0,
     combinator::value,
     IResult,
+    Parser as _,
 };
 
 use matrix_sdk::ruma::events::room::message::{
@@ -118,7 +119,8 @@ fn parse_slash_command_inner(input: &str) -> IResult<&str, SlashCommand> {
         value(SlashCommand::Rainfall, tag("/rainfall ")),
         value(SlashCommand::Snowfall, tag("/snowfall ")),
         value(SlashCommand::SpaceInvaders, tag("/spaceinvaders ")),
-    ))(input)?;
+    ))
+    .parse(input)?;
     let (input, _) = space0(input)?;
 
     Ok((input, slash))
@@ -154,7 +156,7 @@ fn text_to_html(input: &str) -> Option<String> {
         return None;
     }
 
-    let mut options = ComrakOptions::default();
+    let mut options = Options::default();
     options.extension.autolink = true;
     options.extension.shortcodes = true;
     options.extension.strikethrough = true;

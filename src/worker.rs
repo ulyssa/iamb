@@ -23,16 +23,21 @@ use matrix_sdk::{
     authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
     deserialized_responses::DisplayName,
-    encryption::verification::{SasVerification, Verification},
-    encryption::{BackupDownloadStrategy, EncryptionSettings},
+    encryption::{
+        verification::{SasVerification, Verification},
+        BackupDownloadStrategy,
+        EncryptionSettings,
+    },
     event_handler::Ctx,
     reqwest,
     room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
         api::client::{
             filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
-            room::create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
-            room::Visibility,
+            room::{
+                create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
+                Visibility,
+            },
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
         },
         assign,
@@ -46,8 +51,7 @@ use matrix_sdk::{
             },
             presence::PresenceEvent,
             reaction::ReactionEventContent,
-            receipt::ReceiptType,
-            receipt::{ReceiptEventContent, ReceiptThread},
+            receipt::{ReceiptEventContent, ReceiptThread, ReceiptType},
             room::{
                 encryption::RoomEncryptionEventContent,
                 member::OriginalSyncRoomMemberEvent,
@@ -57,11 +61,9 @@ use matrix_sdk::{
             },
             tag::Tags,
             typing::SyncTypingEvent,
-            AnyInitialStateEvent,
             AnyMessageLikeEvent,
             AnySyncStateEvent,
             AnyTimelineEvent,
-            EmptyStateKey,
             InitialStateEvent,
             SyncEphemeralRoomEvent,
             SyncMessageLikeEvent,
@@ -69,14 +71,12 @@ use matrix_sdk::{
         },
         room::RoomType,
         serde::Raw,
-        EventEncryptionAlgorithm,
         EventId,
         OwnedEventId,
         OwnedRoomId,
         OwnedRoomOrAliasId,
         OwnedUserId,
         RoomId,
-        RoomVersionId,
     },
     Client,
     ClientBuildError,
@@ -88,7 +88,7 @@ use matrix_sdk::{
 use modalkit::errors::UIError;
 use modalkit::prelude::{EditInfo, InfoMessage};
 
-use crate::base::Need;
+use crate::base::MessageNeed;
 use crate::notifications::register_notifications;
 use crate::{
     base::{
@@ -162,13 +162,11 @@ pub async fn create_room(
 
     // Set up encryption.
     if flags.contains(CreateRoomFlags::ENCRYPTED) {
-        // XXX: Once matrix-sdk uses ruma 0.8, then this can skip the cast.
-        let algo = EventEncryptionAlgorithm::MegolmV1AesSha2;
-        let content = RoomEncryptionEventContent::new(algo);
-        let encr = InitialStateEvent { content, state_key: EmptyStateKey };
-        let encr_raw = Raw::new(&encr).map_err(IambError::from)?;
-        let encr_raw = encr_raw.cast::<AnyInitialStateEvent>();
-        initial_state.push(encr_raw);
+        let ev = InitialStateEvent::with_empty_state_key(
+            RoomEncryptionEventContent::with_recommended_defaults(),
+        )
+        .to_raw_any();
+        initial_state.push(ev);
     }
 
     let request = assign!(CreateRoomRequest::new(), {
@@ -216,7 +214,7 @@ async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id:
 
 #[derive(Debug)]
 enum Plan {
-    Messages(OwnedRoomId, Option<String>),
+    Messages(OwnedRoomId, Option<String>, Vec<MessageNeed>),
     Members(OwnedRoomId),
 }
 
@@ -225,8 +223,8 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
     let ChatStore { need_load, rooms, .. } = &mut locked.application;
     let mut plan = Vec::with_capacity(need_load.rooms() * 2);
 
-    for (room_id, mut need) in std::mem::take(need_load).into_iter() {
-        if need.contains(Need::MESSAGES) {
+    for (room_id, need) in std::mem::take(need_load).into_iter() {
+        if let Some(message_need) = need.messages {
             let info = rooms.get_or_default(room_id.clone());
 
             if !info.recently_fetched() && !info.fetching {
@@ -239,16 +237,11 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
                     RoomFetchStatus::NotStarted => None,
                 };
 
-                plan.push(Plan::Messages(room_id.to_owned(), fetch_id));
-                need.remove(Need::MESSAGES);
+                plan.push(Plan::Messages(room_id.to_owned(), fetch_id, message_need));
             }
         }
-        if need.contains(Need::MEMBERS) {
+        if need.members {
             plan.push(Plan::Members(room_id.to_owned()));
-            need.remove(Need::MEMBERS);
-        }
-        if !need.is_empty() {
-            need_load.insert(room_id, need);
         }
     }
 
@@ -258,14 +251,14 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
 async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permits: &Semaphore) {
     let permit = permits.acquire().await;
     match plan {
-        Plan::Messages(room_id, fetch_id) => {
+        Plan::Messages(room_id, fetch_id, message_need) => {
             let limit = MIN_MSG_LOAD;
             let client = client.clone();
             let store_clone = store.clone();
 
             let res = load_older_one(&client, &room_id, fetch_id, limit).await;
             let mut locked = store.lock().await;
-            load_insert(room_id, res, locked.deref_mut(), store_clone);
+            load_insert(room_id, res, locked.deref_mut(), store_clone, message_need);
         },
         Plan::Members(room_id) => {
             let res = members_load(client, &room_id).await;
@@ -283,6 +276,9 @@ async fn load_older_one(
     limit: u32,
 ) -> MessageFetchResult {
     if let Some(room) = client.get_room(room_id) {
+        // Update cached encryption state. This is a noop if the state is already cached.
+        let _ = room.request_encryption_state().await;
+
         let mut opts = match &fetch_id {
             Some(id) => MessagesOptions::backward().from(id.as_str()),
             None => MessagesOptions::backward(),
@@ -325,6 +321,7 @@ fn load_insert(
     res: MessageFetchResult,
     locked: &mut ProgramStore,
     store: AsyncProgramStore,
+    message_needs: Vec<MessageNeed>,
 ) {
     let ChatStore { presences, rooms, worker, picker, settings, .. } = &mut locked.application;
     let info = rooms.get_or_default(room_id.clone());
@@ -370,12 +367,25 @@ fn load_insert(
             }
 
             info.fetch_id = fetch_id.map_or(RoomFetchStatus::Done, RoomFetchStatus::HaveMore);
+
+            // check if more are needed
+            let needs: Vec<_> = message_needs
+                .into_iter()
+                .filter(|need| !info.keys.contains_key(&need.event_id) && need.ttl > 0)
+                .map(|mut need| {
+                    need.ttl -= 1;
+                    need
+                })
+                .collect();
+            if !needs.is_empty() {
+                locked.application.need_load.need_messages_all(room_id, needs);
+            }
         },
         Err(e) => {
             warn!(room_id = room_id.as_str(), err = e.to_string(), "Failed to load older messages");
 
             // Wait and try again.
-            locked.application.need_load.insert(room_id, Need::MESSAGES);
+            locked.application.need_load.need_messages_all(room_id, message_needs);
         },
     }
 }
@@ -557,7 +567,7 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
     let mut filter = FilterDefinition::default();
     filter.room = room_ev;
 
-    let settings = SyncSettings::new().filter(filter.into());
+    let settings = SyncSettings::new().filter(filter.into()).timeout(Duration::from_secs(0));
 
     client.sync_once(settings).await?;
 
@@ -570,12 +580,12 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
 
     for room in sync_info.rooms.iter() {
         let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.insert(room_id, Need::MESSAGES);
+        need_load.need_messages(room_id);
     }
 
     for room in sync_info.dms.iter() {
         let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.insert(room_id, Need::MESSAGES);
+        need_load.need_messages(room_id);
     }
 
     Ok(())
@@ -705,10 +715,11 @@ async fn create_client_inner(
         .pool_idle_timeout(Duration::from_secs(60))
         .pool_max_idle_per_host(10)
         .tcp_keepalive(Duration::from_secs(10))
+        .danger_accept_invalid_certs(!settings.tunables.ssl_verify)
         .build()
         .unwrap();
 
-    let req_config = RequestConfig::new().timeout(req_timeout).retry_timeout(req_timeout);
+    let req_config = RequestConfig::new().timeout(req_timeout).max_retry_time(req_timeout);
 
     // Set up the Matrix client for the selected profile.
     let builder = Client::builder()
@@ -1083,12 +1094,10 @@ impl ClientWorker {
              store: Ctx<AsyncProgramStore>| {
                 async move {
                     let room_id = room.room_id();
-                    let room_info = room.clone_info();
-                    let room_version = room_info.room_version().unwrap_or(&RoomVersionId::V1);
 
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
-                    info.redact(ev, room_version);
+                    info.redact(ev);
                 }
             },
         );
@@ -1106,7 +1115,7 @@ impl ClientWorker {
                         ev.content.displayname.as_deref().unwrap_or_else(|| user_id.as_str()),
                     );
                     let ambiguous = client
-                        .store()
+                        .state_store()
                         .get_users_with_display_name(room_id, &ambiguous_name)
                         .await
                         .map(|users| users.len() > 1)
@@ -1244,7 +1253,7 @@ impl ClientWorker {
             let settings = self.settings.clone();
 
             async move {
-                while !client.logged_in() {
+                while !client.is_active() {
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
 
@@ -1418,7 +1427,7 @@ impl ClientWorker {
 
         let resp = self.client.send(req).await.map_err(IambError::from)?;
 
-        let rooms = resp.rooms.into_iter().map(|chunk| chunk.room_id).collect();
+        let rooms = resp.rooms.into_iter().map(|chunk| chunk.summary.room_id).collect();
 
         Ok(rooms)
     }

@@ -66,7 +66,6 @@ use crate::base::{
     IambInfo,
     IambResult,
     MessageAction,
-    Need,
     ProgramAction,
     ProgramContext,
     ProgramStore,
@@ -97,12 +96,12 @@ fn bold_style() -> Style {
 }
 
 #[inline]
-fn bold_span(s: &str) -> Span {
+fn bold_span(s: &str) -> Span<'_> {
     Span::styled(s, bold_style())
 }
 
 #[inline]
-fn bold_spans(s: &str) -> Line {
+fn bold_spans(s: &str) -> Line<'_> {
     bold_span(s).into()
 }
 
@@ -116,12 +115,12 @@ fn selected_style(selected: bool) -> Style {
 }
 
 #[inline]
-fn selected_span(s: &str, selected: bool) -> Span {
+fn selected_span(s: &str, selected: bool) -> Span<'_> {
     Span::styled(s, selected_style(selected))
 }
 
 #[inline]
-fn selected_text(s: &str, selected: bool) -> Text {
+fn selected_text(s: &str, selected: bool) -> Text<'_> {
     Text::from(selected_span(s, selected))
 }
 
@@ -641,7 +640,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 state.set(items);
 
                 List::new(store)
-                    .empty_message("You do not have rooms or dms yet")
+                    .empty_message("You do not have any unreads yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
                     .render(area, buf, state);
@@ -743,7 +742,7 @@ impl Window<IambInfo> for IambWindow {
         }
     }
 
-    fn get_tab_title(&self, store: &mut ProgramStore) -> Line {
+    fn get_tab_title(&self, store: &mut ProgramStore) -> Line<'_> {
         match self {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
@@ -771,7 +770,7 @@ impl Window<IambInfo> for IambWindow {
         }
     }
 
-    fn get_win_title(&self, store: &mut ProgramStore) -> Line {
+    fn get_win_title(&self, store: &mut ProgramStore) -> Line<'_> {
         match self {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
@@ -801,7 +800,7 @@ impl Window<IambInfo> for IambWindow {
                 let (room, name, tags) = store.application.worker.get_room(room_id)?;
                 let room = RoomState::new(room, thread, name, tags, store);
 
-                store.application.need_load.insert(room.id().to_owned(), Need::MEMBERS);
+                store.application.need_load.need_members(room.id().to_owned());
                 return Ok(room.into());
             },
             IambId::DirectList => {
@@ -863,7 +862,7 @@ impl Window<IambInfo> for IambWindow {
             let (room, name, tags) = store.application.worker.get_room(room_id)?;
             let room = RoomState::new(room, None, name, tags, store);
 
-            store.application.need_load.insert(room.id().to_owned(), Need::MEMBERS);
+            store.application.need_load.need_members(room.id().to_owned());
             Ok(room.into())
         }
     }
@@ -959,7 +958,12 @@ impl Display for GenericChatItem {
 }
 
 impl ListItem<IambInfo> for GenericChatItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         let unread = self.unread.is_unread();
         let style = selected_style(selected);
         let (name, mut labels) = name_and_labels(&self.name, unread, style);
@@ -1073,7 +1077,12 @@ impl Display for RoomItem {
 }
 
 impl ListItem<IambInfo> for RoomItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         let unread = self.unread.is_unread();
         let style = selected_style(selected);
         let (name, mut labels) = name_and_labels(&self.name, unread, style);
@@ -1177,7 +1186,12 @@ impl Display for DirectItem {
 }
 
 impl ListItem<IambInfo> for DirectItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         let unread = self.unread.is_unread();
         let style = selected_style(selected);
         let (name, mut labels) = name_and_labels(&self.name, unread, style);
@@ -1280,7 +1294,12 @@ impl Display for SpaceItem {
 }
 
 impl ListItem<IambInfo> for SpaceItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         selected_text(self.name.as_str(), selected)
     }
 
@@ -1411,7 +1430,12 @@ impl Display for VerifyItem {
 }
 
 impl ListItem<IambInfo> for VerifyItem {
-    fn show(&self, selected: bool, _: &ViewportContext<ListCursor>, _: &mut ProgramStore) -> Text {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        _: &mut ProgramStore,
+    ) -> Text<'_> {
         let mut lines = vec![];
 
         let bold = Style::default().add_modifier(StyleModifier::BOLD);
@@ -1521,7 +1545,7 @@ impl ListItem<IambInfo> for MemberItem {
         selected: bool,
         _: &ViewportContext<ListCursor>,
         store: &mut ProgramStore,
-    ) -> Text {
+    ) -> Text<'_> {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let user_id = self.member.user_id();
 
@@ -1564,6 +1588,10 @@ impl ListItem<IambInfo> for MemberItem {
 
     fn get_word(&self) -> Option<String> {
         self.member.user_id().to_string().into()
+    }
+
+    fn matches(&self, needle: &regex::Regex) -> bool {
+        needle.is_match(self.member.name()) || needle.is_match(self.member.user_id().as_str())
     }
 }
 
@@ -1644,7 +1672,7 @@ mod tests {
         let server = server_name!("example.com");
 
         let room1 = TestRoomItem {
-            room_id: RoomId::new(server).to_owned(),
+            room_id: RoomId::new_v1(server).to_owned(),
             tags: vec![TagName::Favorite],
             alias: Some(room_alias_id!("#room1:example.com").to_owned()),
             name: "Z",
@@ -1653,7 +1681,7 @@ mod tests {
         };
 
         let room2 = TestRoomItem {
-            room_id: RoomId::new(server).to_owned(),
+            room_id: RoomId::new_v1(server).to_owned(),
             tags: vec![],
             alias: Some(room_alias_id!("#a:example.com").to_owned()),
             name: "Unnamed Room",
@@ -1662,7 +1690,7 @@ mod tests {
         };
 
         let room3 = TestRoomItem {
-            room_id: RoomId::new(server).to_owned(),
+            room_id: RoomId::new_v1(server).to_owned(),
             tags: vec![],
             alias: None,
             name: "Cool Room",
@@ -1710,7 +1738,7 @@ mod tests {
         let server = server_name!("example.com");
 
         let room1 = TestRoomItem {
-            room_id: RoomId::new(server).to_owned(),
+            room_id: RoomId::new_v1(server).to_owned(),
             tags: vec![],
             alias: None,
             name: "Room 1",
@@ -1719,7 +1747,7 @@ mod tests {
         };
 
         let room2 = TestRoomItem {
-            room_id: RoomId::new(server).to_owned(),
+            room_id: RoomId::new_v1(server).to_owned(),
             tags: vec![],
             alias: None,
             name: "Room 2",
@@ -1731,7 +1759,7 @@ mod tests {
         };
 
         let room3 = TestRoomItem {
-            room_id: RoomId::new(server).to_owned(),
+            room_id: RoomId::new_v1(server).to_owned(),
             tags: vec![],
             alias: None,
             name: "Room 3",
@@ -1762,7 +1790,7 @@ mod tests {
         let server = server_name!("example.com");
 
         let room1 = TestRoomItem {
-            room_id: RoomId::new(server).to_owned(),
+            room_id: RoomId::new_v1(server).to_owned(),
             tags: vec![],
             alias: None,
             name: "Old room 1",
@@ -1771,7 +1799,7 @@ mod tests {
         };
 
         let room2 = TestRoomItem {
-            room_id: RoomId::new(server).to_owned(),
+            room_id: RoomId::new_v1(server).to_owned(),
             tags: vec![],
             alias: None,
             name: "Old room 2",
@@ -1780,7 +1808,7 @@ mod tests {
         };
 
         let room3 = TestRoomItem {
-            room_id: RoomId::new(server).to_owned(),
+            room_id: RoomId::new_v1(server).to_owned(),
             tags: vec![],
             alias: None,
             name: "New Fancy Room",

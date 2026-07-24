@@ -67,6 +67,8 @@ View a list of unread rooms.
 Mark all rooms as read.
 .It Sy ":welcome"
 View the startup Welcome window.
+.It Sy ":forget"
+Remove all left rooms from the internal database.
 .El
 
 .Sh "E2EE COMMANDS"
@@ -114,6 +116,8 @@ Redact the selected message with the optional reason.
 Reply to the selected message.
 .It Sy ":cancel"
 Cancel the currently drafted message including replies.
+.It Sy ":replied"
+Go to the message the current message replied to.
 .It Sy ":upload [path]"
 Upload an attachment and send it to the currently selected room.
 .El
@@ -290,6 +294,18 @@ Produces no effect in
 .Nm ,
 but will display aliens from Space Invaders in Matrix clients that support doing so.
 .El
+
+.Sh "ENVIRONMENT"
+The behaviour of
+.Nm
+is affected by the following environment variables.
+.Bl -tag -width Ds
+.It Sy "RUST_LOG"
+Overwrites the value set by the
+.Sy log_level
+config value.
+The syntax is defined at
+.Lk https://docs.rs/tracing-subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
 
 .Sh EXAMPLES
 .Ss Example 1: Starting with a specific profile
