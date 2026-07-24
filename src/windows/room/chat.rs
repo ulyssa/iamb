@@ -231,17 +231,21 @@ impl ChatState {
                                 return Err(IambError::NoAttachment.into());
                             }
 
-                            let links = if let Some(html) = &msg.html {
+                            let mut links = if let Some(html) = &msg.html {
                                 html.get_links()
                             } else {
-                                linkify::LinkFinder::new()
+                                vec![]
+                            };
+
+                            if links.is_empty() {
+                                links = linkify::LinkFinder::new()
                                     .links(&msg.event.body())
                                     .filter_map(|u| Url::parse(u.as_str()).ok())
                                     .scan(TreeGenState { link_num: 0 }, |state, u| {
                                         state.next_link_char().map(|c| (c, u))
                                     })
-                                    .collect()
-                            };
+                                    .collect();
+                            }
 
                             if links.is_empty() {
                                 return Err(IambError::NoAttachment.into());
