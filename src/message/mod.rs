@@ -11,6 +11,7 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::AnyRedactionEvent;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
@@ -560,11 +561,13 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
 }
 
 fn redaction_reason_unsigned(unsigned: &RedactedUnsigned) -> Option<String> {
-    unsigned
-        .redacted_because
-        .deserialize()
-        .ok()
-        .and_then(|ev| ev.content.reason)
+    let ev = unsigned.redacted_because.deserialize().ok()?;
+
+    let AnyRedactionEvent::RoomRedaction(ev) = ev else {
+        return None;
+    };
+
+    ev.content.reason
 }
 
 fn body_cow_reason(reason: Option<&str>) -> Cow<'static, str> {
@@ -894,7 +897,7 @@ impl Message {
         };
 
         match &content.relates_to {
-            Some(Relation::Reply { in_reply_to }) => Some(in_reply_to.event_id.clone()),
+            Some(Relation::Reply(reply)) => Some(reply.in_reply_to.event_id.clone()),
             Some(Relation::Thread(Thread {
                 in_reply_to: Some(in_reply_to),
                 is_falling_back: false,
