@@ -891,7 +891,7 @@ async fn check_import_keys(
     let encrypted = match encrypt_room_key_export(&keys, &passphrase, 500000) {
         Ok(encrypted) => encrypted,
         Err(e) => {
-            println!("* Failed to encrypt room keys during export: {e}");
+            eprintln!("* Failed to encrypt room keys during export: {e}");
             process::exit(2);
         },
     };
@@ -1118,7 +1118,7 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
     guard
 }
 
-fn main() -> IambResult<()> {
+fn main() {
     // Parse command-line flags.
     let iamb = Iamb::parse();
 
@@ -1144,8 +1144,10 @@ fn main() -> IambResult<()> {
         .build()
         .unwrap();
 
-    rt.block_on(async move { run(settings).await })?;
+    if let Err(err) = rt.block_on(async move { run(settings).await }) {
+        eprintln!("\n{err}\n");
+        process::exit(2);
+    }
 
     drop(guard);
-    process::exit(0);
 }
