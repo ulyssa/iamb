@@ -45,14 +45,22 @@
           fileset = lib.fileset.unions [
             (craneLib.fileset.commonCargoSources ./.)
             ./src/windows/welcome.md
+
+            ./docs/iamb.1
+            ./docs/iamb.5
+            ./docs/iamb.svg
+            ./docs/iamb.metainfo.xml
+            ./iamb.desktop
           ];
         };
 
-        commonArgs = {
+        commonArgs = rec {
           inherit src;
           strictDeps = true;
           pname = "iamb";
           version = self.shortRev or self.dirtyShortRev;
+
+          VERGEN_GIT_SHA = version;
         };
 
         # Build *just* the cargo dependencies, so we can reuse
@@ -62,6 +70,21 @@
         # Build the actual crate
         iamb = craneLib.buildPackage (commonArgs // {
           inherit cargoArtifacts;
+
+          nativeBuildInputs = [ pkgs.installShellFiles ];
+          postInstall = ''
+            installManPage $src/docs/iamb.{1,5}
+            install -D $src/docs/iamb.svg -t $out/share/icons/hicolor/scalable/apps
+            install -D $src/docs/iamb.metainfo.xml $out/share/appdata/chat.iamb.iamb.appdata.xml
+            install -D $src/iamb.desktop -t $out/share/applications
+          '';
+
+          meta = {
+            description = "Matrix client for Vim addicts";
+            mainProgram = "iamb";
+            homepage = "https://github.com/ulyssa/iamb";
+            license = lib.licenses.asl20;
+          };
         });
       in
       {
