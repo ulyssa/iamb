@@ -11,6 +11,7 @@
 //!
 //! Most rendering logic lives under the [windows] module, but [Matrix messages][message] have
 //! their own module.
+#![recursion_limit = "256"]
 #![allow(clippy::manual_range_contains)]
 #![allow(clippy::needless_return)]
 #![allow(clippy::result_large_err)]
@@ -27,14 +28,16 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use clap::Parser;
-use matrix_sdk::crypto::encrypt_room_key_export;
 use matrix_sdk::ruma::api::client::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
+use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
-use rand::{distributions::Alphanumeric, Rng};
+use rand::distr::Alphanumeric;
+use rand::RngExt as _;
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
-use tracing_subscriber::FmtSubscriber;
+use tracing::Level;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use modalkit::crossterm::{
     self,
@@ -780,11 +783,7 @@ impl Application {
 }
 
 fn gen_passphrase() -> String {
-    rand::thread_rng()
-        .sample_iter(&Alphanumeric)
-        .take(20)
-        .map(char::from)
-        .collect()
+    rand::rng().sample_iter(&Alphanumeric).take(20).map(char::from).collect()
 }
 
 fn read_response(question: &str) -> String {
@@ -1081,6 +1080,44 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     Ok(())
 }
 
+fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocking::WorkerGuard {
+    let log_prefix = format!("iamb-log-{}", settings.profile_name);
+    let log_dir = settings.dirs.logs.as_path();
+    let max_log_files = settings.tunables.max_log_files;
+    let log_level = &settings.tunables.log_level;
+
+    let appender = tracing_appender::rolling::Builder::new()
+        .rotation(tracing_appender::rolling::Rotation::DAILY)
+        .filename_prefix(log_prefix)
+        .max_log_files(max_log_files)
+        .build(log_dir)
+        .expect("can build appending tracing logger");
+    let (appender, guard) = tracing_appender::non_blocking(appender);
+
+    let filter = if let Ok(dirs) = std::env::var(EnvFilter::DEFAULT_ENV) {
+        EnvFilter::builder()
+            .with_default_directive(Level::WARN.into())
+            .parse(dirs)
+            .map_err(|err| format!("Unable to parse {}: {err}", EnvFilter::DEFAULT_ENV))
+            .unwrap_or_else(print_exit)
+    } else {
+        EnvFilter::builder()
+            .with_default_directive(Level::WARN.into())
+            .parse(log_level)
+            .map_err(|err| format!("Unable to parse `log_level`: {err}"))
+            .unwrap_or_else(print_exit)
+    };
+
+    let subscriber = FmtSubscriber::builder()
+        .with_writer(appender)
+        .with_env_filter(filter)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    guard
+}
+
 fn main() -> IambResult<()> {
     // Parse command-line flags.
     let iamb = Iamb::parse();
@@ -1094,18 +1131,7 @@ fn main() -> IambResult<()> {
         libc::umask(0o077);
     };
 
-    // Set up the tracing subscriber so we can log client messages.
-    let log_prefix = format!("iamb-log-{}", settings.profile_name);
-    let log_dir = settings.dirs.logs.as_path();
-
-    let appender = tracing_appender::rolling::daily(log_dir, log_prefix);
-    let (appender, guard) = tracing_appender::non_blocking(appender);
-
-    let subscriber = FmtSubscriber::builder()
-        .with_writer(appender)
-        .with_max_level(settings.tunables.log_level)
-        .finish();
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    let guard = setup_logging(&settings);
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
