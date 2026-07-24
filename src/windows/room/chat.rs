@@ -590,7 +590,7 @@ impl ChatState {
                 // XXX: second parameter can be a locally unique transaction id.
                 // Useful for doing retries.
                 let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
-                let event_id = resp.event_id;
+                let event_id = resp.response.event_id;
 
                 // Reset message bar state now that it's been sent.
                 self.reset();
