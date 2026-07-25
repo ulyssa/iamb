@@ -13,6 +13,7 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::sticker::StickerEvent;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -850,14 +851,17 @@ pub enum EventLocation {
 
     /// The [EventId] belongs to a state event in the main timeline of the room.
     State(MessageKey),
+
+    /// The [EventId] belongs to a sticker event in the main scrollback
+    Sticker(MessageKey),
 }
 
 impl EventLocation {
     fn to_message_key(&self) -> Option<&MessageKey> {
-        if let EventLocation::Message(_, key) = self {
-            Some(key)
-        } else {
-            None
+        match self {
+            EventLocation::Message(_, key) => Some(key),
+            EventLocation::Sticker(key) => Some(key),
+            _ => None,
         }
     }
 }
@@ -1150,6 +1154,12 @@ impl RoomInfo {
 
                 self.keys.remove(redacts);
             },
+            Some(EventLocation::Sticker(key)) => {
+                if let Some(msg) = self.messages.get_mut(key) {
+                    let ev = SyncRoomRedactionEvent::Original(ev);
+                    msg.redact(ev);
+                }
+            },
         }
     }
 
@@ -1171,6 +1181,50 @@ impl RoomInfo {
             },
             MessageLikeEvent::Redacted(_) => {
                 return;
+            },
+        }
+    }
+
+    /// Insert a sticker
+    pub fn insert_sticker(
+        &mut self,
+        room_id: OwnedRoomId,
+        store: AsyncProgramStore,
+        picker: Option<Picker>,
+        sticker: StickerEvent,
+        settings: &ApplicationSettings,
+        media: matrix_sdk::Media,
+    ) {
+        match sticker {
+            MessageLikeEvent::Original(ref sticker_content) => {
+                let key =
+                    (sticker_content.origin_server_ts.into(), sticker_content.event_id.clone());
+
+                let loc = EventLocation::Sticker(key.clone());
+
+                self.keys.insert(sticker_content.event_id.clone(), loc);
+                self.messages.insert_message(key.clone(), sticker.clone());
+
+                if picker.is_some() {
+                    if let (Some(msg), Some(image_preview)) = (
+                        self.get_event_mut(&sticker_content.event_id),
+                        &settings.tunables.image_preview,
+                    ) {
+                        msg.image_preview = ImageStatus::Downloading(image_preview.size.clone());
+                        spawn_insert_preview(
+                            store,
+                            room_id,
+                            sticker_content.event_id.clone(),
+                            sticker_content.content.source.clone().into(),
+                            media,
+                            settings.dirs.image_previews.clone(),
+                        )
+                    }
+                }
+            },
+            MessageLikeEvent::Redacted(ref redaction) => {
+                let key = (redaction.origin_server_ts.into(), redaction.event_id.clone());
+                self.messages.insert_message(key.clone(), sticker.clone());
             },
         }
     }
@@ -1205,6 +1259,7 @@ impl RoomInfo {
             },
             MessageEvent::Redacted(_, _) |
             MessageEvent::State(_) |
+            MessageEvent::Sticker(_) |
             MessageEvent::EncryptedOriginal(_) |
             MessageEvent::EncryptedRedacted(_) => {
                 return;
@@ -1234,7 +1289,9 @@ impl RoomInfo {
             .and_then(|receipts| receipts.get(&settings.profile.user_id));
         let last_receipt = last_receipt.as_ref().and_then(|event_id| {
             match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
+                EventLocation::Message(_, key) |
+                EventLocation::State(key) |
+                EventLocation::Sticker(key) => Some(key),
                 EventLocation::Reaction(_) => None,
             }
         });
@@ -1245,7 +1302,9 @@ impl RoomInfo {
             .and_then(|receipts| receipts.get(&settings.profile.user_id));
         let last_unthreaded = last_unthreaded.as_ref().and_then(|event_id| {
             match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
+                EventLocation::Message(_, key) |
+                EventLocation::State(key) |
+                EventLocation::Sticker(key) => Some(key),
                 EventLocation::Reaction(_) => None,
             }
         });
