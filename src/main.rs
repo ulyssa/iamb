@@ -27,8 +27,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use clap::Parser;
-use matrix_sdk::ruma::api::client::error::ErrorKind;
+use clap::{CommandFactory, Parser};
+use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
@@ -812,6 +812,17 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
         return Ok(());
     }
 
+    if let Some(ref password_file) = settings.profile.password_file {
+        if let Err(e) = std::fs::read_to_string(password_file)
+            .map(|password| worker.login(LoginStyle::Password(password)))
+        {
+            println!("Failed to log in using password file {password_file:?}: {e}");
+            println!("Continuing on to interactive login");
+        } else {
+            return Ok(());
+        }
+    }
+
     loop {
         let login_style =
             match read_response("Please select login type: [p]assword / [s]ingle sign on")
@@ -891,7 +902,7 @@ async fn check_import_keys(
     let encrypted = match encrypt_room_key_export(&keys, &passphrase, 500000) {
         Ok(encrypted) => encrypted,
         Err(e) => {
-            println!("* Failed to encrypt room keys during export: {e}");
+            eprintln!("* Failed to encrypt room keys during export: {e}");
             process::exit(2);
         },
     };
@@ -1118,9 +1129,14 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
     guard
 }
 
-fn main() -> IambResult<()> {
+fn main() {
     // Parse command-line flags.
     let iamb = Iamb::parse();
+
+    if let Some(shell) = iamb.completions {
+        clap_complete::generate(shell, &mut Iamb::command(), "iamb", &mut std::io::stdout());
+        return;
+    }
 
     // Load configuration and set up the Matrix SDK.
     let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);
@@ -1144,8 +1160,10 @@ fn main() -> IambResult<()> {
         .build()
         .unwrap();
 
-    rt.block_on(async move { run(settings).await })?;
+    if let Err(err) = rt.block_on(async move { run(settings).await }) {
+        eprintln!("\n{err}\n");
+        process::exit(2);
+    }
 
     drop(guard);
-    process::exit(0);
 }

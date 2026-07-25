@@ -129,6 +129,9 @@ const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
 #[clap(version = VERSION, about, long_about = None)]
 #[clap(propagate_version = true)]
 pub struct Iamb {
+    #[clap(long, value_parser)]
+    pub completions: Option<clap_complete::Shell>,
+
     #[clap(short = 'P', long, value_parser)]
     pub profile: Option<String>,
 
@@ -569,6 +572,7 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub ssl_verify: bool,
 }
 
 #[derive(Clone, Default, Deserialize)]
@@ -599,6 +603,7 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    pub ssl_verify: Option<bool>,
 }
 
 impl Tunables {
@@ -635,6 +640,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            ssl_verify: self.ssl_verify.or(other.ssl_verify),
         }
     }
 
@@ -670,6 +676,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            ssl_verify: self.ssl_verify.unwrap_or(true),
         }
     }
 }
@@ -823,6 +830,7 @@ pub enum Layout {
 #[derive(Clone, Deserialize)]
 pub struct ProfileConfig {
     pub user_id: OwnedUserId,
+    pub password_file: Option<PathBuf>,
     pub url: Option<Url>,
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
@@ -1082,8 +1090,8 @@ impl ApplicationSettings {
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
             (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
             (None, UserDisplayStyle::DisplayName) => {
-                if let Some(display) = info.display_names.get(user_id) {
-                    Cow::Borrowed(display.as_str())
+                if let Some(name) = info.display_names.get(user_id) {
+                    name
                 } else {
                     Cow::Borrowed(user_id.as_str())
                 }
