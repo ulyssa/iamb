@@ -65,6 +65,7 @@ use crate::base::{
 
 use self::chat::ChatState;
 use self::space::{Space, SpaceState};
+use crate::config::EncryptionIndicatorLocation;
 
 use std::convert::TryFrom;
 
@@ -639,6 +640,8 @@ impl RoomState {
     }
 
     pub fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
+        let room = store.application.worker.client.get_room(self.id());
+
         let title = store.application.get_room_title(self.id());
         let style = Style::default().add_modifier(StyleModifier::BOLD);
         let mut spans = vec![];
@@ -651,13 +654,22 @@ impl RoomState {
 
         spans.push(Span::styled(title, style));
 
+        if let Some(room) = room {
+            let encryption_settings = &store.application.settings.tunables.encryption;
+            let encryption_indicator = encryption_settings
+                .get_indicator(EncryptionIndicatorLocation::TITLE, room.encryption_state());
+            spans.extend(encryption_indicator);
+        }
+
         match self.room().topic() {
             Some(desc) if !desc.is_empty() => {
                 spans.push(" (".into());
                 spans.push(desc.into());
                 spans.push(")".into());
             },
-            _ => {},
+            _ => {
+                spans.push(" ".into());
+            },
         }
 
         Line::from(spans)

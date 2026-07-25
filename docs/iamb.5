@@ -126,6 +126,11 @@ These options are configured as an object under the
 key and can be overridden as described in
 .Sx PROFILES .
 .Bl -tag -width Ds
+.It Sy encryption
+Configuration subsection for specific settings related to room encryption.
+See
+.Sx ENCRYPTION
+for more details.
 .It Sy external_edit_file_suffix
 Suffix to append to temporary file names when using the :editor command. Defaults to .md.
 .It Sy default_room
@@ -258,6 +263,32 @@ reaction_shortcode_display = true
 [settings]
 request_timeout = 120
 .Ed
+.Sh ENCRYPTION
+The
+.Sy settings.encryption
+subsection allows controlling how encrypted rooms are presented.
+.Pp
+The available fields in this subsection are:
+.Bl -tag -width Ds
+.It Sy indicator
+Defines when an encryption status indicator is shown.
+Possible values are:
+.Dq Sy enabled
+(default, always indicate status),
+.Dq Sy disabled
+(never indicate status),
+.Dq Sy only-unencrypted ,
+and
+.Dq Sy only-encrypted .
+.It Sy indicator_location
+Defines where the encryption status indicator is shown when relevant.
+Possible values are:
+.Dq Sy title ,
+and
+.Dq Sy prompt
+(the default).
+Both can be used via
+.Dq Sy title|prompt .
 .Sh MOUSE
 The
 .Sy settings.mouse

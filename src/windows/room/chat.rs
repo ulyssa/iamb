@@ -7,9 +7,7 @@ use std::path::{Path, PathBuf};
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
-use matrix_sdk::EncryptionState;
 use modalkit::editing::store::RegisterError;
-use ratatui::style::{Color, Style};
 use std::process::Command;
 use tokio;
 use url::Url;
@@ -88,6 +86,7 @@ use crate::base::{
     SendAction,
 };
 
+use crate::config::EncryptionIndicatorLocation;
 use crate::message::{
     text_to_message,
     Message,
@@ -996,15 +995,13 @@ impl StatefulWidget for Chat<'_> {
             Paragraph::new(desc_spans).render(descarea, buf);
         }
 
-        let prompt = match (self.focused, state.room().encryption_state()) {
+        let encryption_settings = &self.store.application.settings.tunables.encryption;
+        let encryption_indicator = encryption_settings
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
+        let prompt = match (self.focused, encryption_indicator) {
             (false, _) => Span::raw("  "),
-            (_, EncryptionState::Encrypted) => {
-                Span::styled("\u{1F512}\u{FE0E} ", Style::new().fg(Color::LightGreen))
-            },
-            (_, EncryptionState::NotEncrypted) => {
-                Span::styled("\u{1F513}\u{FE0E} ", Style::new().fg(Color::Red))
-            },
-            (_, EncryptionState::Unknown) => Span::styled("> ", Style::new().fg(Color::Red)),
+            (true, Some(i)) => i,
+            (true, None) => Span::raw("> "),
         };
 
         let tbox = TextBox::new().prompt(prompt);
