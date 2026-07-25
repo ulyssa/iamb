@@ -21,6 +21,10 @@ typing_notice_send = true
 user_gutter_width = 30
 username_display = "username"
 
+[settings.encryption]
+indicator = "only-encrypted"
+location = "title|prompt"
+
 [settings.image_preview]
 protocol.type = "sixel"
 size = { "width" = 66, "height" = 10 }

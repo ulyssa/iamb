@@ -20,7 +20,6 @@ use matrix_sdk::{
         OwnedUserId,
         RoomId,
     },
-    EncryptionState,
     RoomDisplayName,
     RoomState as MatrixRoomState,
 };
@@ -28,7 +27,7 @@ use matrix_sdk::{
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
-    style::{Color, Modifier as StyleModifier, Style},
+    style::{Modifier as StyleModifier, Style},
     text::{Line, Span, Text},
     widgets::{Paragraph, StatefulWidget, Widget},
 };
@@ -66,6 +65,7 @@ use crate::base::{
 
 use self::chat::ChatState;
 use self::space::{Space, SpaceState};
+use crate::config::EncryptionIndicatorLocation;
 
 use std::convert::TryFrom;
 
@@ -654,21 +654,11 @@ impl RoomState {
 
         spans.push(Span::styled(title, style));
 
-        match room.map(|room| room.encryption_state()) {
-            Some(EncryptionState::Encrypted) => {
-                if store.application.settings.tunables.encryption_indicator.encrypted {
-                    spans.push(Span::styled(
-                        " \u{1F512}\u{FE0E}",
-                        Style::new().fg(Color::LightGreen),
-                    ));
-                }
-            },
-            Some(EncryptionState::NotEncrypted) => {
-                if store.application.settings.tunables.encryption_indicator.unencrypted {
-                    spans.push(Span::styled(" \u{1F513}\u{FE0E}", Style::new().fg(Color::Red)));
-                }
-            },
-            _ => (),
+        if let Some(room) = room {
+            let encryption_settings = &store.application.settings.tunables.encryption;
+            let encryption_indicator = encryption_settings
+                .get_indicator(EncryptionIndicatorLocation::TITLE, room.encryption_state());
+            spans.extend(encryption_indicator);
         }
 
         match self.room().topic() {

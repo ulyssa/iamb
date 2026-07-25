@@ -13,6 +13,7 @@ use std::process;
 use clap::Parser;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use matrix_sdk::EncryptionState;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
@@ -53,6 +54,7 @@ const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 
+const DEFAULT_ENC_INDICATOR_LOC: EncryptionIndicatorLocation = EncryptionIndicatorLocation::PROMPT;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
 
 const COLORS: [Color; 13] = [
@@ -315,6 +317,13 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
+fn merge_encryption(profile: Encryption, global: Encryption) -> Encryption {
+    Encryption {
+        indicator: profile.indicator.or(global.indicator),
+        indicator_location: profile.indicator_location.or(global.indicator_location),
+    }
+}
+
 fn merge_sorts(profile: SortOverrides, global: SortOverrides) -> SortOverrides {
     SortOverrides {
         chats: profile.chats.or(global.chats),
@@ -345,31 +354,66 @@ where
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
 pub enum EncryptionIndicator {
+    /// Always indicate the room's encryption status.
+    #[default]
     Enabled,
+    /// Never indicate the room's encryption status.
     Disabled,
-    EncryptedOnly,
-    UnencryptedOnly,
+    /// Only indicate the room's encryption status when it is encrypted.
+    OnlyEncrypted,
+    /// Only indicate the room's encryption status when it is unencrypted.
+    OnlyUnencrypted,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct EncryptionIndicatorValues {
-    /// Show an indicator for encrypted rooms.
-    pub encrypted: bool,
-    /// Show an indicator for unencrypted rooms.
-    pub unencrypted: bool,
+bitflags::bitflags! {
+    /// Available options for where to show the encryption status indicator.
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct EncryptionIndicatorLocation: u8 {
+        const NONE   = 0b00000000;
+        const TITLE  = 0b00000001;
+        const PROMPT = 0b00000010;
+    }
 }
 
-impl From<EncryptionIndicator> for EncryptionIndicatorValues {
-    fn from(value: EncryptionIndicator) -> Self {
-        match value {
-            EncryptionIndicator::Enabled => Self { encrypted: true, unencrypted: true },
-            EncryptionIndicator::Disabled => Self { encrypted: false, unencrypted: false },
-            EncryptionIndicator::EncryptedOnly => Self { encrypted: true, unencrypted: false },
-            EncryptionIndicator::UnencryptedOnly => Self { encrypted: false, unencrypted: true },
+pub struct EncryptionIndicatorLocationVisitor;
+
+impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
+    type Value = EncryptionIndicatorLocation;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid encryption indicator location (e.g. \"title\" or \"prompt\")")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        let mut location = EncryptionIndicatorLocation::NONE;
+
+        for value in value.split('|') {
+            match value.to_ascii_lowercase().as_str() {
+                "title" => location |= EncryptionIndicatorLocation::TITLE,
+                "prompt" => location |= EncryptionIndicatorLocation::PROMPT,
+                _ => {
+                    return Err(E::custom("could not parse into an encryption indicator location"))
+                },
+            };
         }
+
+        Ok(location)
+    }
+}
+
+impl<'de> Deserialize<'de> for EncryptionIndicatorLocation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(EncryptionIndicatorLocationVisitor)
     }
 }
 
@@ -455,6 +499,69 @@ impl<'de> Deserialize<'de> for NotifyVia {
         D: Deserializer<'de>,
     {
         deserializer.deserialize_str(NotifyViaVisitor)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Encryption {
+    indicator: Option<EncryptionIndicator>,
+    indicator_location: Option<EncryptionIndicatorLocation>,
+}
+
+impl Encryption {
+    pub fn values(self) -> EncryptionValues {
+        EncryptionValues {
+            indicator: self.indicator.unwrap_or_default(),
+            indicator_location: self.indicator_location.unwrap_or(DEFAULT_ENC_INDICATOR_LOC),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct EncryptionValues {
+    pub indicator: EncryptionIndicator,
+    pub indicator_location: EncryptionIndicatorLocation,
+}
+
+impl EncryptionValues {
+    pub fn get_indicator(
+        &self,
+        location: EncryptionIndicatorLocation,
+        state: EncryptionState,
+    ) -> Option<Span<'static>> {
+        if !self.indicator_location.contains(location) {
+            return None;
+        }
+
+        let indicator = match (self.indicator, state) {
+            (EncryptionIndicator::Disabled, _) |
+            (EncryptionIndicator::OnlyUnencrypted, EncryptionState::Encrypted) |
+            (EncryptionIndicator::OnlyEncrypted, EncryptionState::NotEncrypted) => {
+                // User doesn't want to see anything:
+                return None;
+            },
+            (
+                EncryptionIndicator::Enabled | EncryptionIndicator::OnlyEncrypted,
+                EncryptionState::Encrypted,
+            ) => {
+                // Green lock:
+                Span::styled("\u{1F512}\u{FE0E} ", Style::new().fg(Color::LightGreen))
+            },
+            (
+                EncryptionIndicator::Enabled | EncryptionIndicator::OnlyUnencrypted,
+                EncryptionState::NotEncrypted,
+            ) => {
+                // Red unlocked lock:
+                Span::styled("\u{1F513}\u{FE0E} ", Style::new().fg(Color::Red))
+            },
+
+            (_, EncryptionState::Unknown) => {
+                // Yellow question mark:
+                Span::styled("? ", Style::new().fg(Color::Yellow))
+            },
+        };
+
+        Some(indicator)
     }
 }
 
@@ -547,7 +654,7 @@ impl SortOverrides {
 
 #[derive(Clone)]
 pub struct TunableValues {
-    pub encryption_indicator: EncryptionIndicatorValues,
+    pub encryption: EncryptionValues,
     pub log_level: String,
     pub max_log_files: usize,
     pub message_shortcode_display: bool,
@@ -577,7 +684,8 @@ pub struct TunableValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
-    pub encryption_indicator: Option<EncryptionIndicator>,
+    #[serde(default)]
+    pub encryption: Encryption,
     pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
@@ -609,7 +717,7 @@ pub struct Tunables {
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
-            encryption_indicator: self.encryption_indicator.or(other.encryption_indicator),
+            encryption: merge_encryption(self.encryption, other.encryption),
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
@@ -647,10 +755,7 @@ impl Tunables {
     fn values(self) -> TunableValues {
         TunableValues {
             log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
-            encryption_indicator: self
-                .encryption_indicator
-                .unwrap_or(EncryptionIndicator::EncryptedOnly)
-                .into(),
+            encryption: self.encryption.values(),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
@@ -1371,5 +1476,100 @@ mod tests {
         assert!(dirs.is_some());
         assert!(layout.is_some());
         assert!(macros.is_some());
+    }
+
+    #[test]
+    fn test_encryption_indicator_enabled() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::Enabled,
+            indicator_location: EncryptionIndicatorLocation::TITLE,
+        };
+
+        // Always shows in the title:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_some());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            .is_some());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
+
+        // Doesn't show in the prompt:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            .is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+    }
+
+    #[test]
+    fn test_encryption_indicator_disabled() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::Disabled,
+            indicator_location: EncryptionIndicatorLocation::TITLE,
+        };
+
+        // Never shows in the title or the prompt:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            .is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            .is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+    }
+
+    #[test]
+    fn test_encryption_indicator_only_encrypted() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::OnlyEncrypted,
+            indicator_location: EncryptionIndicatorLocation::PROMPT,
+        };
+
+        // Shows in the prompt when encrypted or unknown:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_some());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+
+        // But is hidden when unencrypted:
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            .is_none());
+
+        // Doesn't show in the title:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            .is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
+    }
+    #[test]
+    fn test_encryption_indicator_only_unencrypted() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::OnlyUnencrypted,
+            indicator_location: EncryptionIndicatorLocation::all(),
+        };
+
+        // Shows in both the prompt and title when unencrypted or unknown:
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            .is_some());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            .is_some());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+
+        // But is hidden when encrypted:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
     }
 }

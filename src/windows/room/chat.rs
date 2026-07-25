@@ -86,6 +86,7 @@ use crate::base::{
     SendAction,
 };
 
+use crate::config::EncryptionIndicatorLocation;
 use crate::message::{
     text_to_message,
     Message,
@@ -994,7 +995,14 @@ impl StatefulWidget for Chat<'_> {
             Paragraph::new(desc_spans).render(descarea, buf);
         }
 
-        let prompt = if self.focused { "> " } else { "  " };
+        let encryption_settings = &self.store.application.settings.tunables.encryption;
+        let encryption_indicator = encryption_settings
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
+        let prompt = match (self.focused, encryption_indicator) {
+            (false, _) => Span::raw("  "),
+            (true, Some(i)) => i,
+            (true, None) => Span::raw("> "),
+        };
 
         let tbox = TextBox::new().prompt(prompt);
         tbox.render(textarea, buf, &mut state.tbox);
