@@ -6,7 +6,6 @@ password_file = "/path/to/password"
 url = "https://matrix.org"
 
 [settings]
-cursor_shape = "default"
 default_room = "#iamb-users:0x.badd.cafe"
 external_edit_file_suffix = ".md"
 log_level = "warn"
@@ -35,6 +34,7 @@ rooms = ["favorite", "lowpriority", "unread", "name"]
 members = ["power", "id"]
 
 [settings.terminal]
+cursor_shape = "default"
 enable_extended_keys = false
 enable_title = true
 

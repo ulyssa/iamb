@@ -102,7 +102,7 @@ use crate::{
         ProgramContext,
         ProgramStore,
     },
-    config::{ApplicationSettings, CursorShape, Iamb},
+    config::{ApplicationSettings, Iamb},
     windows::IambWindow,
     worker::{create_room, ClientWorker, LoginStyle, Requester},
 };
@@ -985,13 +985,6 @@ async fn login_normal(
 
 /// Set up the terminal for drawing the TUI, and getting additional info.
 fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std::io::Result<()> {
-    let cursor_style = match settings.tunables.cursor_shape {
-        CursorShape::Default => SetCursorStyle::DefaultUserShape,
-        CursorShape::Block => SetCursorStyle::SteadyBlock,
-        CursorShape::Line => SetCursorStyle::SteadyBar,
-        CursorShape::Underline => SetCursorStyle::SteadyUnderScore,
-    };
-
     // Enable raw mode and enter the alternate screen.
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(stdout(), EnterAlternateScreen)?;
@@ -1013,12 +1006,9 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
         crossterm::execute!(stdout(), SetTitle(title))?;
     }
 
-    crossterm::execute!(
-        stdout(),
-        EnableBracketedPaste,
-        EnableFocusChange,
-        cursor_style
-    )
+    let cursor_shape = SetCursorStyle::from(settings.tunables.terminal.cursor_shape);
+
+    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, cursor_shape)
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.

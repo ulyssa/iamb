@@ -655,6 +655,7 @@ impl SortOverrides {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Terminal {
+    pub cursor_shape: Option<CursorShape>,
     pub enable_extended_keys: Option<bool>,
     pub enable_title: Option<bool>,
 }
@@ -662,6 +663,7 @@ pub struct Terminal {
 impl Terminal {
     fn merge(profile: Self, global: Self) -> Self {
         Self {
+            cursor_shape: profile.cursor_shape.or(global.cursor_shape),
             enable_extended_keys: profile.enable_extended_keys.or(global.enable_extended_keys),
             enable_title: profile.enable_title.or(global.enable_title),
         }
@@ -669,6 +671,7 @@ impl Terminal {
 
     pub fn values(self) -> TerminalValues {
         TerminalValues {
+            cursor_shape: self.cursor_shape.unwrap_or_default(),
             enable_extended_keys: self.enable_extended_keys,
             enable_title: self.enable_title.unwrap_or(DEFAULT_ENABLE_TITLE),
         }
@@ -677,13 +680,13 @@ impl Terminal {
 
 #[derive(Clone, Debug)]
 pub struct TerminalValues {
+    pub cursor_shape: CursorShape,
     pub enable_extended_keys: Option<bool>,
     pub enable_title: bool,
 }
 
 #[derive(Clone)]
 pub struct TunableValues {
-    pub cursor_shape: CursorShape,
     pub encryption: EncryptionValues,
     pub log_level: String,
     pub max_log_files: usize,
@@ -730,7 +733,6 @@ pub struct Tunables {
     /// Subsection for overriding how specific Matrix users are rendered.
     pub users: Option<UserOverrides>,
 
-    pub cursor_shape: Option<CursorShape>,
     pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
@@ -764,7 +766,6 @@ impl Tunables {
             terminal: Terminal::merge(self.terminal, other.terminal),
             users: merge_maps(self.users, other.users),
 
-            cursor_shape: self.cursor_shape.or(other.cursor_shape),
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
@@ -803,7 +804,6 @@ impl Tunables {
             sort: self.sort.values(),
             terminal: self.terminal.values(),
 
-            cursor_shape: self.cursor_shape.unwrap_or_default(),
             log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
@@ -835,13 +835,25 @@ impl Tunables {
 }
 
 #[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-#[serde(rename_all = "lowercase")]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
 pub enum CursorShape {
     #[default]
     Default,
     Block,
     Line,
     Underline,
+}
+
+impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
+    fn from(shape: CursorShape) -> Self {
+        match shape {
+            CursorShape::Default => Self::DefaultUserShape,
+            CursorShape::Block => Self::SteadyBlock,
+            CursorShape::Line => Self::SteadyBar,
+            CursorShape::Underline => Self::SteadyUnderScore,
+        }
+    }
 }
 
 #[derive(Clone)]
