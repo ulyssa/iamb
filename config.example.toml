@@ -33,6 +33,10 @@ size = { "width" = 66, "height" = 10 }
 rooms = ["favorite", "lowpriority", "unread", "name"]
 members = ["power", "id"]
 
+[settings.terminal]
+enable_extended_keys = false
+enable_title = true
+
 [settings.users]
 "@user:matrix.org" = { "name" = "John Doe", "color" = "magenta" }
 

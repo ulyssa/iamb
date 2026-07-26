@@ -985,8 +985,6 @@ async fn login_normal(
 
 /// Set up the terminal for drawing the TUI, and getting additional info.
 fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std::io::Result<()> {
-    let title = format!("iamb ({})", settings.profile.user_id.as_str());
-
     // Enable raw mode and enter the alternate screen.
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(stdout(), EnterAlternateScreen)?;
@@ -1003,7 +1001,12 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
         crossterm::execute!(stdout(), EnableMouseCapture)?;
     }
 
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
+    if settings.tunables.terminal.enable_title {
+        let title = format!("iamb ({})", settings.profile.user_id.as_str());
+        crossterm::execute!(stdout(), SetTitle(title))?;
+    }
+
+    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange)
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.

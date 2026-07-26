@@ -131,12 +131,12 @@ Configuration subsection for specific settings related to room encryption.
 See
 .Sx ENCRYPTION
 for more details.
-.It Sy external_edit_file_suffix
-Suffix to append to temporary file names when using the :editor command. Defaults to .md.
 .It Sy default_room
 The room to show by default instead of the
 .Sy :welcome
 window.
+.It Sy external_edit_file_suffix
+Suffix to append to temporary file names when using the :editor command. Defaults to .md.
 .It Sy image_preview
 Enable image previews and configure it.
 An empty object will enable the feature with default settings, omitting it will disable the feature.
@@ -251,7 +251,6 @@ Defaults to 30.
 .It Sy tabstop
 Number of spaces that a <Tab> counts for.
 Defaults to 4.
-
 .It Sy ssl_verify
 Enable SSL verification for the HTTP requests.
 Defaults to true.
@@ -444,6 +443,10 @@ Defines whether to explicitly enable or disable requesting extended keypresses f
 By default, when unset,
 .Sy iamb
 will attempt to auto-detect support in your terminal and request extended keypresses from the terminal if supported.
+.It Sy enable_title
+Whether to set the title of the terminal window to
+.Dq Sy iamb (<user_id>) .
+Defaults to true.
 .El
 .It Sy indicator
 .Sh "USER OVERRIDES"

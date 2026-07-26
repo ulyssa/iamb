@@ -54,6 +54,7 @@ const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 
+const DEFAULT_ENABLE_TITLE: bool = true;
 const DEFAULT_ENC_INDICATOR_LOC: EncryptionIndicatorLocation = EncryptionIndicatorLocation::PROMPT;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
 
@@ -655,23 +656,29 @@ impl SortOverrides {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Terminal {
     pub enable_extended_keys: Option<bool>,
+    pub enable_title: Option<bool>,
 }
 
 impl Terminal {
     fn merge(profile: Self, global: Self) -> Self {
         Self {
             enable_extended_keys: profile.enable_extended_keys.or(global.enable_extended_keys),
+            enable_title: profile.enable_title.or(global.enable_title),
         }
     }
 
     pub fn values(self) -> TerminalValues {
-        TerminalValues { enable_extended_keys: self.enable_extended_keys }
+        TerminalValues {
+            enable_extended_keys: self.enable_extended_keys,
+            enable_title: self.enable_title.unwrap_or(DEFAULT_ENABLE_TITLE),
+        }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct TerminalValues {
     pub enable_extended_keys: Option<bool>,
+    pub enable_title: bool,
 }
 
 #[derive(Clone)]
