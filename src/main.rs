@@ -1063,14 +1063,15 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     }
 
     // Set up the terminal for drawing, and cleanup properly on panics.
-    let enable_enhanced_keys = match crossterm::terminal::supports_keyboard_enhancement() {
-        Ok(supported) => supported,
-        Err(e) => {
-            tracing::warn!(err = %e,
-               "Failed to determine whether the terminal supports keyboard enhancements");
-            false
-        },
-    };
+    let enable_enhanced_keys =
+        settings.tunables.terminal.enable_extended_keys.unwrap_or_else(|| {
+            crossterm::terminal::supports_keyboard_enhancement()
+                .inspect_err(|e| tracing::warn!(
+                        err = %e,
+                       "Failed to determine whether the terminal supports keyboard enhancements"
+               ))
+                .unwrap_or_default()
+        });
     setup_tty(&settings, enable_enhanced_keys)?;
 
     let orig_hook = std::panic::take_hook();

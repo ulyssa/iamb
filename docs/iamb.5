@@ -221,6 +221,11 @@ See
 for more details.
 .It Sy state_event_display
 Defines whether the state events like joined or left are shown.
+.It Sy terminal
+Subsection for configuring how specific terminal features are used (or not used).
+See
+.Sx TERMINAL
+for more details.
 .It Sy typing_notice_send
 Defines whether or not the typing state is sent.
 .It Sy typing_notice_display
@@ -289,6 +294,7 @@ and
 (the default).
 Both can be used via
 .Dq Sy title|prompt .
+.El
 .Sh MOUSE
 The
 .Sy settings.mouse
@@ -424,6 +430,22 @@ in front of any value to flip the order.
 [settings.sort]
 members = ["server", "~localpart"]
 .Ed
+.Sh TERMINAL
+The
+.Sy settings.terminal
+subsection allows overriding how
+.Sy iamb
+interacts with your terminal.
+.Pp
+The available fields in this subsection are:
+.Bl -tag -width Ds
+.It Sy enable_extended_keys
+Defines whether to explicitly enable or disable requesting extended keypresses from your terminal.
+By default, when unset,
+.Sy iamb
+will attempt to auto-detect support in your terminal and request extended keypresses from the terminal if supported.
+.El
+.It Sy indicator
 .Sh "USER OVERRIDES"
 The
 .Sy settings.users
