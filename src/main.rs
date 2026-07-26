@@ -41,7 +41,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use modalkit::crossterm::{
     self,
-    cursor::Show as CursorShow,
+    cursor::{SetCursorStyle, Show as CursorShow},
     event::{
         poll,
         read,
@@ -1006,7 +1006,9 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
         crossterm::execute!(stdout(), SetTitle(title))?;
     }
 
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange)
+    let cursor_shape = SetCursorStyle::from(settings.tunables.terminal.cursor_shape);
+
+    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, cursor_shape)
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
@@ -1023,6 +1025,7 @@ fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
         stdout(),
         DisableBracketedPaste,
         DisableFocusChange,
+        SetCursorStyle::DefaultUserShape,
         LeaveAlternateScreen,
         CursorShow,
     );

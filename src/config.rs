@@ -655,6 +655,7 @@ impl SortOverrides {
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Terminal {
+    pub cursor_shape: Option<CursorShape>,
     pub enable_extended_keys: Option<bool>,
     pub enable_title: Option<bool>,
 }
@@ -662,6 +663,7 @@ pub struct Terminal {
 impl Terminal {
     fn merge(profile: Self, global: Self) -> Self {
         Self {
+            cursor_shape: profile.cursor_shape.or(global.cursor_shape),
             enable_extended_keys: profile.enable_extended_keys.or(global.enable_extended_keys),
             enable_title: profile.enable_title.or(global.enable_title),
         }
@@ -669,6 +671,7 @@ impl Terminal {
 
     pub fn values(self) -> TerminalValues {
         TerminalValues {
+            cursor_shape: self.cursor_shape.unwrap_or_default(),
             enable_extended_keys: self.enable_extended_keys,
             enable_title: self.enable_title.unwrap_or(DEFAULT_ENABLE_TITLE),
         }
@@ -677,6 +680,7 @@ impl Terminal {
 
 #[derive(Clone, Debug)]
 pub struct TerminalValues {
+    pub cursor_shape: CursorShape,
     pub enable_extended_keys: Option<bool>,
     pub enable_title: bool,
 }
@@ -826,6 +830,28 @@ impl Tunables {
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
             ssl_verify: self.ssl_verify.unwrap_or(true),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum CursorShape {
+    #[default]
+    Default,
+    Block,
+    Line,
+    Underline,
+}
+
+impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
+    fn from(shape: CursorShape) -> Self {
+        match shape {
+            CursorShape::Default => Self::DefaultUserShape,
+            CursorShape::Block => Self::SteadyBlock,
+            CursorShape::Line => Self::SteadyBar,
+            CursorShape::Underline => Self::SteadyUnderScore,
         }
     }
 }
@@ -1497,6 +1523,16 @@ mod tests {
         );
         assert!(serde_json::from_str::<NotifyVia>(r#""other""#).is_err());
         assert!(serde_json::from_str::<NotifyVia>(r#""""#).is_err());
+    }
+
+    #[test]
+    fn test_parse_cursor_shape() {
+        assert_eq!(CursorShape::Default, CursorShape::default());
+        assert_eq!(CursorShape::Default, serde_json::from_str(r#""default""#).unwrap());
+        assert_eq!(CursorShape::Block, serde_json::from_str(r#""block""#).unwrap());
+        assert_eq!(CursorShape::Line, serde_json::from_str(r#""line""#).unwrap());
+        assert_eq!(CursorShape::Underline, serde_json::from_str(r#""underline""#).unwrap());
+        assert!(serde_json::from_str::<CursorShape>(r#""beam""#).is_err());
     }
 
     #[test]

@@ -34,6 +34,7 @@ rooms = ["favorite", "lowpriority", "unread", "name"]
 members = ["power", "id"]
 
 [settings.terminal]
+cursor_shape = "default"
 enable_extended_keys = false
 enable_title = true
 
