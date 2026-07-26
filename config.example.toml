@@ -2,6 +2,7 @@ default_profile = "default"
 
 [profiles.default]
 user_id = "@user:matrix.org"
+password_file = "/path/to/password"
 url = "https://matrix.org"
 
 [settings]
@@ -21,6 +22,10 @@ typing_notice_send = true
 user_gutter_width = 30
 username_display = "username"
 
+[settings.encryption]
+indicator = "only-encrypted"
+location = "title|prompt"
+
 [settings.image_preview]
 protocol.type = "sixel"
 size = { "width" = 66, "height" = 10 }
@@ -28,6 +33,10 @@ size = { "width" = 66, "height" = 10 }
 [settings.sort]
 rooms = ["favorite", "lowpriority", "unread", "name"]
 members = ["power", "id"]
+
+[settings.terminal]
+enable_extended_keys = false
+enable_title = true
 
 [settings.users]
 "@user:matrix.org" = { "name" = "John Doe", "color" = "magenta" }
