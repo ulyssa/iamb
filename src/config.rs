@@ -317,23 +317,6 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
-fn merge_encryption(profile: Encryption, global: Encryption) -> Encryption {
-    Encryption {
-        indicator: profile.indicator.or(global.indicator),
-        indicator_location: profile.indicator_location.or(global.indicator_location),
-    }
-}
-
-fn merge_sorts(profile: SortOverrides, global: SortOverrides) -> SortOverrides {
-    SortOverrides {
-        chats: profile.chats.or(global.chats),
-        dms: profile.dms.or(global.dms),
-        rooms: profile.rooms.or(global.rooms),
-        spaces: profile.spaces.or(global.spaces),
-        members: profile.members.or(global.members),
-    }
-}
-
 fn merge_maps<K, V>(
     profile: Option<HashMap<K, V>>,
     global: Option<HashMap<K, V>>,
@@ -509,6 +492,13 @@ pub struct Encryption {
 }
 
 impl Encryption {
+    fn merge(profile: Self, global: Self) -> Self {
+        Encryption {
+            indicator: profile.indicator.or(global.indicator),
+            indicator_location: profile.indicator_location.or(global.indicator_location),
+        }
+    }
+
     pub fn values(self) -> EncryptionValues {
         EncryptionValues {
             indicator: self.indicator.unwrap_or_default(),
@@ -641,6 +631,16 @@ pub struct SortOverrides {
 }
 
 impl SortOverrides {
+    fn merge(profile: Self, global: Self) -> Self {
+        Self {
+            chats: profile.chats.or(global.chats),
+            dms: profile.dms.or(global.dms),
+            rooms: profile.rooms.or(global.rooms),
+            spaces: profile.spaces.or(global.spaces),
+            members: profile.members.or(global.members),
+        }
+    }
+
     pub fn values(self) -> SortValues {
         let rooms = self.rooms.unwrap_or_else(|| Vec::from(DEFAULT_ROOM_SORT));
         let chats = self.chats.unwrap_or_else(|| rooms.clone());
@@ -650,6 +650,28 @@ impl SortOverrides {
 
         SortValues { rooms, members, chats, dms, spaces }
     }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Terminal {
+    pub enable_extended_keys: Option<bool>,
+}
+
+impl Terminal {
+    fn merge(profile: Self, global: Self) -> Self {
+        Self {
+            enable_extended_keys: profile.enable_extended_keys.or(global.enable_extended_keys),
+        }
+    }
+
+    pub fn values(self) -> TerminalValues {
+        TerminalValues { enable_extended_keys: self.enable_extended_keys }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalValues {
+    pub enable_extended_keys: Option<bool>,
 }
 
 #[derive(Clone)]
@@ -675,6 +697,7 @@ pub struct TunableValues {
     pub open_command: Option<Vec<String>>,
     pub mouse: Mouse,
     pub notifications: Notifications,
+    pub terminal: TerminalValues,
     pub image_preview: Option<ImagePreviewValues>,
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
@@ -684,8 +707,21 @@ pub struct TunableValues {
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
+    /// Subsection for overriding encryption-related settings.
     #[serde(default)]
     pub encryption: Encryption,
+
+    /// Subsection for overriding sort orders in UI lists.
+    #[serde(default)]
+    pub sort: SortOverrides,
+
+    /// Subsection for overriding terminal settings.
+    #[serde(default)]
+    pub terminal: Terminal,
+
+    /// Subsection for overriding how specific Matrix users are rendered.
+    pub users: Option<UserOverrides>,
+
     pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
@@ -695,12 +731,9 @@ pub struct Tunables {
     pub read_receipt_send: Option<bool>,
     pub read_receipt_display: Option<bool>,
     pub request_timeout: Option<u64>,
-    #[serde(default)]
-    pub sort: SortOverrides,
     pub state_event_display: Option<bool>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
-    pub users: Option<UserOverrides>,
     pub username_display: Option<UserDisplayStyle>,
     pub message_user_color: Option<bool>,
     pub default_room: Option<String>,
@@ -717,7 +750,11 @@ pub struct Tunables {
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
-            encryption: merge_encryption(self.encryption, other.encryption),
+            encryption: Encryption::merge(self.encryption, other.encryption),
+            sort: SortOverrides::merge(self.sort, other.sort),
+            terminal: Terminal::merge(self.terminal, other.terminal),
+            users: merge_maps(self.users, other.users),
+
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
@@ -731,11 +768,9 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
             request_timeout: self.request_timeout.or(other.request_timeout),
-            sort: merge_sorts(self.sort, other.sort),
             state_event_display: self.state_event_display.or(other.state_event_display),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
-            users: merge_maps(self.users, other.users),
             username_display: self.username_display.or(other.username_display),
             message_user_color: self.message_user_color.or(other.message_user_color),
             default_room: self.default_room.or(other.default_room),
@@ -754,8 +789,11 @@ impl Tunables {
 
     fn values(self) -> TunableValues {
         TunableValues {
-            log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
             encryption: self.encryption.values(),
+            sort: self.sort.values(),
+            terminal: self.terminal.values(),
+
+            log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
@@ -764,7 +802,6 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
-            sort: self.sort.values(),
             state_event_display: self.state_event_display.unwrap_or(true),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),

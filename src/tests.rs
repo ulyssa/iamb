@@ -31,6 +31,7 @@ use crate::{
         NotifyVia,
         ProfileConfig,
         SortOverrides,
+        Terminal,
         TunableValues,
         UserColor,
         UserDisplayStyle,
@@ -183,6 +184,7 @@ pub fn mock_tunables() -> TunableValues {
         request_timeout: 120,
         sort: SortOverrides::default().values(),
         state_event_display: true,
+        terminal: Terminal::default().values(),
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
