@@ -2,6 +2,7 @@ default_profile = "default"
 
 [profiles.default]
 user_id = "@user:matrix.org"
+password_file = "/path/to/password"
 url = "https://matrix.org"
 
 [settings]
@@ -19,6 +20,10 @@ typing_notice_display = true
 typing_notice_send = true
 user_gutter_width = 30
 username_display = "username"
+
+[settings.encryption]
+indicator = "only-encrypted"
+location = "title|prompt"
 
 [settings.image_preview]
 protocol.type = "sixel"

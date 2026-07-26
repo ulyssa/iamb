@@ -86,6 +86,7 @@ use crate::base::{
     SendAction,
 };
 
+use crate::config::EncryptionIndicatorLocation;
 use crate::message::{
     text_to_message,
     Message,
@@ -229,17 +230,21 @@ impl ChatState {
                                 return Err(IambError::NoAttachment.into());
                             }
 
-                            let links = if let Some(html) = &msg.html {
+                            let mut links = if let Some(html) = &msg.html {
                                 html.get_links()
                             } else {
-                                linkify::LinkFinder::new()
+                                vec![]
+                            };
+
+                            if links.is_empty() {
+                                links = linkify::LinkFinder::new()
                                     .links(&msg.event.body())
                                     .filter_map(|u| Url::parse(u.as_str()).ok())
                                     .scan(TreeGenState { link_num: 0 }, |state, u| {
                                         state.next_link_char().map(|c| (c, u))
                                     })
-                                    .collect()
-                            };
+                                    .collect();
+                            }
 
                             if links.is_empty() {
                                 return Err(IambError::NoAttachment.into());
@@ -271,9 +276,9 @@ impl ChatState {
                             let mut filename_incr = filename.clone();
                             for n in 1..=1000 {
                                 if let Some(ext) = ext.and_then(OsStr::to_str) {
-                                    filename_incr.set_file_name(format!("{}-{}.{}", stem, n, ext));
+                                    filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
                                 } else {
-                                    filename_incr.set_file_name(format!("{}-{}", stem, n));
+                                    filename_incr.set_file_name(format!("{stem}-{n}"));
                                 }
 
                                 if !filename_incr.exists() {
@@ -390,7 +395,8 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot react to a redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -399,7 +405,7 @@ impl ChatState {
                 };
 
                 if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
-                    let msg = format!("You’ve already reacted to this message with {}", emoji);
+                    let msg = format!("You’ve already reacted to this message with {emoji}");
                     let err = UIError::Failure(msg);
 
                     return Err(err);
@@ -428,7 +434,8 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot redact already redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -446,6 +453,21 @@ impl ChatState {
                 self.reply_to = self.scrollback.get_key(info);
                 self.focus = RoomFocus::MessageBar;
 
+                Ok(None)
+            },
+            MessageAction::Replied => {
+                let Some(reply) = msg.reply_to() else {
+                    let msg = "Selected message is not a reply";
+                    return Err(UIError::Failure(msg.into()));
+                };
+
+                let Some(key) = info.get_message_key(&reply) else {
+                    store.application.need_load.need_message(self.room_id.clone(), reply);
+                    let msg = "Replied to message will be loaded in the background";
+                    return Err(UIError::Failure(msg.into()));
+                };
+
+                self.scrollback.goto_message(key.clone());
                 Ok(None)
             },
             MessageAction::Unreact(reaction, literal) => {
@@ -476,7 +498,8 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot unreact to a redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -569,7 +592,7 @@ impl ChatState {
                 // XXX: second parameter can be a locally unique transaction id.
                 // Useful for doing retries.
                 let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
-                let event_id = resp.event_id;
+                let event_id = resp.response.event_id;
 
                 // Reset message bar state now that it's been sent.
                 self.reset();
@@ -975,7 +998,14 @@ impl StatefulWidget for Chat<'_> {
             Paragraph::new(desc_spans).render(descarea, buf);
         }
 
-        let prompt = if self.focused { "> " } else { "  " };
+        let encryption_settings = &self.store.application.settings.tunables.encryption;
+        let encryption_indicator = encryption_settings
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
+        let prompt = match (self.focused, encryption_indicator) {
+            (false, _) => Span::raw("  "),
+            (true, Some(i)) => i,
+            (true, None) => Span::raw("> "),
+        };
 
         let tbox = TextBox::new().prompt(prompt);
         tbox.render(textarea, buf, &mut state.tbox);

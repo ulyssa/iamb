@@ -1,6 +1,6 @@
 unstable_features = true
 max_width = 100
-fn_call_width = 90
+fn_call_width = 88
 struct_lit_width = 50
 struct_variant_width = 50
 chain_width = 75

@@ -139,6 +139,7 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
 }
 
 #[cfg(feature = "desktop")]
+#[cfg_attr(target_os = "macos", allow(unused_variables))]
 async fn send_notification_desktop(
     summary: &str,
     body: Option<&str>,
@@ -164,7 +165,12 @@ async fn send_notification_desktop(
         desktop_notification.body(body);
     }
 
-    match desktop_notification.show() {
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let res = desktop_notification.show_async().await;
+    #[cfg(any(not(unix), target_os = "macos"))]
+    let res = desktop_notification.show();
+
+    match res {
         Err(err) => tracing::error!("Failed to send notification: {err}"),
         Ok(handle) => {
             #[cfg(all(unix, not(target_os = "macos")))]

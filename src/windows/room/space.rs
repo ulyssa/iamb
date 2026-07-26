@@ -1,9 +1,11 @@
 //! Window for Matrix spaces
 use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::StateEventType;
+use matrix_sdk::ruma::OwnedSpaceChildOrder;
 use matrix_sdk::{
     room::Room as MatrixRoom,
     ruma::{OwnedRoomId, RoomId},
@@ -105,7 +107,11 @@ impl SpaceState {
 
                 let via = self.room.route().await.map_err(IambError::from)?;
                 let mut ev = SpaceChildEventContent::new(via);
-                ev.order = order;
+                ev.order = order
+                    .as_deref()
+                    .map(OwnedSpaceChildOrder::from_str)
+                    .transpose()
+                    .map_err(IambError::InvalidSpaceChildOrder)?;
                 ev.suggested = suggested;
                 let _ = self
                     .room
