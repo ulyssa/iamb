@@ -199,9 +199,6 @@ pub enum SpaceAction {
 /// The type of room being created.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CreateRoomType {
-    /// A direct message room.
-    Direct(OwnedUserId),
-
     /// A standard chat room.
     Room,
 
