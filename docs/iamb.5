@@ -248,10 +248,6 @@ Usernames that are too long are truncated.
 If this value is less than 3, the usernames are displayed in an extra line at the top of the message
 and this value is only used to indent the message.
 Defaults to 30.
-.It Sy set_window_title
-Whether to set the title of the terminal window to
-.Dq Sy iamb (<user_id>) .
-Defaults to true.
 .It Sy tabstop
 Number of spaces that a <Tab> counts for.
 Defaults to 4.
@@ -447,6 +443,10 @@ Defines whether to explicitly enable or disable requesting extended keypresses f
 By default, when unset,
 .Sy iamb
 will attempt to auto-detect support in your terminal and request extended keypresses from the terminal if supported.
+.It Sy enable_title
+Whether to set the title of the terminal window to
+.Dq Sy iamb (<user_id>) .
+Defaults to true.
 .El
 .It Sy indicator
 .Sh "USER OVERRIDES"

@@ -207,7 +207,6 @@ pub fn mock_tunables() -> TunableValues {
         image_preview: None,
         user_gutter_width: 30,
         tabstop: 4,
-        set_window_title: true,
         ssl_verify: true,
     }
 }

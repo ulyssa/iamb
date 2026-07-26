@@ -54,6 +54,7 @@ const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 
+const DEFAULT_ENABLE_TITLE: bool = true;
 const DEFAULT_ENC_INDICATOR_LOC: EncryptionIndicatorLocation = EncryptionIndicatorLocation::PROMPT;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
 
@@ -655,23 +656,29 @@ impl SortOverrides {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Terminal {
     pub enable_extended_keys: Option<bool>,
+    pub enable_title: Option<bool>,
 }
 
 impl Terminal {
     fn merge(profile: Self, global: Self) -> Self {
         Self {
             enable_extended_keys: profile.enable_extended_keys.or(global.enable_extended_keys),
+            enable_title: profile.enable_title.or(global.enable_title),
         }
     }
 
     pub fn values(self) -> TerminalValues {
-        TerminalValues { enable_extended_keys: self.enable_extended_keys }
+        TerminalValues {
+            enable_extended_keys: self.enable_extended_keys,
+            enable_title: self.enable_title.unwrap_or(DEFAULT_ENABLE_TITLE),
+        }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct TerminalValues {
     pub enable_extended_keys: Option<bool>,
+    pub enable_title: bool,
 }
 
 #[derive(Clone)]
@@ -702,7 +709,6 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
-    pub set_window_title: bool,
     pub ssl_verify: bool,
 }
 
@@ -745,7 +751,6 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
-    pub set_window_title: Option<bool>,
     pub ssl_verify: Option<bool>,
 }
 
@@ -785,7 +790,6 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
-            set_window_title: self.set_window_title.or(other.set_window_title),
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
         }
     }
@@ -821,7 +825,6 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
-            set_window_title: self.set_window_title.unwrap_or(true),
             ssl_verify: self.ssl_verify.unwrap_or(true),
         }
     }
