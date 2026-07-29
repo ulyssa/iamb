@@ -11,6 +11,7 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::sticker::StickerEvent;
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
 use unicode_width::UnicodeWidthStr;
@@ -57,6 +58,7 @@ use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
 use crate::config::ImagePreviewSize;
+use crate::preview::{ImageStatus, PreviewManager};
 use crate::{
     base::RoomInfo,
     config::ApplicationSettings,
@@ -785,6 +787,7 @@ impl<'a> MessageFormatter<'a> {
         text: &mut Text<'a>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
     ) -> Option<ProtocolPreview<'a>> {
         let reply_style = if settings.tunables.message_user_color {
             style.patch(settings.get_user_color(&msg.sender))
@@ -794,7 +797,7 @@ impl<'a> MessageFormatter<'a> {
 
         let width = self.width();
         let w = width.saturating_sub(2);
-        let (mut replied, proto) = msg.show_msg(w, reply_style, settings);
+        let (mut replied, proto) = msg.show_msg(w, reply_style, settings, previews);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -895,20 +898,13 @@ impl<'a> MessageFormatter<'a> {
     }
 }
 
-pub enum ImageStatus {
-    None,
-    Downloading(ImagePreviewSize),
-    Loaded(Protocol),
-    Error(String),
-}
-
 pub struct Message {
     pub event: MessageEvent,
     pub sender: OwnedUserId,
     pub timestamp: MessageTimeStamp,
     pub downloaded: bool,
     pub html: Option<StyleTree>,
-    pub image_preview: ImageStatus,
+    pub image_preview: Option<MediaSource>,
 }
 
 impl Message {
@@ -922,7 +918,7 @@ impl Message {
             timestamp,
             downloaded,
             html,
-            image_preview: ImageStatus::None,
+            image_preview: None,
         }
     }
 
@@ -948,7 +944,7 @@ impl Message {
         }
     }
 
-    fn thread_root(&self) -> Option<OwnedEventId> {
+    pub fn thread_root(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
@@ -1056,6 +1052,7 @@ impl Message {
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
     ) -> (Text<'a>, [Option<ProtocolPreview<'a>>; 2]) {
         let width = vwctx.get_width();
 
@@ -1069,7 +1066,7 @@ impl Message {
         let proto_reply = reply.as_ref().and_then(|r| {
             if let Some(r) = r {
                 // Format the reply header, push it into the `Text` buffer, and get any image.
-                fmt.push_in_reply(r, style, &mut text, info, settings)
+                fmt.push_in_reply(r, style, &mut text, info, settings, previews)
             } else {
                 fmt.push_spans(
                     Line::from(vec![
@@ -1086,7 +1083,7 @@ impl Message {
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(width, style, settings);
+        let (msg, proto) = self.show_msg(width, style, settings, previews);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
@@ -1124,8 +1121,9 @@ impl Message {
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
     ) -> Text<'a> {
-        self.show_with_preview(prev, selected, vwctx, info, settings).0
+        self.show_with_preview(prev, selected, vwctx, info, settings, previews).0
     }
 
     fn show_msg<'a>(
@@ -1133,6 +1131,7 @@ impl Message {
         width: usize,
         style: Style,
         settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
     ) -> (Text<'a>, Option<&'a Protocol>) {
         if let Some(html) = &self.html {
             (html.to_text(width, style, settings), None)
@@ -1147,17 +1146,21 @@ impl Message {
             }
 
             let mut proto = None;
-            let placeholder = match &self.image_preview {
-                ImageStatus::None => None,
-                ImageStatus::Downloading(image_preview_size) => {
-                    placeholder_frame(Some("Downloading..."), width, image_preview_size)
-                },
-                ImageStatus::Loaded(backend) => {
-                    proto = Some(backend);
-                    placeholder_frame(Some("No Space..."), width, &backend.area().into())
-                },
-                ImageStatus::Error(err) => Some(format!("[Image error: {err}]\n")),
-            };
+            let placeholder =
+                match self.image_preview.as_ref().and_then(|source| previews.get(source)) {
+                    None => None,
+                    Some(ImageStatus::Queued(image_preview_size)) => {
+                        placeholder_frame(Some("Queued..."), width, image_preview_size)
+                    },
+                    Some(ImageStatus::Downloading(image_preview_size)) => {
+                        placeholder_frame(Some("Downloading..."), width, image_preview_size)
+                    },
+                    Some(ImageStatus::Loaded(backend)) => {
+                        proto = Some(backend);
+                        placeholder_frame(Some("No Space..."), width, &backend.area().into())
+                    },
+                    Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
+                };
 
             if let Some(placeholder) = placeholder {
                 msg.to_mut().insert_str(0, &placeholder);
@@ -1217,7 +1220,7 @@ impl Message {
         self.event.redact(redaction);
         self.html = None;
         self.downloaded = false;
-        self.image_preview = ImageStatus::None;
+        self.image_preview = None;
     }
 }
 
