@@ -1,17 +1,11 @@
 //! # Windows for Matrix rooms and spaces
 use std::collections::HashSet;
 
+use matrix_sdk::ruma::api::error::ErrorKind as ClientApiErrorKind;
 use matrix_sdk::{
     notification_settings::RoomNotificationMode,
     room::Room as MatrixRoom,
     ruma::{
-        api::client::{
-            alias::{
-                create_alias::v3::Request as CreateAliasRequest,
-                delete_alias::v3::Request as DeleteAliasRequest,
-            },
-            error::ErrorKind as ClientApiErrorKind,
-        },
         events::{
             room::{
                 canonical_alias::RoomCanonicalAliasEventContent,
@@ -71,6 +65,7 @@ use crate::base::{
 
 use self::chat::ChatState;
 use self::space::{Space, SpaceState};
+use crate::config::EncryptionIndicatorLocation;
 
 use std::convert::TryFrom;
 
@@ -123,16 +118,7 @@ pub async fn room_command(
     match act {
         RoomAction::InviteAccept => {
             if let Some(room) = store.application.worker.client.get_room(id) {
-                let details = room.invite_details().await.map_err(IambError::from)?;
-                let details = details.invitee.event().original_content();
-                let is_direct = details.and_then(|ev| ev.is_direct).unwrap_or_default();
-
                 room.join().await.map_err(IambError::from)?;
-
-                if is_direct {
-                    room.set_is_direct(true).await.map_err(IambError::from)?;
-                }
-
                 Ok(vec![])
             } else {
                 Err(IambError::NotInvited.into())
@@ -311,9 +297,7 @@ pub async fn room_command(
                     }
 
                     // Try creating the room alias on the server.
-                    let alias_create_req =
-                        CreateAliasRequest::new(orai.clone(), room.room_id().into());
-                    if let Err(e) = client.send(alias_create_req).await {
+                    if let Err(e) = client.create_room_alias(&orai, room.room_id()).await {
                         if let Some(ClientApiErrorKind::Unknown) = e.client_api_error_kind() {
                             // Ignore when it already exists.
                         } else {
@@ -352,8 +336,7 @@ pub async fn room_command(
                     }
 
                     // If the room alias does not exist on the server, create it
-                    let alias_create_req = CreateAliasRequest::new(orai, room.room_id().into());
-                    if let Err(e) = client.send(alias_create_req).await {
+                    if let Err(e) = client.create_room_alias(&orai, room.room_id()).await {
                         if let Some(ClientApiErrorKind::Unknown) = e.client_api_error_kind() {
                             // Ignore when it already exists.
                         } else {
@@ -423,12 +406,11 @@ pub async fn room_command(
                     let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
 
                     // And then unmap it on the server.
-                    let del_req = DeleteAliasRequest::new(alias_to_destroy);
-                    let _ = store
+                    store
                         .application
                         .worker
                         .client
-                        .send(del_req)
+                        .remove_room_alias(&alias_to_destroy)
                         .await
                         .map_err(IambError::from)?;
                 },
@@ -456,12 +438,11 @@ pub async fn room_command(
                     let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
 
                     // And then unmap it on the server.
-                    let del_req = DeleteAliasRequest::new(orai);
-                    let _ = store
+                    store
                         .application
                         .worker
                         .client
-                        .send(del_req)
+                        .remove_room_alias(&orai)
                         .await
                         .map_err(IambError::from)?;
                 },
@@ -676,6 +657,8 @@ impl RoomState {
     }
 
     pub fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
+        let room = store.application.worker.client.get_room(self.id());
+
         let title = store.application.get_room_title(self.id());
         let style = Style::default().add_modifier(StyleModifier::BOLD);
         let mut spans = vec![];
@@ -688,13 +671,22 @@ impl RoomState {
 
         spans.push(Span::styled(title, style));
 
+        if let Some(room) = room {
+            let encryption_settings = &store.application.settings.tunables.encryption;
+            let encryption_indicator = encryption_settings
+                .get_indicator(EncryptionIndicatorLocation::TITLE, room.encryption_state());
+            spans.extend(encryption_indicator);
+        }
+
         match self.room().topic() {
             Some(desc) if !desc.is_empty() => {
                 spans.push(" (".into());
                 spans.push(desc.into());
                 spans.push(")".into());
             },
-            _ => {},
+            _ => {
+                spans.push(" ".into());
+            },
         }
 
         Line::from(spans)

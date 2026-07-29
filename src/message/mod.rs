@@ -11,8 +11,8 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{format_size, DECIMAL};
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
-use matrix_sdk::ruma::room_version_rules::RedactionRules;
-use serde_json::json;
+use matrix_sdk::ruma::events::sticker::StickerEvent;
+use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
@@ -37,7 +37,6 @@ use matrix_sdk::ruma::{
             redaction::SyncRoomRedactionEvent,
         },
         AnySyncStateEvent,
-        RedactContent,
         RedactedUnsigned,
     },
     EventId,
@@ -109,7 +108,9 @@ impl Messages {
 
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
         let event_id = key.1.clone();
-        let msg = msg.into();
+        let mut msg = msg.into();
+
+        msg.event.strip_reply_fallback();
 
         self.0.insert(key, msg);
 
@@ -417,26 +418,12 @@ impl PartialOrd for MessageCursor {
     }
 }
 
-fn redaction_reason(ev: &SyncRoomRedactionEvent) -> Option<&str> {
+fn redaction_reason_event(ev: SyncRoomRedactionEvent) -> Option<String> {
     let SyncRoomRedactionEvent::Original(ev) = ev else {
         return None;
     };
 
-    return ev.content.reason.as_deref();
-}
-
-fn redaction_unsigned(ev: SyncRoomRedactionEvent) -> RedactedUnsigned {
-    let reason = redaction_reason(&ev);
-    let redacted_because = json!({
-        "content": {
-            "reason": reason
-        },
-        "event_id": ev.event_id(),
-        "sender": ev.sender(),
-        "origin_server_ts": ev.origin_server_ts(),
-        "unsigned": {},
-    });
-    RedactedUnsigned::new(serde_json::from_value(redacted_because).unwrap())
+    ev.content.reason
 }
 
 #[derive(Clone)]
@@ -444,8 +431,9 @@ pub enum MessageEvent {
     EncryptedOriginal(Box<OriginalRoomEncryptedEvent>),
     EncryptedRedacted(Box<RedactedRoomEncryptedEvent>),
     Original(Box<OriginalRoomMessageEvent>),
-    Redacted(Box<RedactedRoomMessageEvent>),
+    Redacted(OwnedEventId, Option<String>),
     State(Box<AnySyncStateEvent>),
+    Sticker(Box<StickerEvent>),
     Local(OwnedEventId, Box<RoomMessageEventContent>),
 }
 
@@ -455,8 +443,9 @@ impl MessageEvent {
             MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
             MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
             MessageEvent::Original(ev) => ev.event_id.as_ref(),
-            MessageEvent::Redacted(ev) => ev.event_id.as_ref(),
+            MessageEvent::Redacted(event_id, _) => event_id.as_ref(),
             MessageEvent::State(ev) => ev.event_id(),
+            MessageEvent::Sticker(ev) => ev.event_id(),
             MessageEvent::Local(event_id, _) => event_id.as_ref(),
         }
     }
@@ -466,8 +455,9 @@ impl MessageEvent {
             MessageEvent::EncryptedOriginal(_) => None,
             MessageEvent::Original(ev) => Some(&ev.content),
             MessageEvent::EncryptedRedacted(_) => None,
-            MessageEvent::Redacted(_) => None,
+            MessageEvent::Redacted(_, _) => None,
             MessageEvent::State(_) => None,
+            MessageEvent::Sticker(_) => None,
             MessageEvent::Local(_, content) => Some(content),
         }
     }
@@ -483,8 +473,11 @@ impl MessageEvent {
         match self {
             MessageEvent::EncryptedOriginal(_) => "[Unable to decrypt message]".into(),
             MessageEvent::Original(ev) => body_cow_content(&ev.content),
-            MessageEvent::EncryptedRedacted(ev) => body_cow_reason(&ev.unsigned),
-            MessageEvent::Redacted(ev) => body_cow_reason(&ev.unsigned),
+            MessageEvent::EncryptedRedacted(ev) => {
+                body_cow_reason(redaction_reason_unsigned(&ev.unsigned).as_deref())
+            },
+            MessageEvent::Redacted(_, reason) => body_cow_reason(reason.as_deref()),
+            MessageEvent::Sticker(ev) => body_cow_sticker(ev),
             MessageEvent::State(ev) => body_cow_state(ev),
             MessageEvent::Local(_, content) => body_cow_content(content),
         }
@@ -495,8 +488,9 @@ impl MessageEvent {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
             MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_) => return None,
+            MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(ev) => return Some(html_state(ev)),
+            MessageEvent::Sticker(_) => return None,
             MessageEvent::Local(_, content) => content,
         };
 
@@ -511,25 +505,42 @@ impl MessageEvent {
         }
     }
 
-    fn redact(&mut self, redaction: SyncRoomRedactionEvent, rules: &RedactionRules) {
+    fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
         match self {
             MessageEvent::EncryptedOriginal(_) => return,
             MessageEvent::EncryptedRedacted(_) => return,
-            MessageEvent::Redacted(_) => return,
+            MessageEvent::Redacted(_, _) => return,
             MessageEvent::State(_) => return,
             MessageEvent::Local(_, _) => return,
+            MessageEvent::Sticker(ev) => {
+                let event_id = ev.event_id().to_owned();
+                let reason = redaction_reason_event(redaction);
+                *self = MessageEvent::Redacted(event_id, reason);
+            },
             MessageEvent::Original(ev) => {
-                let redacted = RedactedRoomMessageEvent {
-                    content: ev.content.clone().redact(rules),
-                    event_id: ev.event_id.clone(),
-                    sender: ev.sender.clone(),
-                    origin_server_ts: ev.origin_server_ts,
-                    room_id: ev.room_id.clone(),
-                    unsigned: redaction_unsigned(redaction),
-                };
-                *self = MessageEvent::Redacted(Box::new(redacted));
+                let event_id = ev.event_id.to_owned();
+                let reason = redaction_reason_event(redaction);
+                *self = MessageEvent::Redacted(event_id, reason);
             },
         }
+    }
+
+    pub fn strip_reply_fallback(&mut self) {
+        let MessageEvent::Original(ev) = self else {
+            return;
+        };
+
+        let MessageType::Text(content) = &mut ev.content.msgtype else {
+            return;
+        };
+
+        if !content.body.starts_with('>') {
+            return;
+        }
+
+        let new_body = content.body.lines().skip_while(|line| line.starts_with('>')).collect();
+
+        content.body = new_body;
     }
 }
 
@@ -580,13 +591,26 @@ fn body_cow_content(content: &RoomMessageEventContent) -> Cow<'_, str> {
     Cow::Borrowed(s)
 }
 
-fn body_cow_reason(unsigned: &RedactedUnsigned) -> Cow<'_, str> {
-    let reason = unsigned
-        .redacted_because
-        .deserialize()
-        .ok()
-        .and_then(|ev| ev.content.reason);
+fn body_cow_sticker(content: &StickerEvent) -> Cow<'_, str> {
+    match content {
+        MessageLikeEvent::Original(sticker) => {
+            Cow::Owned(format!("* sent a sticker: {}", sticker.content.body))
+        },
+        MessageLikeEvent::Redacted(_) => Cow::Borrowed("[Redacted]"),
+    }
+}
 
+fn redaction_reason_unsigned(unsigned: &RedactedUnsigned) -> Option<String> {
+    let ev = unsigned.redacted_because.deserialize().ok()?;
+
+    let AnyRedactionEvent::RoomRedaction(ev) = ev else {
+        return None;
+    };
+
+    ev.content.reason
+}
+
+fn body_cow_reason(reason: Option<&str>) -> Cow<'static, str> {
     if let Some(r) = reason {
         Cow::Owned(format!("[Redacted: {r:?}]"))
     } else {
@@ -618,6 +642,20 @@ impl MessageColumns {
     }
 }
 
+#[derive(Default, Debug)]
+enum SenderSpan<'a> {
+    /// Show the sender name in the user gutter.
+    /// This is truncated and padded to fit [`user_gutter_width`](`crate::config::TunableValues::user_gutter_width`).
+    Gutter(Span<'a>),
+
+    /// Show the sender name in an extra line at the top of the message.
+    Line(Span<'a>),
+
+    /// The sender name has already been printed.
+    #[default]
+    None,
+}
+
 struct MessageFormatter<'a> {
     settings: &'a ApplicationSettings,
 
@@ -631,7 +669,7 @@ struct MessageFormatter<'a> {
     fill: usize,
 
     /// The formatted Span for the message sender.
-    user: Option<Span<'a>>,
+    user: SenderSpan<'a>,
 
     /// The time the message was sent.
     time: Option<Span<'a>>,
@@ -648,6 +686,20 @@ impl<'a> MessageFormatter<'a> {
         self.fill
     }
 
+    fn message_start_line(&self) -> u16 {
+        let mut line = 0;
+
+        if self.date.is_some() {
+            line += 1;
+        }
+
+        if let SenderSpan::Line(_) = self.user {
+            line += 1;
+        }
+
+        line
+    }
+
     #[inline]
     fn push_spans(&mut self, prev_line: Line<'a>, style: Style, text: &mut Text<'a>) {
         if let Some(date) = self.date.take() {
@@ -662,13 +714,21 @@ impl<'a> MessageFormatter<'a> {
         let user_gutter_empty_span =
             space_span(self.settings.tunables.user_gutter_width, Style::default());
 
+        let user_gutter = match std::mem::take(&mut self.user) {
+            SenderSpan::Line(user) => {
+                text.lines.push(user.into());
+                user_gutter_empty_span
+            },
+            SenderSpan::Gutter(user) => user,
+            SenderSpan::None => user_gutter_empty_span,
+        };
+
         match self.cols {
             MessageColumns::Four => {
                 let settings = self.settings;
-                let user = self.user.take().unwrap_or(user_gutter_empty_span);
                 let time = self.time.take().unwrap_or(TIME_GUTTER_EMPTY_SPAN);
 
-                let mut line = vec![user];
+                let mut line = vec![user_gutter];
                 line.extend(prev_line.spans);
                 line.push(time);
 
@@ -688,27 +748,21 @@ impl<'a> MessageFormatter<'a> {
                 text.lines.push(Line::from(line))
             },
             MessageColumns::Three => {
-                let user = self.user.take().unwrap_or(user_gutter_empty_span);
                 let time = self.time.take().unwrap_or_else(|| Span::from(""));
 
-                let mut line = vec![user];
+                let mut line = vec![user_gutter];
                 line.extend(prev_line.spans);
                 line.push(time);
 
                 text.lines.push(Line::from(line))
             },
             MessageColumns::Two => {
-                let user = self.user.take().unwrap_or(user_gutter_empty_span);
-                let mut line = vec![user];
+                let mut line = vec![user_gutter];
                 line.extend(prev_line.spans);
 
                 text.lines.push(Line::from(line));
             },
             MessageColumns::One => {
-                if let Some(user) = self.user.take() {
-                    text.lines.push(Line::from(vec![user]));
-                }
-
                 let leading = space_span(2, style);
                 let mut line = vec![leading];
                 line.extend(prev_line.spans);
@@ -740,7 +794,7 @@ impl<'a> MessageFormatter<'a> {
 
         let width = self.width();
         let w = width.saturating_sub(2);
-        let (mut replied, proto) = msg.show_msg(w, reply_style, true, settings);
+        let (mut replied, proto) = msg.show_msg(w, reply_style, settings);
         let mut sender = msg.sender_span(info, self.settings);
         let sender_width = UnicodeWidthStr::width(sender.content.as_ref());
         let trailing = w.saturating_sub(sender_width + 1);
@@ -778,7 +832,7 @@ impl<'a> MessageFormatter<'a> {
     }
 
     fn push_reactions(&mut self, counts: Vec<(&'a str, usize)>, style: Style, text: &mut Text<'a>) {
-        let mut emojis = printer::TextPrinter::new(self.width(), style, false, self.settings);
+        let mut emojis = printer::TextPrinter::new(self.width(), style, self.settings);
         let mut reactions = 0;
 
         for (key, count) in counts {
@@ -827,7 +881,7 @@ impl<'a> MessageFormatter<'a> {
         let plural = len != 1;
         let style = Style::default();
         let mut threaded =
-            printer::TextPrinter::new(self.width(), style, false, self.settings).literal(true);
+            printer::TextPrinter::new(self.width(), style, self.settings).literal(true);
         let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
         threaded.push_str(" \u{2937} ", style);
         threaded.push_span_nobreak(len);
@@ -878,12 +932,13 @@ impl Message {
             MessageEvent::EncryptedRedacted(_) => return None,
             MessageEvent::Local(_, content) => content,
             MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_) => return None,
+            MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
+            MessageEvent::Sticker(_) => return None,
         };
 
         match &content.relates_to {
-            Some(Relation::Reply { in_reply_to }) => Some(in_reply_to.event_id.clone()),
+            Some(Relation::Reply(reply)) => Some(reply.in_reply_to.event_id.clone()),
             Some(Relation::Thread(Thread {
                 in_reply_to: Some(in_reply_to),
                 is_falling_back: false,
@@ -899,8 +954,9 @@ impl Message {
             MessageEvent::EncryptedRedacted(_) => return None,
             MessageEvent::Local(_, content) => content,
             MessageEvent::Original(ev) => &ev.content,
-            MessageEvent::Redacted(_) => return None,
+            MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
+            MessageEvent::Sticker(_) => return None,
         };
 
         match &content.relates_to {
@@ -952,7 +1008,7 @@ impl Message {
         {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
-            let user = self.show_sender(prev, true, info, settings);
+            let user = self.show_sender(prev, true, info, settings, width);
             let time = self.timestamp.show_time();
             let read = info
                 .event_receipts
@@ -966,7 +1022,7 @@ impl Message {
         } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
-            let user = self.show_sender(prev, true, info, settings);
+            let user = self.show_sender(prev, true, info, settings, width);
             let time = self.timestamp.show_time();
             let read = Vec::new();
 
@@ -974,7 +1030,7 @@ impl Message {
         } else if user_gutter + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Two;
             let fill = width - user_gutter;
-            let user = self.show_sender(prev, true, info, settings);
+            let user = self.show_sender(prev, true, info, settings, width);
             let time = None;
             let read = Vec::new();
 
@@ -982,7 +1038,7 @@ impl Message {
         } else {
             let cols = MessageColumns::One;
             let fill = width.saturating_sub(2);
-            let user = self.show_sender(prev, false, info, settings);
+            let user = self.show_sender(prev, false, info, settings, width);
             let time = None;
             let read = Vec::new();
 
@@ -1009,25 +1065,36 @@ impl Message {
         let width = fmt.width();
 
         // Show the message that this one replied to, if any.
-        let reply = self
-            .reply_to()
-            .or_else(|| self.thread_root())
-            .and_then(|e| info.get_event(&e));
+        let reply = self.reply_to().or_else(|| self.thread_root()).map(|e| info.get_event(&e));
         let proto_reply = reply.as_ref().and_then(|r| {
-            // Format the reply header, push it into the `Text` buffer, and get any image.
-            fmt.push_in_reply(r, style, &mut text, info, settings)
+            if let Some(r) = r {
+                // Format the reply header, push it into the `Text` buffer, and get any image.
+                fmt.push_in_reply(r, style, &mut text, info, settings)
+            } else {
+                fmt.push_spans(
+                    Line::from(vec![
+                        Span::styled(" ", style),
+                        Span::styled(THICK_VERTICAL, style),
+                        Span::styled("Original message not loaded", style),
+                        space_span(width.saturating_sub(29), style),
+                    ]),
+                    style,
+                    &mut text,
+                );
+                None
+            }
         });
 
         // Now show the message contents, and the inlined reply if we couldn't find it above.
-        let (msg, proto) = self.show_msg(width, style, reply.is_some(), settings);
+        let (msg, proto) = self.show_msg(width, style, settings);
 
         // Given our text so far, determine the image offset.
         let proto_main = proto.map(|p| {
             let y_off = text.lines.len() as u16;
             let x_off = fmt.cols.user_gutter_width(settings);
-            // Adjust y_off by 1 if a date was printed before the message to account for
-            // the extra line we're going to print.
-            let y_off = if fmt.date.is_some() { y_off + 1 } else { y_off };
+
+            // Account for extra lines printed before the message;
+            let y_off = y_off + fmt.message_start_line();
             (p, x_off, y_off)
         });
 
@@ -1065,11 +1132,10 @@ impl Message {
         &'a self,
         width: usize,
         style: Style,
-        hide_reply: bool,
         settings: &'a ApplicationSettings,
     ) -> (Text<'a>, Option<&'a Protocol>) {
         if let Some(html) = &self.html {
-            (html.to_text(width, style, hide_reply, settings), None)
+            (html.to_text(width, style, settings), None)
         } else {
             let mut msg = self.event.body();
             if settings.tunables.message_shortcode_display {
@@ -1112,35 +1178,43 @@ impl Message {
     fn show_sender<'a>(
         &'a self,
         prev: Option<&Message>,
-        align_right: bool,
+        gutter_enabled: bool,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
-    ) -> Option<Span<'a>> {
+        width: usize,
+    ) -> SenderSpan<'a> {
         if let Some(prev) = prev {
             if self.sender == prev.sender &&
                 self.timestamp.same_day(&prev.timestamp) &&
                 !self.event.is_emote()
             {
-                return None;
+                return SenderSpan::None;
             }
         }
 
         let Span { content, style } = self.sender_span(info, settings);
         let user_gutter = settings.tunables.user_gutter_width;
-        let ((truncated, width), _) = take_width(content, user_gutter - 2);
-        let padding = user_gutter - 2 - width;
 
-        let sender = if align_right {
-            format!("{}{}  ", space(padding), truncated)
+        let show_in_gutter = gutter_enabled && user_gutter > 2;
+
+        if show_in_gutter {
+            let ((truncated, width), _) = take_width(content, user_gutter - 2);
+            let padding = user_gutter - 2 - width;
+
+            let sender = format!("{}{}  ", space(padding), truncated);
+
+            SenderSpan::Gutter(Span::styled(sender, style))
+        } else if UnicodeWidthStr::width(content.as_ref()) > width {
+            let ((truncated, _), _) = take_width(content, width);
+
+            SenderSpan::Line(Span::styled(truncated, style))
         } else {
-            format!("{}{}  ", truncated, space(padding))
-        };
-
-        Span::styled(sender, style).into()
+            SenderSpan::Line(Span::styled(content, style))
+        }
     }
 
-    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent, rules: &RedactionRules) {
-        self.event.redact(redaction, rules);
+    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
+        self.event.redact(redaction);
         self.html = None;
         self.downloaded = false;
         self.image_preview = ImageStatus::None;
@@ -1174,7 +1248,10 @@ impl From<RedactedRoomMessageEvent> for Message {
     fn from(event: RedactedRoomMessageEvent) -> Self {
         let timestamp = event.origin_server_ts.into();
         let user_id = event.sender.clone();
-        let content = MessageEvent::Redacted(event.into());
+
+        let event_id = event.event_id;
+        let reason = redaction_reason_unsigned(&event.unsigned);
+        let content = MessageEvent::Redacted(event_id, reason);
 
         Message::new(content, user_id, timestamp)
     }
@@ -1194,6 +1271,16 @@ impl From<AnySyncStateEvent> for Message {
         let timestamp = event.origin_server_ts().into();
         let user_id = event.sender().to_owned();
         let event = MessageEvent::State(event.into());
+
+        Message::new(event, user_id, timestamp)
+    }
+}
+
+impl From<StickerEvent> for Message {
+    fn from(event: StickerEvent) -> Self {
+        let timestamp = event.origin_server_ts().into();
+        let user_id = event.sender().to_owned();
+        let event = MessageEvent::Sticker(event.into());
 
         Message::new(event, user_id, timestamp)
     }

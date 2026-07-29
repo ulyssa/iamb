@@ -1579,7 +1579,7 @@ impl ListItem<IambInfo> for MemberItem {
             spans.push(Span::styled(name, style));
             parens = true;
         } else if let Some(display) = info.display_names.get(user_id) {
-            spans.push(Span::styled(display.clone(), style));
+            spans.push(Span::styled(display.into_owned(), style));
             parens = true;
         }
 
