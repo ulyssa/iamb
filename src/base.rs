@@ -12,7 +12,9 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
+
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::sticker::StickerEvent;
 use ratatui::{
     buffer::Buffer,
@@ -1184,12 +1186,10 @@ impl RoomInfo {
     /// Insert a sticker
     pub fn insert_sticker(
         &mut self,
-        room_id: OwnedRoomId,
-        store: AsyncProgramStore,
-        picker: Option<Picker>,
         sticker: StickerEvent,
         settings: &ApplicationSettings,
-        media: matrix_sdk::Media,
+        previews: &mut PreviewManager,
+        worker: &Requester,
     ) {
         match sticker {
             MessageLikeEvent::Original(ref sticker_content) => {
@@ -1201,21 +1201,13 @@ impl RoomInfo {
                 self.keys.insert(sticker_content.event_id.clone(), loc);
                 self.messages.insert_message(key.clone(), sticker.clone());
 
-                if picker.is_some() {
-                    if let (Some(msg), Some(image_preview)) = (
-                        self.get_event_mut(&sticker_content.event_id),
-                        &settings.tunables.image_preview,
-                    ) {
-                        msg.image_preview = ImageStatus::Downloading(image_preview.size.clone());
-                        spawn_insert_preview(
-                            store,
-                            room_id,
-                            sticker_content.event_id.clone(),
-                            sticker_content.content.source.clone().into(),
-                            media,
-                            settings.dirs.image_previews.clone(),
-                        )
-                    }
+                if let (Some(msg), Some(image_preview)) = (
+                    self.get_event_mut(&sticker_content.event_id),
+                    &settings.tunables.image_preview,
+                ) {
+                    let source: MediaSource = sticker_content.content.source.clone().into();
+                    msg.image_preview = Some(source.clone());
+                    previews.register_preview(settings, source, image_preview.size, worker);
                 }
             },
             MessageLikeEvent::Redacted(ref redaction) => {

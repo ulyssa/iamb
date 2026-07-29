@@ -324,14 +324,7 @@ fn load_insert(
                         info.insert_reaction(ev);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
-                        info.insert_sticker(
-                            room_id.clone(),
-                            store.clone(),
-                            picker.clone(),
-                            ev,
-                            settings,
-                            client.media(),
-                        );
+                        info.insert_sticker(ev, settings, previews, worker);
                     },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
@@ -1041,7 +1034,6 @@ impl ClientWorker {
         let _ = self.client.add_event_handler(
             |ev: SyncMessageLikeEvent<StickerEventContent>,
              room: MatrixRoom,
-             client: Client,
              store: Ctx<AsyncProgramStore>| {
                 async move {
                     let room_id = room.room_id();
@@ -1051,21 +1043,15 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
+                    let ChatStore { rooms, settings, previews, worker, .. } =
+                        &mut locked.application;
 
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     update_event_receipts(info, &room, ev.event_id()).await;
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_sticker(
-                        room_id.to_owned(),
-                        store.clone(),
-                        picker.clone(),
-                        full_ev,
-                        settings,
-                        client.media(),
-                    );
+                    info.insert_sticker(full_ev, settings, previews, worker);
                 }
             },
         );
