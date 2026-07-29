@@ -911,7 +911,7 @@ impl GenericChatItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room, &store.application.settings);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -1030,7 +1030,7 @@ impl RoomItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room, &store.application.settings);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -1143,7 +1143,7 @@ impl DirectItem {
 
         let info = store.application.rooms.get_or_default(room_id);
         let name = info.name.clone().unwrap_or_default();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(&room_info.0, &store.application.settings);
         info.tags.clone_from(&room_info.deref().1);
 
         DirectItem { room_info, name, alias, unread }
