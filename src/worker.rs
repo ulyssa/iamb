@@ -5,7 +5,7 @@
 use std::collections::HashMap;
 use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::str::FromStr;
 use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
@@ -14,6 +14,7 @@ use std::time::{Duration, Instant};
 use futures::{stream::FuturesUnordered, StreamExt};
 use gethostname::gethostname;
 use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::events::sticker::StickerEventContent;
 use ratatui_image::picker::Picker;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
@@ -24,7 +25,6 @@ use url::Url;
 use matrix_sdk::{
     authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
-    deserialized_responses::DisplayName,
     encryption::{
         verification::{SasVerification, Verification},
         BackupDownloadStrategy,
@@ -37,7 +37,7 @@ use matrix_sdk::{
         api::client::{
             filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
             room::{
-                create_room::v3::{CreationContent, Request as CreateRoomRequest, RoomPreset},
+                create_room::v3::{CreationContent, Request as CreateRoomRequest},
                 Visibility,
             },
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
@@ -126,10 +126,6 @@ fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
 }
 
-async fn is_direct(room: &MatrixRoom) -> bool {
-    room.deref().is_direct().await.unwrap_or_default()
-}
-
 pub async fn create_room(
     client: &Client,
     room_alias_name: Option<String>,
@@ -138,9 +134,6 @@ pub async fn create_room(
 ) -> IambResult<OwnedRoomId> {
     let mut creation_content = None;
     let mut initial_state = vec![];
-    let mut is_direct = false;
-    let mut preset = None;
-    let mut invite = vec![];
 
     let visibility = if flags.contains(CreateRoomFlags::PUBLIC) {
         Visibility::Public
@@ -149,11 +142,6 @@ pub async fn create_room(
     };
 
     match rt {
-        CreateRoomType::Direct(user) => {
-            invite.push(user);
-            is_direct = true;
-            preset = Some(RoomPreset::TrustedPrivateChat);
-        },
         CreateRoomType::Space => {
             let mut cc = CreationContent::new();
             cc.room_type = Some(RoomType::Space);
@@ -177,24 +165,10 @@ pub async fn create_room(
         room_alias_name,
         creation_content,
         initial_state,
-        invite,
-        is_direct,
         visibility,
-        preset,
     });
 
     let resp = client.create_room(request).await.map_err(IambError::from)?;
-
-    if is_direct {
-        if let Some(room) = client.get_room(resp.room_id()) {
-            room.set_is_direct(true).await.map_err(IambError::from)?;
-        } else {
-            error!(
-                room_id = resp.room_id().as_str(),
-                "Couldn't set is_direct for new direct message room"
-            );
-        }
-    }
 
     return Ok(resp.room_id().to_owned());
 }
@@ -349,6 +323,16 @@ fn load_insert(
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
                         info.insert_reaction(ev);
                     },
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
+                        info.insert_sticker(
+                            room_id.clone(),
+                            store.clone(),
+                            picker.clone(),
+                            ev,
+                            settings,
+                            client.media(),
+                        );
+                    },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
                     },
@@ -424,10 +408,9 @@ fn members_insert(
         let info = rooms.get_or_default(room_id);
 
         for member in members {
-            let user_id = member.user_id();
-            let display_name =
-                member.display_name().map_or(user_id.to_string(), |str| str.to_string());
-            info.display_names.insert(user_id.to_owned(), display_name);
+            let user_id = member.user_id().to_owned();
+            let name = member.display_name().map(|s| s.to_owned());
+            info.display_names.set(user_id, name);
         }
     }
     // else ???
@@ -450,28 +433,13 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     let mut rooms = vec![];
     let mut dms = vec![];
 
-    for room in client.invited_rooms().into_iter() {
+    for room in client.invited_rooms().into_iter().chain(client.joined_rooms().into_iter()) {
         let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
         let tags = room.tags().await.unwrap_or_default();
 
         names.push((room.room_id().to_owned(), name));
 
-        if is_direct(&room).await {
-            dms.push(Arc::new((room, tags)));
-        } else if room.is_space() {
-            spaces.push(Arc::new((room, tags)));
-        } else {
-            rooms.push(Arc::new((room, tags)));
-        }
-    }
-
-    for room in client.joined_rooms().into_iter() {
-        let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
-        let tags = room.tags().await.unwrap_or_default();
-
-        names.push((room.room_id().to_owned(), name));
-
-        if is_direct(&room).await {
+        if room.is_direct().await.unwrap_or_default() {
             dms.push(Arc::new((room, tags)));
         } else if room.is_space() {
             spaces.push(Arc::new((room, tags)));
@@ -718,6 +686,7 @@ async fn create_client_inner(
         .pool_idle_timeout(Duration::from_secs(60))
         .pool_max_idle_per_host(10)
         .tcp_keepalive(Duration::from_secs(10))
+        .danger_accept_invalid_certs(!settings.tunables.ssl_verify)
         .build()
         .unwrap();
 
@@ -1070,6 +1039,38 @@ impl ClientWorker {
         );
 
         let _ = self.client.add_event_handler(
+            |ev: SyncMessageLikeEvent<StickerEventContent>,
+             room: MatrixRoom,
+             client: Client,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+
+                    let mut locked = store.lock().await;
+
+                    let sender = ev.sender().to_owned();
+                    let _ = locked.application.presences.get_or_default(sender);
+
+                    let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
+
+                    let info = rooms.get_or_default(room_id.to_owned());
+
+                    update_event_receipts(info, &room, ev.event_id()).await;
+
+                    let full_ev = ev.into_full_event(room_id.to_owned());
+                    info.insert_sticker(
+                        room_id.to_owned(),
+                        store.clone(),
+                        picker.clone(),
+                        full_ev,
+                        settings,
+                        client.media(),
+                    );
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
             |ev: SyncEphemeralRoomEvent<ReceiptEventContent>,
              room: MatrixRoom,
              store: Ctx<AsyncProgramStore>| {
@@ -1124,34 +1125,14 @@ impl ClientWorker {
         );
 
         let _ = self.client.add_event_handler(
-            |ev: OriginalSyncRoomMemberEvent,
-             room: MatrixRoom,
-             client: Client,
-             store: Ctx<AsyncProgramStore>| {
+            |ev: OriginalSyncRoomMemberEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
                 async move {
                     let room_id = room.room_id();
                     let user_id = ev.state_key;
 
-                    let ambiguous_name = DisplayName::new(
-                        ev.content.displayname.as_deref().unwrap_or_else(|| user_id.as_str()),
-                    );
-                    let ambiguous = client
-                        .state_store()
-                        .get_users_with_display_name(room_id, &ambiguous_name)
-                        .await
-                        .map(|users| users.len() > 1)
-                        .unwrap_or_default();
-
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
-
-                    if ambiguous {
-                        info.display_names.remove(&user_id);
-                    } else if let Some(display) = ev.content.displayname {
-                        info.display_names.insert(user_id, display);
-                    } else {
-                        info.display_names.remove(&user_id);
-                    }
+                    info.display_names.set(user_id, ev.content.displayname);
                 }
             },
         );
@@ -1372,29 +1353,24 @@ impl ClientWorker {
     }
 
     async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<OwnedRoomId> {
-        for room in self.client.rooms() {
-            if !is_direct(&room).await {
-                continue;
-            }
-
-            if room.get_member(user.as_ref()).await.map_err(IambError::from)?.is_some() {
-                return Ok(room.room_id().to_owned());
-            }
+        if let Some(room) = self.client.get_dm_room(&user) {
+            return Ok(room.room_id().to_owned());
         }
 
-        let rt = CreateRoomType::Direct(user.clone());
-        let flags = CreateRoomFlags::ENCRYPTED;
+        self.client
+            .create_dm(&user)
+            .await
+            .map(|room| room.room_id().to_owned())
+            .map_err(|err| {
+                error!(
+                    user_id = user.as_str(),
+                    err = err.to_string(),
+                    "Failed to create direct message room"
+                );
 
-        create_room(&self.client, None, rt, flags).await.map_err(|e| {
-            error!(
-                user_id = user.as_str(),
-                err = e.to_string(),
-                "Failed to create direct message room"
-            );
-
-            let msg = format!("Could not open a room with {user}");
-            UIError::Failure(msg)
-        })
+                let msg = format!("Could not open a room with {user}");
+                UIError::Failure(msg)
+            })
     }
 
     async fn get_inviter(&mut self, invited: MatrixRoom) -> IambResult<Option<RoomMember>> {

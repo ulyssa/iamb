@@ -18,7 +18,6 @@ use lazy_static::lazy_static;
 use ratatui::style::{Color, Style};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::unbounded_channel;
-use url::Url;
 
 use crate::{
     base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
@@ -27,10 +26,12 @@ use crate::{
         user_style_from_color,
         ApplicationSettings,
         DirectoryValues,
+        Encryption,
         Notifications,
         NotifyVia,
         ProfileConfig,
         SortOverrides,
+        Terminal,
         TunableValues,
         UserColor,
         UserDisplayStyle,
@@ -56,13 +57,13 @@ lazy_static! {
     pub static ref TEST_USER3: OwnedUserId = user_id!("@user3:example.com").to_owned();
     pub static ref TEST_USER4: OwnedUserId = user_id!("@user4:example.com").to_owned();
     pub static ref TEST_USER5: OwnedUserId = user_id!("@user5:example.com").to_owned();
-    pub static ref MSG1_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
-    pub static ref MSG2_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
+    pub static ref MSG1_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
+    pub static ref MSG2_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
     pub static ref MSG3_EVID: OwnedEventId =
         event_id!("$5jRz3KfVhaUzXtVj7k:example.com").to_owned();
     pub static ref MSG4_EVID: OwnedEventId =
         event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned();
-    pub static ref MSG5_EVID: OwnedEventId = EventId::new(server_name!("example.com"));
+    pub static ref MSG5_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
     pub static ref MSG1_KEY: MessageKey = (LocalEcho, MSG1_EVID.clone());
     pub static ref MSG2_KEY: MessageKey = (OriginServer(UInt::new(1).unwrap()), MSG2_EVID.clone());
     pub static ref MSG3_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG3_EVID.clone());
@@ -170,6 +171,7 @@ pub fn mock_dirs() -> DirectoryValues {
 pub fn mock_tunables() -> TunableValues {
     TunableValues {
         default_room: None,
+        encryption: Encryption::default().values(),
         log_level: "warn".into(),
         max_log_files: 7,
         message_shortcode_display: false,
@@ -181,6 +183,7 @@ pub fn mock_tunables() -> TunableValues {
         request_timeout: 120,
         sort: SortOverrides::default().values(),
         state_event_display: true,
+        terminal: Terminal::default().values(),
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
@@ -203,6 +206,7 @@ pub fn mock_tunables() -> TunableValues {
         image_preview: None,
         user_gutter_width: 30,
         tabstop: 4,
+        ssl_verify: true,
     }
 }
 
@@ -217,6 +221,7 @@ pub fn mock_settings() -> ApplicationSettings {
         profile_name: "test".into(),
         profile: ProfileConfig {
             user_id: user_id!("@user:example.com").to_owned(),
+            password_file: None,
             url: None,
             settings: None,
             dirs: None,
@@ -232,8 +237,13 @@ pub fn mock_settings() -> ApplicationSettings {
 
 pub async fn mock_store() -> ProgramStore {
     let (tx, _) = unbounded_channel();
-    let homeserver = Url::parse("https://localhost").unwrap();
-    let client = matrix_sdk::Client::new(homeserver).await.unwrap();
+    let client = matrix_sdk::Client::builder()
+        .homeserver_url("https://localhost")
+        // don't panic if no certs are available like in a nix build sandbox
+        .disable_ssl_verification()
+        .build()
+        .await
+        .unwrap();
     let worker = Requester { tx, client };
 
     let mut store = ChatStore::new(worker, mock_settings());

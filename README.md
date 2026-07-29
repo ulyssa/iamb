@@ -41,7 +41,7 @@ You can create a basic configuration in `$CONFIG_DIR/iamb/config.toml` that look
 user_id = "@user:example.com"
 ```
 
-If you homeserver is located on a different domain than the server part of the
+If your homeserver is located on a different domain than the server part of the
 `user_id` and you don't have a [`/.well-known`][well_known_entry] entry, then
 you can explicitly specify the homeserver URL to use:
 
@@ -144,6 +144,14 @@ A snap for Linux distributions which [support](https://snapcraft.io/docs/install
 
 ```
 snap install iamb
+```
+
+### Conda (Linux, macOS, Windows)
+
+A Conda [package](https://prefix.dev/channels/conda-forge/packages/iamb) is available on conda-forge. To install it simply run:
+
+```
+pixi global install iamb
 ```
 
 ## License
