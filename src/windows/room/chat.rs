@@ -7,9 +7,7 @@ use std::path::{Path, PathBuf};
 
 use edit::edit_with_builder as external_edit;
 use edit::Builder;
-use matrix_sdk::EncryptionState;
 use modalkit::editing::store::RegisterError;
-use ratatui::style::{Color, Style};
 use std::process::Command;
 use tokio;
 use url::Url;
@@ -88,6 +86,7 @@ use crate::base::{
     SendAction,
 };
 
+use crate::config::EncryptionIndicatorLocation;
 use crate::message::{
     text_to_message,
     Message,
@@ -231,17 +230,21 @@ impl ChatState {
                                 return Err(IambError::NoAttachment.into());
                             }
 
-                            let links = if let Some(html) = &msg.html {
+                            let mut links = if let Some(html) = &msg.html {
                                 html.get_links()
                             } else {
-                                linkify::LinkFinder::new()
+                                vec![]
+                            };
+
+                            if links.is_empty() {
+                                links = linkify::LinkFinder::new()
                                     .links(&msg.event.body())
                                     .filter_map(|u| Url::parse(u.as_str()).ok())
                                     .scan(TreeGenState { link_num: 0 }, |state, u| {
                                         state.next_link_char().map(|c| (c, u))
                                     })
-                                    .collect()
-                            };
+                                    .collect();
+                            }
 
                             if links.is_empty() {
                                 return Err(IambError::NoAttachment.into());
@@ -392,7 +395,8 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot react to a redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -430,7 +434,8 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot redact already redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -493,7 +498,8 @@ impl ChatState {
                     MessageEvent::Original(ev) => ev.event_id.clone(),
                     MessageEvent::Local(event_id, _) => event_id.clone(),
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot unreact to a redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -586,7 +592,7 @@ impl ChatState {
                 // XXX: second parameter can be a locally unique transaction id.
                 // Useful for doing retries.
                 let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
-                let event_id = resp.event_id;
+                let event_id = resp.response.event_id;
 
                 // Reset message bar state now that it's been sent.
                 self.reset();
@@ -992,15 +998,13 @@ impl StatefulWidget for Chat<'_> {
             Paragraph::new(desc_spans).render(descarea, buf);
         }
 
-        let prompt = match (self.focused, state.room().encryption_state()) {
+        let encryption_settings = &self.store.application.settings.tunables.encryption;
+        let encryption_indicator = encryption_settings
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
+        let prompt = match (self.focused, encryption_indicator) {
             (false, _) => Span::raw("  "),
-            (_, EncryptionState::Encrypted) => {
-                Span::styled("\u{1F512}\u{FE0E} ", Style::new().fg(Color::LightGreen))
-            },
-            (_, EncryptionState::NotEncrypted) => {
-                Span::styled("\u{1F513}\u{FE0E} ", Style::new().fg(Color::Red))
-            },
-            (_, EncryptionState::Unknown) => Span::styled("> ", Style::new().fg(Color::Red)),
+            (true, Some(i)) => i,
+            (true, None) => Span::raw("> "),
         };
 
         let tbox = TextBox::new().prompt(prompt);
