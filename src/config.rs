@@ -13,6 +13,7 @@ use std::process;
 use clap::Parser;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use matrix_sdk::EncryptionState;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
@@ -53,6 +54,8 @@ const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 
+const DEFAULT_ENABLE_TITLE: bool = true;
+const DEFAULT_ENC_INDICATOR_LOC: EncryptionIndicatorLocation = EncryptionIndicatorLocation::PROMPT;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
 
 const COLORS: [Color; 13] = [
@@ -129,6 +132,9 @@ const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
 #[clap(version = VERSION, about, long_about = None)]
 #[clap(propagate_version = true)]
 pub struct Iamb {
+    #[clap(long, value_parser)]
+    pub completions: Option<clap_complete::Shell>,
+
     #[clap(short = 'P', long, value_parser)]
     pub profile: Option<String>,
 
@@ -312,16 +318,6 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
-fn merge_sorts(profile: SortOverrides, global: SortOverrides) -> SortOverrides {
-    SortOverrides {
-        chats: profile.chats.or(global.chats),
-        dms: profile.dms.or(global.dms),
-        rooms: profile.rooms.or(global.rooms),
-        spaces: profile.spaces.or(global.spaces),
-        members: profile.members.or(global.members),
-    }
-}
-
 fn merge_maps<K, V>(
     profile: Option<HashMap<K, V>>,
     global: Option<HashMap<K, V>>,
@@ -339,6 +335,69 @@ where
             Some(global)
         },
         (None, None) => None,
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum EncryptionIndicator {
+    /// Always indicate the room's encryption status.
+    #[default]
+    Enabled,
+    /// Never indicate the room's encryption status.
+    Disabled,
+    /// Only indicate the room's encryption status when it is encrypted.
+    OnlyEncrypted,
+    /// Only indicate the room's encryption status when it is unencrypted.
+    OnlyUnencrypted,
+}
+
+bitflags::bitflags! {
+    /// Available options for where to show the encryption status indicator.
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct EncryptionIndicatorLocation: u8 {
+        const NONE   = 0b00000000;
+        const TITLE  = 0b00000001;
+        const PROMPT = 0b00000010;
+    }
+}
+
+pub struct EncryptionIndicatorLocationVisitor;
+
+impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
+    type Value = EncryptionIndicatorLocation;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid encryption indicator location (e.g. \"title\" or \"prompt\")")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        let mut location = EncryptionIndicatorLocation::NONE;
+
+        for value in value.split('|') {
+            match value.to_ascii_lowercase().as_str() {
+                "title" => location |= EncryptionIndicatorLocation::TITLE,
+                "prompt" => location |= EncryptionIndicatorLocation::PROMPT,
+                _ => {
+                    return Err(E::custom("could not parse into an encryption indicator location"))
+                },
+            };
+        }
+
+        Ok(location)
+    }
+}
+
+impl<'de> Deserialize<'de> for EncryptionIndicatorLocation {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(EncryptionIndicatorLocationVisitor)
     }
 }
 
@@ -435,6 +494,76 @@ impl<'de> Deserialize<'de> for NotifyVia {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Encryption {
+    indicator: Option<EncryptionIndicator>,
+    indicator_location: Option<EncryptionIndicatorLocation>,
+}
+
+impl Encryption {
+    fn merge(profile: Self, global: Self) -> Self {
+        Encryption {
+            indicator: profile.indicator.or(global.indicator),
+            indicator_location: profile.indicator_location.or(global.indicator_location),
+        }
+    }
+
+    pub fn values(self) -> EncryptionValues {
+        EncryptionValues {
+            indicator: self.indicator.unwrap_or_default(),
+            indicator_location: self.indicator_location.unwrap_or(DEFAULT_ENC_INDICATOR_LOC),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct EncryptionValues {
+    pub indicator: EncryptionIndicator,
+    pub indicator_location: EncryptionIndicatorLocation,
+}
+
+impl EncryptionValues {
+    pub fn get_indicator(
+        &self,
+        location: EncryptionIndicatorLocation,
+        state: EncryptionState,
+    ) -> Option<Span<'static>> {
+        if !self.indicator_location.contains(location) {
+            return None;
+        }
+
+        let indicator = match (self.indicator, state) {
+            (EncryptionIndicator::Disabled, _) |
+            (EncryptionIndicator::OnlyUnencrypted, EncryptionState::Encrypted) |
+            (EncryptionIndicator::OnlyEncrypted, EncryptionState::NotEncrypted) => {
+                // User doesn't want to see anything:
+                return None;
+            },
+            (
+                EncryptionIndicator::Enabled | EncryptionIndicator::OnlyEncrypted,
+                EncryptionState::Encrypted,
+            ) => {
+                // Green lock:
+                Span::styled("\u{1F512}\u{FE0E} ", Style::new().fg(Color::LightGreen))
+            },
+            (
+                EncryptionIndicator::Enabled | EncryptionIndicator::OnlyUnencrypted,
+                EncryptionState::NotEncrypted,
+            ) => {
+                // Red unlocked lock:
+                Span::styled("\u{1F513}\u{FE0E} ", Style::new().fg(Color::Red))
+            },
+
+            (_, EncryptionState::Unknown) => {
+                // Yellow question mark:
+                Span::styled("? ", Style::new().fg(Color::Yellow))
+            },
+        };
+
+        Some(indicator)
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct Mouse {
     #[serde(default)]
@@ -455,12 +584,14 @@ pub struct Notifications {
 
 #[derive(Clone)]
 pub struct ImagePreviewValues {
+    pub lazy_load: bool,
     pub size: ImagePreviewSize,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct ImagePreview {
+    pub lazy_load: Option<bool>,
     pub size: Option<ImagePreviewSize>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
@@ -468,13 +599,14 @@ pub struct ImagePreview {
 impl ImagePreview {
     fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
+            lazy_load: self.lazy_load.unwrap_or(true),
             size: self.size.unwrap_or_default(),
             protocol: self.protocol,
         }
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Copy, Deserialize, Debug)]
 pub struct ImagePreviewSize {
     pub width: usize,
     pub height: usize,
@@ -511,6 +643,16 @@ pub struct SortOverrides {
 }
 
 impl SortOverrides {
+    fn merge(profile: Self, global: Self) -> Self {
+        Self {
+            chats: profile.chats.or(global.chats),
+            dms: profile.dms.or(global.dms),
+            rooms: profile.rooms.or(global.rooms),
+            spaces: profile.spaces.or(global.spaces),
+            members: profile.members.or(global.members),
+        }
+    }
+
     pub fn values(self) -> SortValues {
         let rooms = self.rooms.unwrap_or_else(|| Vec::from(DEFAULT_ROOM_SORT));
         let chats = self.chats.unwrap_or_else(|| rooms.clone());
@@ -522,8 +664,41 @@ impl SortOverrides {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Terminal {
+    pub cursor_shape: Option<CursorShape>,
+    pub enable_extended_keys: Option<bool>,
+    pub enable_title: Option<bool>,
+}
+
+impl Terminal {
+    fn merge(profile: Self, global: Self) -> Self {
+        Self {
+            cursor_shape: profile.cursor_shape.or(global.cursor_shape),
+            enable_extended_keys: profile.enable_extended_keys.or(global.enable_extended_keys),
+            enable_title: profile.enable_title.or(global.enable_title),
+        }
+    }
+
+    pub fn values(self) -> TerminalValues {
+        TerminalValues {
+            cursor_shape: self.cursor_shape.unwrap_or_default(),
+            enable_extended_keys: self.enable_extended_keys,
+            enable_title: self.enable_title.unwrap_or(DEFAULT_ENABLE_TITLE),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalValues {
+    pub cursor_shape: CursorShape,
+    pub enable_extended_keys: Option<bool>,
+    pub enable_title: bool,
+}
+
 #[derive(Clone)]
 pub struct TunableValues {
+    pub encryption: EncryptionValues,
     pub log_level: String,
     pub max_log_files: usize,
     pub message_shortcode_display: bool,
@@ -544,15 +719,32 @@ pub struct TunableValues {
     pub open_command: Option<Vec<String>>,
     pub mouse: Mouse,
     pub notifications: Notifications,
+    pub terminal: TerminalValues,
     pub image_preview: Option<ImagePreviewValues>,
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
     pub default_split: SplitDirection,
+    pub ssl_verify: bool,
 }
 
 #[derive(Clone, Default, Deserialize)]
 pub struct Tunables {
+    /// Subsection for overriding encryption-related settings.
+    #[serde(default)]
+    pub encryption: Encryption,
+
+    /// Subsection for overriding sort orders in UI lists.
+    #[serde(default)]
+    pub sort: SortOverrides,
+
+    /// Subsection for overriding terminal settings.
+    #[serde(default)]
+    pub terminal: Terminal,
+
+    /// Subsection for overriding how specific Matrix users are rendered.
+    pub users: Option<UserOverrides>,
+
     pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
@@ -562,12 +754,9 @@ pub struct Tunables {
     pub read_receipt_send: Option<bool>,
     pub read_receipt_display: Option<bool>,
     pub request_timeout: Option<u64>,
-    #[serde(default)]
-    pub sort: SortOverrides,
     pub state_event_display: Option<bool>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
-    pub users: Option<UserOverrides>,
     pub username_display: Option<UserDisplayStyle>,
     pub message_user_color: Option<bool>,
     pub default_room: Option<String>,
@@ -579,11 +768,17 @@ pub struct Tunables {
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
     pub default_split: Option<SplitDirection>,
+    pub ssl_verify: Option<bool>,
 }
 
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
+            encryption: Encryption::merge(self.encryption, other.encryption),
+            sort: SortOverrides::merge(self.sort, other.sort),
+            terminal: Terminal::merge(self.terminal, other.terminal),
+            users: merge_maps(self.users, other.users),
+
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
@@ -597,11 +792,9 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
             request_timeout: self.request_timeout.or(other.request_timeout),
-            sort: merge_sorts(self.sort, other.sort),
             state_event_display: self.state_event_display.or(other.state_event_display),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
-            users: merge_maps(self.users, other.users),
             username_display: self.username_display.or(other.username_display),
             message_user_color: self.message_user_color.or(other.message_user_color),
             default_room: self.default_room.or(other.default_room),
@@ -615,11 +808,16 @@ impl Tunables {
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
             default_split: self.default_split.or(other.default_split),
+            ssl_verify: self.ssl_verify.or(other.ssl_verify),
         }
     }
 
     fn values(self) -> TunableValues {
         TunableValues {
+            encryption: self.encryption.values(),
+            sort: self.sort.values(),
+            terminal: self.terminal.values(),
+
             log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
@@ -629,7 +827,6 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
-            sort: self.sort.values(),
             state_event_display: self.state_event_display.unwrap_or(true),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
@@ -647,6 +844,29 @@ impl Tunables {
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
             default_split: self.default_split.unwrap_or_default(),
+            ssl_verify: self.ssl_verify.unwrap_or(true),
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum CursorShape {
+    #[default]
+    Default,
+    Block,
+    Line,
+    Underline,
+}
+
+impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
+    fn from(shape: CursorShape) -> Self {
+        match shape {
+            CursorShape::Default => Self::DefaultUserShape,
+            CursorShape::Block => Self::SteadyBlock,
+            CursorShape::Line => Self::SteadyBar,
+            CursorShape::Underline => Self::SteadyUnderScore,
         }
     }
 }
@@ -657,19 +877,17 @@ pub struct DirectoryValues {
     pub data: PathBuf,
     pub logs: PathBuf,
     pub downloads: Option<PathBuf>,
-    pub image_previews: PathBuf,
 }
 
 impl DirectoryValues {
     fn create_dir_all(&self) -> std::io::Result<()> {
         use std::fs::create_dir_all;
 
-        let Self { cache, data, logs, downloads, image_previews } = self;
+        let Self { cache, data, logs, downloads } = self;
 
         create_dir_all(cache)?;
         create_dir_all(data)?;
         create_dir_all(logs)?;
-        create_dir_all(image_previews)?;
 
         if let Some(downloads) = downloads {
             create_dir_all(downloads)?;
@@ -685,7 +903,6 @@ pub struct Directories {
     pub data: Option<String>,
     pub logs: Option<String>,
     pub downloads: Option<String>,
-    pub image_previews: Option<String>,
 }
 
 impl Directories {
@@ -695,7 +912,6 @@ impl Directories {
             data: self.data.or(other.data),
             logs: self.logs.or(other.logs),
             downloads: self.downloads.or(other.downloads),
-            image_previews: self.image_previews.or(other.image_previews),
         }
     }
 
@@ -750,20 +966,7 @@ impl Directories {
             })
             .or_else(dirs::download_dir);
 
-        let image_previews = self
-            .image_previews
-            .map(|dir| {
-                let dir = shellexpand::full(&dir)
-                    .expect("unable to expand shell variables in dirs.cache");
-                Path::new(dir.as_ref()).to_owned()
-            })
-            .unwrap_or_else(|| {
-                let mut dir = cache.clone();
-                dir.push("image_preview_downloads");
-                dir
-            });
-
-        DirectoryValues { cache, data, logs, downloads, image_previews }
+        DirectoryValues { cache, data, logs, downloads }
     }
 }
 
@@ -800,6 +1003,7 @@ pub enum Layout {
 #[derive(Clone, Deserialize)]
 pub struct ProfileConfig {
     pub user_id: OwnedUserId,
+    pub password_file: Option<PathBuf>,
     pub url: Option<Url>,
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
@@ -1059,8 +1263,8 @@ impl ApplicationSettings {
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
             (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
             (None, UserDisplayStyle::DisplayName) => {
-                if let Some(display) = info.display_names.get(user_id) {
-                    Cow::Borrowed(display.as_str())
+                if let Some(name) = info.display_names.get(user_id) {
+                    name
                 } else {
                     Cow::Borrowed(user_id.as_str())
                 }
@@ -1320,6 +1524,16 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_cursor_shape() {
+        assert_eq!(CursorShape::Default, CursorShape::default());
+        assert_eq!(CursorShape::Default, serde_json::from_str(r#""default""#).unwrap());
+        assert_eq!(CursorShape::Block, serde_json::from_str(r#""block""#).unwrap());
+        assert_eq!(CursorShape::Line, serde_json::from_str(r#""line""#).unwrap());
+        assert_eq!(CursorShape::Underline, serde_json::from_str(r#""underline""#).unwrap());
+        assert!(serde_json::from_str::<CursorShape>(r#""beam""#).is_err());
+    }
+
+    #[test]
     fn test_load_example_config_toml() {
         let path = PathBuf::from("config.example.toml");
         let config = IambConfig::load_toml(&path).expect("can load example_config.toml");
@@ -1340,5 +1554,100 @@ mod tests {
         assert!(dirs.is_some());
         assert!(layout.is_some());
         assert!(macros.is_some());
+    }
+
+    #[test]
+    fn test_encryption_indicator_enabled() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::Enabled,
+            indicator_location: EncryptionIndicatorLocation::TITLE,
+        };
+
+        // Always shows in the title:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_some());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            .is_some());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
+
+        // Doesn't show in the prompt:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            .is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+    }
+
+    #[test]
+    fn test_encryption_indicator_disabled() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::Disabled,
+            indicator_location: EncryptionIndicatorLocation::TITLE,
+        };
+
+        // Never shows in the title or the prompt:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            .is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            .is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+    }
+
+    #[test]
+    fn test_encryption_indicator_only_encrypted() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::OnlyEncrypted,
+            indicator_location: EncryptionIndicatorLocation::PROMPT,
+        };
+
+        // Shows in the prompt when encrypted or unknown:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_some());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+
+        // But is hidden when unencrypted:
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            .is_none());
+
+        // Doesn't show in the title:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            .is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
+    }
+    #[test]
+    fn test_encryption_indicator_only_unencrypted() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::OnlyUnencrypted,
+            indicator_location: EncryptionIndicatorLocation::all(),
+        };
+
+        // Shows in both the prompt and title when unencrypted or unknown:
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            .is_some());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
+        assert!(enc
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            .is_some());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+
+        // But is hidden when encrypted:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
     }
 }
