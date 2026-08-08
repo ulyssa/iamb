@@ -161,6 +161,9 @@ impl TerminalCursor for SpaceState {
     fn get_term_cursor(&self) -> Option<TermOffset> {
         self.list.get_term_cursor()
     }
+    fn hide_term_cursor(&self) -> bool {
+        self.list.hide_term_cursor()
+    }
 }
 
 impl Deref for SpaceState {
