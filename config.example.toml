@@ -24,7 +24,7 @@ username_display = "username"
 
 [settings.encryption]
 indicator = "only-encrypted"
-location = "title|prompt"
+indicator_location = "title|prompt"
 
 [settings.image_preview]
 protocol.type = "sixel"
