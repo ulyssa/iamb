@@ -1997,10 +1997,10 @@ impl Visitor<'_> for IambIdVisitor {
             },
             Some("mentions") => {
                 if url.path() != "" {
-                    return Err(E::custom("iamb://message takes no path"));
+                    return Err(E::custom("iamb://mentions takes no path"));
                 }
 
-                Ok(IambId::UnreadList)
+                Ok(IambId::MentionsList)
             },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
