@@ -29,7 +29,7 @@ use matrix_sdk::{
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
-    style::{Modifier as StyleModifier, Style},
+    style::{Color, Modifier as StyleModifier, Style},
     text::{Line, Span, Text},
     widgets::StatefulWidget,
 };
@@ -1629,42 +1629,77 @@ impl ListItem<IambInfo> for MemberItem {
         _: &ViewportContext<ListCursor>,
         store: &mut ProgramStore,
     ) -> Text<'_> {
+        use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
+
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let user_id = self.member.user_id();
 
         let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
         let color = color.unwrap_or_else(|| super::config::user_color(user_id.as_str()));
-        let mut style = super::config::user_style_from_color(color);
 
-        if selected {
-            style = style.add_modifier(StyleModifier::REVERSED);
-        }
+        let style = if selected {
+            // Ensure the whole item has the same color when it's selected:
+            Style::default().fg(color).add_modifier(StyleModifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        let user_style = style.patch(super::config::user_style_from_color(color));
+        let role_style = style.add_modifier(StyleModifier::BOLD);
 
         let mut spans = vec![];
-        let mut parens = false;
+        let mut tags = vec![];
 
         if let Some(name) = name {
-            spans.push(Span::styled(name, style));
-            parens = true;
+            spans.push(Span::styled(name, user_style));
+            tags.push(Span::styled(user_id.as_str(), user_style));
         } else if let Some(display) = info.display_names.get(user_id) {
-            spans.push(Span::styled(display.into_owned(), style));
-            parens = true;
+            spans.push(Span::styled(display.into_owned(), user_style));
+            tags.push(Span::styled(user_id.as_str(), user_style));
         }
 
-        spans.extend(parens.then_some(Span::styled(" (", style)));
-        spans.push(Span::styled(user_id.as_str(), style));
-        spans.extend(parens.then_some(Span::styled(")", style)));
+        let roles = match self.member.power_level() {
+            UserPowerLevel::Infinite => {
+                vec![
+                    Span::styled("Admin", role_style),
+                    Span::styled("Creator", role_style),
+                ]
+            },
+            UserPowerLevel::Int(n) => {
+                match i64::from(n) {
+                    0 => vec![],
+                    50 => vec![Span::styled("Moderator", role_style)],
+                    100 => vec![Span::styled("Admin", role_style)],
+                    _ => {
+                        let custom = format!("Power Level {n}");
+                        vec![Span::styled(custom, role_style)]
+                    },
+                }
+            },
+            _ => vec![],
+        };
 
         let state = match self.member.membership() {
-            MembershipState::Ban => Span::raw(" (banned)").into(),
-            MembershipState::Invite => Span::raw(" (invited)").into(),
-            MembershipState::Knock => Span::raw(" (wants to join)").into(),
-            MembershipState::Leave => Span::raw(" (left)").into(),
+            MembershipState::Ban => Span::styled("banned", style.fg(Color::LightRed)).into(),
+            MembershipState::Invite => Span::styled("invited", style).into(),
+            MembershipState::Knock => Span::styled("wants to join", style).into(),
+            MembershipState::Leave => Span::styled("left", style).into(),
             MembershipState::Join => None,
             _ => None,
         };
 
-        spans.extend(state);
+        tags.extend(roles);
+        tags.extend(state);
+
+        if !tags.is_empty() {
+            spans.push(Span::styled(" (", style));
+            for (i, tag) in tags.into_iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled(", ", style));
+                }
+                spans.push(tag);
+            }
+            spans.push(Span::styled(")", style));
+        }
 
         return Line::from(spans).into();
     }
