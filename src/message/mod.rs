@@ -79,6 +79,10 @@ pub use html::TreeGenState;
 
 type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
 
+/// The key used for uniquely identifying messages within a room and its threads.
+///
+/// Note that the ordering of the fields is important here, so that the derived
+/// `Ord` trait will sort by timestamp first, and then sort by the message ID.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
 pub struct MessageKey {
     pub ts: MessageTimeStamp,
