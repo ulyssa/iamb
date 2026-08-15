@@ -203,6 +203,17 @@ fn room_cmp<T: RoomLikeItem>(
         SortFieldRoom::Name => collator.collate(a.name(), b.name()),
         SortFieldRoom::Alias => some_cmp(a.alias(), b.alias(), Ord::cmp),
         SortFieldRoom::RoomId => a.room_id().cmp(b.room_id()),
+        SortFieldRoom::Server => {
+            let a = a
+                .alias()
+                .map(RoomAliasId::server_name)
+                .or_else(|| a.room_id().server_name());
+            let b = b
+                .alias()
+                .map(RoomAliasId::server_name)
+                .or_else(|| b.room_id().server_name());
+            some_cmp(a, b, Ord::cmp)
+        },
         SortFieldRoom::Unread => {
             // Sort true (unread) before false (read)
             b.is_unread().cmp(&a.is_unread())
@@ -1917,5 +1928,81 @@ mod tests {
         ];
         rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room1, &room2, &room3]);
+    }
+
+    #[test]
+    fn sort_room_servers() {
+        let mut collator = Collator::default();
+        let collator = &mut collator;
+        let server1 = server_name!("a.com");
+        let server3 = server_name!("c.com");
+
+        // No alias, fallback to namespace of V1 room ID:
+        let room1 = TestRoomItem {
+            room_id: RoomId::new_v1(server3).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Room E",
+            unread: UnreadInfo::default(),
+            invite: false,
+        };
+
+        // Alias and V1 room ID agree:
+        let room2 = TestRoomItem {
+            room_id: RoomId::new_v1(server1).to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#name:a.com").to_owned()),
+            name: "Room D",
+            unread: UnreadInfo::default(),
+            invite: false,
+        };
+
+        // Alias, V2 room id:
+        let room3 = TestRoomItem {
+            room_id: RoomId::new_v2("refhash").unwrap().to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#alias:b.com").to_owned()),
+            name: "Room C",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // Alias and V2 room ID disagree, alias is used:
+        let room4 = TestRoomItem {
+            room_id: RoomId::new_v1(server3).to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#alias:a.com").to_owned()),
+            name: "Room B",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // No alias and V2 room ID:
+        let room5 = TestRoomItem {
+            room_id: RoomId::new_v2("refhash").unwrap().to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Room A",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // Sort servers first ascending, name tie breaks:
+        let mut rooms = vec![&room1, &room2, &room3, &room4, &room5];
+        let fields = &[
+            SortColumn(SortFieldRoom::Server, SortOrder::Ascending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+        assert_eq!(rooms, vec![&room4, &room2, &room3, &room1, &room5]);
+
+        // Sort servers first descending, name tie breaks:
+        let mut rooms = vec![&room1, &room2, &room3, &room4, &room5];
+        let fields = &[
+            SortColumn(SortFieldRoom::Server, SortOrder::Descending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+        assert_eq!(rooms, vec![&room5, &room1, &room3, &room4, &room2]);
     }
 }
