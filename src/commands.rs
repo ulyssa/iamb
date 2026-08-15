@@ -573,6 +573,12 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         ("id", "show", None) => RoomAction::Show(RoomField::Id).into(),
         ("id", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
+        // :room unread set
+        ("unread", "set", None) => RoomAction::SetUnread(true).into(),
+
+        // :room unread [unset|clear]
+        ("unread", "unset" | "clear", None) => RoomAction::SetUnread(false).into(),
+
         _ => return Result::Err(CommandError::InvalidArgument),
     };
 

@@ -13,7 +13,7 @@ use modalkit::{
 };
 
 use crate::base::{IambAction, IambInfo, Keybindings, MATRIX_ID_WORD};
-use crate::config::{ApplicationSettings, Keys};
+use crate::config::{ApplicationSettings, Keys, SplitDirection};
 
 pub type IambStep = InputStep<IambInfo>;
 
@@ -84,6 +84,28 @@ impl InputBindings<TerminalKey, IambStep> for ApplicationSettings {
                     bindings.add_mapping(*mode, &input, &step);
                 }
             }
+        }
+
+        if self.tunables.default_split == SplitDirection::Vertical {
+            let ctrl_w = "<C-W>".parse::<TerminalKey>().unwrap();
+            let key_f = "f".parse::<TerminalKey>().unwrap();
+            let ctrl_f = "<C-F>".parse::<TerminalKey>().unwrap();
+
+            let vsplit_open = IambStep::new()
+                .actions(vec![WindowAction::Split(
+                    OpenTarget::Cursor(MATRIX_ID_WORD.clone()),
+                    Axis::Vertical,
+                    MoveDir1D::Next,
+                    1.into(),
+                )
+                .into()])
+                .goto(VimMode::Normal);
+
+            let cwf = vec![once(&ctrl_w), once(&key_f)];
+            let cwcf = vec![once(&ctrl_w), once(&ctrl_f)];
+
+            bindings.add_mapping(VimMode::Normal, &cwf, &vsplit_open);
+            bindings.add_mapping(VimMode::Normal, &cwcf, &vsplit_open);
         }
     }
 }
