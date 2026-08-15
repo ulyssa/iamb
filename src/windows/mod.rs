@@ -143,7 +143,7 @@ fn name_and_labels<'a>(
 
     if unread.unread_mentions > 0 {
         labels.push(vec![Span::styled("Unread Mention", style)]);
-    } else if unread.unread_notifications > 0 || unread.unread_messages > 0 {
+    } else if unread.is_unread() {
         labels.push(vec![Span::styled("Unread", style)]);
     }
 
@@ -1816,6 +1816,7 @@ mod tests {
             name: "Room 1",
             unread: UnreadInfo {
                 latest: None,
+                unread_mark: false,
                 unread_messages: 0,
                 unread_notifications: 0,
                 unread_mentions: 0,
@@ -1830,6 +1831,7 @@ mod tests {
             name: "Room 2",
             unread: UnreadInfo {
                 latest: Some(MessageTimeStamp::OriginServer(40u32.into())),
+                unread_mark: false,
                 unread_messages: 0,
                 unread_notifications: 0,
                 unread_mentions: 0,
@@ -1844,6 +1846,7 @@ mod tests {
             name: "Room 3",
             unread: UnreadInfo {
                 latest: Some(MessageTimeStamp::OriginServer(20u32.into())),
+                unread_mark: false,
                 unread_messages: 0,
                 unread_notifications: 0,
                 unread_mentions: 0,

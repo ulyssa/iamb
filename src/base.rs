@@ -869,6 +869,7 @@ impl EventLocation {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnreadInfo {
+    pub(crate) unread_mark: bool,
     pub(crate) unread_messages: u64,
     pub(crate) unread_notifications: u64,
     pub(crate) unread_mentions: u64,
@@ -877,7 +878,7 @@ pub struct UnreadInfo {
 
 impl UnreadInfo {
     pub fn is_unread(&self) -> bool {
-        self.unread_notifications > 0 || self.unread_mentions > 0
+        self.unread_mark || self.unread_notifications > 0 || self.unread_mentions > 0
     }
 
     pub fn has_mention(&self) -> bool {
@@ -1285,6 +1286,7 @@ impl RoomInfo {
             .find(|(_, msg)| !matches!(&msg.event, MessageEvent::State(..)));
 
         UnreadInfo {
+            unread_mark: room.is_marked_unread(),
             unread_messages: room.num_unread_messages(),
             unread_notifications: room.num_unread_notifications(),
             unread_mentions: room.num_unread_mentions(),
