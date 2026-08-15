@@ -218,6 +218,11 @@ for more details.
 Defines a custom  command and its arguments to run when opening downloads instead of the default.
 (For example,
 .Sy ["my-open",\ "--file"] . )
+.Sy proxy
+When this subsection is present, you can configure how requests are proxied to the homeserver.
+See
+.Sx PROXYING
+for more details.
 .It Sy reaction_display
 Defines whether or not reactions should be shown.
 .It Sy reaction_shortcode_display
@@ -376,6 +381,34 @@ enabled = true
 sound_hint = "message-new-instant" # Linux
 sound_hint = "IM"                  # Windows
 .Ed
+.Sh "PROXYING"
+The
+.Sy settings.proxy
+subsection allows configuring proxying for requests to the homeserver.
+.Pp
+Fields available within this subsection are:
+.Bl -tag -width Ds
+.It Sy url
+Either a
+.Sy socks5://IP:PORT
+URL for a SOCKS server to proxy request through,
+or a
+.Sy http[s]://[USER:PASS@]HOST[:PORT]/
+URL to do HTTP(S) proxying through.
+Setting this to the empty string will explicitly disable proxying, and any environment variables will be ignored.
+.It Sy auth
+A value to send in a
+.Sy Proxy-Authorization
+header if your HTTP(S) proxy requires it,
+such as for doing Bearer authentication with a token.
+.It Sy headers
+A subsection for specifying additional headers and values to include in requests sent to the proxy.
+For example, custom HTTPS proxy server software may require specifying a
+.Sy User-Agent
+or a custom header like
+.Sy X-Proxy-Token
+in order to be allowed to send request through it.
+.El
 .Sh "SORTING LISTS"
 The
 .Sy settings.sort

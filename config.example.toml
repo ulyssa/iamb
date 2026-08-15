@@ -30,6 +30,11 @@ indicator_location = "title|prompt"
 protocol.type = "sixel"
 size = { "width" = 66, "height" = 10 }
 
+[settings.proxy]
+url = "" # An empty string disables any proxying
+auth = "Bearer abcd1234"
+headers.X-Proxy-Config = "foobar"
+
 [settings.sort]
 rooms = ["favorite", "lowpriority", "unread", "name"]
 members = ["power", "id"]
