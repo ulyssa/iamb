@@ -176,6 +176,7 @@ pub fn mock_tunables() -> TunableValues {
         reaction_display: true,
         reaction_shortcode_display: false,
         read_receipt_send: true,
+        read_receipt_trigger: Default::default(),
         read_receipt_display: true,
         request_timeout: 120,
         sort: SortOverrides::default().values(),

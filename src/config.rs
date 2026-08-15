@@ -350,6 +350,42 @@ where
 #[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 #[repr(u8)]
+pub enum ReadReceiptTrigger {
+    /// Update read receipts for a room when a window for it is focused, and it is scrolled to the
+    /// last message.
+    #[default]
+    Focused,
+    /// Update read receipts for a room when a window for it is visible, and it is scrolled to the
+    /// last message.
+    Visible,
+    /// Update read receipts for a room whenever some portion of its scrollback is rendered.
+    Scrollback,
+    /// Update read receipts for a room once the user sends a message to it.
+    Message,
+    /// Never update read receipts.
+    Disabled,
+}
+
+impl ReadReceiptTrigger {
+    /// Whether to update read receipts when a room is being rendered.
+    pub fn on_render(&self, last_visible: bool, room_focused: bool) -> bool {
+        match self {
+            Self::Disabled => false,
+            Self::Scrollback => true,
+            Self::Focused => last_visible && room_focused,
+            Self::Visible => last_visible,
+            Self::Message => false,
+        }
+    }
+
+    pub fn on_message(&self) -> bool {
+        matches!(self, Self::Message)
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
 pub enum EncryptionIndicator {
     /// Always indicate the room's encryption status.
     #[default]
@@ -763,6 +799,7 @@ pub struct TunableValues {
     pub reaction_display: bool,
     pub reaction_shortcode_display: bool,
     pub read_receipt_send: bool,
+    pub read_receipt_trigger: ReadReceiptTrigger,
     pub read_receipt_display: bool,
     pub request_timeout: u64,
     pub sort: SortValues,
@@ -812,6 +849,7 @@ pub struct Tunables {
     pub reaction_display: Option<bool>,
     pub reaction_shortcode_display: Option<bool>,
     pub read_receipt_send: Option<bool>,
+    pub read_receipt_trigger: Option<ReadReceiptTrigger>,
     pub read_receipt_display: Option<bool>,
     pub request_timeout: Option<u64>,
     pub state_event_display: Option<bool>,
@@ -855,6 +893,7 @@ impl Tunables {
                 .reaction_shortcode_display
                 .or(other.reaction_shortcode_display),
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
+            read_receipt_trigger: self.read_receipt_trigger.or(other.read_receipt_trigger),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
             request_timeout: self.request_timeout.or(other.request_timeout),
             state_event_display: self.state_event_display.or(other.state_event_display),
@@ -892,6 +931,7 @@ impl Tunables {
             reaction_display: self.reaction_display.unwrap_or(true),
             reaction_shortcode_display: self.reaction_shortcode_display.unwrap_or(false),
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
+            read_receipt_trigger: self.read_receipt_trigger.unwrap_or_default(),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             state_event_display: self.state_event_display.unwrap_or(true),

@@ -1459,8 +1459,12 @@ impl StatefulWidget for Scrollback<'_> {
             }
         }
 
-        if self.room_focused && state.cursor.timestamp.is_none() {
-            // If the cursor is at the last message, then update the read marker.
+        // Check if we should update the user's read receipt for this room after this render:
+        if settings
+            .tunables
+            .read_receipt_trigger
+            .on_render(state.cursor.timestamp.is_none(), self.room_focused)
+        {
             info.fully_read(settings.profile.user_id.clone(), thread.1.clone());
         }
 

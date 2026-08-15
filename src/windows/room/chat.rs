@@ -564,6 +564,8 @@ impl ChatState {
         _: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
+        let settings = &store.application.settings;
+        let tunables = &settings.tunables;
         let room = self.get_joined(&store.application.worker)?;
         let info = store.application.rooms.get_or_default(self.id().to_owned());
 
@@ -691,6 +693,12 @@ impl ChatState {
 
         // Jump to the end of the scrollback to show the message.
         self.scrollback.goto_latest();
+
+        if tunables.read_receipt_trigger.on_message() {
+            if let Some(thread) = self.scrollback.get_thread(info) {
+                info.fully_read(settings.profile.user_id.clone(), thread.1.clone());
+            }
+        }
 
         Ok(None)
     }
