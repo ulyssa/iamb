@@ -125,19 +125,27 @@ fn selected_text(s: &str, selected: bool) -> Text<'_> {
     Text::from(selected_span(s, selected))
 }
 
-fn name_and_labels(name: &str, unread: bool, style: Style) -> (Span<'_>, Vec<Vec<Span<'_>>>) {
-    let name_style = if unread {
+fn name_and_labels<'a>(
+    name: &'a str,
+    unread: &UnreadInfo,
+    style: Style,
+) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
+    // TODO: use different colors for "mention", "notification", "muted room"
+    let name_style = if unread.is_unread() {
         style.add_modifier(StyleModifier::BOLD)
     } else {
         style
     };
 
     let name = Span::styled(name, name_style);
-    let labels = if unread {
-        vec![vec![Span::styled("Unread", style)]]
-    } else {
-        vec![]
-    };
+
+    let mut labels = vec![];
+
+    if unread.unread_mentions > 0 {
+        labels.push(vec![Span::styled("Unread Mention", style)]);
+    } else if unread.unread_notifications > 0 || unread.unread_messages > 0 {
+        labels.push(vec![Span::styled("Unread", style)]);
+    }
 
     (name, labels)
 }
@@ -330,6 +338,7 @@ macro_rules! delegate {
             IambWindow::Welcome($id) => $e,
             IambWindow::ChatList($id) => $e,
             IambWindow::UnreadList($id) => $e,
+            IambWindow::MentionsList($id) => $e,
         }
     };
 }
@@ -344,6 +353,7 @@ pub enum IambWindow {
     Welcome(WelcomeState),
     ChatList(ChatListState),
     UnreadList(UnreadListState),
+    MentionsList(MentionsListState),
 }
 
 impl IambWindow {
@@ -427,6 +437,7 @@ pub type MemberListState = ListState<MemberItem, IambInfo>;
 pub type RoomListState = ListState<RoomItem, IambInfo>;
 pub type ChatListState = ListState<GenericChatItem, IambInfo>;
 pub type UnreadListState = ListState<GenericChatItem, IambInfo>;
+pub type MentionsListState = ListState<GenericChatItem, IambInfo>;
 pub type SpaceListState = ListState<SpaceItem, IambInfo>;
 pub type VerifyListState = ListState<VerifyItem, IambInfo>;
 
@@ -660,6 +671,40 @@ impl WindowOps<IambInfo> for IambWindow {
                     .focus(focused)
                     .render(area, buf, state);
             },
+            IambWindow::MentionsList(state) => {
+                let mut items = store
+                    .application
+                    .sync_info
+                    .rooms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, false))
+                    .filter(GenericChatItem::has_mention)
+                    .collect::<Vec<_>>();
+
+                let dms = store
+                    .application
+                    .sync_info
+                    .dms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, true))
+                    .filter(GenericChatItem::has_mention);
+
+                items.extend(dms);
+
+                let fields = &store.application.settings.tunables.sort.chats;
+                let collator = &mut store.application.collator;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+
+                state.set(items);
+
+                List::new(store)
+                    .empty_message("You do not have any unread mentions yet")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(area, buf, state);
+            },
             IambWindow::SpaceList(state) => {
                 let mut items = store
                     .application
@@ -713,6 +758,7 @@ impl WindowOps<IambInfo> for IambWindow {
             IambWindow::Welcome(w) => w.dup(store).into(),
             IambWindow::ChatList(w) => w.dup(store).into(),
             IambWindow::UnreadList(w) => w.dup(store).into(),
+            IambWindow::MentionsList(w) => w.dup(store).into(),
         }
     }
 
@@ -754,6 +800,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => IambId::Welcome,
             IambWindow::ChatList(_) => IambId::ChatList,
             IambWindow::UnreadList(_) => IambId::UnreadList,
+            IambWindow::MentionsList(_) => IambId::MentionsList,
         }
     }
 
@@ -766,6 +813,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
             IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::MentionsList(_) => bold_spans("Unread Mentions"),
 
             IambWindow::Room(w) => {
                 let title = store.application.get_room_title(w.id());
@@ -794,6 +842,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
             IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::MentionsList(_) => bold_spans("Unread Mentions"),
 
             IambWindow::Room(w) => w.get_title(store),
             IambWindow::MemberList(state, room_id, _) => {
@@ -860,6 +909,11 @@ impl Window<IambInfo> for IambWindow {
 
                 Ok(IambWindow::UnreadList(list))
             },
+            IambId::MentionsList => {
+                let list = MentionsListState::new(IambBufferId::MentionsList, vec![]);
+
+                Ok(IambWindow::MentionsList(list))
+            },
         }
     }
 
@@ -911,7 +965,7 @@ impl GenericChatItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(room, &store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -929,6 +983,11 @@ impl GenericChatItem {
     #[inline]
     fn tags(&self) -> &Option<Tags> {
         &self.room_info.deref().1
+    }
+
+    #[inline]
+    fn has_mention(&self) -> bool {
+        self.unread.has_mention()
     }
 }
 
@@ -979,9 +1038,8 @@ impl ListItem<IambInfo> for GenericChatItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
         let mut spans = vec![name];
 
         labels.push(if self.is_dm {
@@ -1030,7 +1088,7 @@ impl RoomItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(room, &store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -1098,9 +1156,8 @@ impl ListItem<IambInfo> for RoomItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1138,12 +1195,13 @@ pub struct DirectItem {
 
 impl DirectItem {
     fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
+        let room = &room_info.deref().0;
         let room_id = room_info.0.room_id().to_owned();
         let alias = room_info.0.canonical_alias();
 
         let info = store.application.rooms.get_or_default(room_id);
         let name = info.name.clone().unwrap_or_default();
-        let unread = info.unreads(&room_info.0, &store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         DirectItem { room_info, name, alias, unread }
@@ -1207,9 +1265,8 @@ impl ListItem<IambInfo> for DirectItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1757,7 +1814,12 @@ mod tests {
             tags: vec![],
             alias: None,
             name: "Room 1",
-            unread: UnreadInfo { unread: false, latest: None },
+            unread: UnreadInfo {
+                latest: None,
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
+            },
             invite: false,
         };
 
@@ -1767,8 +1829,10 @@ mod tests {
             alias: None,
             name: "Room 2",
             unread: UnreadInfo {
-                unread: false,
                 latest: Some(MessageTimeStamp::OriginServer(40u32.into())),
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
             },
             invite: false,
         };
@@ -1779,8 +1843,10 @@ mod tests {
             alias: None,
             name: "Room 3",
             unread: UnreadInfo {
-                unread: false,
                 latest: Some(MessageTimeStamp::OriginServer(20u32.into())),
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
             },
             invite: false,
         };
