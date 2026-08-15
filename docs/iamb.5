@@ -418,7 +418,7 @@ Defaults to
 .Sy ["power",\ "id"] .
 .El
 .Pp
-The available values are:
+The available values for sorting rooms are:
 .Bl -tag -width Ds
 .It Sy favorite
 Put favorite rooms before other rooms.
@@ -430,6 +430,10 @@ Sort rooms by alphabetically ascending room name.
 Sort rooms by alphabetically ascending canonical room alias.
 .It Sy id
 Sort rooms by alphabetically ascending Matrix room identifier.
+.It Sy server
+Sort rooms by alphabetically ascending server name from the room alias.
+This will fall back to the server from the room identifier if there is
+no canonical alias for the room.
 .It Sy unread
 Put unread rooms before other rooms.
 .It Sy recent

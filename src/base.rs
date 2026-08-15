@@ -256,6 +256,13 @@ pub enum SortFieldRoom {
     /// Sort rooms by their Matrix room identifier.
     RoomId,
 
+    /// Sort rooms by the server portion of their canonical room alias.
+    ///
+    /// If the room has no canonical alias, and the room identifier uses the version 1 syntax
+    /// for formatting the MXID, then this will fall back to using the server portion of the
+    /// identifier (aka, the "namespace").
+    Server,
+
     /// Sort rooms by whether they have unread messages.
     Unread,
 
@@ -328,6 +335,7 @@ impl Visitor<'_> for SortRoomVisitor {
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
             "id" => SortFieldRoom::RoomId,
+            "server" => SortFieldRoom::Server,
             "invite" => SortFieldRoom::Invite,
             _ => {
                 let msg = format!("Unknown sort field: {value:?}");
