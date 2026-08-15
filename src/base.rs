@@ -2,7 +2,7 @@
 //!
 //! The types defined here get used throughout iamb.
 use std::borrow::Cow;
-use std::collections::hash_map::IntoIter;
+use std::collections::hash_map::{Entry, IntoIter};
 use std::collections::{BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
@@ -12,7 +12,10 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
+
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::events::sticker::StickerEvent;
 use matrix_sdk::ruma::OwnedTransactionId;
 use ratatui::{
     buffer::Buffer,
@@ -91,9 +94,8 @@ use modalkit::{
 };
 
 use crate::config::ImagePreviewProtocolValues;
-use crate::message::ImageStatus;
 use crate::notifications::NotificationHandle;
-use crate::preview::{source_from_event, spawn_insert_preview};
+use crate::preview::{source_from_event, PreviewManager};
 use crate::{
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     worker::Requester,
@@ -199,9 +201,6 @@ pub enum SpaceAction {
 /// The type of room being created.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CreateRoomType {
-    /// A direct message room.
-    Direct(OwnedUserId),
-
     /// A standard chat room.
     Room,
 
@@ -470,6 +469,9 @@ pub enum RoomAction {
 
     /// List the values in a list room property.
     Show(RoomField),
+
+    /// Mark the room as read/unread.
+    SetUnread(bool),
 }
 
 /// An action that sends a message to a room.
@@ -855,14 +857,17 @@ pub enum EventLocation {
 
     /// The [EventId] belongs to a state event in the main timeline of the room.
     State(MessageKey),
+
+    /// The [EventId] belongs to a sticker event in the main scrollback
+    Sticker(MessageKey),
 }
 
 impl EventLocation {
     fn to_message_key(&self) -> Option<&MessageKey> {
-        if let EventLocation::Message(_, key) = self {
-            Some(key)
-        } else {
-            None
+        match self {
+            EventLocation::Message(_, key) => Some(key),
+            EventLocation::Sticker(key) => Some(key),
+            _ => None,
         }
     }
 }
@@ -882,17 +887,109 @@ pub enum EchoLocation {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnreadInfo {
-    pub(crate) unread: bool,
+    pub(crate) unread_mark: bool,
+    pub(crate) unread_messages: u64,
+    pub(crate) unread_notifications: u64,
+    pub(crate) unread_mentions: u64,
     pub(crate) latest: Option<MessageTimeStamp>,
 }
 
 impl UnreadInfo {
     pub fn is_unread(&self) -> bool {
-        self.unread
+        self.unread_mark || self.unread_notifications > 0 || self.unread_mentions > 0
+    }
+
+    pub fn has_mention(&self) -> bool {
+        self.unread_mentions > 0
     }
 
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
         self.latest.as_ref()
+    }
+}
+
+/// Track the display names for users and render any needed disambiguation for
+/// those with overlapping names.
+#[derive(Default)]
+pub struct DisplayNameStore {
+    by_ids: HashMap<OwnedUserId, String>,
+    by_names: HashMap<String, HashSet<OwnedUserId>>,
+}
+
+impl DisplayNameStore {
+    /// Update the `HashSet` associated with a given displayname.
+    ///
+    /// Note that this *could* be done more elegantly using the Entry API, but
+    /// is intentionally written in a way to avoid cloning conflicting display
+    /// names.
+    fn set_by_name(&mut self, user_id: OwnedUserId, name: &str) {
+        if let Some(existing) = self.by_names.get_mut(name) {
+            existing.insert(user_id);
+        } else {
+            self.by_names.insert(name.to_owned(), HashSet::from([user_id]));
+        }
+    }
+
+    /// Track a new user ID to displayname mapping, or unset any existing ones.
+    pub fn set(&mut self, user_id: OwnedUserId, name: Option<String>) {
+        if let Some(name) = name.as_deref() {
+            self.set_by_name(user_id.clone(), name);
+        }
+
+        let previous = match (self.by_ids.entry(user_id), name) {
+            // Nothing to do!
+            (Entry::Vacant(_), None) => None,
+
+            // Setting initial display name for user:
+            (Entry::Vacant(v), Some(name)) => {
+                v.insert(name);
+                None
+            },
+
+            // Unsetting display name:
+            (Entry::Occupied(o), None) => Some(o.remove_entry()),
+
+            // Replacing existing name:
+            (Entry::Occupied(mut o), Some(name)) => {
+                if o.get() == &name {
+                    None
+                } else {
+                    Some((o.key().clone(), o.insert(name)))
+                }
+            },
+        };
+
+        let Some((user_id, previous)) = previous else {
+            return;
+        };
+
+        let Some(users) = self.by_names.get_mut(&previous) else {
+            return;
+        };
+
+        users.remove(&user_id);
+
+        if users.is_empty() {
+            self.by_names.remove(&previous);
+        }
+    }
+
+    pub fn get<'a>(&'a self, user_id: &UserId) -> Option<Cow<'a, str>> {
+        let displayname = self.by_ids.get(user_id)?;
+        let users = self.by_names.get(displayname)?;
+
+        if !users.contains(user_id) {
+            // Internal consistency error? Assume no display name:
+            return None;
+        }
+
+        if users.len() == 1 {
+            // Unambiguous!
+            return Some(Cow::Borrowed(displayname.as_str()));
+        }
+
+        // Ambiguous username, so include unique user ID:
+        Some(Cow::Owned(format!("{displayname} ({user_id})")))
     }
 }
 
@@ -938,7 +1035,7 @@ pub struct RoomInfo {
     pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
 
     /// The display names for users in this room.
-    pub display_names: HashMap<OwnedUserId, String>,
+    pub display_names: DisplayNameStore,
 
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
@@ -1085,6 +1182,12 @@ impl RoomInfo {
 
                 self.keys.remove(redacts);
             },
+            Some(EventLocation::Sticker(key)) => {
+                if let Some(msg) = self.messages.get_mut(key) {
+                    let ev = SyncRoomRedactionEvent::Original(ev);
+                    msg.redact(ev);
+                }
+            },
         }
     }
 
@@ -1106,6 +1209,46 @@ impl RoomInfo {
             },
             MessageLikeEvent::Redacted(_) => {
                 return;
+            },
+        }
+    }
+
+    /// Insert a sticker
+    pub fn insert_sticker(
+        &mut self,
+        sticker: StickerEvent,
+        settings: &ApplicationSettings,
+        previews: &mut PreviewManager,
+        worker: &Requester,
+    ) {
+        match sticker {
+            MessageLikeEvent::Original(ref sticker_content) => {
+                let key = MessageKey {
+                    ts: sticker_content.origin_server_ts.into(),
+                    id: sticker_content.event_id.clone().into(),
+                };
+
+                let loc = EventLocation::Sticker(key.clone());
+
+                self.keys.insert(sticker_content.event_id.clone(), loc);
+                self.messages.insert_message(key.clone(), sticker.clone());
+
+                if let (Some(msg), Some(image_preview)) = (
+                    self.get_event_mut(&sticker_content.event_id),
+                    &settings.tunables.image_preview,
+                ) {
+                    let source: MediaSource = sticker_content.content.source.clone().into();
+                    msg.image_preview = Some(source.clone());
+                    previews.register_preview(settings, source, image_preview.size, worker);
+                }
+            },
+            MessageLikeEvent::Redacted(ref redaction) => {
+                let key = MessageKey {
+                    ts: redaction.origin_server_ts.into(),
+                    id: redaction.event_id.clone().into(),
+                };
+
+                self.messages.insert_message(key.clone(), sticker.clone());
             },
         }
     }
@@ -1140,6 +1283,7 @@ impl RoomInfo {
             },
             MessageEvent::Redacted(_, _) |
             MessageEvent::State(_) |
+            MessageEvent::Sticker(_) |
             MessageEvent::EncryptedOriginal(_) |
             MessageEvent::EncryptedRedacted(_) => {
                 return;
@@ -1147,6 +1291,7 @@ impl RoomInfo {
         }
 
         msg.html = msg.event.html();
+        msg.event.strip_reply_fallback();
     }
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
@@ -1162,43 +1307,19 @@ impl RoomInfo {
     }
 
     /// Indicates whether this room has unread messages.
-    pub fn unreads(&self, settings: &ApplicationSettings) -> UnreadInfo {
-        let last_message = self.messages.last_key_value();
+    pub fn unreads(&self, room: &matrix_sdk::Room) -> UnreadInfo {
+        let last_message = self
+            .messages
+            .iter()
+            .rev()
+            .find(|(_, msg)| !matches!(&msg.event, MessageEvent::State(..)));
 
-        let last_receipt = self
-            .user_receipts
-            .get(&ReceiptThread::Main)
-            .and_then(|receipts| receipts.get(&settings.profile.user_id));
-        let last_receipt = last_receipt.as_ref().and_then(|event_id| {
-            match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
-                EventLocation::Reaction(_) => None,
-            }
-        });
-
-        let last_unthreaded = self
-            .user_receipts
-            .get(&ReceiptThread::Unthreaded)
-            .and_then(|receipts| receipts.get(&settings.profile.user_id));
-        let last_unthreaded = last_unthreaded.as_ref().and_then(|event_id| {
-            match &self.keys.get(*event_id)? {
-                EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
-                EventLocation::Reaction(_) => None,
-            }
-        });
-
-        let last_receipt = std::cmp::max(last_receipt, last_unthreaded);
-
-        match (last_message, last_receipt) {
-            (Some((key, _)), Some(read_key)) => {
-                UnreadInfo { unread: key.ts > read_key.ts, latest: Some(key.ts) }
-            },
-            (Some((key, _)), None) => {
-                // If we've never loaded/generated a room's receipt (example,
-                // a newly joined but never viewed room), show it as unread.
-                UnreadInfo { unread: true, latest: Some(key.ts) }
-            },
-            (None, _) => UnreadInfo::default(),
+        UnreadInfo {
+            unread_mark: room.is_marked_unread(),
+            unread_messages: room.num_unread_messages(),
+            unread_notifications: room.num_unread_notifications(),
+            unread_mentions: room.num_unread_mentions(),
+            latest: last_message.map(|(key, _)| key.ts.to_owned()),
         }
     }
 
@@ -1264,33 +1385,23 @@ impl RoomInfo {
         }
     }
 
-    /// Insert a new message event, and spawn a task for image-preview if it has an image
-    /// attachment.
+    /// Insert a new message event, and prepare for image-preview if it has an image attachment.
     pub fn insert_with_preview(
         &mut self,
-        room_id: OwnedRoomId,
-        store: AsyncProgramStore,
-        picker: Option<Picker>,
         ev: RoomMessageEvent,
-        settings: &mut ApplicationSettings,
-        media: matrix_sdk::Media,
+        settings: &ApplicationSettings,
+        previews: &mut PreviewManager,
+        worker: &Requester,
     ) {
-        let source = picker.and_then(|_| source_from_event(&ev));
+        let source = source_from_event(&ev);
         self.insert(ev);
 
         if let Some((event_id, source)) = source {
             if let (Some(msg), Some(image_preview)) =
                 (self.get_event_mut(&event_id), &settings.tunables.image_preview)
             {
-                msg.image_preview = ImageStatus::Downloading(image_preview.size.clone());
-                spawn_insert_preview(
-                    store,
-                    room_id,
-                    event_id,
-                    source,
-                    media,
-                    settings.dirs.image_previews.clone(),
-                )
+                msg.image_preview = Some(source.clone());
+                previews.register_preview(settings, source, image_preview.size, worker)
             }
         }
     }
@@ -1333,30 +1444,44 @@ impl RoomInfo {
         self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
     }
 
-    pub fn fully_read(&mut self, user_id: &UserId) {
-        let Some(event_id) = self.messages.iter().rev().find_map(|(key, _)| key.id.as_origin())
-        else {
+    pub fn fully_read(&mut self, user_id: OwnedUserId, thread: ReceiptThread) {
+        let messages = match &thread {
+            ReceiptThread::Main => self.get_thread(None),
+            ReceiptThread::Thread(root) => self.get_thread(Some(root)),
+            _ => None,
+        };
+
+        let Some(messages) = messages else {
             return;
         };
 
-        self.set_receipt(ReceiptThread::Main, user_id.to_owned(), event_id.to_owned());
-
-        let newest = self
-            .threads
+        let event_id = messages
             .iter()
-            .filter_map(|(thread_id, messages)| {
-                let thread = ReceiptThread::Thread(thread_id.to_owned());
-
-                messages
-                    .iter()
-                    .rev()
-                    .find_map(|(key, _)| key.id.as_origin())
-                    .map(|id| (thread, id.to_owned()))
+            .filter(|(_, msg)| msg.sender != user_id)
+            .filter(|(_, msg)| {
+                matches!(
+                    msg.event,
+                    MessageEvent::EncryptedOriginal(..) |
+                        MessageEvent::EncryptedRedacted(..) |
+                        MessageEvent::Original(..) |
+                        MessageEvent::Redacted(..)
+                )
             })
-            .collect::<Vec<_>>();
+            .flat_map(|(_, msg)| msg.event.event_id())
+            .next_back();
 
-        for (thread, event_id) in newest.into_iter() {
-            self.set_receipt(thread, user_id.to_owned(), event_id);
+        if let Some(event_id) = event_id {
+            self.set_receipt(thread, user_id, event_id.to_owned());
+        }
+    }
+
+    pub fn fully_read_all(&mut self, user_id: &UserId) {
+        self.fully_read(user_id.to_owned(), ReceiptThread::Main);
+
+        let threads: Vec<_> = self.threads.keys().map(|root| root.to_owned()).collect();
+
+        for thread in threads {
+            self.fully_read(user_id.to_owned(), ReceiptThread::Thread(thread));
         }
     }
 
@@ -1635,8 +1760,8 @@ pub struct ChatStore {
     /// Information gathered by the background thread.
     pub sync_info: SyncInfo,
 
-    /// Image preview "protocol" picker.
-    pub picker: Option<Picker>,
+    /// Rendered image previews.
+    pub previews: PreviewManager,
 
     /// Last draw time, used to match with RoomInfo's draw_last.
     pub draw_curr: Option<Instant>,
@@ -1662,7 +1787,7 @@ impl ChatStore {
         ChatStore {
             worker,
             settings,
-            picker,
+            previews: PreviewManager::new(picker),
             cmds: crate::commands::setup_commands(),
             emojis: emoji_map(),
 
@@ -1749,6 +1874,9 @@ pub enum IambId {
 
     /// The `:unreads` window.
     UnreadList,
+
+    /// The `:mentions` window.
+    MentionsList,
 }
 
 impl Display for IambId {
@@ -1770,6 +1898,7 @@ impl Display for IambId {
             IambId::Welcome => f.write_str("iamb://welcome"),
             IambId::ChatList => f.write_str("iamb://chats"),
             IambId::UnreadList => f.write_str("iamb://unreads"),
+            IambId::MentionsList => f.write_str("iamb://mentions"),
         }
     }
 }
@@ -1908,6 +2037,13 @@ impl Visitor<'_> for IambIdVisitor {
 
                 Ok(IambId::UnreadList)
             },
+            Some("mentions") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://mentions takes no path"));
+                }
+
+                Ok(IambId::MentionsList)
+            },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
         }
@@ -1978,6 +2114,9 @@ pub enum IambBufferId {
 
     /// The `:unreads` window.
     UnreadList,
+
+    /// The `:mentions` window.
+    MentionsList,
 }
 
 impl IambBufferId {
@@ -1994,6 +2133,7 @@ impl IambBufferId {
             IambBufferId::Welcome => IambId::Welcome,
             IambBufferId::ChatList => IambId::ChatList,
             IambBufferId::UnreadList => IambId::UnreadList,
+            IambBufferId::MentionsList => IambId::MentionsList,
         };
 
         Some(id)
@@ -2038,6 +2178,7 @@ impl Completer<IambInfo> for IambCompleter {
             IambBufferId::Welcome => vec![],
             IambBufferId::ChatList => vec![],
             IambBufferId::UnreadList => vec![],
+            IambBufferId::MentionsList => vec![],
         }
     }
 }
@@ -2442,5 +2583,61 @@ pub mod tests {
         let mut cursor = Cursor::new(0, 15);
         let res = complete_cmdbar(&text, &mut cursor, &store);
         assert_eq!(res, users);
+    }
+
+    #[test]
+    fn test_ambiguous_displaynames() {
+        let mut store = DisplayNameStore::default();
+
+        store.set(TEST_USER1.clone(), Some("John".into()));
+        store.set(TEST_USER2.clone(), Some("John".into()));
+        store.set(TEST_USER3.clone(), Some("Jane".into()));
+        store.set(TEST_USER4.clone(), Some("Alice".into()));
+        store.set(TEST_USER5.clone(), Some("Bob".into()));
+
+        // TEST_USER1 and TEST_USER2 are both ambiguous, while the other are unambiguous:
+        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John (@user1:example.com)");
+        assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "John (@user2:example.com)");
+        assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "Jane");
+        assert_eq!(store.get(&TEST_USER4).unwrap().as_ref(), "Alice");
+        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "Bob");
+
+        // TEST_USER1 becomes unambiguous when TEST_USER2 changes:
+        store.set(TEST_USER2.clone(), Some("Eve".into()));
+        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John");
+        assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "Eve");
+        assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "Jane");
+        assert_eq!(store.get(&TEST_USER4).unwrap().as_ref(), "Alice");
+        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "Bob");
+
+        // TEST_USER5 becomes ambiguous when TEST_USER2 once again changes their name to match:
+        store.set(TEST_USER2.clone(), Some("Bob".into()));
+        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John");
+        assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "Bob (@user2:example.com)");
+        assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "Jane");
+        assert_eq!(store.get(&TEST_USER4).unwrap().as_ref(), "Alice");
+        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "Bob (@user5:example.com)");
+
+        // Now "Everyone is John":
+        store.set(TEST_USER2.clone(), Some("John".into()));
+        store.set(TEST_USER3.clone(), Some("John".into()));
+        store.set(TEST_USER4.clone(), Some("John".into()));
+        store.set(TEST_USER5.clone(), Some("John".into()));
+        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John (@user1:example.com)");
+        assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "John (@user2:example.com)");
+        assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "John (@user3:example.com)");
+        assert_eq!(store.get(&TEST_USER4).unwrap().as_ref(), "John (@user4:example.com)");
+        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "John (@user5:example.com)");
+
+        // 2-5 unset their displayname:
+        store.set(TEST_USER2.clone(), None);
+        store.set(TEST_USER3.clone(), None);
+        store.set(TEST_USER4.clone(), None);
+        store.set(TEST_USER5.clone(), None);
+        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John");
+        assert_eq!(store.get(&TEST_USER2), None);
+        assert_eq!(store.get(&TEST_USER3), None);
+        assert_eq!(store.get(&TEST_USER4), None);
+        assert_eq!(store.get(&TEST_USER5), None);
     }
 }

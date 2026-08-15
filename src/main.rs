@@ -27,8 +27,8 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use clap::Parser;
-use matrix_sdk::ruma::api::client::error::ErrorKind;
+use clap::{CommandFactory, Parser};
+use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
@@ -41,7 +41,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use modalkit::crossterm::{
     self,
-    cursor::Show as CursorShow,
+    cursor::{SetCursorStyle, Show as CursorShow},
     event::{
         poll,
         read,
@@ -569,7 +569,7 @@ impl Application {
 
                 for room_id in store.application.sync_info.chats() {
                     if let Some(room) = store.application.rooms.get_mut(room_id) {
-                        room.fully_read(user_id);
+                        room.fully_read_all(user_id);
                     }
                 }
 
@@ -812,6 +812,17 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
         return Ok(());
     }
 
+    if let Some(ref password_file) = settings.profile.password_file {
+        if let Err(e) = std::fs::read_to_string(password_file)
+            .map(|password| worker.login(LoginStyle::Password(password)))
+        {
+            println!("Failed to log in using password file {password_file:?}: {e}");
+            println!("Continuing on to interactive login");
+        } else {
+            return Ok(());
+        }
+    }
+
     loop {
         let login_style =
             match read_response("Please select login type: [p]assword / [s]ingle sign on")
@@ -891,7 +902,7 @@ async fn check_import_keys(
     let encrypted = match encrypt_room_key_export(&keys, &passphrase, 500000) {
         Ok(encrypted) => encrypted,
         Err(e) => {
-            println!("* Failed to encrypt room keys during export: {e}");
+            eprintln!("* Failed to encrypt room keys during export: {e}");
             process::exit(2);
         },
     };
@@ -974,8 +985,6 @@ async fn login_normal(
 
 /// Set up the terminal for drawing the TUI, and getting additional info.
 fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std::io::Result<()> {
-    let title = format!("iamb ({})", settings.profile.user_id.as_str());
-
     // Enable raw mode and enter the alternate screen.
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(stdout(), EnterAlternateScreen)?;
@@ -992,7 +1001,14 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
         crossterm::execute!(stdout(), EnableMouseCapture)?;
     }
 
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
+    if settings.tunables.terminal.enable_title {
+        let title = format!("iamb ({})", settings.profile.user_id.as_str());
+        crossterm::execute!(stdout(), SetTitle(title))?;
+    }
+
+    let cursor_shape = SetCursorStyle::from(settings.tunables.terminal.cursor_shape);
+
+    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, cursor_shape)
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
@@ -1009,6 +1025,7 @@ fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
         stdout(),
         DisableBracketedPaste,
         DisableFocusChange,
+        SetCursorStyle::DefaultUserShape,
         LeaveAlternateScreen,
         CursorShow,
     );
@@ -1052,14 +1069,15 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     }
 
     // Set up the terminal for drawing, and cleanup properly on panics.
-    let enable_enhanced_keys = match crossterm::terminal::supports_keyboard_enhancement() {
-        Ok(supported) => supported,
-        Err(e) => {
-            tracing::warn!(err = %e,
-               "Failed to determine whether the terminal supports keyboard enhancements");
-            false
-        },
-    };
+    let enable_enhanced_keys =
+        settings.tunables.terminal.enable_extended_keys.unwrap_or_else(|| {
+            crossterm::terminal::supports_keyboard_enhancement()
+                .inspect_err(|e| tracing::warn!(
+                        err = %e,
+                       "Failed to determine whether the terminal supports keyboard enhancements"
+               ))
+                .unwrap_or_default()
+        });
     setup_tty(&settings, enable_enhanced_keys)?;
 
     let orig_hook = std::panic::take_hook();
@@ -1118,9 +1136,14 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
     guard
 }
 
-fn main() -> IambResult<()> {
+fn main() {
     // Parse command-line flags.
     let iamb = Iamb::parse();
+
+    if let Some(shell) = iamb.completions {
+        clap_complete::generate(shell, &mut Iamb::command(), "iamb", &mut std::io::stdout());
+        return;
+    }
 
     // Load configuration and set up the Matrix SDK.
     let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);
@@ -1144,8 +1167,10 @@ fn main() -> IambResult<()> {
         .build()
         .unwrap();
 
-    rt.block_on(async move { run(settings).await })?;
+    if let Err(err) = rt.block_on(async move { run(settings).await }) {
+        eprintln!("\n{err}\n");
+        process::exit(2);
+    }
 
     drop(guard);
-    process::exit(0);
 }
