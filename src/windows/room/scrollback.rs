@@ -1047,9 +1047,13 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     let err = EditError::Failure(msg.into());
                     Err(err)
                 } else {
-                    let root = key.1.clone();
+                    let Some(root) = key.id.as_origin() else {
+                        let msg = "Cannot create thread for local echo.";
+                        let err = EditError::Failure(msg.into());
+                        return Err(err);
+                    };
                     let room_id = self.room_id.clone();
-                    let id = IambId::Room(room_id, Some(root));
+                    let id = IambId::Room(room_id, Some(root.to_owned()));
                     let open = WindowAction::Switch(OpenTarget::Application(id));
                     Ok(vec![(open.into(), ctx.clone())])
                 }
@@ -1425,8 +1429,8 @@ impl StatefulWidget for Scrollback<'_> {
             let _ = lines.drain(..n);
         }
 
-        if let Some(((ts, event_id), row, _, _)) = lines.first() {
-            state.viewctx.corner.timestamp = Some((*ts, event_id.clone()));
+        if let Some((key, row, _, _)) = lines.first() {
+            state.viewctx.corner.timestamp = Some((*key).clone());
             state.viewctx.corner.text_row = *row;
         }
 
@@ -1434,7 +1438,7 @@ impl StatefulWidget for Scrollback<'_> {
         let x = area.left();
 
         let mut image_previews = vec![];
-        for ((_, _), _, txt, line_preview) in lines.into_iter() {
+        for (_, _, txt, line_preview) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
             if let Some((backend, msg_x, _)) = line_preview {
                 image_previews.push((x + msg_x, y, backend));

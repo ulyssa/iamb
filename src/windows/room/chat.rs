@@ -26,13 +26,12 @@ use matrix_sdk::{
             OriginalRoomMessageEvent,
             Relation,
             ReplyWithinThread,
-            RoomMessageEventContent,
-            TextMessageEventContent,
         },
         OwnedEventId,
         OwnedRoomId,
         RoomId,
     },
+    send_queue::RoomSendQueueError,
     RoomState,
 };
 
@@ -72,6 +71,7 @@ use modalkit::prelude::*;
 
 use crate::base::{
     DownloadFlags,
+    EchoLocation,
     IambAction,
     IambBufferId,
     IambError,
@@ -87,14 +87,7 @@ use crate::base::{
 };
 
 use crate::config::EncryptionIndicatorLocation;
-use crate::message::{
-    text_to_message,
-    Message,
-    MessageEvent,
-    MessageKey,
-    MessageTimeStamp,
-    TreeGenState,
-};
+use crate::message::{text_to_message, MessageEvent, MessageId, MessageKey, TreeGenState};
 use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
@@ -346,7 +339,7 @@ impl ChatState {
 
                 let ev = match &msg.event {
                     MessageEvent::Original(ev) => &ev.content,
-                    MessageEvent::Local(_, ev) => ev.deref(),
+                    MessageEvent::Local(_, _, ev) => ev.deref(),
                     _ => {
                         let msg = "Cannot edit a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -393,7 +386,14 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Local(..) => {
+                        // XXX: Implement reactions for local echos
+
+                        let msg = "Cannot react to a local echo";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_, _) => {
@@ -413,7 +413,8 @@ impl ChatState {
 
                 let reaction = Annotation::new(event_id, emoji);
                 let msg = ReactionEventContent::new(reaction);
-                let _ = room.send(msg).await.map_err(IambError::from)?;
+
+                room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
 
                 Ok(None)
             },
@@ -432,7 +433,22 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Local(_, handle, _) => {
+                        let succeeded = handle
+                            .abort()
+                            .await
+                            .map_err(RoomSendQueueError::from)
+                            .map_err(IambError::from)?;
+
+                        if !succeeded {
+                            let msg = "local echo was already sent; please retry";
+                            let err = UIError::Failure(msg.into());
+
+                            return Err(err);
+                        }
+
+                        return Ok(None);
+                    },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_, _) => {
@@ -496,7 +512,12 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Local(..) => {
+                        let msg = "Cannot unreact to a local echo";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
                     MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
                     MessageEvent::Redacted(_, _) => {
@@ -545,9 +566,8 @@ impl ChatState {
     ) -> IambResult<EditInfo> {
         let room = self.get_joined(&store.application.worker)?;
         let info = store.application.rooms.get_or_default(self.id().to_owned());
-        let mut show_echo = true;
 
-        let (event_id, msg) = match act {
+        match act {
             SendAction::Submit | SendAction::SubmitFromEditor => {
                 let msg = self.tbox.get();
 
@@ -570,13 +590,48 @@ impl ChatState {
 
                 let mut msg = text_to_message(msg);
 
-                if let Some((_, event_id)) = &self.editing {
+                if let Some(key) = &self.editing {
+                    let id = match &key.id {
+                        MessageId::Origin(id) => id,
+                        MessageId::Local(transaction_id) => {
+                            match info.echo_keys.get(transaction_id) {
+                                Some(EchoLocation::Replaced(id)) => id,
+                                Some(EchoLocation::Message(thread, orig_key)) => {
+                                    let Some(MessageEvent::Local(_, handle, _)) = info
+                                        .get_thread(thread.as_deref())
+                                        .and_then(|thread| thread.get(orig_key))
+                                        .map(|msg| &msg.event)
+                                    else {
+                                        let msg = "local echo not found in store";
+                                        return Err(UIError::Failure(msg.into()));
+                                    };
+
+                                    let succeeded = handle
+                                        .edit(msg.into())
+                                        .await
+                                        .map_err(RoomSendQueueError::from)
+                                        .map_err(IambError::from)?;
+
+                                    if !succeeded {
+                                        let msg = "local echo was already sent; please retry";
+                                        return Err(UIError::Failure(msg.into()));
+                                    }
+
+                                    self.reset();
+                                    return Ok(None);
+                                },
+                                None => {
+                                    let msg = "local echo not found in store";
+                                    return Err(UIError::Failure(msg.into()));
+                                },
+                            }
+                        },
+                    };
+
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(
-                        event_id.clone(),
+                        id.to_owned(),
                         msg.msgtype.clone().into(),
                     )));
-
-                    show_echo = false;
                 } else if let Some(thread_root) = self.scrollback.thread() {
                     if let Some(m) = self.get_reply_to(info) {
                         msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::No);
@@ -589,15 +644,10 @@ impl ChatState {
                     msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
                 }
 
-                // XXX: second parameter can be a locally unique transaction id.
-                // Useful for doing retries.
-                let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
-                let event_id = resp.response.event_id;
+                room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
 
                 // Reset message bar state now that it's been sent.
                 self.reset();
-
-                (event_id, msg)
             },
             SendAction::Upload(file) => {
                 let path = Path::new(file.as_str());
@@ -610,17 +660,10 @@ impl ChatState {
                     .unwrap_or_else(|| Cow::from("Attachment"));
                 let config = AttachmentConfig::new();
 
-                let resp = room
-                    .send_attachment(name.as_ref(), &mime, bytes, config)
+                room.send_queue()
+                    .send_attachment(name.as_ref(), mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
-
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
             },
             SendAction::UploadImage(width, height, bytes) => {
                 // Convert to png because arboard does not give us the mime type.
@@ -639,27 +682,11 @@ impl ChatState {
                 let name = "Clipboard.png";
                 let config = AttachmentConfig::new();
 
-                let resp = room
-                    .send_attachment(name, &mime, bytes, config)
+                room.send_queue()
+                    .send_attachment(name, mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
-
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
             },
-        };
-
-        if show_echo {
-            let user = store.application.settings.profile.user_id.clone();
-            let key = (MessageTimeStamp::LocalEcho, event_id.clone());
-            let msg = MessageEvent::Local(event_id, msg.into());
-            let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
-            let thread = self.scrollback.get_thread_mut(info);
-            thread.insert(key, msg);
         }
 
         // Jump to the end of the scrollback to show the message.

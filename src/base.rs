@@ -16,6 +16,7 @@ use emojis::Emoji;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::sticker::StickerEvent;
+use matrix_sdk::ruma::OwnedTransactionId;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -733,6 +734,10 @@ pub enum IambError {
     #[error("Matrix client error: {0}")]
     Matrix(#[from] matrix_sdk::Error),
 
+    /// A failure when sending a message.
+    #[error("Send queue error: {0}")]
+    SendQueue(#[from] matrix_sdk::send_queue::RoomSendQueueError),
+
     /// A failure in the sled storage.
     #[error("Matrix client storage error: {0}")]
     Store(#[from] matrix_sdk::StoreError),
@@ -867,6 +872,19 @@ impl EventLocation {
     }
 }
 
+/// Indicates where a local echo lives in the [`ChatStore`].
+#[derive(Debug, Clone)]
+pub enum EchoLocation {
+    /// The [`OwnedTransactionId`] belongs to a message.
+    ///
+    /// If the first argument is [`None`], then it's part of the main scrollback. When [`Some`], it
+    /// specifies which thread it's in reply to.
+    Message(Option<OwnedEventId>, MessageKey),
+
+    /// The local echo has been replaced by an event with this event id.
+    Replaced(OwnedEventId),
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct UnreadInfo {
     pub(crate) unread_mark: bool,
@@ -985,6 +1003,7 @@ pub struct RoomInfo {
 
     /// A map of event IDs to where they are stored in this struct.
     pub keys: HashMap<OwnedEventId, EventLocation>,
+    pub echo_keys: HashMap<OwnedTransactionId, EchoLocation>,
 
     /// The messages loaded for this room.
     messages: Messages,
@@ -1030,6 +1049,7 @@ impl Default for RoomInfo {
             name: Default::default(),
             tags: Default::default(),
             keys: Default::default(),
+            echo_keys: Default::default(),
             event_receipts: Default::default(),
             user_receipts: Default::default(),
             reactions: Default::default(),
@@ -1203,8 +1223,10 @@ impl RoomInfo {
     ) {
         match sticker {
             MessageLikeEvent::Original(ref sticker_content) => {
-                let key =
-                    (sticker_content.origin_server_ts.into(), sticker_content.event_id.clone());
+                let key = MessageKey {
+                    ts: sticker_content.origin_server_ts.into(),
+                    id: sticker_content.event_id.clone().into(),
+                };
 
                 let loc = EventLocation::Sticker(key.clone());
 
@@ -1221,7 +1243,11 @@ impl RoomInfo {
                 }
             },
             MessageLikeEvent::Redacted(ref redaction) => {
-                let key = (redaction.origin_server_ts.into(), redaction.event_id.clone());
+                let key = MessageKey {
+                    ts: redaction.origin_server_ts.into(),
+                    id: redaction.event_id.clone().into(),
+                };
+
                 self.messages.insert_message(key.clone(), sticker.clone());
             },
         }
@@ -1252,7 +1278,7 @@ impl RoomInfo {
             MessageEvent::Original(orig) => {
                 orig.content.apply_replacement(new_msgtype);
             },
-            MessageEvent::Local(_, content) => {
+            MessageEvent::Local(_, _, content) => {
                 content.apply_replacement(new_msgtype);
             },
             MessageEvent::Redacted(_, _) |
@@ -1270,7 +1296,10 @@ impl RoomInfo {
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
         let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
+        let key = MessageKey {
+            ts: msg.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
 
         let loc = EventLocation::State(key.clone());
         self.keys.insert(event_id, loc);
@@ -1290,14 +1319,17 @@ impl RoomInfo {
             unread_messages: room.num_unread_messages(),
             unread_notifications: room.num_unread_notifications(),
             unread_mentions: room.num_unread_mentions(),
-            latest: last_message.map(|((ts, _), _)| ts.to_owned()),
+            latest: last_message.map(|(key, _)| key.ts.to_owned()),
         }
     }
 
     /// Inserts events that couldn't be decrypted into the scrollback.
     pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
         let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
+        let key = MessageKey {
+            ts: msg.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
 
         self.keys.insert(event_id, EventLocation::Message(None, key.clone()));
         self.messages.insert(key, msg.into());
@@ -1306,7 +1338,10 @@ impl RoomInfo {
     /// Insert a new message.
     pub fn insert_message(&mut self, msg: RoomMessageEvent) {
         let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
+        let key = MessageKey {
+            ts: msg.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
 
         let loc = EventLocation::Message(None, key.clone());
         self.keys.insert(event_id, loc);
@@ -1315,7 +1350,10 @@ impl RoomInfo {
 
     fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
         let event_id = msg.event_id().to_owned();
-        let key = (msg.origin_server_ts().into(), event_id.clone());
+        let key = MessageKey {
+            ts: msg.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
 
         let replies = self
             .threads
@@ -1407,11 +1445,13 @@ impl RoomInfo {
     }
 
     pub fn fully_read(&mut self, user_id: OwnedUserId, thread: ReceiptThread) {
-        let Some(messages) = (match &thread {
+        let messages = match &thread {
             ReceiptThread::Main => self.get_thread(None),
             ReceiptThread::Thread(root) => self.get_thread(Some(root)),
             _ => None,
-        }) else {
+        };
+
+        let Some(messages) = messages else {
             return;
         };
 
@@ -1427,11 +1467,11 @@ impl RoomInfo {
                         MessageEvent::Redacted(..)
                 )
             })
-            .map(|(_, msg)| msg.event.event_id().to_owned())
+            .flat_map(|(_, msg)| msg.event.event_id())
             .next_back();
 
         if let Some(event_id) = event_id {
-            self.set_receipt(thread, user_id, event_id);
+            self.set_receipt(thread, user_id, event_id.to_owned());
         }
     }
 

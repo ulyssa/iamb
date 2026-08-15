@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::{collections::HashMap, iter::FromIterator as _};
 
+use matrix_sdk::ruma::MilliSecondsSinceUnixEpoch;
 use matrix_sdk::ruma::{
     event_id,
     events::room::message::RoomMessageEventContent,
@@ -19,6 +20,7 @@ use ratatui::style::{Color, Style};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::unbounded_channel;
 
+use crate::message::MessageTimeStamp;
 use crate::{
     base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
     config::{
@@ -37,13 +39,7 @@ use crate::{
         UserDisplayStyle,
         UserDisplayTunables,
     },
-    message::{
-        Message,
-        MessageEvent,
-        MessageKey,
-        MessageTimeStamp::{LocalEcho, OriginServer},
-        Messages,
-    },
+    message::{Message, MessageEvent, MessageKey, Messages},
     worker::Requester,
 };
 
@@ -64,11 +60,27 @@ lazy_static! {
     pub static ref MSG4_EVID: OwnedEventId =
         event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned();
     pub static ref MSG5_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
-    pub static ref MSG1_KEY: MessageKey = (LocalEcho, MSG1_EVID.clone());
-    pub static ref MSG2_KEY: MessageKey = (OriginServer(UInt::new(1).unwrap()), MSG2_EVID.clone());
-    pub static ref MSG3_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG3_EVID.clone());
-    pub static ref MSG4_KEY: MessageKey = (OriginServer(UInt::new(2).unwrap()), MSG4_EVID.clone());
-    pub static ref MSG5_KEY: MessageKey = (OriginServer(UInt::new(8).unwrap()), MSG5_EVID.clone());
+    pub static ref MSG1_KEY: MessageKey = MessageKey {
+        // 2000-01-01T00:00:00
+        ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(946681200).unwrap())),
+        id: MSG1_EVID.clone().into()
+    };
+    pub static ref MSG2_KEY: MessageKey = MessageKey {
+        ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(1).unwrap())),
+        id: MSG2_EVID.clone().into()
+    };
+    pub static ref MSG3_KEY: MessageKey = MessageKey {
+        ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(2).unwrap())),
+        id: MSG3_EVID.clone().into()
+    };
+    pub static ref MSG4_KEY: MessageKey = MessageKey {
+        ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(2).unwrap())),
+        id: MSG4_EVID.clone().into()
+    };
+    pub static ref MSG5_KEY: MessageKey = MessageKey {
+        ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(8).unwrap())),
+        id: MSG5_EVID.clone().into()
+    };
 }
 
 pub fn user_style(user: &str) -> Style {
@@ -80,13 +92,13 @@ pub fn mock_room1_message(
     sender: OwnedUserId,
     key: MessageKey,
 ) -> Message {
-    let timestamp = key.0.as_millis().unwrap();
-    let event_id = key.1;
+    let timestamp = key.ts.0;
+    let event_id = key.id.as_origin().unwrap();
 
     let event = serde_json::from_value(Value::Object(Map::from_iter([
         ("type".to_owned(), Value::String("m.room.message".into())),
         ("content".to_owned(), serde_json::to_value(&content).unwrap()),
-        ("event_id".to_owned(), serde_json::to_value(&event_id).unwrap()),
+        ("event_id".to_owned(), serde_json::to_value(event_id).unwrap()),
         ("sender".to_owned(), serde_json::to_value(&sender).unwrap()),
         ("origin_server_ts".to_owned(), serde_json::to_value(timestamp).unwrap()),
         ("room_id".to_owned(), serde_json::to_value(&*TEST_ROOM1_ID).unwrap()),
@@ -98,9 +110,8 @@ pub fn mock_room1_message(
 
 pub fn mock_message1() -> Message {
     let content = RoomMessageEventContent::text_plain("writhe");
-    let content = MessageEvent::Local(MSG1_EVID.clone(), content.into());
 
-    Message::new(content, TEST_USER1.clone(), MSG1_KEY.0)
+    mock_room1_message(content, TEST_USER1.clone(), MSG1_KEY.clone())
 }
 
 pub fn mock_message2() -> Message {
@@ -130,7 +141,7 @@ pub fn mock_message5() -> Message {
 pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
     let mut keys = HashMap::new();
 
-    keys.insert(MSG1_EVID.clone(), EventLocation::Message(None, MSG1_KEY.clone()));
+    keys.insert(MSG1_EVID.clone(), EventLocation::Message(None, MSG2_KEY.clone()));
     keys.insert(MSG2_EVID.clone(), EventLocation::Message(None, MSG2_KEY.clone()));
     keys.insert(MSG3_EVID.clone(), EventLocation::Message(None, MSG3_KEY.clone()));
     keys.insert(MSG4_EVID.clone(), EventLocation::Message(None, MSG4_KEY.clone()));
