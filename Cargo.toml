@@ -38,6 +38,7 @@ feruca = "0.11"
 futures = "0.3"
 gethostname = "1.1"
 html5ever = "0.39.0"
+http-serde = "2.1.1"
 humansize = "2.0.0"
 image = "0.25.6"
 libc = "0.2"
@@ -89,7 +90,7 @@ version = "0.0.25"
 [dependencies.matrix-sdk]
 version = "0.18.0"
 default-features = false
-features = ["e2e-encryption", "sqlite", "sso-login"]
+features = ["e2e-encryption", "socks", "sqlite", "sso-login"]
 
 [dependencies.matrix-sdk-crypto]
 version = "0.18.0"

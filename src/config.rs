@@ -9,9 +9,11 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::str::FromStr;
 
 use clap::Parser;
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
 use matrix_sdk::EncryptionState;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
@@ -123,6 +125,20 @@ fn validate_profile_names(names: &BTreeMap<String, ProfileConfig>) {
     }
 }
 
+fn deserialize_from_str_opt<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+    T: FromStr,
+    <T as FromStr>::Err: fmt::Display,
+{
+    <Option<&'de str>>::deserialize(deserializer)?
+        .map(|s| {
+            let t = T::from_str(s);
+            t.map_err(|e| D::Error::custom(format!("failed to parse string: {e}")))
+        })
+        .transpose()
+}
+
 const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
     None => env!("CARGO_PKG_VERSION"),
     Some(_) => concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")"),
@@ -154,6 +170,26 @@ pub enum ConfigError {
     InvalidJSON(#[from] serde_json::Error),
 }
 
+macro_rules! deserialize_str_with_visitor {
+    ($t: ident, $v: ident) => {
+        impl<'de> Deserialize<'de> for $t {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                deserializer.deserialize_str($v)
+            }
+        }
+    };
+}
+
+deserialize_str_with_visitor!(Keys, KeysVisitor);
+deserialize_str_with_visitor!(VimModes, VimModesVisitor);
+deserialize_str_with_visitor!(UserColor, UserColorVisitor);
+deserialize_str_with_visitor!(EncryptionIndicatorLocation, EncryptionIndicatorLocationVisitor);
+deserialize_str_with_visitor!(NotifyVia, NotifyViaVisitor);
+deserialize_str_with_visitor!(ProxyUrl, ProxyUrlVisitor);
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Keys(pub Vec<TerminalKey>, pub String);
 pub struct KeysVisitor;
@@ -173,15 +209,6 @@ impl Visitor<'_> for KeysVisitor {
             Ok(keys) => Ok(Keys(keys, value.to_string())),
             Err(e) => Err(E::custom(format!("Could not parse key sequence: {e}"))),
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for Keys {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(KeysVisitor)
     }
 }
 
@@ -220,15 +247,6 @@ impl Visitor<'_> for VimModesVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for VimModes {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(VimModesVisitor)
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UserColor(pub Color);
 pub struct UserColorVisitor;
@@ -264,15 +282,6 @@ impl Visitor<'_> for UserColorVisitor {
             "white" => Ok(UserColor(Color::White)),
             _ => Err(E::custom("Could not parse color")),
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for UserColor {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(UserColorVisitor)
     }
 }
 
@@ -392,15 +401,6 @@ impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for EncryptionIndicatorLocation {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(EncryptionIndicatorLocationVisitor)
-    }
-}
-
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum UserDisplayStyle {
@@ -485,15 +485,6 @@ impl Visitor<'_> for NotifyViaVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for NotifyVia {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(NotifyViaVisitor)
-    }
-}
-
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Encryption {
     indicator: Option<EncryptionIndicator>,
@@ -564,6 +555,69 @@ impl EncryptionValues {
     }
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum ProxyUrl {
+    Disabled,
+    Endpoint(Url),
+    #[default]
+    System,
+}
+
+pub struct ProxyUrlVisitor;
+
+impl Visitor<'_> for ProxyUrlVisitor {
+    type Value = ProxyUrl;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid proxy URL (e.g. \"socks5://localhost:9050\")")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        if value.is_empty() {
+            return Ok(ProxyUrl::Disabled);
+        }
+
+        match Url::from_str(value) {
+            Ok(uri) => Ok(ProxyUrl::Endpoint(uri)),
+            Err(e) => Err(E::custom(format!("could not parse {value:?}: {e}"))),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Proxy {
+    /// How and where to proxy the client's requests to the homeserver.
+    url: Option<ProxyUrl>,
+
+    /// An optional value to include in the `Proxy-Authorization` header.
+    #[serde(default, deserialize_with = "deserialize_from_str_opt")]
+    auth: Option<HeaderValue>,
+
+    /// Optional headers to include in requests sent to the proxy.
+    #[serde(default, with = "http_serde::header_map")]
+    headers: HeaderMap,
+}
+
+impl Proxy {
+    pub fn values(self) -> ProxyValues {
+        ProxyValues {
+            url: self.url.unwrap_or_default(),
+            auth: self.auth,
+            headers: self.headers,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProxyValues {
+    pub url: ProxyUrl,
+    pub auth: Option<HeaderValue>,
+    pub headers: HeaderMap,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct Mouse {
     #[serde(default)]
@@ -589,7 +643,7 @@ pub struct ImagePreviewValues {
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct ImagePreview {
     pub lazy_load: Option<bool>,
     pub size: Option<ImagePreviewSize>,
@@ -618,7 +672,7 @@ impl Default for ImagePreviewSize {
     }
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize)]
 pub struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,
     pub font_size: Option<(u16, u16)>,
@@ -633,7 +687,7 @@ pub struct SortValues {
     pub members: Vec<SortColumn<SortFieldUser>>,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct SortOverrides {
     pub chats: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub dms: Option<Vec<SortColumn<SortFieldRoom>>>,
@@ -696,6 +750,8 @@ pub struct TerminalValues {
     pub enable_title: bool,
 }
 
+/// The configuration settings to run with, after merging the
+/// per-profile overrides on top of the global settings.
 #[derive(Clone)]
 pub struct TunableValues {
     pub encryption: EncryptionValues,
@@ -703,6 +759,7 @@ pub struct TunableValues {
     pub max_log_files: usize,
     pub message_shortcode_display: bool,
     pub normal_after_send: bool,
+    pub proxy: ProxyValues,
     pub reaction_display: bool,
     pub reaction_shortcode_display: bool,
     pub read_receipt_send: bool,
@@ -728,11 +785,14 @@ pub struct TunableValues {
     pub ssl_verify: bool,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Tunables {
     /// Subsection for overriding encryption-related settings.
     #[serde(default)]
     pub encryption: Encryption,
+
+    /// Subsection for configuring an HTTP(S) proxy.
+    pub proxy: Option<Proxy>,
 
     /// Subsection for overriding sort orders in UI lists.
     #[serde(default)]
@@ -779,6 +839,11 @@ impl Tunables {
             terminal: Terminal::merge(self.terminal, other.terminal),
             users: merge_maps(self.users, other.users),
 
+            // Proxy configuration sub-field do *not* get merged, so that a
+            // per-profile override won't inherit auth or headers from the
+            // global settings.
+            proxy: self.proxy.or(other.proxy),
+
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
@@ -815,8 +880,10 @@ impl Tunables {
     fn values(self) -> TunableValues {
         TunableValues {
             encryption: self.encryption.values(),
+            proxy: self.proxy.unwrap_or_default().values(),
             sort: self.sort.values(),
             terminal: self.terminal.values(),
+            users: self.users.unwrap_or_default(),
 
             log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
             max_log_files: self.max_log_files.unwrap_or(7),
@@ -830,7 +897,6 @@ impl Tunables {
             state_event_display: self.state_event_display.unwrap_or(true),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
-            users: self.users.unwrap_or_default(),
             username_display: self.username_display.unwrap_or_default(),
             message_user_color: self.message_user_color.unwrap_or(false),
             default_room: self.default_room,
@@ -1422,6 +1488,82 @@ mod tests {
         ]);
         assert_eq!(res.sort.rooms, Vec::from(DEFAULT_ROOM_SORT));
         assert_eq!(res.sort.dms, Vec::from(DEFAULT_ROOM_SORT));
+    }
+
+    #[test]
+    fn test_parse_tunables_proxy_invalid() {
+        let res =
+            serde_json::from_str::<Tunables>(r#"{"proxy": {"url": "localhost"}}"#).unwrap_err();
+
+        // Should result in a validation error:
+        assert_eq!(res.classify(), serde_json::error::Category::Data);
+    }
+
+    #[test]
+    fn test_parse_tunables_proxy_empty() {
+        let res: Tunables = serde_json::from_str(r#"{"proxy": {"url": ""}}"#).unwrap();
+        let proxy = res.proxy.unwrap();
+        assert_eq!(proxy.url.unwrap(), ProxyUrl::Disabled);
+    }
+
+    #[test]
+    fn test_parse_tunables_proxy_socks5() {
+        let res: Tunables =
+            serde_json::from_str(r#"{"proxy": {"url": "socks5://localhost:1080"}}"#).unwrap();
+        let proxy = res.proxy.unwrap();
+        let ProxyUrl::Endpoint(url) = proxy.url.unwrap() else {
+            panic!("should parse ProxyUrl::Endpoint")
+        };
+
+        assert_eq!(url.scheme(), "socks5");
+        assert_eq!(url.host_str().unwrap(), "localhost");
+        assert_eq!(url.port().unwrap(), 1080);
+        assert_eq!(url.authority(), "localhost:1080");
+    }
+
+    #[test]
+    fn test_parse_tunables_proxy_https() {
+        let res: Tunables = serde_json::from_str(
+            r#"{"proxy": {"url": "https://localhost:8080","auth": "Bearer abcd1234","headers":{"User-Agent": "iamb"}}}"#
+        ).unwrap();
+        let proxy = res.proxy.unwrap();
+        let ProxyUrl::Endpoint(url) = proxy.url.unwrap() else {
+            panic!("should parse ProxyUrl::Endpoint")
+        };
+
+        // Verify URL fields:
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str().unwrap(), "localhost");
+        assert_eq!(url.port().unwrap(), 8080);
+        assert_eq!(url.authority(), "localhost:8080");
+
+        // Verify our `Proxy-Authorization` value:
+        assert_eq!(proxy.auth.unwrap(), "Bearer abcd1234");
+
+        // Verify our custom header is present:
+        assert_eq!(proxy.headers.len(), 1);
+        assert_eq!(proxy.headers.get("user-agent").unwrap(), "iamb");
+    }
+
+    #[test]
+    fn test_parse_tunables_proxy_merge() {
+        let global: Tunables = serde_json::from_str(
+            r#"{"proxy": {"url": "https://localhost:8080","auth": "Bearer abcd1234","headers":{"User-Agent": "iamb"}}}"#
+        ).unwrap();
+        let profile: Tunables =
+            serde_json::from_str(r#"{"proxy": {"url": "socks5://localhost:1080"}}"#).unwrap();
+
+        // The configuration merge should select the entirety of the profile proxy config,
+        // and not merge subfields, to ensure that things like `auth` and `headers` are
+        // not ever sent to a `url` they were meant for.
+        let merged = profile.merge(global).values();
+        let ProxyUrl::Endpoint(url) = merged.proxy.url else {
+            panic!("should parse ProxyUrl::Endpoint")
+        };
+        assert_eq!(url.scheme(), "socks5");
+        assert_eq!(url.authority(), "localhost:1080");
+        assert_eq!(merged.proxy.auth, None);
+        assert_eq!(merged.proxy.headers.is_empty(), true);
     }
 
     #[test]

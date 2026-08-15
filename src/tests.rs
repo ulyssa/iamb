@@ -23,22 +23,7 @@ use tokio::sync::mpsc::unbounded_channel;
 use crate::message::MessageTimeStamp;
 use crate::{
     base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
-    config::{
-        user_color,
-        user_style_from_color,
-        ApplicationSettings,
-        DirectoryValues,
-        Encryption,
-        Notifications,
-        NotifyVia,
-        ProfileConfig,
-        SortOverrides,
-        Terminal,
-        TunableValues,
-        UserColor,
-        UserDisplayStyle,
-        UserDisplayTunables,
-    },
+    config::*,
     message::{Message, MessageEvent, MessageKey, Messages},
     worker::Requester,
 };
@@ -187,6 +172,7 @@ pub fn mock_tunables() -> TunableValues {
         max_log_files: 7,
         message_shortcode_display: false,
         normal_after_send: true,
+        proxy: Proxy::default().values(),
         reaction_display: true,
         reaction_shortcode_display: false,
         read_receipt_send: true,
