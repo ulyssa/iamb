@@ -10,6 +10,7 @@ default_room = "#iamb-users:0x.badd.cafe"
 default_split = "vertical"
 external_edit_file_suffix = ".md"
 log_level = "warn"
+members_split = "vertical"
 message_shortcode_display = false
 open_command = ["my-open", "--file"]
 reaction_display = true

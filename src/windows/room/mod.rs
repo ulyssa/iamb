@@ -200,11 +200,14 @@ pub async fn room_command(
             Ok(vec![])
         },
         RoomAction::Members(mut cmd) => {
-            let width = Count::Exact(30);
-            let act = cmd
-                .default_axis(Axis::Vertical)
-                .default_relation(MoveDir1D::Next)
-                .window(OpenTarget::Application(IambId::MemberList(id.to_owned())), width.into());
+            let id = IambId::MemberList(id.to_owned());
+            let target = OpenTarget::Application(id);
+            let cmd = cmd.default_relation(MoveDir1D::Next);
+
+            let act = match store.application.settings.tunables.members_split {
+                Some(dir) => cmd.default_axis(dir.to_axis()).window(target, None),
+                None => cmd.switch(target),
+            };
 
             Ok(vec![(act, cmd.context.clone())])
         },
