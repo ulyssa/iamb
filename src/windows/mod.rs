@@ -13,17 +13,17 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use matrix_sdk::{
-    encryption::verification::{format_emojis, SasVerification},
+    RoomState as MatrixRoomState,
+    encryption::verification::{SasVerification, format_emojis},
     room::{Room as MatrixRoom, RoomMember},
     ruma::{
-        events::room::member::MembershipState,
-        events::tag::{TagName, Tags},
         OwnedRoomAliasId,
         OwnedRoomId,
         RoomAliasId,
         RoomId,
+        events::room::member::MembershipState,
+        events::tag::{TagName, Tags},
     },
-    RoomState as MatrixRoomState,
 };
 
 use ratatui::{
@@ -51,11 +51,11 @@ use modalkit::{
 };
 
 use modalkit_ratatui::{
-    list::{List, ListCursor, ListItem, ListState},
     TermOffset,
     TerminalCursor,
     Window,
     WindowOps,
+    list::{List, ListCursor, ListItem, ListState},
 };
 
 use crate::base::{
@@ -576,17 +576,15 @@ impl WindowOps<IambInfo> for IambWindow {
                     None => true,
                 };
 
-                if need_fetch {
-                    if let Ok(mems) = store.application.worker.members(room_id.clone()) {
-                        let mut items = mems
-                            .into_iter()
-                            .map(|m| MemberItem::new(m, room_id.clone()))
-                            .collect::<Vec<_>>();
-                        let fields = &store.application.settings.tunables.sort.members;
-                        items.sort_by(|a, b| user_fields_cmp(a, b, fields));
-                        state.set(items);
-                        *last_fetch = Some(Instant::now());
-                    }
+                if need_fetch && let Ok(mems) = store.application.worker.members(room_id.clone()) {
+                    let mut items = mems
+                        .into_iter()
+                        .map(|m| MemberItem::new(m, room_id.clone()))
+                        .collect::<Vec<_>>();
+                    let fields = &store.application.settings.tunables.sort.members;
+                    items.sort_by(|a, b| user_fields_cmp(a, b, fields));
+                    state.set(items);
+                    *last_fetch = Some(Instant::now());
                 }
 
                 List::new(store)
@@ -1743,7 +1741,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matrix_sdk::ruma::{room_alias_id, server_name, MilliSecondsSinceUnixEpoch};
+    use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, room_alias_id, server_name};
 
     #[derive(Debug, Eq, PartialEq)]
     struct TestRoomItem {

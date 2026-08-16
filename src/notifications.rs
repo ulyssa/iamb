@@ -1,18 +1,18 @@
 use std::time::SystemTime;
 
 use matrix_sdk::{
+    Client,
+    EncryptionState,
     deserialized_responses::RawAnySyncOrStrippedTimelineEvent,
     notification_settings::{IsEncrypted, IsOneToOne, NotificationSettings, RoomNotificationMode},
     room::Room as MatrixRoom,
     ruma::{
-        events::{room::message::MessageType, AnyMessageLikeEventContent, AnySyncTimelineEvent},
-        serde::Raw,
         MilliSecondsSinceUnixEpoch,
         OwnedRoomId,
         RoomId,
+        events::{AnyMessageLikeEventContent, AnySyncTimelineEvent, room::message::MessageType},
+        serde::Raw,
     },
-    Client,
-    EncryptionState,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -208,14 +208,14 @@ async fn global_or_room_mode(
 }
 
 fn is_missing_mention(body: &Option<String>, mode: RoomNotificationMode, client: &Client) -> bool {
-    if let Some(body) = body {
-        if mode == RoomNotificationMode::MentionsAndKeywordsOnly {
-            let mentioned = match client.user_id() {
-                Some(user_id) => body.contains(user_id.localpart()),
-                _ => false,
-            };
-            return !mentioned;
-        }
+    if let Some(body) = body &&
+        mode == RoomNotificationMode::MentionsAndKeywordsOnly
+    {
+        let mentioned = match client.user_id() {
+            Some(user_id) => body.contains(user_id.localpart()),
+            _ => false,
+        };
+        return !mentioned;
     }
     false
 }

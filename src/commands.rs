@@ -4,7 +4,7 @@
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
 use std::{convert::TryFrom, str::FromStr as _};
 
-use matrix_sdk::ruma::{events::tag::TagName, OwnedRoomId, OwnedUserId};
+use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, events::tag::TagName};
 
 use modalkit::{
     commands::{CommandError, CommandResult, CommandStep},
@@ -550,7 +550,7 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             RoomAction::Show(RoomField::CanonicalAlias).into()
         },
         ("canonicalalias" | "canon", "show", Some(_)) => {
-            return Result::Err(CommandError::InvalidArgument)
+            return Result::Err(CommandError::InvalidArgument);
         },
 
         // :room canonicalalias set
@@ -558,7 +558,7 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             RoomAction::Set(RoomField::CanonicalAlias, s).into()
         },
         ("canonicalalias" | "canon", "set", None) => {
-            return Result::Err(CommandError::InvalidArgument)
+            return Result::Err(CommandError::InvalidArgument);
         },
 
         // :room canonicalalias unset
@@ -566,7 +566,7 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             RoomAction::Unset(RoomField::CanonicalAlias).into()
         },
         ("canonicalalias" | "canon", "unset", Some(_)) => {
-            return Result::Err(CommandError::InvalidArgument)
+            return Result::Err(CommandError::InvalidArgument);
         },
 
         // :room id show

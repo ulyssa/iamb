@@ -13,10 +13,10 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 
+use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::sticker::StickerEvent;
-use matrix_sdk::ruma::OwnedTransactionId;
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -25,21 +25,30 @@ use ratatui::{
 };
 use ratatui_image::picker::{Picker, ProtocolType};
 use serde::{
-    de::Error as SerdeError,
-    de::Visitor,
     Deserialize,
     Deserializer,
     Serialize,
     Serializer,
+    de::Error as SerdeError,
+    de::Visitor,
 };
 use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 
 use matrix_sdk::{
+    RoomState as MatrixRoomState,
     encryption::verification::SasVerification,
     room::Room as MatrixRoom,
     ruma::{
+        EventId,
+        OwnedEventId,
+        OwnedRoomId,
+        OwnedUserId,
+        RoomId,
+        UserId,
         events::{
+            AnySyncStateEvent,
+            MessageLikeEvent,
             reaction::ReactionEvent,
             relation::{Replacement, Thread},
             room::encrypted::RoomEncryptedEvent,
@@ -52,18 +61,9 @@ use matrix_sdk::{
             },
             room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
             tag::{TagName, Tags},
-            AnySyncStateEvent,
-            MessageLikeEvent,
         },
         presence::PresenceState,
-        EventId,
-        OwnedEventId,
-        OwnedRoomId,
-        OwnedUserId,
-        RoomId,
-        UserId,
     },
-    RoomState as MatrixRoomState,
 };
 
 use modalkit::{
@@ -77,7 +77,7 @@ use modalkit::{
             ApplicationStore,
             ApplicationWindowId,
         },
-        completion::{complete_path, Completer, CompletionMap},
+        completion::{Completer, CompletionMap, complete_path},
         context::EditContext,
         cursor::Cursor,
         rope::EditRope,
@@ -97,7 +97,7 @@ use crate::{
     config::{ApplicationSettings, ImagePreviewProtocolValues},
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     notifications::NotificationHandle,
-    preview::{source_from_event, PreviewManager},
+    preview::{PreviewManager, source_from_event},
     worker::Requester,
 };
 
@@ -1180,11 +1180,11 @@ impl RoomInfo {
                 }
             },
             Some(EventLocation::Message(Some(root), key)) => {
-                if let Some(thread) = self.threads.get_mut(root) {
-                    if let Some(msg) = thread.get_mut(key) {
-                        let ev = SyncRoomRedactionEvent::Original(ev);
-                        msg.redact(ev);
-                    }
+                if let Some(thread) = self.threads.get_mut(root) &&
+                    let Some(msg) = thread.get_mut(key)
+                {
+                    let ev = SyncRoomRedactionEvent::Original(ev);
+                    msg.redact(ev);
                 }
             },
             Some(EventLocation::Reaction(event_id)) => {
@@ -1408,13 +1408,12 @@ impl RoomInfo {
         let source = source_from_event(&ev);
         self.insert(ev);
 
-        if let Some((event_id, source)) = source {
-            if let (Some(msg), Some(image_preview)) =
+        if let Some((event_id, source)) = source &&
+            let (Some(msg), Some(image_preview)) =
                 (self.get_event_mut(&event_id), &settings.tunables.image_preview)
-            {
-                msg.image_preview = Some(source.clone());
-                previews.register_preview(settings, source, image_preview.size, worker)
-            }
+        {
+            msg.image_preview = Some(source.clone());
+            previews.register_preview(settings, source, image_preview.size, worker)
         }
     }
 
@@ -1627,7 +1626,9 @@ fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
 /// Windows cannot guess the right protocol, and always needs type and font_size.
 #[cfg(windows)]
 fn picker_from_termios(_: Option<ProtocolType>) -> Option<Picker> {
-    tracing::error!("\"image_preview\" requires \"protocol\" with \"type\" and \"font_size\" options on Windows.");
+    tracing::error!(
+        "\"image_preview\" requires \"protocol\" with \"type\" and \"font_size\" options on Windows."
+    );
     None
 }
 
@@ -2365,9 +2366,9 @@ pub mod tests {
     use crate::config::user_style_from_color;
     use crate::tests::*;
     use matrix_sdk::ruma::{
+        MilliSecondsSinceUnixEpoch,
         events::{reaction::ReactionEventContent, relation::Annotation},
         owned_event_id,
-        MilliSecondsSinceUnixEpoch,
     };
     use pretty_assertions::assert_eq;
     use ratatui::style::Color;
