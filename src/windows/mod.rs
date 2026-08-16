@@ -1655,6 +1655,8 @@ impl ListItem<IambInfo> for MemberItem {
         } else if let Some(display) = info.display_names.get(user_id) {
             spans.push(Span::styled(display.into_owned(), user_style));
             tags.push(Span::styled(user_id.as_str(), user_style));
+        } else {
+            spans.push(Span::styled(user_id.as_str(), user_style));
         }
 
         let roles = match self.member.power_level() {
