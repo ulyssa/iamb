@@ -19,21 +19,21 @@
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::Display;
-use std::fs::{create_dir_all, File};
-use std::io::{stdout, BufWriter, Stdout, Write};
+use std::fs::{File, create_dir_all};
+use std::io::{BufWriter, Stdout, Write, stdout};
 use std::ops::DerefMut;
 use std::process;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
 use clap::{CommandFactory, Parser};
-use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk::ruma::OwnedUserId;
+use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
-use rand::distr::Alphanumeric;
 use rand::RngExt as _;
+use rand::distr::Alphanumeric;
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::Level;
@@ -43,8 +43,6 @@ use modalkit::crossterm::{
     self,
     cursor::{SetCursorStyle, Show as CursorShow},
     event::{
-        poll,
-        read,
         DisableBracketedPaste,
         DisableFocusChange,
         DisableMouseCapture,
@@ -57,18 +55,20 @@ use modalkit::crossterm::{
         MouseEventKind,
         PopKeyboardEnhancementFlags,
         PushKeyboardEnhancementFlags,
+        poll,
+        read,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
 };
 
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Span,
     widgets::Paragraph,
-    Terminal,
 };
 
 mod base;
@@ -104,7 +104,7 @@ use crate::{
     },
     config::{ApplicationSettings, Iamb},
     windows::IambWindow,
-    worker::{create_room, ClientWorker, LoginStyle, Requester},
+    worker::{ClientWorker, LoginStyle, Requester, create_room},
 };
 
 use modalkit::{
@@ -127,20 +127,20 @@ use modalkit::{
     errors::{EditError, UIError},
     key::TerminalKey,
     keybindings::{
-        dialog::{Pager, PromptYesNo},
         BindingMachine,
+        dialog::{Pager, PromptYesNo},
     },
     prelude::*,
     ui::FocusList,
 };
 
 use modalkit_ratatui::{
-    cmdbar::CommandBarState,
-    screen::{Screen, ScreenState, TabbedLayoutDescription},
-    windows::{WindowLayoutDescription, WindowLayoutState},
     TerminalCursor,
     TerminalExtOps,
     Window,
+    cmdbar::CommandBarState,
+    screen::{Screen, ScreenState, TabbedLayoutDescription},
+    windows::{WindowLayoutDescription, WindowLayoutState},
 };
 
 fn config_tab_to_desc(
@@ -1059,7 +1059,10 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     match res {
         Err(UIError::Application(IambError::Matrix(e))) => {
             if let Some(ErrorKind::UnknownToken { .. }) = e.client_api_error_kind() {
-                print_exit(format!("Server did not recognize our API token; did you log out from this session elsewhere?\nTry deleting `{}` to force a clean login.", settings.session_json.display()))
+                print_exit(format!(
+                    "Server did not recognize our API token; did you log out from this session elsewhere?\nTry deleting `{}` to force a clean login.",
+                    settings.session_json.display()
+                ))
             } else {
                 print_exit(e)
             }

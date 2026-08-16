@@ -4,9 +4,9 @@
 //! keys come from [modalkit::env::vim::keybindings].
 use modalkit::{
     actions::{InsertTextAction, MacroAction, WindowAction},
-    env::vim::keybindings::{InputStep, VimBindings},
-    env::vim::VimMode,
     env::CommonKeyClass,
+    env::vim::VimMode,
+    env::vim::keybindings::{InputStep, VimBindings},
     key::TerminalKey,
     keybindings::{EdgeEvent, EdgeRepeat, InputBindings},
     prelude::*,
@@ -60,12 +60,9 @@ pub fn setup_keybindings() -> Keybindings {
     ism.add_mapping(VimMode::Visual, &cwcm, &stoggle);
 
     let shift_enter = vec![once(&shift_enter)];
-    let newline = IambStep::new().actions(vec![InsertTextAction::Type(
-        Char::Single('\n').into(),
-        MoveDir1D::Previous,
-        1.into(),
-    )
-    .into()]);
+    let newline = IambStep::new().actions(vec![
+        InsertTextAction::Type(Char::Single('\n').into(), MoveDir1D::Previous, 1.into()).into(),
+    ]);
     ism.add_mapping(VimMode::Insert, &cwm, &newline);
     ism.add_mapping(VimMode::Insert, &shift_enter, &newline);
 
@@ -92,13 +89,15 @@ impl InputBindings<TerminalKey, IambStep> for ApplicationSettings {
             let ctrl_f = "<C-F>".parse::<TerminalKey>().unwrap();
 
             let vsplit_open = IambStep::new()
-                .actions(vec![WindowAction::Split(
-                    OpenTarget::Cursor(MATRIX_ID_WORD.clone()),
-                    Axis::Vertical,
-                    MoveDir1D::Next,
-                    1.into(),
-                )
-                .into()])
+                .actions(vec![
+                    WindowAction::Split(
+                        OpenTarget::Cursor(MATRIX_ID_WORD.clone()),
+                        Axis::Vertical,
+                        MoveDir1D::Next,
+                        1.into(),
+                    )
+                    .into(),
+                ])
                 .goto(VimMode::Normal);
 
             let cwf = vec![once(&ctrl_w), once(&key_f)];

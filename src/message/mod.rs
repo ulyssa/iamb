@@ -1,25 +1,32 @@
 //! # Room Messages
 use std::borrow::Cow;
 use std::cmp::{Ord, Ordering, PartialOrd};
-use std::collections::hash_map::DefaultHasher;
 use std::collections::BTreeMap;
+use std::collections::hash_map::DefaultHasher;
 use std::convert::{TryFrom, TryInto};
 use std::fmt::{self, Display};
 use std::hash::{Hash, Hasher};
 use std::ops::{Deref, DerefMut};
 
 use chrono::{DateTime, Local as LocalTz};
-use humansize::{format_size, DECIMAL};
+use humansize::{DECIMAL, format_size};
+use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::sticker::StickerEvent;
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
-use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::send_queue::SendHandle;
 use unicode_width::UnicodeWidthStr;
 
 use matrix_sdk::ruma::{
+    EventId,
+    MilliSecondsSinceUnixEpoch,
+    OwnedEventId,
+    OwnedUserId,
+    UInt,
     events::{
+        AnySyncStateEvent,
+        RedactedUnsigned,
         relation::Thread,
         room::{
             encrypted::{
@@ -39,14 +46,7 @@ use matrix_sdk::ruma::{
             },
             redaction::SyncRoomRedactionEvent,
         },
-        AnySyncStateEvent,
-        RedactedUnsigned,
     },
-    EventId,
-    MilliSecondsSinceUnixEpoch,
-    OwnedEventId,
-    OwnedUserId,
-    UInt,
 };
 
 use ratatui::{
@@ -64,7 +64,7 @@ use crate::preview::{ImageStatus, PreviewManager};
 use crate::{
     base::RoomInfo,
     config::ApplicationSettings,
-    message::html::{parse_matrix_html, StyleTree},
+    message::html::{StyleTree, parse_matrix_html},
     util::{replace_emojis_in_str, space, space_span, take_width, wrapped_text},
 };
 
@@ -188,13 +188,12 @@ fn placeholder_frame(
     placeholder.push('\u{230d}');
     placeholder.push_str(&"\n".repeat((height - 1) / 2));
 
-    if *height > 2 {
-        if let Some(text) = text {
-            if text.width() <= width - 2 {
-                placeholder.push(' ');
-                placeholder.push_str(text);
-            }
-        }
+    if *height > 2 &&
+        let Some(text) = text &&
+        text.width() <= width - 2
+    {
+        placeholder.push(' ');
+        placeholder.push_str(text);
     }
 
     placeholder.push_str(&"\n".repeat(height / 2));
@@ -239,7 +238,7 @@ pub struct MessageTimeStamp(pub MilliSecondsSinceUnixEpoch);
 
 impl MessageTimeStamp {
     fn as_datetime(self) -> DateTime<LocalTz> {
-        let time = i64::from(self.0 .0) / 1000;
+        let time = i64::from(self.0.0) / 1000;
         let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
         time.into()
     }
@@ -275,7 +274,7 @@ impl TryFrom<&MessageTimeStamp> for usize {
     type Error = TimeStampIntError;
 
     fn try_from(ts: &MessageTimeStamp) -> Result<Self, Self::Error> {
-        let n = usize::try_from(u64::from(ts.0 .0))?;
+        let n = usize::try_from(u64::from(ts.0.0))?;
 
         Ok(n)
     }
@@ -1154,13 +1153,12 @@ impl Message {
         settings: &'a ApplicationSettings,
         width: usize,
     ) -> SenderSpan<'a> {
-        if let Some(prev) = prev {
-            if self.sender == prev.sender &&
-                self.timestamp.same_day(prev.timestamp) &&
-                !self.event.is_emote()
-            {
-                return SenderSpan::None;
-            }
+        if let Some(prev) = prev &&
+            self.sender == prev.sender &&
+            self.timestamp.same_day(prev.timestamp) &&
+            !self.event.is_emote()
+        {
+            return SenderSpan::None;
         }
 
         let Span { content, style } = self.sender_span(info, settings);
@@ -1266,6 +1264,7 @@ impl Display for Message {
 #[cfg(test)]
 pub mod tests {
     use matrix_sdk::ruma::events::room::{
+        ImageInfo,
         message::{
             AudioInfo,
             AudioMessageEventContent,
@@ -1275,7 +1274,6 @@ pub mod tests {
             VideoInfo,
             VideoMessageEventContent,
         },
-        ImageInfo,
     };
 
     use super::*;

@@ -3,16 +3,16 @@ use std::{collections::HashMap, iter::FromIterator as _};
 
 use matrix_sdk::ruma::MilliSecondsSinceUnixEpoch;
 use matrix_sdk::ruma::{
-    event_id,
-    events::room::message::RoomMessageEventContent,
-    server_name,
-    user_id,
     EventId,
     OwnedEventId,
     OwnedRoomId,
     OwnedUserId,
     RoomId,
     UInt,
+    event_id,
+    events::room::message::RoomMessageEventContent,
+    server_name,
+    user_id,
 };
 
 use lazy_static::lazy_static;

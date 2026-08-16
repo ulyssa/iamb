@@ -1,12 +1,12 @@
 //! Code for converting composed messages into content to send to the homeserver.
 use comrak::{markdown_to_html, options::Options};
 use nom::{
+    IResult,
+    Parser as _,
     branch::alt,
     bytes::complete::tag,
     character::complete::space0,
     combinator::value,
-    IResult,
-    Parser as _,
 };
 
 use matrix_sdk::ruma::events::room::message::{

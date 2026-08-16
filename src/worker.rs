@@ -7,53 +7,71 @@ use std::convert::TryFrom;
 use std::fmt::{Debug, Formatter};
 use std::ops::DerefMut;
 use std::str::FromStr;
-use std::sync::mpsc::{sync_channel, Receiver, SyncSender};
 use std::sync::Arc;
+use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use std::time::{Duration, Instant};
 
-use futures::{stream::FuturesUnordered, StreamExt};
+use futures::{StreamExt, stream::FuturesUnordered};
 use gethostname::gethostname;
-use matrix_sdk::ruma::events::relation::Thread;
-use matrix_sdk::ruma::events::room::message::Relation;
-use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::events::sticker::StickerEventContent;
 use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
+use matrix_sdk::ruma::events::relation::Thread;
+use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::events::room::message::Relation;
+use matrix_sdk::ruma::events::sticker::StickerEventContent;
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
 use ratatui_image::picker::Picker;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::Semaphore;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tracing::{error, warn};
 use url::Url;
 
 use matrix_sdk::{
+    Client,
+    ClientBuildError,
+    Error as MatrixError,
+    RoomDisplayName,
+    RoomMemberships,
     authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
     encryption::{
-        verification::{SasVerification, Verification},
         BackupDownloadStrategy,
         EncryptionSettings,
+        verification::{SasVerification, Verification},
     },
     event_handler::Ctx,
     reqwest,
     room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
     ruma::{
+        EventId,
+        OwnedEventId,
+        OwnedRoomId,
+        OwnedRoomOrAliasId,
+        OwnedUserId,
+        RoomId,
         api::client::{
             filter::{FilterDefinition, LazyLoadOptions, RoomEventFilter, RoomFilter},
             room::{
-                create_room::v3::{CreationContent, Request as CreateRoomRequest},
                 Visibility,
+                create_room::v3::{CreationContent, Request as CreateRoomRequest},
             },
             space::get_hierarchy::v1::Request as SpaceHierarchyRequest,
         },
         assign,
         events::{
+            AnyMessageLikeEvent,
+            AnySyncStateEvent,
+            AnyTimelineEvent,
+            InitialStateEvent,
+            SyncEphemeralRoomEvent,
+            SyncMessageLikeEvent,
+            SyncStateEvent,
             key::verification::{
+                VerificationMethod,
                 done::{OriginalSyncKeyVerificationDoneEvent, ToDeviceKeyVerificationDoneEvent},
                 key::{OriginalSyncKeyVerificationKeyEvent, ToDeviceKeyVerificationKeyEvent},
                 request::ToDeviceKeyVerificationRequestEvent,
                 start::{OriginalSyncKeyVerificationStartEvent, ToDeviceKeyVerificationStartEvent},
-                VerificationMethod,
             },
             presence::PresenceEvent,
             reaction::ReactionEventContent,
@@ -67,28 +85,10 @@ use matrix_sdk::{
             },
             tag::Tags,
             typing::SyncTypingEvent,
-            AnyMessageLikeEvent,
-            AnySyncStateEvent,
-            AnyTimelineEvent,
-            InitialStateEvent,
-            SyncEphemeralRoomEvent,
-            SyncMessageLikeEvent,
-            SyncStateEvent,
         },
         room::RoomType,
         serde::Raw,
-        EventId,
-        OwnedEventId,
-        OwnedRoomId,
-        OwnedRoomOrAliasId,
-        OwnedUserId,
-        RoomId,
     },
-    Client,
-    ClientBuildError,
-    Error as MatrixError,
-    RoomDisplayName,
-    RoomMemberships,
 };
 
 use modalkit::errors::UIError;
@@ -100,6 +100,7 @@ use crate::message::{Message, MessageEvent, MessageId, MessageKey};
 use crate::notifications::register_notifications;
 use crate::preview::load_image;
 use crate::{
+    ApplicationSettings,
     base::{
         AsyncProgramStore,
         ChatStore,
@@ -112,7 +113,6 @@ use crate::{
         RoomInfo,
         VerifyAction,
     },
-    ApplicationSettings,
 };
 
 const DEFAULT_ENCRYPTION_SETTINGS: EncryptionSettings = EncryptionSettings {
@@ -510,9 +510,10 @@ async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
             };
 
             if ReceiptThread::Main == thread || ReceiptThread::Unthreaded == thread {
-                if let Err(err) = room.set_unread_flag(false).await {
-                    tracing::warn!(?room_id, "Failed to clear unread flag: {err}");
-                }
+                let _ = room
+                    .set_unread_flag(false)
+                    .await
+                    .inspect_err(|e| tracing::warn!(?room_id, "Failed to clear unread flag: {e}"));
             }
 
             match room
@@ -1148,16 +1149,14 @@ impl ClientWorker {
                 async move {
                     let room_id = room.room_id();
 
-                    if let Some(msg) = ev.as_original() {
-                        if let MessageType::VerificationRequest(_) = msg.content.msgtype {
-                            if let Some(request) = client
-                                .encryption()
-                                .get_verification_request(ev.sender(), ev.event_id())
-                                .await
-                            {
-                                request.accept().await.expect("Failed to accept request");
-                            }
-                        }
+                    if let Some(msg) = ev.as_original() &&
+                        let MessageType::VerificationRequest(_) = msg.content.msgtype &&
+                        let Some(request) = client
+                            .encryption()
+                            .get_verification_request(ev.sender(), ev.event_id())
+                            .await
+                    {
+                        request.accept().await.expect("Failed to accept request");
                     }
 
                     let mut locked = store.lock().await;

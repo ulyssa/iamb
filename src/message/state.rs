@@ -3,14 +3,14 @@ use std::borrow::Cow;
 use std::str::FromStr;
 
 use matrix_sdk::ruma::{
+    OwnedRoomId,
+    UserId,
     events::{
-        room::member::MembershipChange,
         AnyStateEventContentChange,
         AnySyncStateEvent,
         StateEventContentChange,
+        room::member::MembershipChange,
     },
-    OwnedRoomId,
-    UserId,
 };
 
 use super::html::{StyleTree, StyleTreeNode};

@@ -12,14 +12,14 @@ use std::process;
 use std::str::FromStr;
 
 use clap::Parser;
+use matrix_sdk::EncryptionState;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
-use matrix_sdk::EncryptionState;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::picker::ProtocolType;
-use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as SerdeError, de::Visitor};
 use url::Url;
 
 use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
@@ -428,7 +428,7 @@ impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
                 "title" => location |= EncryptionIndicatorLocation::TITLE,
                 "prompt" => location |= EncryptionIndicatorLocation::PROMPT,
                 _ => {
-                    return Err(E::custom("could not parse into an encryption indicator location"))
+                    return Err(E::custom("could not parse into an encryption indicator location"));
                 },
             };
         }
@@ -511,7 +511,7 @@ impl Visitor<'_> for NotifyViaVisitor {
                 },
                 #[cfg(not(feature = "desktop"))]
                 "desktop" => {
-                    return Err(E::custom("desktop notification support was compiled out"))
+                    return Err(E::custom("desktop notification support was compiled out"));
                 },
                 _ => return Err(E::custom("could not parse into a notify destination")),
             };
@@ -1231,10 +1231,10 @@ impl ApplicationSettings {
                         For more information try '--help'",
                     );
                 }
-                if let Ok(i) = input.trim().parse::<usize>() {
-                    if i < profiles.len() {
-                        break profiles.into_iter().nth(i).unwrap();
-                    }
+                if let Ok(i) = input.trim().parse::<usize>() &&
+                    i < profiles.len()
+                {
+                    break profiles.into_iter().nth(i).unwrap();
                 }
                 println!("\nInvalid index.");
             }
@@ -1749,16 +1749,18 @@ mod tests {
 
         // Always shows in the title:
         assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_some());
-        assert!(enc
-            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
-            .is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+                .is_some()
+        );
         assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
 
         // Doesn't show in the prompt:
         assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
-        assert!(enc
-            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
-            .is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+                .is_none()
+        );
         assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
     }
 
@@ -1773,14 +1775,16 @@ mod tests {
 
         // Never shows in the title or the prompt:
         assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
-        assert!(enc
-            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
-            .is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+                .is_none()
+        );
         assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
         assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
-        assert!(enc
-            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
-            .is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+                .is_none()
+        );
         assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
     }
 
@@ -1798,15 +1802,17 @@ mod tests {
         assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
 
         // But is hidden when unencrypted:
-        assert!(enc
-            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
-            .is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+                .is_none()
+        );
 
         // Doesn't show in the title:
         assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
-        assert!(enc
-            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
-            .is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+                .is_none()
+        );
         assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
     }
     #[test]
@@ -1819,13 +1825,15 @@ mod tests {
         };
 
         // Shows in both the prompt and title when unencrypted or unknown:
-        assert!(enc
-            .get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
-            .is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+                .is_some()
+        );
         assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
-        assert!(enc
-            .get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
-            .is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+                .is_some()
+        );
         assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
 
         // But is hidden when encrypted:

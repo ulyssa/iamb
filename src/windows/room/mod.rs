@@ -3,9 +3,15 @@ use std::collections::HashSet;
 
 use matrix_sdk::ruma::api::error::ErrorKind as ClientApiErrorKind;
 use matrix_sdk::{
+    RoomDisplayName,
+    RoomState as MatrixRoomState,
     notification_settings::RoomNotificationMode,
     room::Room as MatrixRoom,
     ruma::{
+        OwnedEventId,
+        OwnedRoomAliasId,
+        OwnedUserId,
+        RoomId,
         events::{
             room::{
                 canonical_alias::RoomCanonicalAliasEventContent,
@@ -15,13 +21,7 @@ use matrix_sdk::{
             },
             tag::{TagInfo, Tags},
         },
-        OwnedEventId,
-        OwnedRoomAliasId,
-        OwnedUserId,
-        RoomId,
     },
-    RoomDisplayName,
-    RoomState as MatrixRoomState,
 };
 
 use ratatui::{
@@ -230,14 +230,14 @@ pub async fn room_command(
                 let user_id = store.application.settings.profile.user_id.clone();
                 let info = store.application.get_room_info(id.to_owned());
                 let messages = info.get_thread(None).expect("room main timeline doesn't exist");
-                if let Some((key, _)) = messages.last_key_value() {
-                    if let Some(event_id) = key.id.as_origin() {
-                        info.set_receipt(
-                            matrix_sdk::ruma::events::receipt::ReceiptThread::Main,
-                            user_id,
-                            event_id.to_owned(),
-                        );
-                    }
+                if let Some((key, _)) = messages.last_key_value() &&
+                    let Some(event_id) = key.id.as_origin()
+                {
+                    info.set_receipt(
+                        matrix_sdk::ruma::events::receipt::ReceiptThread::Main,
+                        user_id,
+                        event_id.to_owned(),
+                    );
                 }
             }
 
@@ -665,10 +665,10 @@ impl RoomState {
         let style = Style::default().add_modifier(StyleModifier::BOLD);
         let mut spans = vec![];
 
-        if let RoomState::Chat(chat) = self {
-            if chat.thread().is_some() {
-                spans.push("Thread in ".into());
-            }
+        if let RoomState::Chat(chat) = self &&
+            chat.thread().is_some()
+        {
+            spans.push("Thread in ".into());
         }
 
         spans.push(Span::styled(title, style));
