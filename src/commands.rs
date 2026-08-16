@@ -4,7 +4,7 @@
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
 use std::{convert::TryFrom, str::FromStr as _};
 
-use matrix_sdk::ruma::{events::tag::TagName, OwnedRoomId, OwnedUserId};
+use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, events::tag::TagName};
 
 use modalkit::{
     commands::{CommandError, CommandResult, CommandStep},
@@ -200,6 +200,17 @@ fn iamb_leave(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_forget(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let forget = IambAction::Homeserver(HomeserverAction::Forget);
+    let step = CommandStep::Continue(forget.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_cancel(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -275,6 +286,17 @@ fn iamb_reply(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_replied(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let ract = IambAction::from(MessageAction::Replied);
+    let step = CommandStep::Continue(ract.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_editor(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -330,6 +352,17 @@ fn iamb_unreads(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             return Ok(step);
         },
     }
+}
+
+fn iamb_mentions(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = ctx.switch(OpenTarget::Application(IambId::MentionsList));
+    let step = CommandStep::Continue(open, ctx.context.clone());
+
+    return Ok(step);
 }
 
 fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
@@ -517,7 +550,7 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             RoomAction::Show(RoomField::CanonicalAlias).into()
         },
         ("canonicalalias" | "canon", "show", Some(_)) => {
-            return Result::Err(CommandError::InvalidArgument)
+            return Result::Err(CommandError::InvalidArgument);
         },
 
         // :room canonicalalias set
@@ -525,7 +558,7 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             RoomAction::Set(RoomField::CanonicalAlias, s).into()
         },
         ("canonicalalias" | "canon", "set", None) => {
-            return Result::Err(CommandError::InvalidArgument)
+            return Result::Err(CommandError::InvalidArgument);
         },
 
         // :room canonicalalias unset
@@ -533,12 +566,18 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             RoomAction::Unset(RoomField::CanonicalAlias).into()
         },
         ("canonicalalias" | "canon", "unset", Some(_)) => {
-            return Result::Err(CommandError::InvalidArgument)
+            return Result::Err(CommandError::InvalidArgument);
         },
 
         // :room id show
         ("id", "show", None) => RoomAction::Show(RoomField::Id).into(),
         ("id", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room unread set
+        ("unread", "set", None) => RoomAction::SetUnread(true).into(),
+
+        // :room unread [unset|clear]
+        ("unread", "unset" | "clear", None) => RoomAction::SetUnread(false).into(),
 
         _ => return Result::Err(CommandError::InvalidArgument),
     };
@@ -636,7 +675,7 @@ fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let sact = SendAction::Upload(args.remove(0));
+    let sact = SendAction::Upload(args.remove(0), None);
     let iact = IambAction::from(sact);
     let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
@@ -732,6 +771,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_leave,
     });
     cmds.add_command(ProgramCommand {
+        name: "forget".into(),
+        aliases: vec![],
+        f: iamb_forget,
+    });
+    cmds.add_command(ProgramCommand {
         name: "members".into(),
         aliases: vec![],
         f: iamb_members,
@@ -750,6 +794,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "reply".into(),
         aliases: vec![],
         f: iamb_reply,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "replied".into(),
+        aliases: vec![],
+        f: iamb_replied,
     });
     cmds.add_command(ProgramCommand {
         name: "rooms".into(),
@@ -771,6 +820,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "unreads".into(),
         aliases: vec![],
         f: iamb_unreads,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "mentions".into(),
+        aliases: vec![],
+        f: iamb_mentions,
     });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),

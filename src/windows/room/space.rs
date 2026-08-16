@@ -1,9 +1,11 @@
 //! Window for Matrix spaces
 use std::ops::{Deref, DerefMut};
+use std::str::FromStr;
 use std::time::{Duration, Instant};
 
-use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
+use matrix_sdk::ruma::OwnedSpaceChildOrder;
 use matrix_sdk::ruma::events::StateEventType;
+use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::{
     room::Room as MatrixRoom,
     ruma::{OwnedRoomId, RoomId},
@@ -19,10 +21,10 @@ use ratatui::{
 };
 
 use modalkit_ratatui::{
-    list::{List, ListState},
     TermOffset,
     TerminalCursor,
     WindowOps,
+    list::{List, ListState},
 };
 
 use crate::base::{
@@ -36,7 +38,7 @@ use crate::base::{
     SpaceAction,
 };
 
-use crate::windows::{room_fields_cmp, RoomItem, RoomLikeItem};
+use crate::windows::{RoomItem, RoomLikeItem, room_fields_cmp};
 
 const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -91,19 +93,25 @@ impl SpaceState {
             SpaceAction::SetChild(child_id, order, suggested) => {
                 if !self
                     .room
-                    .can_user_send_state(
+                    .power_levels()
+                    .await
+                    .map_err(matrix_sdk::Error::from)
+                    .map_err(IambError::from)?
+                    .user_can_send_state(
                         &store.application.settings.profile.user_id,
                         StateEventType::SpaceChild,
                     )
-                    .await
-                    .map_err(IambError::from)?
                 {
                     return Err(IambError::InsufficientPermission.into());
                 }
 
                 let via = self.room.route().await.map_err(IambError::from)?;
                 let mut ev = SpaceChildEventContent::new(via);
-                ev.order = order;
+                ev.order = order
+                    .as_deref()
+                    .map(OwnedSpaceChildOrder::from_str)
+                    .transpose()
+                    .map_err(IambError::InvalidSpaceChildOrder)?;
                 ev.suggested = suggested;
                 let _ = self
                     .room
@@ -117,12 +125,14 @@ impl SpaceState {
                 let space = self.list.get().ok_or(IambError::NoSelectedRoomOrSpaceItem)?;
                 if !self
                     .room
-                    .can_user_send_state(
+                    .power_levels()
+                    .await
+                    .map_err(matrix_sdk::Error::from)
+                    .map_err(IambError::from)?
+                    .user_can_send_state(
                         &store.application.settings.profile.user_id,
                         StateEventType::SpaceChild,
                     )
-                    .await
-                    .map_err(IambError::from)?
                 {
                     return Err(IambError::InsufficientPermission.into());
                 }

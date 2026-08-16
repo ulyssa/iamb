@@ -1,22 +1,29 @@
 //! Window for Matrix rooms
 use std::borrow::Cow;
+use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-use edit::edit_with_builder as external_edit;
 use edit::Builder;
+use edit::edit_with_builder as external_edit;
+use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
+use matrix_sdk::room::reply::{EnforceThread, Reply};
 use modalkit::editing::store::RegisterError;
 use std::process::Command;
 use tokio;
 use url::Url;
 
 use matrix_sdk::{
+    RoomState,
     attachment::AttachmentConfig,
     media::{MediaFormat, MediaRequestParameters},
     room::Room as MatrixRoom,
     ruma::{
+        OwnedEventId,
+        OwnedRoomId,
+        RoomId,
         events::reaction::ReactionEventContent,
         events::relation::{Annotation, Replacement},
         events::room::message::{
@@ -26,14 +33,9 @@ use matrix_sdk::{
             OriginalRoomMessageEvent,
             Relation,
             ReplyWithinThread,
-            RoomMessageEventContent,
-            TextMessageEventContent,
         },
-        OwnedEventId,
-        OwnedRoomId,
-        RoomId,
     },
-    RoomState,
+    send_queue::RoomSendQueueError,
 };
 
 use ratatui::{
@@ -43,13 +45,13 @@ use ratatui::{
     widgets::{Paragraph, StatefulWidget, Widget},
 };
 
-use modalkit::keybindings::dialog::{MultiChoice, MultiChoiceItem, PromptYesNo};
+use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem, PromptYesNo};
 
 use modalkit_ratatui::{
-    textbox::{TextBox, TextBoxState},
     PromptActions,
     TerminalCursor,
     WindowOps,
+    textbox::{TextBox, TextBoxState},
 };
 
 use modalkit::actions::{
@@ -72,6 +74,7 @@ use modalkit::prelude::*;
 
 use crate::base::{
     DownloadFlags,
+    EchoLocation,
     IambAction,
     IambBufferId,
     IambError,
@@ -86,7 +89,15 @@ use crate::base::{
     SendAction,
 };
 
-use crate::message::{text_to_message, Message, MessageEvent, MessageKey, MessageTimeStamp};
+use crate::config::EncryptionIndicatorLocation;
+use crate::message::{
+    MessageEvent,
+    MessageId,
+    MessageKey,
+    TreeGenState,
+    text_to_message,
+    text_to_text_message_event_content,
+};
 use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
@@ -213,24 +224,30 @@ impl ChatState {
                     };
 
                     let (source, msg_filename) = match &ev.content.msgtype {
-                        MessageType::Audio(c) => (c.source.clone(), c.body.as_str()),
-                        MessageType::File(c) => {
-                            (c.source.clone(), c.filename.as_deref().unwrap_or(c.body.as_str()))
-                        },
-                        MessageType::Image(c) => (c.source.clone(), c.body.as_str()),
-                        MessageType::Video(c) => (c.source.clone(), c.body.as_str()),
+                        MessageType::Audio(c) => (c.source.clone(), c.filename()),
+                        MessageType::File(c) => (c.source.clone(), c.filename()),
+                        MessageType::Image(c) => (c.source.clone(), c.filename()),
+                        MessageType::Video(c) => (c.source.clone(), c.filename()),
                         _ => {
                             if !flags.contains(DownloadFlags::OPEN) {
                                 return Err(IambError::NoAttachment.into());
                             }
 
-                            let links = if let Some(html) = &msg.html {
+                            let mut links = if let Some(html) = &msg.html {
                                 html.get_links()
-                            } else if let Ok(url) = Url::parse(&msg.event.body()) {
-                                vec![('0', url)]
                             } else {
                                 vec![]
                             };
+
+                            if links.is_empty() {
+                                links = linkify::LinkFinder::new()
+                                    .links(&msg.event.body())
+                                    .filter_map(|u| Url::parse(u.as_str()).ok())
+                                    .scan(TreeGenState { link_num: 0 }, |state, u| {
+                                        state.next_link_char().map(|c| (c, u))
+                                    })
+                                    .collect();
+                            }
 
                             if links.is_empty() {
                                 return Err(IambError::NoAttachment.into());
@@ -252,7 +269,7 @@ impl ChatState {
                     };
 
                     if filename.is_dir() {
-                        filename.push(msg_filename);
+                        filename.push(msg_filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
                     }
 
                     if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
@@ -262,9 +279,9 @@ impl ChatState {
                             let mut filename_incr = filename.clone();
                             for n in 1..=1000 {
                                 if let Some(ext) = ext.and_then(OsStr::to_str) {
-                                    filename_incr.set_file_name(format!("{}-{}.{}", stem, n, ext));
+                                    filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
                                 } else {
-                                    filename_incr.set_file_name(format!("{}-{}", stem, n));
+                                    filename_incr.set_file_name(format!("{stem}-{n}"));
                                 }
 
                                 if !filename_incr.exists() {
@@ -332,7 +349,7 @@ impl ChatState {
 
                 let ev = match &msg.event {
                     MessageEvent::Original(ev) => &ev.content,
-                    MessageEvent::Local(_, ev) => ev.deref(),
+                    MessageEvent::Local(_, _, ev) => ev.deref(),
                     _ => {
                         let msg = "Cannot edit a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -366,7 +383,9 @@ impl ChatState {
                 {
                     emoji.to_string()
                 } else {
-                    let msg = format!("{reaction:?} is not a known Emoji shortcode; do you want to react with exactly {reaction:?}?");
+                    let msg = format!(
+                        "{reaction:?} is not a known Emoji shortcode; do you want to react with exactly {reaction:?}?"
+                    );
                     let act = IambAction::Message(MessageAction::React(reaction, true));
                     let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
                     let prompt = Box::new(prompt);
@@ -379,9 +398,17 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Local(..) => {
+                        // XXX: Implement reactions for local echos
+
+                        let msg = "Cannot react to a local echo";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot react to a redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -390,7 +417,7 @@ impl ChatState {
                 };
 
                 if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
-                    let msg = format!("You’ve already reacted to this message with {}", emoji);
+                    let msg = format!("You’ve already reacted to this message with {emoji}");
                     let err = UIError::Failure(msg);
 
                     return Err(err);
@@ -398,7 +425,8 @@ impl ChatState {
 
                 let reaction = Annotation::new(event_id, emoji);
                 let msg = ReactionEventContent::new(reaction);
-                let _ = room.send(msg).await.map_err(IambError::from)?;
+
+                room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
 
                 Ok(None)
             },
@@ -417,9 +445,25 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Local(_, handle, _) => {
+                        let succeeded = handle
+                            .abort()
+                            .await
+                            .map_err(RoomSendQueueError::from)
+                            .map_err(IambError::from)?;
+
+                        if !succeeded {
+                            let msg = "local echo was already sent; please retry";
+                            let err = UIError::Failure(msg.into());
+
+                            return Err(err);
+                        }
+
+                        return Ok(None);
+                    },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot redact already redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -439,6 +483,21 @@ impl ChatState {
 
                 Ok(None)
             },
+            MessageAction::Replied => {
+                let Some(reply) = msg.reply_to() else {
+                    let msg = "Selected message is not a reply";
+                    return Err(UIError::Failure(msg.into()));
+                };
+
+                let Some(key) = info.get_message_key(&reply) else {
+                    store.application.need_load.need_message(self.room_id.clone(), reply);
+                    let msg = "Replied to message will be loaded in the background";
+                    return Err(UIError::Failure(msg.into()));
+                };
+
+                self.scrollback.goto_message(key.clone());
+                Ok(None)
+            },
             MessageAction::Unreact(reaction, literal) => {
                 let emoji = match reaction {
                     reaction if literal => reaction,
@@ -448,7 +507,9 @@ impl ChatState {
                         {
                             Some(emoji.to_string())
                         } else {
-                            let msg = format!("{reaction:?} is not a known Emoji shortcode; do you want to remove exactly {reaction:?}?");
+                            let msg = format!(
+                                "{reaction:?} is not a known Emoji shortcode; do you want to remove exactly {reaction:?}?"
+                            );
                             let act =
                                 IambAction::Message(MessageAction::Unreact(Some(reaction), true));
                             let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
@@ -465,9 +526,15 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev) => ev.event_id.clone(),
-                    MessageEvent::Local(event_id, _) => event_id.clone(),
+                    MessageEvent::Local(..) => {
+                        let msg = "Cannot unreact to a local echo";
+                        let err = UIError::Failure(msg.into());
+
+                        return Err(err);
+                    },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Redacted(_) => {
+                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot unreact to a redacted message";
                         let err = UIError::Failure(msg.into());
 
@@ -505,17 +572,61 @@ impl ChatState {
         }
     }
 
+    /// Generate a [`Reply`] setting thread info and reply_to (if `set_reply` is true)
+    fn generate_reply_info(&self, info: &RoomInfo, set_reply: bool) -> Option<Reply> {
+        let thread_last = self.scrollback.thread().and_then(|id| info.get_thread_last(id));
+
+        let (event_id, enforce_thread) = if let Some(last) = thread_last {
+            if let Some(m) = self.get_reply_to(info) &&
+                set_reply
+            {
+                // thread reply
+                (m.event_id.to_owned(), EnforceThread::Threaded(ReplyWithinThread::Yes))
+            } else {
+                // thread message
+                (last.event_id.to_owned(), EnforceThread::Threaded(ReplyWithinThread::No))
+            }
+        } else if let Some(m) = self.get_reply_to(info) &&
+            set_reply
+        {
+            // normal reply in main timeline:
+            (m.event_id.to_owned(), EnforceThread::Unthreaded)
+        } else {
+            // not any kind of reply:
+            return None;
+        };
+
+        Some(Reply {
+            add_mentions: AddMentions::No,
+            event_id,
+            enforce_thread,
+        })
+    }
+
+    /// Generate an attachment for this room based on the current message bar state.
+    fn generate_attachment_config(&self, info: &RoomInfo, add_caption: bool) -> AttachmentConfig {
+        let mut config = AttachmentConfig::new();
+        config.caption = add_caption
+            .then(|| self.tbox.get())
+            .filter(|c| !c.is_blank())
+            .map(|c| c.trim_end().to_string())
+            .and_then(text_to_text_message_event_content);
+        config.reply = self.generate_reply_info(info, add_caption);
+        config
+    }
+
     pub async fn send_command(
         &mut self,
         act: SendAction,
         _: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
+        let settings = &store.application.settings;
+        let tunables = &settings.tunables;
         let room = self.get_joined(&store.application.worker)?;
         let info = store.application.rooms.get_or_default(self.id().to_owned());
-        let mut show_echo = true;
 
-        let (event_id, msg) = match act {
+        match act {
             SendAction::Submit | SendAction::SubmitFromEditor => {
                 let msg = self.tbox.get();
 
@@ -538,13 +649,48 @@ impl ChatState {
 
                 let mut msg = text_to_message(msg);
 
-                if let Some((_, event_id)) = &self.editing {
+                if let Some(key) = &self.editing {
+                    let id = match &key.id {
+                        MessageId::Origin(id) => id,
+                        MessageId::Local(transaction_id) => {
+                            match info.echo_keys.get(transaction_id) {
+                                Some(EchoLocation::Replaced(id)) => id,
+                                Some(EchoLocation::Message(thread, orig_key)) => {
+                                    let Some(MessageEvent::Local(_, handle, _)) = info
+                                        .get_thread(thread.as_deref())
+                                        .and_then(|thread| thread.get(orig_key))
+                                        .map(|msg| &msg.event)
+                                    else {
+                                        let msg = "local echo not found in store";
+                                        return Err(UIError::Failure(msg.into()));
+                                    };
+
+                                    let succeeded = handle
+                                        .edit(msg.into())
+                                        .await
+                                        .map_err(RoomSendQueueError::from)
+                                        .map_err(IambError::from)?;
+
+                                    if !succeeded {
+                                        let msg = "local echo was already sent; please retry";
+                                        return Err(UIError::Failure(msg.into()));
+                                    }
+
+                                    self.reset();
+                                    return Ok(None);
+                                },
+                                None => {
+                                    let msg = "local echo not found in store";
+                                    return Err(UIError::Failure(msg.into()));
+                                },
+                            }
+                        },
+                    };
+
                     msg.relates_to = Some(Relation::Replacement(Replacement::new(
-                        event_id.clone(),
+                        id.to_owned(),
                         msg.msgtype.clone().into(),
                     )));
-
-                    show_echo = false;
                 } else if let Some(thread_root) = self.scrollback.thread() {
                     if let Some(m) = self.get_reply_to(info) {
                         msg = msg.make_for_thread(m, ReplyWithinThread::Yes, AddMentions::No);
@@ -557,17 +703,33 @@ impl ChatState {
                     msg = msg.make_reply_to(m, ForwardThread::Yes, AddMentions::No);
                 }
 
-                // XXX: second parameter can be a locally unique transaction id.
-                // Useful for doing retries.
-                let resp = room.send(msg.clone()).await.map_err(IambError::from)?;
-                let event_id = resp.event_id;
+                room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
 
                 // Reset message bar state now that it's been sent.
                 self.reset();
-
-                (event_id, msg)
             },
-            SendAction::Upload(file) => {
+            SendAction::Upload(file, add_caption) => {
+                let caption = self.tbox.get();
+
+                if add_caption.is_none() &&
+                    (!caption.is_blank() || self.get_reply_to(info).is_some())
+                {
+                    let msg = "Would you like to use the message bar as a caption?";
+
+                    let yes_act = SendAction::Upload(file.clone(), Some(true));
+                    let no_act = SendAction::Upload(file, Some(false));
+
+                    let yes_choice =
+                        MultiChoiceItem::new('y', msg, vec![IambAction::from(yes_act).into()]);
+                    let no_choice =
+                        MultiChoiceItem::new('n', "", vec![IambAction::from(no_act).into()]);
+
+                    let prompt = MultiChoice::new(vec![yes_choice, no_choice]);
+                    let prompt = Box::new(prompt);
+
+                    return Err(UIError::NeedConfirm(prompt));
+                }
+
                 let path = Path::new(file.as_str());
                 let mime = mime_guess::from_path(path).first_or(mime::APPLICATION_OCTET_STREAM);
 
@@ -576,21 +738,20 @@ impl ChatState {
                     .file_name()
                     .map(OsStr::to_string_lossy)
                     .unwrap_or_else(|| Cow::from("Attachment"));
-                let config = AttachmentConfig::new();
 
-                let resp = room
-                    .send_attachment(name.as_ref(), &mime, bytes, config)
+                let add_caption = add_caption.unwrap_or(false);
+                let config = self.generate_attachment_config(info, add_caption);
+
+                room.send_queue()
+                    .send_attachment(name.as_ref(), mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
 
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
+                if add_caption {
+                    self.reset();
+                }
             },
-            SendAction::UploadImage(width, height, bytes) => {
+            SendAction::UploadImage(width, height, bytes, add_caption) => {
                 // Convert to png because arboard does not give us the mime type.
                 let bytes =
                     image::ImageBuffer::from_raw(width as _, height as _, bytes.into_owned())
@@ -601,38 +762,36 @@ impl ChatState {
                             let mut buff = std::io::Cursor::new(bytes);
                             dynimage.write_to(&mut buff, image::ImageFormat::Png)?;
                             Ok(buff.into_inner())
-                        })
-                        .map_err(IambError::from)?;
+                        })?;
                 let mime = mime::IMAGE_PNG;
-
                 let name = "Clipboard.png";
-                let config = AttachmentConfig::new();
 
-                let resp = room
-                    .send_attachment(name, &mime, bytes, config)
+                let mut config = self.generate_attachment_config(info, add_caption);
+                config.info = Some(AttachmentInfo::Image(BaseImageInfo {
+                    height: height.try_into().ok(),
+                    width: width.try_into().ok(),
+                    ..Default::default()
+                }));
+
+                room.send_queue()
+                    .send_attachment(name, mime, bytes, config)
                     .await
                     .map_err(IambError::from)?;
 
-                // Mock up the local echo message for the scrollback.
-                let msg = TextMessageEventContent::plain(format!("[Attached File: {name}]"));
-                let msg = MessageType::Text(msg);
-                let msg = RoomMessageEventContent::new(msg);
-
-                (resp.event_id, msg)
+                if add_caption {
+                    self.reset();
+                }
             },
-        };
-
-        if show_echo {
-            let user = store.application.settings.profile.user_id.clone();
-            let key = (MessageTimeStamp::LocalEcho, event_id.clone());
-            let msg = MessageEvent::Local(event_id, msg.into());
-            let msg = Message::new(msg, user, MessageTimeStamp::LocalEcho);
-            let thread = self.scrollback.get_thread_mut(info);
-            thread.insert(key, msg);
         }
 
         // Jump to the end of the scrollback to show the message.
         self.scrollback.goto_latest();
+
+        if tunables.read_receipt_trigger.on_message() &&
+            let Some(thread) = self.scrollback.get_thread(info)
+        {
+            info.fully_read(settings.profile.user_id.clone(), thread.1.clone());
+        }
 
         Ok(None)
     }
@@ -782,11 +941,36 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
                 delegate!(self, w => w.editor_command(act, ctx, store))
             },
             Err(EditError::Register(RegisterError::ClipboardImage(data))) => {
-                let msg = "Do you really want to upload the image from your system clipboard?";
-                let send =
-                    IambAction::Send(SendAction::UploadImage(data.width, data.height, data.bytes));
-                let prompt = PromptYesNo::new(msg, vec![Action::from(send)]);
-                let prompt = Box::new(prompt);
+                let info = store.application.rooms.get_or_default(self.id().to_owned());
+                let prompt = if self.tbox.get().is_blank() && self.get_reply_to(info).is_none() {
+                    let msg = "Do you really want to upload the image from your system clipboard?";
+                    let send = IambAction::Send(SendAction::UploadImage(
+                        data.width,
+                        data.height,
+                        data.bytes,
+                        false,
+                    ));
+                    let prompt = PromptYesNo::new(msg, vec![Action::from(send)]);
+                    Box::new(prompt) as Box<dyn Dialog<_>>
+                } else {
+                    let msg_c = "Upload clipboard image with message bar as caption";
+                    let act_c =
+                        SendAction::UploadImage(data.width, data.height, data.bytes.clone(), true);
+                    let choice_c =
+                        MultiChoiceItem::new('c', msg_c, vec![IambAction::from(act_c).into()]);
+
+                    let msg_y = "Upload clipboard image without caption";
+                    let act_y =
+                        SendAction::UploadImage(data.width, data.height, data.bytes.clone(), false);
+                    let choice_y =
+                        MultiChoiceItem::new('y', msg_y, vec![IambAction::from(act_y).into()]);
+
+                    let msg_n = "Do not upload clipboard image";
+                    let choice_n = MultiChoiceItem::new('n', msg_n, vec![Action::NoOp]);
+
+                    let prompt = MultiChoice::new(vec![choice_c, choice_y, choice_n]);
+                    Box::new(prompt) as Box<dyn Dialog<_>>
+                };
 
                 Err(EditError::NeedConfirm(prompt))
             },
@@ -864,16 +1048,16 @@ impl PromptActions<ProgramContext, ProgramStore, IambInfo> for ChatState {
 
     fn recall(
         &mut self,
+        filter: &RecallFilter,
         dir: &MoveDir1D,
         count: &Count,
-        prefixed: bool,
         ctx: &ProgramContext,
         _: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
         let count = ctx.resolve(count);
         let rope = self.tbox.get();
 
-        let text = self.sent.recall(&rope, &mut self.sent_scrollback, *dir, prefixed, count);
+        let text = self.sent.recall(&rope, &mut self.sent_scrollback, filter, *dir, count);
 
         if let Some(text) = text {
             self.tbox.set_text(text);
@@ -897,9 +1081,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ChatState {
         match act {
             PromptAction::Submit => self.submit(ctx, store),
             PromptAction::Abort(empty) => self.abort(*empty, ctx, store),
-            PromptAction::Recall(dir, count, prefixed) => {
-                self.recall(dir, count, *prefixed, ctx, store)
-            },
+            PromptAction::Recall(filter, dir, count) => self.recall(filter, dir, count, ctx, store),
         }
     }
 }
@@ -969,7 +1151,14 @@ impl StatefulWidget for Chat<'_> {
             Paragraph::new(desc_spans).render(descarea, buf);
         }
 
-        let prompt = if self.focused { "> " } else { "  " };
+        let encryption_settings = &self.store.application.settings.tunables.encryption;
+        let encryption_indicator = encryption_settings
+            .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
+        let prompt = match (self.focused, encryption_indicator) {
+            (false, _) => Span::raw("  "),
+            (true, Some(i)) => i,
+            (true, None) => Span::raw("> "),
+        };
 
         let tbox = TextBox::new().prompt(prompt);
         tbox.render(textarea, buf, &mut state.tbox);
@@ -1087,7 +1276,7 @@ mod tests {
 
     use modalkit::actions::{EditAction, InsertTextAction};
 
-    use crate::tests::{mock_store, TEST_ROOM1_ID};
+    use crate::tests::{TEST_ROOM1_ID, mock_store};
 
     macro_rules! move_line {
         ($dir: expr, $count: expr) => {

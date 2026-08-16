@@ -47,7 +47,6 @@ use crate::{
         IambId,
         IambInfo,
         IambResult,
-        Need,
         ProgramContext,
         ProgramStore,
         RoomFetchStatus,
@@ -56,6 +55,7 @@ use crate::{
     },
     config::ApplicationSettings,
     message::{Message, MessageCursor, MessageKey, Messages},
+    preview::PreviewManager,
 };
 
 fn no_msgs() -> EditError<IambInfo> {
@@ -165,6 +165,12 @@ impl ScrollbackState {
         self.cursor = MessageCursor::latest();
     }
 
+    pub fn goto_message(&mut self, target: MessageKey) {
+        let mut cursor = MessageCursor::new(target, 0);
+        std::mem::swap(&mut cursor, &mut self.cursor);
+        self.jumped.push(cursor);
+    }
+
     /// Set the dimensions and placement within the terminal window for this list.
     pub fn set_term_info(&mut self, area: Rect) {
         self.viewctx.dimensions = (area.width as usize, area.height as usize);
@@ -265,6 +271,7 @@ impl ScrollbackState {
         pos: MovePosition,
         info: &RoomInfo,
         settings: &ApplicationSettings,
+        previews: &PreviewManager,
     ) {
         let Some(thread) = self.get_thread(info) else {
             return;
@@ -287,7 +294,8 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = selidx == key;
                     let prev = prevmsg(key, thread);
-                    let len = item.show(prev, sel, &self.viewctx, info, settings).lines.len();
+                    let len =
+                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
 
                     if key == &idx {
                         lines += len / 2;
@@ -310,7 +318,8 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = key == selidx;
                     let prev = prevmsg(key, thread);
-                    let len = item.show(prev, sel, &self.viewctx, info, settings).lines.len();
+                    let len =
+                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
 
                     lines += len;
 
@@ -333,7 +342,12 @@ impl ScrollbackState {
         self.jumped.push(self.cursor.clone());
     }
 
-    fn shift_cursor(&mut self, info: &RoomInfo, settings: &ApplicationSettings) {
+    fn shift_cursor(
+        &mut self,
+        info: &RoomInfo,
+        settings: &ApplicationSettings,
+        previews: &PreviewManager,
+    ) {
         let Some(thread) = self.get_thread(info) else {
             return;
         };
@@ -363,7 +377,10 @@ impl ScrollbackState {
                 break;
             }
 
-            lines += item.show(prev, false, &self.viewctx, info, settings).height().max(1);
+            lines += item
+                .show(prev, false, &self.viewctx, info, settings, previews)
+                .height()
+                .max(1);
 
             if lines >= self.viewctx.get_height() {
                 // We've reached the end of the viewport; move cursor into it.
@@ -689,10 +706,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
-                            store
-                                .application
-                                .need_load
-                                .insert(self.room_id.clone(), Need::MESSAGES);
+                            store.application.need_load.need_messages(self.room_id.clone());
                         }
                         mc
                     },
@@ -768,10 +782,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
-                            store
-                                .application
-                                .need_load
-                                .insert(self.room_id.to_owned(), Need::MESSAGES);
+                            store.application.need_load.need_messages(self.room_id.to_owned());
                         }
 
                         mc.map(|c| self._range_to(c))
@@ -840,8 +851,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
     fn complete(
         &mut self,
+        _: &CompletionStyle,
         _: &CompletionType,
-        _: &CompletionSelection,
         _: &CompletionDisplay,
         _: &ProgramContext,
         _: &mut ProgramStore,
@@ -1036,9 +1047,13 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     let err = EditError::Failure(msg.into());
                     Err(err)
                 } else {
-                    let root = key.1.clone();
+                    let Some(root) = key.id.as_origin() else {
+                        let msg = "Cannot create thread for local echo.";
+                        let err = EditError::Failure(msg.into());
+                        return Err(err);
+                    };
                     let room_id = self.room_id.clone();
-                    let id = IambId::Room(room_id, Some(root));
+                    let id = IambId::Room(room_id, Some(root.to_owned()));
                     let open = WindowAction::Switch(OpenTarget::Application(id));
                     Ok(vec![(open.into(), ctx.clone())])
                 }
@@ -1068,6 +1083,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
     ) -> EditResult<EditInfo, IambInfo> {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let settings = &store.application.settings;
+        let previews = &store.application.previews;
         let mut corner = self.viewctx.corner.clone();
         let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
@@ -1095,7 +1111,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 for (key, item) in thread.range(..=&corner_key).rev() {
                     let sel = key == cursor_key;
                     let prev = prevmsg(key, thread);
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1123,7 +1139,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in thread.range(&corner_key..) {
                     let sel = key == cursor_key;
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings);
+                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1161,7 +1177,7 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
         }
 
         self.viewctx.corner = corner;
-        self.shift_cursor(info, settings);
+        self.shift_cursor(info, settings, previews);
 
         Ok(None)
     }
@@ -1183,10 +1199,11 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             Axis::Vertical => {
                 let info = store.application.rooms.get_or_default(self.room_id.clone());
                 let settings = &store.application.settings;
+                let previews = &store.application.previews;
                 let thread = self.get_thread(info).ok_or_else(no_msgs)?;
 
                 if let Some(key) = self.cursor.to_key(thread).cloned() {
-                    self.scrollview(key, pos, info, settings);
+                    self.scrollview(key, pos, info, settings, previews);
                 }
 
                 Ok(None)
@@ -1328,10 +1345,7 @@ impl StatefulWidget for Scrollback<'_> {
             k
         } else {
             if state.need_more_messages(info) {
-                self.store
-                    .application
-                    .need_load
-                    .insert(state.room_id.to_owned(), Need::MESSAGES);
+                self.store.application.need_load.need_messages(state.room_id.to_owned());
             }
             return;
         };
@@ -1349,10 +1363,33 @@ impl StatefulWidget for Scrollback<'_> {
         let mut sawit = false;
         let mut prev = prevmsg(&corner_key, thread);
 
+        // load image previews
+        for (_, item) in thread.range(&corner_key..).rev() {
+            if let Some(source) = &item.image_preview {
+                self.store
+                    .application
+                    .previews
+                    .load(source, &self.store.application.worker);
+            }
+            let reply = item
+                .reply_to()
+                .or_else(|| item.thread_root())
+                .and_then(|e| info.get_event(&e))
+                .and_then(|msg| msg.image_preview.as_ref());
+            if let Some(source) = reply {
+                self.store
+                    .application
+                    .previews
+                    .load(source, &self.store.application.worker);
+            }
+        }
+
+        let previews = &self.store.application.previews;
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
+
             let (txt, [mut msg_preview, mut reply_preview]) =
-                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings);
+                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings, previews);
 
             let incomplete_ok = !full || !sel;
 
@@ -1392,8 +1429,8 @@ impl StatefulWidget for Scrollback<'_> {
             let _ = lines.drain(..n);
         }
 
-        if let Some(((ts, event_id), row, _, _)) = lines.first() {
-            state.viewctx.corner.timestamp = Some((*ts, event_id.clone()));
+        if let Some((key, row, _, _)) = lines.first() {
+            state.viewctx.corner.timestamp = Some((*key).clone());
             state.viewctx.corner.text_row = *row;
         }
 
@@ -1401,7 +1438,7 @@ impl StatefulWidget for Scrollback<'_> {
         let x = area.left();
 
         let mut image_previews = vec![];
-        for ((_, _), _, txt, line_preview) in lines.into_iter() {
+        for (_, _, txt, line_preview) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
             if let Some((backend, msg_x, _)) = line_preview {
                 image_previews.push((x + msg_x, y, backend));
@@ -1422,23 +1459,19 @@ impl StatefulWidget for Scrollback<'_> {
             }
         }
 
-        if self.room_focused &&
-            settings.tunables.read_receipt_send &&
-            state.cursor.timestamp.is_none()
+        // Check if we should update the user's read receipt for this room after this render:
+        if settings
+            .tunables
+            .read_receipt_trigger
+            .on_render(state.cursor.timestamp.is_none(), self.room_focused)
         {
-            // If the cursor is at the last message, then update the read marker.
-            if let Some((k, _)) = thread.last_key_value() {
-                info.set_receipt(thread.1.clone(), settings.profile.user_id.clone(), k.1.clone());
-            }
+            info.fully_read(settings.profile.user_id.clone(), thread.1.clone());
         }
 
         // Check whether we should load older messages for this room.
         if state.need_more_messages(info) {
             // If the top of the screen is the older message, load more.
-            self.store
-                .application
-                .need_load
-                .insert(state.room_id.to_owned(), Need::MESSAGES);
+            self.store.application.need_load.need_messages(state.room_id.to_owned());
         }
 
         info.draw_last = self.store.application.draw_curr;
@@ -1448,7 +1481,7 @@ impl StatefulWidget for Scrollback<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::tests::*;
+    use crate::{base::Need, tests::*};
 
     #[tokio::test]
     async fn test_search_messages() {
@@ -1493,7 +1526,7 @@ mod tests {
             std::mem::take(&mut store.application.need_load)
                 .into_iter()
                 .collect::<Vec<(OwnedRoomId, Need)>>(),
-            vec![(room_id.clone(), Need::MESSAGES)]
+            vec![(room_id.clone(), Need { messages: Some(Vec::new()), members: false })]
         );
 
         // Search forward twice to MSG1.
@@ -1571,7 +1604,7 @@ mod tests {
         // MSG1: |                   XXXday, Month NN 20XX                    |
         //       |           @user1:example.com  writhe                       |
         //       |------------------------------------------------------------|
-        let area = Rect::new(0, 0, 60, 4);
+        let area = Rect::new(0, 0, 60, 5);
         let mut buffer = Buffer::empty(area);
         scrollback.draw(area, &mut buffer, true, &mut store);
 

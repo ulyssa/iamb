@@ -1,11 +1,12 @@
 //! Code for converting composed messages into content to send to the homeserver.
-use comrak::{markdown_to_html, ComrakOptions};
+use comrak::{markdown_to_html, options::Options};
 use nom::{
+    IResult,
+    Parser as _,
     branch::alt,
     bytes::complete::tag,
     character::complete::space0,
     combinator::value,
-    IResult,
 };
 
 use matrix_sdk::ruma::events::room::message::{
@@ -118,7 +119,8 @@ fn parse_slash_command_inner(input: &str) -> IResult<&str, SlashCommand> {
         value(SlashCommand::Rainfall, tag("/rainfall ")),
         value(SlashCommand::Snowfall, tag("/snowfall ")),
         value(SlashCommand::SpaceInvaders, tag("/spaceinvaders ")),
-    ))(input)?;
+    ))
+    .parse(input)?;
     let (input, _) = space0(input)?;
 
     Ok((input, slash))
@@ -154,7 +156,7 @@ fn text_to_html(input: &str) -> Option<String> {
         return None;
     }
 
-    let mut options = ComrakOptions::default();
+    let mut options = Options::default();
     options.extension.autolink = true;
     options.extension.shortcodes = true;
     options.extension.strikethrough = true;
@@ -176,6 +178,34 @@ pub fn text_to_message(input: String) -> RoomMessageEventContent {
         .unwrap_or_else(|_| MessageType::Text(text_to_message_content(input)));
 
     RoomMessageEventContent::new(msg)
+}
+
+/// Returns `None` if `input` contains a non-text slash command.
+pub fn text_to_text_message_event_content(input: String) -> Option<TextMessageEventContent> {
+    let cmd = parse_slash_command(&input);
+
+    let content = match cmd {
+        Ok((body, SlashCommand::Html)) => TextMessageEventContent::html(body, body),
+        Ok((body, SlashCommand::Plaintext)) => TextMessageEventContent::plain(body),
+        Ok((body, SlashCommand::Markdown)) => {
+            if let Some(html) = text_to_html(body) {
+                TextMessageEventContent::html(body, html)
+            } else {
+                TextMessageEventContent::plain(body)
+            }
+        },
+        Ok(_) => return None,
+
+        _ => {
+            if let Some(html) = text_to_html(&input) {
+                TextMessageEventContent::html(input, html)
+            } else {
+                TextMessageEventContent::plain(input)
+            }
+        },
+    };
+
+    Some(content)
 }
 
 #[cfg(test)]

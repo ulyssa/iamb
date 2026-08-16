@@ -1,16 +1,18 @@
 use std::time::SystemTime;
 
 use matrix_sdk::{
+    Client,
+    EncryptionState,
     deserialized_responses::RawAnySyncOrStrippedTimelineEvent,
     notification_settings::{IsEncrypted, IsOneToOne, NotificationSettings, RoomNotificationMode},
     room::Room as MatrixRoom,
     ruma::{
-        events::{room::message::MessageType, AnyMessageLikeEventContent, AnySyncTimelineEvent},
-        serde::Raw,
         MilliSecondsSinceUnixEpoch,
+        OwnedRoomId,
         RoomId,
+        events::{AnyMessageLikeEventContent, AnySyncTimelineEvent, room::message::MessageType},
+        serde::Raw,
     },
-    Client,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -24,6 +26,21 @@ const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
     Some(iamb) => iamb,
 };
 
+/// Handle for an open notification that should be closed when the user views it.
+pub struct NotificationHandle(
+    #[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
+    Option<notify_rust::NotificationHandle>,
+);
+
+impl Drop for NotificationHandle {
+    fn drop(&mut self) {
+        #[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
+        if let Some(handle) = self.0.take() {
+            handle.close();
+        }
+    }
+}
+
 pub async fn register_notifications(
     client: &Client,
     settings: &ApplicationSettings,
@@ -34,6 +51,7 @@ pub async fn register_notifications(
     }
     let notify_via = settings.tunables.notifications.via;
     let show_message = settings.tunables.notifications.show_message;
+    let sound_hint = settings.tunables.notifications.sound_hint.clone();
     let server_settings = client.notification_settings().await;
     let Some(startup_ts) = MilliSecondsSinceUnixEpoch::from_system_time(SystemTime::now()) else {
         return;
@@ -44,6 +62,7 @@ pub async fn register_notifications(
         .register_notification_handler(move |notification, room: MatrixRoom, client: Client| {
             let store = store.clone();
             let server_settings = server_settings.clone();
+            let sound_hint = sound_hint.clone();
             async move {
                 let mode = global_or_room_mode(&server_settings, &room).await;
                 if mode == RoomNotificationMode::Mute {
@@ -54,6 +73,7 @@ pub async fn register_notifications(
                     return;
                 }
 
+                let room_id = room.room_id().to_owned();
                 match notification.event {
                     RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
                         match parse_full_notification(e, room, show_message).await {
@@ -66,8 +86,15 @@ pub async fn register_notifications(
                                     return;
                                 }
 
-                                send_notification(&notify_via, &store, &summary, body.as_deref())
-                                    .await;
+                                send_notification(
+                                    &notify_via,
+                                    &summary,
+                                    body.as_deref(),
+                                    room_id,
+                                    &store,
+                                    sound_hint.as_deref(),
+                                )
+                                .await;
                             },
                             Err(err) => {
                                 tracing::error!("Failed to extract notification data: {err}")
@@ -86,13 +113,15 @@ pub async fn register_notifications(
 
 async fn send_notification(
     via: &NotifyVia,
-    store: &AsyncProgramStore,
     summary: &str,
     body: Option<&str>,
+    room_id: OwnedRoomId,
+    store: &AsyncProgramStore,
+    sound_hint: Option<&str>,
 ) {
     #[cfg(feature = "desktop")]
     if via.desktop {
-        send_notification_desktop(summary, body);
+        send_notification_desktop(summary, body, room_id, store, sound_hint).await;
     }
     #[cfg(not(feature = "desktop"))]
     {
@@ -110,13 +139,24 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
 }
 
 #[cfg(feature = "desktop")]
-fn send_notification_desktop(summary: &str, body: Option<&str>) {
+#[cfg_attr(target_os = "macos", allow(unused_variables))]
+async fn send_notification_desktop(
+    summary: &str,
+    body: Option<&str>,
+    room_id: OwnedRoomId,
+    _store: &AsyncProgramStore,
+    sound_hint: Option<&str>,
+) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
         .summary(summary)
         .appname(IAMB_XDG_NAME)
         .icon(IAMB_XDG_NAME)
         .action("default", "default");
+
+    if let Some(sound_hint) = sound_hint {
+        desktop_notification.sound_name(sound_hint);
+    }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     desktop_notification.urgency(notify_rust::Urgency::Normal);
@@ -125,8 +165,24 @@ fn send_notification_desktop(summary: &str, body: Option<&str>) {
         desktop_notification.body(body);
     }
 
-    if let Err(err) = desktop_notification.show() {
-        tracing::error!("Failed to send notification: {err}")
+    #[cfg(all(unix, not(target_os = "macos")))]
+    let res = desktop_notification.show_async().await;
+    #[cfg(any(not(unix), target_os = "macos"))]
+    let res = desktop_notification.show();
+
+    match res {
+        Err(err) => tracing::error!("Failed to send notification: {err}"),
+        Ok(handle) => {
+            #[cfg(all(unix, not(target_os = "macos")))]
+            _store
+                .lock()
+                .await
+                .application
+                .open_notifications
+                .entry(room_id)
+                .or_default()
+                .push(NotificationHandle(Some(handle)));
+        },
     }
 }
 
@@ -142,8 +198,8 @@ async fn global_or_room_mode(
         Ok(true) => IsOneToOne::Yes,
         _ => IsOneToOne::No,
     };
-    let is_encrypted = match room.is_encrypted().await {
-        Ok(true) => IsEncrypted::Yes,
+    let is_encrypted = match room.latest_encryption_state().await {
+        Ok(EncryptionState::Encrypted) => IsEncrypted::Yes,
         _ => IsEncrypted::No,
     };
     settings
@@ -152,14 +208,14 @@ async fn global_or_room_mode(
 }
 
 fn is_missing_mention(body: &Option<String>, mode: RoomNotificationMode, client: &Client) -> bool {
-    if let Some(body) = body {
-        if mode == RoomNotificationMode::MentionsAndKeywordsOnly {
-            let mentioned = match client.user_id() {
-                Some(user_id) => body.contains(user_id.localpart()),
-                _ => false,
-            };
-            return !mentioned;
-        }
+    if let Some(body) = body &&
+        mode == RoomNotificationMode::MentionsAndKeywordsOnly
+    {
+        let mentioned = match client.user_id() {
+            Some(user_id) => body.contains(user_id.localpart()),
+            _ => false,
+        };
+        return !mentioned;
     }
     false
 }

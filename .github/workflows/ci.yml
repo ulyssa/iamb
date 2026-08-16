@@ -22,8 +22,8 @@ jobs:
       uses: actions/checkout@v3
       with:
         submodules: true
-    - name: Install Rust (1.83 w/ clippy)
-      uses: dtolnay/rust-toolchain@1.83
+    - name: Install Rust (1.93 w/ clippy)
+      uses: dtolnay/rust-toolchain@1.93
       with:
           components: clippy
     - name: Install Rust (nightly w/ rustfmt)
@@ -45,3 +45,25 @@ jobs:
         reporter: 'github-check'
     - name: Run tests
       run: cargo test --locked
+
+  nix-flake-test:
+    name: Flake checks ❄️
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+      - uses: cachix/install-nix-action@v31
+        with:
+          github_access_token: ${{ secrets.GITHUB_TOKEN }}
+      - uses: cachix/cachix-action@v15
+        with:
+          name: iamb-prs
+          authToken: '${{ secrets.CACHIX_AUTH_TOKEN }}'
+      - name: Flake check
+        run: |
+          nix flake show
+          nix flake check --print-build-logs
+
