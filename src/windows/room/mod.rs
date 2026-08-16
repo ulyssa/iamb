@@ -40,7 +40,6 @@ use modalkit::actions::{
     PromptAction,
     Promptable,
     Scrollable,
-    WindowAction,
 };
 use modalkit::errors::{EditResult, UIError};
 use modalkit::prelude::*;
@@ -201,9 +200,14 @@ pub async fn room_command(
             Ok(vec![])
         },
         RoomAction::Members(mut cmd) => {
-            let act = Action::Window(WindowAction::Switch(OpenTarget::Application(
-                IambId::MemberList(id.to_owned()),
-            )));
+            let id = IambId::MemberList(id.to_owned());
+            let target = OpenTarget::Application(id);
+            let cmd = cmd.default_relation(MoveDir1D::Next);
+
+            let act = match store.application.settings.tunables.members_split {
+                Some(dir) => cmd.default_axis(dir.to_axis()).window(target, None),
+                None => cmd.switch(target),
+            };
 
             Ok(vec![(act, cmd.context.clone())])
         },

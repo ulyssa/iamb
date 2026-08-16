@@ -22,7 +22,10 @@ use ratatui_image::picker::ProtocolType;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as SerdeError, de::Visitor};
 use url::Url;
 
-use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
+use modalkit::env::vim::VimMode;
+use modalkit::key::TerminalKey;
+use modalkit::keybindings::InputKey;
+use modalkit::prelude::Axis;
 
 use super::base::{
     IambError,
@@ -463,6 +466,15 @@ pub enum SplitDirection {
     Vertical,
 }
 
+impl SplitDirection {
+    pub fn to_axis(self) -> Axis {
+        match self {
+            Self::Horizontal => Axis::Horizontal,
+            Self::Vertical => Axis::Vertical,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct NotifyVia {
     /// Deliver notifications via terminal bell.
@@ -818,6 +830,7 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub members_split: Option<SplitDirection>,
     pub default_split: SplitDirection,
     pub ssl_verify: bool,
 }
@@ -865,6 +878,7 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    pub members_split: Option<SplitDirection>,
     pub default_split: Option<SplitDirection>,
     pub ssl_verify: Option<bool>,
 }
@@ -911,6 +925,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            members_split: self.members_split.or(other.members_split),
             default_split: self.default_split.or(other.default_split),
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
         }
@@ -949,6 +964,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            members_split: self.members_split,
             default_split: self.default_split.unwrap_or_default(),
             ssl_verify: self.ssl_verify.unwrap_or(true),
         }
