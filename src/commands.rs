@@ -675,7 +675,7 @@ fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let sact = SendAction::Upload(args.remove(0));
+    let sact = SendAction::Upload(args.remove(0), None);
     let iact = IambAction::from(sact);
     let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 

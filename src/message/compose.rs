@@ -180,6 +180,34 @@ pub fn text_to_message(input: String) -> RoomMessageEventContent {
     RoomMessageEventContent::new(msg)
 }
 
+/// Returns `None` if `input` contains a non-text slash command.
+pub fn text_to_text_message_event_content(input: String) -> Option<TextMessageEventContent> {
+    let cmd = parse_slash_command(&input);
+
+    let content = match cmd {
+        Ok((body, SlashCommand::Html)) => TextMessageEventContent::html(body, body),
+        Ok((body, SlashCommand::Plaintext)) => TextMessageEventContent::plain(body),
+        Ok((body, SlashCommand::Markdown)) => {
+            if let Some(html) = text_to_html(body) {
+                TextMessageEventContent::html(body, html)
+            } else {
+                TextMessageEventContent::plain(body)
+            }
+        },
+        Ok(_) => return None,
+
+        _ => {
+            if let Some(html) = text_to_html(&input) {
+                TextMessageEventContent::html(input, html)
+            } else {
+                TextMessageEventContent::plain(input)
+            }
+        },
+    };
+
+    Some(content)
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;

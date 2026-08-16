@@ -491,10 +491,15 @@ pub enum SendAction {
     SubmitFromEditor,
 
     /// Upload a file.
-    Upload(String),
+    ///
+    /// The second argument indicates whether to use the messagebar as a caption, don't use it or
+    /// ask the user.
+    Upload(String, Option<bool>),
 
     /// Upload the image data.
-    UploadImage(usize, usize, Cow<'static, [u8]>),
+    ///
+    /// The [`bool`] arguments indicates whether to use the messagebar as a caption.
+    UploadImage(usize, usize, Cow<'static, [u8]>, bool),
 }
 
 /// An action performed against the user's homeserver.
