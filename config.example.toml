@@ -6,6 +6,7 @@ password_file = "/path/to/password"
 url = "https://matrix.org"
 
 [settings]
+default_markup = "html"
 default_room = "#iamb-users:0x.badd.cafe"
 default_split = "vertical"
 external_edit_file_suffix = ".md"

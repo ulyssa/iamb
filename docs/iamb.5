@@ -126,11 +126,13 @@ These options are configured as an object under the
 key and can be overridden as described in
 .Sx PROFILES .
 .Bl -tag -width Ds
-.It Sy encryption
-Configuration subsection for specific settings related to room encryption.
-See
-.Sx ENCRYPTION
-for more details.
+.It Sy default_markup
+Controls how text in the message bar is interpreted by default.
+Possible values are
+.Dq Sy html ,
+.Dq Sy markdown
+(the default) and
+.Dq Sy plaintext .
 .It Sy default_room
 The room to show by default instead of the
 .Sy :welcome
@@ -145,6 +147,11 @@ Possible values are
 .Dq Sy horizontal
 (the default) and
 .Dq Sy vertical .
+.It Sy encryption
+Configuration subsection for specific settings related to room encryption.
+See
+.Sx ENCRYPTION
+for more details.
 .It Sy external_edit_file_suffix
 Suffix to append to temporary file names when using the :editor command. Defaults to .md.
 .It Sy image_preview

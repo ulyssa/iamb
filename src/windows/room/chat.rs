@@ -89,7 +89,7 @@ use crate::base::{
     SendAction,
 };
 
-use crate::config::EncryptionIndicatorLocation;
+use crate::config::{ApplicationSettings, EncryptionIndicatorLocation};
 use crate::message::{
     MessageEvent,
     MessageId,
@@ -604,13 +604,18 @@ impl ChatState {
     }
 
     /// Generate an attachment for this room based on the current message bar state.
-    fn generate_attachment_config(&self, info: &RoomInfo, add_caption: bool) -> AttachmentConfig {
+    fn generate_attachment_config(
+        &self,
+        info: &RoomInfo,
+        add_caption: bool,
+        settings: &ApplicationSettings,
+    ) -> AttachmentConfig {
         let mut config = AttachmentConfig::new();
         config.caption = add_caption
             .then(|| self.tbox.get())
             .filter(|c| !c.is_blank())
             .map(|c| c.trim_end().to_string())
-            .and_then(text_to_text_message_event_content);
+            .and_then(|c| text_to_text_message_event_content(c, settings.tunables.default_markup));
         config.reply = self.generate_reply_info(info, add_caption);
         config
     }
@@ -647,7 +652,7 @@ impl ChatState {
                     msg.trim_end().to_string()
                 };
 
-                let mut msg = text_to_message(msg);
+                let mut msg = text_to_message(msg, tunables.default_markup);
 
                 if let Some(key) = &self.editing {
                     let id = match &key.id {
@@ -740,7 +745,7 @@ impl ChatState {
                     .unwrap_or_else(|| Cow::from("Attachment"));
 
                 let add_caption = add_caption.unwrap_or(false);
-                let config = self.generate_attachment_config(info, add_caption);
+                let config = self.generate_attachment_config(info, add_caption, settings);
 
                 room.send_queue()
                     .send_attachment(name.as_ref(), mime, bytes, config)
@@ -766,7 +771,7 @@ impl ChatState {
                 let mime = mime::IMAGE_PNG;
                 let name = "Clipboard.png";
 
-                let mut config = self.generate_attachment_config(info, add_caption);
+                let mut config = self.generate_attachment_config(info, add_caption, settings);
                 config.info = Some(AttachmentInfo::Image(BaseImageInfo {
                     height: height.try_into().ok(),
                     width: width.try_into().ok(),

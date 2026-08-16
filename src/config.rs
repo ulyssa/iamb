@@ -803,6 +803,7 @@ pub struct TerminalValues {
 #[derive(Clone)]
 pub struct TunableValues {
     pub encryption: EncryptionValues,
+    pub default_markup: MarkupFormat,
     pub log_level: String,
     pub max_log_files: usize,
     pub message_shortcode_display: bool,
@@ -855,6 +856,7 @@ pub struct Tunables {
     /// Subsection for overriding how specific Matrix users are rendered.
     pub users: Option<UserOverrides>,
 
+    pub default_markup: Option<MarkupFormat>,
     pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
@@ -896,6 +898,7 @@ impl Tunables {
             // global settings.
             proxy: self.proxy.or(other.proxy),
 
+            default_markup: self.default_markup.or(other.default_markup),
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
@@ -939,6 +942,7 @@ impl Tunables {
             terminal: self.terminal.values(),
             users: self.users.unwrap_or_default(),
 
+            default_markup: self.default_markup.unwrap_or_default(),
             log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
@@ -991,6 +995,16 @@ impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
             CursorShape::Underline => Self::SteadyUnderScore,
         }
     }
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum MarkupFormat {
+    Html,
+    #[default]
+    Markdown,
+    Plaintext,
 }
 
 #[derive(Clone)]
