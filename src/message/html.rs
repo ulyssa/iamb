@@ -20,7 +20,7 @@ use unicode_segmentation::UnicodeSegmentation;
 use url::Url;
 
 use html5ever::{
-    driver::{parse_fragment, ParseOpts},
+    driver::{ParseOpts, parse_fragment},
     interface::{Attribute, QualName},
     local_name,
     ns,

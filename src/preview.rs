@@ -1,21 +1,21 @@
 use std::{collections::HashMap, sync::Arc};
 
 use matrix_sdk::{
+    Media,
     media::{MediaFormat, MediaRequestParameters, UniqueKey},
     ruma::{
-        events::{
-            room::{
-                message::{MessageType, RoomMessageEventContent},
-                MediaSource,
-            },
-            MessageLikeEvent,
-        },
         OwnedEventId,
+        events::{
+            MessageLikeEvent,
+            room::{
+                MediaSource,
+                message::{MessageType, RoomMessageEventContent},
+            },
+        },
     },
-    Media,
 };
 use ratatui::layout::Rect;
-use ratatui_image::{picker::Picker, protocol::Protocol, Resize};
+use ratatui_image::{Resize, picker::Picker, protocol::Protocol};
 use tokio::sync::Semaphore;
 
 use crate::{
@@ -110,10 +110,10 @@ impl PreviewManager {
 pub fn source_from_event(
     ev: &MessageLikeEvent<RoomMessageEventContent>,
 ) -> Option<(OwnedEventId, MediaSource)> {
-    if let MessageLikeEvent::Original(ev) = &ev {
-        if let MessageType::Image(c) = &ev.content.msgtype {
-            return Some((ev.event_id.clone(), c.source.clone()));
-        }
+    if let MessageLikeEvent::Original(ev) = &ev &&
+        let MessageType::Image(c) = &ev.content.msgtype
+    {
+        return Some((ev.event_id.clone(), c.source.clone()));
     }
     None
 }

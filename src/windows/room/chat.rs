@@ -5,18 +5,22 @@ use std::fs;
 use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
-use edit::edit_with_builder as external_edit;
 use edit::Builder;
+use edit::edit_with_builder as external_edit;
 use modalkit::editing::store::RegisterError;
 use std::process::Command;
 use tokio;
 use url::Url;
 
 use matrix_sdk::{
+    RoomState,
     attachment::AttachmentConfig,
     media::{MediaFormat, MediaRequestParameters},
     room::Room as MatrixRoom,
     ruma::{
+        OwnedEventId,
+        OwnedRoomId,
+        RoomId,
         events::reaction::ReactionEventContent,
         events::relation::{Annotation, Replacement},
         events::room::message::{
@@ -27,12 +31,8 @@ use matrix_sdk::{
             Relation,
             ReplyWithinThread,
         },
-        OwnedEventId,
-        OwnedRoomId,
-        RoomId,
     },
     send_queue::RoomSendQueueError,
-    RoomState,
 };
 
 use ratatui::{
@@ -45,10 +45,10 @@ use ratatui::{
 use modalkit::keybindings::dialog::{MultiChoice, MultiChoiceItem, PromptYesNo};
 
 use modalkit_ratatui::{
-    textbox::{TextBox, TextBoxState},
     PromptActions,
     TerminalCursor,
     WindowOps,
+    textbox::{TextBox, TextBoxState},
 };
 
 use modalkit::actions::{
@@ -87,7 +87,7 @@ use crate::base::{
 };
 
 use crate::config::EncryptionIndicatorLocation;
-use crate::message::{text_to_message, MessageEvent, MessageId, MessageKey, TreeGenState};
+use crate::message::{MessageEvent, MessageId, MessageKey, TreeGenState, text_to_message};
 use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
@@ -373,7 +373,9 @@ impl ChatState {
                 {
                     emoji.to_string()
                 } else {
-                    let msg = format!("{reaction:?} is not a known Emoji shortcode; do you want to react with exactly {reaction:?}?");
+                    let msg = format!(
+                        "{reaction:?} is not a known Emoji shortcode; do you want to react with exactly {reaction:?}?"
+                    );
                     let act = IambAction::Message(MessageAction::React(reaction, true));
                     let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
                     let prompt = Box::new(prompt);
@@ -495,7 +497,9 @@ impl ChatState {
                         {
                             Some(emoji.to_string())
                         } else {
-                            let msg = format!("{reaction:?} is not a known Emoji shortcode; do you want to remove exactly {reaction:?}?");
+                            let msg = format!(
+                                "{reaction:?} is not a known Emoji shortcode; do you want to remove exactly {reaction:?}?"
+                            );
                             let act =
                                 IambAction::Message(MessageAction::Unreact(Some(reaction), true));
                             let prompt = PromptYesNo::new(msg, vec![Action::from(act)]);
@@ -694,10 +698,10 @@ impl ChatState {
         // Jump to the end of the scrollback to show the message.
         self.scrollback.goto_latest();
 
-        if tunables.read_receipt_trigger.on_message() {
-            if let Some(thread) = self.scrollback.get_thread(info) {
-                info.fully_read(settings.profile.user_id.clone(), thread.1.clone());
-            }
+        if tunables.read_receipt_trigger.on_message() &&
+            let Some(thread) = self.scrollback.get_thread(info)
+        {
+            info.fully_read(settings.profile.user_id.clone(), thread.1.clone());
         }
 
         Ok(None)
@@ -1158,7 +1162,7 @@ mod tests {
 
     use modalkit::actions::{EditAction, InsertTextAction};
 
-    use crate::tests::{mock_store, TEST_ROOM1_ID};
+    use crate::tests::{TEST_ROOM1_ID, mock_store};
 
     macro_rules! move_line {
         ($dir: expr, $count: expr) => {
