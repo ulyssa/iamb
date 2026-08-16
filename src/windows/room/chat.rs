@@ -574,42 +574,45 @@ impl ChatState {
 
     /// Generate a [`Reply`] setting thread info and reply_to (if `set_reply` is true)
     fn generate_reply_info(&self, info: &RoomInfo, set_reply: bool) -> Option<Reply> {
-        if let Some(thread_root) = self.scrollback.thread() {
-            if let Some(last) = info.get_thread_last(thread_root) {
-                // XXX: combine these conditions after updating to rust 2024 edition
-                if set_reply {
-                    if let Some(m) = self.get_reply_to(info) {
-                        // thread reply
-                        return Some(Reply {
-                            add_mentions: AddMentions::No,
-                            event_id: m.event_id.to_owned(),
-                            enforce_thread: EnforceThread::Threaded(ReplyWithinThread::Yes),
-                        });
-                    }
-                }
+        let thread_last = self.scrollback.thread().and_then(|id| info.get_thread_last(id));
 
-                // thread message
-                return Some(Reply {
-                    add_mentions: AddMentions::No,
-                    event_id: last.event_id.to_owned(),
-                    enforce_thread: EnforceThread::Threaded(ReplyWithinThread::No),
-                });
+        let (event_id, enforce_thread) = if let Some(last) = thread_last {
+            if let Some(m) = self.get_reply_to(info) &&
+                set_reply
+            {
+                // thread reply
+                (m.event_id.to_owned(), EnforceThread::Threaded(ReplyWithinThread::Yes))
             } else {
-                // Internal state is wonky?
+                // thread message
+                (last.event_id.to_owned(), EnforceThread::Threaded(ReplyWithinThread::No))
             }
-            // XXX: combine these conditions after updating to rust 2024 edition
-        } else if let Some(m) = self.get_reply_to(info) {
-            if set_reply {
-                // normal reply
-                return Some(Reply {
-                    add_mentions: AddMentions::No,
-                    event_id: m.event_id.to_owned(),
-                    enforce_thread: EnforceThread::Unthreaded,
-                });
-            }
-        }
+        } else if let Some(m) = self.get_reply_to(info) &&
+            set_reply
+        {
+            // normal reply in main timeline:
+            (m.event_id.to_owned(), EnforceThread::Unthreaded)
+        } else {
+            // not any kind of reply:
+            return None;
+        };
 
-        None
+        Some(Reply {
+            add_mentions: AddMentions::No,
+            event_id,
+            enforce_thread,
+        })
+    }
+
+    /// Generate an attachment for this room based on the current message bar state.
+    fn generate_attachment_config(&self, info: &RoomInfo, add_caption: bool) -> AttachmentConfig {
+        let mut config = AttachmentConfig::new();
+        config.caption = add_caption
+            .then(|| self.tbox.get())
+            .filter(|c| !c.is_blank())
+            .map(|c| c.trim_end().to_string())
+            .and_then(text_to_text_message_event_content);
+        config.reply = self.generate_reply_info(info, add_caption);
+        config
     }
 
     pub async fn send_command(
@@ -736,15 +739,8 @@ impl ChatState {
                     .map(OsStr::to_string_lossy)
                     .unwrap_or_else(|| Cow::from("Attachment"));
 
-                let mut config = AttachmentConfig::new();
                 let add_caption = add_caption.unwrap_or(false);
-
-                if add_caption {
-                    config.caption =
-                        text_to_text_message_event_content(caption.trim_end().to_string());
-                }
-
-                config.reply = self.generate_reply_info(info, add_caption);
+                let config = self.generate_attachment_config(info, add_caption);
 
                 room.send_queue()
                     .send_attachment(name.as_ref(), mime, bytes, config)
@@ -768,22 +764,14 @@ impl ChatState {
                             Ok(buff.into_inner())
                         })?;
                 let mime = mime::IMAGE_PNG;
-
                 let name = "Clipboard.png";
-                let mut config = AttachmentConfig::new();
 
-                let caption = self.tbox.get();
-                if add_caption && !caption.is_blank() {
-                    config.caption =
-                        text_to_text_message_event_content(caption.trim_end().to_string());
-                }
+                let mut config = self.generate_attachment_config(info, add_caption);
                 config.info = Some(AttachmentInfo::Image(BaseImageInfo {
                     height: height.try_into().ok(),
                     width: width.try_into().ok(),
                     ..Default::default()
                 }));
-
-                config.reply = self.generate_reply_info(info, add_caption);
 
                 room.send_queue()
                     .send_attachment(name, mime, bytes, config)
@@ -965,19 +953,22 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
                     let prompt = PromptYesNo::new(msg, vec![Action::from(send)]);
                     Box::new(prompt) as Box<dyn Dialog<_>>
                 } else {
-                    let yes_msg = "Upload clipboard image with messagebar as caption";
-                    let yes_act =
+                    let msg_c = "Upload clipboard image with message bar as caption";
+                    let act_c =
                         SendAction::UploadImage(data.width, data.height, data.bytes.clone(), true);
-                    let yes_choice =
-                        MultiChoiceItem::new('y', yes_msg, vec![IambAction::from(yes_act).into()]);
+                    let choice_c =
+                        MultiChoiceItem::new('c', msg_c, vec![IambAction::from(act_c).into()]);
 
-                    let no_msg = "Upload clipboard image without caption";
-                    let no_act =
+                    let msg_y = "Upload clipboard image without caption";
+                    let act_y =
                         SendAction::UploadImage(data.width, data.height, data.bytes.clone(), false);
-                    let no_choice =
-                        MultiChoiceItem::new('n', no_msg, vec![IambAction::from(no_act).into()]);
+                    let choice_y =
+                        MultiChoiceItem::new('y', msg_y, vec![IambAction::from(act_y).into()]);
 
-                    let prompt = MultiChoice::new(vec![yes_choice, no_choice]);
+                    let msg_n = "Do not upload clipboard image";
+                    let choice_n = MultiChoiceItem::new('n', msg_n, vec![Action::NoOp]);
+
+                    let prompt = MultiChoice::new(vec![choice_c, choice_y, choice_n]);
                     Box::new(prompt) as Box<dyn Dialog<_>>
                 };
 
