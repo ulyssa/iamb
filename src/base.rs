@@ -93,13 +93,12 @@ use modalkit::{
     prelude::{CommandType, WordStyle},
 };
 
-use crate::config::ImagePreviewProtocolValues;
-use crate::notifications::NotificationHandle;
-use crate::preview::{source_from_event, PreviewManager};
 use crate::{
+    config::{ApplicationSettings, ImagePreviewProtocolValues},
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
+    notifications::NotificationHandle,
+    preview::{source_from_event, PreviewManager},
     worker::Requester,
-    ApplicationSettings,
 };
 
 /// The set of characters used in different Matrix IDs.
