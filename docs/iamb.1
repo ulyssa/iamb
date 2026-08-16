@@ -65,6 +65,8 @@ View a list of joined spaces.
 View a list of unread rooms.
 .It Sy ":unreads clear"
 Mark all rooms as read.
+.It Sy ":mentions"
+View a list of rooms with mentions of the current user.
 .It Sy ":welcome"
 View the startup Welcome window.
 .It Sy ":forget"
@@ -151,6 +153,13 @@ Unset the name of the currently focused room.
 Mark the currently focused room as a direct message.
 .It Sy ":room dm unset"
 Mark the currently focused room as a normal room.
+.It Sy ":room unread set"
+Mark the currently focused room as unread.
+.It Sy ":room unread unset"
+Mark the currently focused room as read.
+.It Sy ":room unread clear"
+Alias for
+.Sy :room unread unset .
 .It Sy ":room notify set [level]"
 Set a notification level for the currently focused room.
 Valid levels are
@@ -300,12 +309,17 @@ The behaviour of
 .Nm
 is affected by the following environment variables.
 .Bl -tag -width Ds
+.It Sy "ALL_PROXY, HTTP_PROXY, HTTPS_PROXY"
+Sets the proxy server to use.
+These names also work in lowercase.
+Example:
+.Dq export ALL_PROXY=socks5://localhost:9050 .
 .It Sy "RUST_LOG"
 Overwrites the value set by the
 .Sy log_level
 config value.
 The syntax is defined at
-.Lk https://docs.rs/tracing-subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
+.Lk https://docs.rs/tracing_subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
 
 .Sh EXAMPLES
 .Ss Example 1: Starting with a specific profile

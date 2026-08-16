@@ -354,6 +354,17 @@ fn iamb_unreads(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 }
 
+fn iamb_mentions(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = ctx.switch(OpenTarget::Application(IambId::MentionsList));
+    let step = CommandStep::Continue(open, ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -561,6 +572,12 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         // :room id show
         ("id", "show", None) => RoomAction::Show(RoomField::Id).into(),
         ("id", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room unread set
+        ("unread", "set", None) => RoomAction::SetUnread(true).into(),
+
+        // :room unread [unset|clear]
+        ("unread", "unset" | "clear", None) => RoomAction::SetUnread(false).into(),
 
         _ => return Result::Err(CommandError::InvalidArgument),
     };
@@ -803,6 +820,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "unreads".into(),
         aliases: vec![],
         f: iamb_unreads,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "mentions".into(),
+        aliases: vec![],
+        f: iamb_mentions,
     });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),
