@@ -365,15 +365,12 @@ pub enum ReadReceiptTrigger {
     Scrollback,
     /// Update read receipts for a room once the user sends a message to it.
     Message,
-    /// Never update read receipts.
-    Disabled,
 }
 
 impl ReadReceiptTrigger {
     /// Whether to update read receipts when a room is being rendered.
     pub fn on_render(&self, last_visible: bool, room_focused: bool) -> bool {
         match self {
-            Self::Disabled => false,
             Self::Scrollback => true,
             Self::Focused => last_visible && room_focused,
             Self::Visible => last_visible,
