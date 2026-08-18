@@ -945,6 +945,7 @@ impl Editable<ProgramContext, ProgramStore, IambInfo> for ChatState {
                 // Run command again.
                 delegate!(self, w => w.editor_command(act, ctx, store))
             },
+            #[cfg(feature = "desktop")]
             Err(EditError::Register(RegisterError::ClipboardImage(data))) => {
                 let info = store.application.rooms.get_or_default(self.id().to_owned());
                 let prompt = if self.tbox.get().is_blank() && self.get_reply_to(info).is_none() {

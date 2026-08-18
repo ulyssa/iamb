@@ -60,6 +60,29 @@ containing the sources (ie: from a git clone):
 cargo install --locked --path .
 ```
 
+If you're willing to wait longer on the build, you can use the `release-lto`
+profile to enable link-time optimization:
+
+```
+cargo install --profile release-lto --locked --path .
+```
+
+If you would prefer to optimize for a smaller binary, you can use the
+`release-light` profile, which will do LTO, optimize code generation
+for smaller output, and strip the binary. The `max_level_error` feature
+will also make sure that any `tracing` logs below the error level have
+their strings removed during compile-time, so that you only get `error`
+logs.
+
+```
+cargo install --profile release-light --features max_level_error --path .
+```
+
+Add `--no-default-features` if you want to skip desktop integration (e.g.
+clipboard and notifications support) and you would like to link against
+your system's OpenSSL and SQLite instead of using rustls and a bundled
+SQLite.
+
 ## Installation (via `crates.io`)
 
 Install Rust (1.83.0 or above) and Cargo, and then run:

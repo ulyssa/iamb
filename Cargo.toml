@@ -18,6 +18,9 @@ build = "build.rs"
 default = ["bundled", "desktop"]
 bundled = ["matrix-sdk/bundled-sqlite"]
 desktop = ["dep:notify-rust", "modalkit/clipboard"]
+max_level_warn = ["tracing/max_level_warn"]
+max_level_error = ["tracing/max_level_error"]
+max_level_off = ["tracing/max_level_off"]
 
 [build-dependencies.vergen-gitcl]
 version = "9"
@@ -107,6 +110,12 @@ pretty_assertions = "1.4.0"
 inherits = "release"
 incremental = false
 lto = true
+
+[profile.release-light]
+inherits = "release-lto"
+opt-level = "z"
+strip = true
+panic = "abort"
 
 [package.metadata.deb]
 section = "net"

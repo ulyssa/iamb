@@ -63,6 +63,12 @@ const DEFAULT_ENABLE_TITLE: bool = true;
 const DEFAULT_ENC_INDICATOR_LOC: EncryptionIndicatorLocation = EncryptionIndicatorLocation::PROMPT;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
 
+const DEFAULT_LOG_LEVEL: &str = if cfg!(feature = "max_level_error") {
+    "error"
+} else {
+    "warn"
+};
+
 const COLORS: [Color; 13] = [
     Color::Blue,
     Color::Cyan,
@@ -940,7 +946,7 @@ impl Tunables {
             users: self.users.unwrap_or_default(),
 
             default_markup: self.default_markup.unwrap_or_default(),
-            log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
+            log_level: self.log_level.unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_owned()),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
