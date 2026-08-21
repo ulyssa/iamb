@@ -1151,6 +1151,14 @@ impl RoomInfo {
         }
     }
 
+    pub fn get_reaction_images(&self, event_id: &EventId) -> impl Iterator<Item = &MediaSource> {
+        self.reactions
+            .get(event_id)
+            .map(HashMap::iter)
+            .unwrap_or_default()
+            .filter_map(|(_, (_, _, source))| source.as_ref())
+    }
+
     /// Map an event identifier to its [MessageKey].
     pub fn get_message_key(&self, event_id: &EventId) -> Option<&MessageKey> {
         self.keys.get(event_id)?.to_message_key()

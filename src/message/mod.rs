@@ -898,7 +898,7 @@ impl<'a> MessageFormatter<'a> {
 
             emojis.push_str("[", style);
             if let Some(Some(proto)) = proto {
-                let (x, y) = emojis.curosor_pos();
+                let (x, y) = emojis.cursor_pos();
                 let y = (y + text.lines.len()) as u16;
                 let x = x as u16 + self.cols.user_gutter_width(settings);
 

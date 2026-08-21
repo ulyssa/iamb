@@ -1384,12 +1384,8 @@ impl StatefulWidget for Scrollback<'_> {
                     &self.store.application.worker,
                 );
             }
-            let reactions =
-                key.id.as_origin().and_then(|id| info.reactions.get(id)).map(|reactions| {
-                    reactions.iter().filter_map(|(_, (_, _, source))| source.as_ref())
-                });
-            if let Some(reactions) = reactions {
-                for source in reactions {
+            if let Some(event_id) = key.id.as_origin() {
+                for source in info.get_reaction_images(event_id) {
                     self.store.application.previews.load(
                         source,
                         PreviewKind::Reaction,
