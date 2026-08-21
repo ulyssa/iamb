@@ -3,7 +3,6 @@ use std::borrow::Cow;
 use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::ops::Deref;
 use std::path::{Path, PathBuf};
 
 use edit::Builder;
@@ -163,7 +162,7 @@ impl ChatState {
         let key = self.reply_to.as_ref()?;
         let msg = thread.get(key)?;
 
-        if let MessageEvent::Original(ev) = &msg.event {
+        if let MessageEvent::Original(ev, _) = &msg.event {
             Some(ev)
         } else {
             None
@@ -214,7 +213,7 @@ impl ChatState {
                 Err(UIError::NeedConfirm(prompt))
             },
             MessageAction::Download(filename, flags) => {
-                if let MessageEvent::Original(ev) = &msg.event {
+                if let Some(msgtype) = msg.event.msgtype() {
                     let media = client.media();
 
                     let mut filename = match (filename, &settings.dirs.downloads) {
@@ -223,7 +222,7 @@ impl ChatState {
                         (None, None) => return Err(IambError::NoDownloadDir.into()),
                     };
 
-                    let (source, msg_filename) = match &ev.content.msgtype {
+                    let (source, msg_filename) = match msgtype {
                         MessageType::Audio(c) => (c.source.clone(), c.filename()),
                         MessageType::File(c) => (c.source.clone(), c.filename()),
                         MessageType::Image(c) => (c.source.clone(), c.filename()),
@@ -347,18 +346,14 @@ impl ChatState {
                     return Err(err);
                 }
 
-                let ev = match &msg.event {
-                    MessageEvent::Original(ev) => &ev.content,
-                    MessageEvent::Local(_, _, ev) => ev.deref(),
-                    _ => {
-                        let msg = "Cannot edit a redacted message";
-                        let err = UIError::Failure(msg.into());
+                let Some(msgtype) = msg.event.msgtype() else {
+                    let msg = "Cannot edit this type of message";
+                    let err = UIError::Failure(msg.into());
 
-                        return Err(err);
-                    },
+                    return Err(err);
                 };
 
-                let text = match &ev.msgtype {
+                let text = match msgtype {
                     MessageType::Text(msg) => msg.body.as_str(),
                     _ => {
                         let msg = "Cannot edit a non-text message";
@@ -397,7 +392,7 @@ impl ChatState {
                 let event_id = match &msg.event {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
+                    MessageEvent::Original(ev, _) => ev.event_id.clone(),
                     MessageEvent::Local(..) => {
                         // XXX: Implement reactions for local echos
 
@@ -444,7 +439,7 @@ impl ChatState {
                 let event_id = match &msg.event {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
+                    MessageEvent::Original(ev, _) => ev.event_id.clone(),
                     MessageEvent::Local(_, handle, _) => {
                         let succeeded = handle
                             .abort()
@@ -525,7 +520,7 @@ impl ChatState {
                 let event_id = match &msg.event {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
-                    MessageEvent::Original(ev) => ev.event_id.clone(),
+                    MessageEvent::Original(ev, _) => ev.event_id.clone(),
                     MessageEvent::Local(..) => {
                         let msg = "Cannot unreact to a local echo";
                         let err = UIError::Failure(msg.into());

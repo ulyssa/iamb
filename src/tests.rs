@@ -90,7 +90,7 @@ pub fn mock_room1_message(
     ])))
     .unwrap();
 
-    Message::new(MessageEvent::Original(event), sender, timestamp.into())
+    Message::new(MessageEvent::Original(event, Default::default()), sender, timestamp.into())
 }
 
 pub fn mock_message1() -> Message {
