@@ -61,6 +61,15 @@ impl PreviewManager {
         self.previews.get(&(source.unique_key(), kind))
     }
 
+    /// Mark all registered previews as queued.
+    ///
+    /// Useful when changing preview settings.
+    pub fn mark_all_queued(&mut self, size: ImagePreviewSize) {
+        for status in self.previews.values_mut() {
+            *status = ImageStatus::Queued(size);
+        }
+    }
+
     fn insert(&mut self, key: String, kind: PreviewKind, status: ImageStatus) {
         self.previews.insert((key, kind), status);
     }
