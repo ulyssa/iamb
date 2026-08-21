@@ -1266,14 +1266,18 @@ impl Message {
     }
 
     pub fn set_edits(&mut self, new_edits: MessageEdits) {
-        if let MessageEvent::Original(_, edits) = &mut self.event {
+        if let MessageEvent::Original(orig, edits) = &mut self.event {
             *edits = new_edits;
 
             for edit in edits.values_mut() {
                 strip_reply_fallback(&mut edit.msgtype);
             }
 
-            self.html = content_html(&edits.last_key_value().unwrap().1.msgtype);
+            if let Some(most_recent) = edits.last_key_value() {
+                self.html = content_html(&most_recent.1.msgtype);
+            } else {
+                self.html = content_html(&orig.content.msgtype);
+            }
         }
     }
 
@@ -1285,9 +1289,8 @@ impl Message {
         if let MessageEvent::Original(_, edits) = &mut self.event {
             strip_reply_fallback(&mut edit.msgtype);
 
-            edits.insert(key, edit);
-
-            self.html = content_html(&edits.last_key_value().unwrap().1.msgtype);
+            let inserted = edits.entry(key).insert_entry(edit);
+            self.html = content_html(&inserted.get().msgtype);
         }
     }
 
