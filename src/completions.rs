@@ -397,6 +397,7 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
         "alias",
         "canonicalalias",
         "id",
+        "unread",
     ];
     if args.len() == 1 {
         complete_choices(&args[0], &subcmds)
@@ -410,6 +411,8 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
             "history" | "topic" | "notify" | "alias" | "canonicalalias" | "canon" => {
                 complete_choices(input, &["show", "set", "unset"])
             },
+
+            "unread" => complete_choices(input, &["unset", "clear"]),
 
             _ => vec![],
         }
