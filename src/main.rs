@@ -238,7 +238,7 @@ fn resolve_mxid(
         },
     };
 
-    if !store
+    if store
         .application
         .worker
         .client
