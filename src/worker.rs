@@ -98,7 +98,7 @@ use crate::base::{EchoLocation, MessageNeed};
 use crate::config::{ImagePreviewSize, ProxyUrl};
 use crate::message::{Message, MessageEvent, MessageId, MessageKey};
 use crate::notifications::register_notifications;
-use crate::preview::load_image;
+use crate::preview::PreviewKind;
 use crate::{
     ApplicationSettings,
     base::{
@@ -326,7 +326,7 @@ fn load_insert(
                         info.insert_with_preview(msg, settings, previews, worker);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
-                        info.insert_reaction(ev);
+                        info.insert_reaction_with_preview(ev, settings, previews, worker);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
                         info.insert_sticker(ev, settings, previews, worker);
@@ -726,7 +726,7 @@ pub enum WorkerTask {
     TypingNotice(OwnedRoomId),
     Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
     VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
-    LoadImage(MediaSource, ImagePreviewSize, Arc<Picker>, Arc<Semaphore>),
+    LoadImage(MediaSource, PreviewKind, ImagePreviewSize, Arc<Picker>, Arc<Semaphore>),
 }
 
 impl Debug for WorkerTask {
@@ -790,9 +790,10 @@ impl Debug for WorkerTask {
                     .field(&format_args!("_"))
                     .finish()
             },
-            WorkerTask::LoadImage(source, size, _, _) => {
+            WorkerTask::LoadImage(source, kind, size, _, _) => {
                 f.debug_tuple("WorkerTask::RenderImage")
                     .field(source)
+                    .field(kind)
                     .field(size)
                     .field(&format_args!("_"))
                     .field(&format_args!("_"))
@@ -845,7 +846,10 @@ async fn create_client_inner(
 
     let http = builder.build().map_err(matrix_sdk::HttpError::Reqwest)?;
 
-    let req_config = RequestConfig::new().timeout(req_timeout).max_retry_time(req_timeout);
+    let req_config = RequestConfig::new()
+        .timeout(req_timeout)
+        .max_retry_time(req_timeout)
+        .retry_limit(8);
 
     // Set up the Matrix client for the selected profile.
     let builder = Client::builder()
@@ -880,6 +884,12 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
     let client = res.expect("Failed to instantiate client");
 
     client.event_cache().subscribe().expect("Failed to start event cache");
+
+    client
+        .media()
+        .set_media_retention_policy(settings.tunables.cache_policy)
+        .await
+        .expect("Failed to start event cache");
 
     client
 }
@@ -978,11 +988,14 @@ impl Requester {
     pub fn load_image(
         &self,
         source: MediaSource,
+        kind: PreviewKind,
         size: ImagePreviewSize,
         picker: Arc<Picker>,
         permits: Arc<Semaphore>,
     ) {
-        self.tx.send(WorkerTask::LoadImage(source, size, picker, permits)).unwrap();
+        self.tx
+            .send(WorkerTask::LoadImage(source, kind, size, picker, permits))
+            .unwrap();
     }
 }
 
@@ -1081,12 +1094,13 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.verify_request(user_id).await);
             },
-            WorkerTask::LoadImage(source, size, picker, permits) => {
+            WorkerTask::LoadImage(source, kind, size, picker, permits) => {
                 assert!(self.initialized);
-                tokio::spawn(load_image(
+                tokio::spawn(crate::preview::load_image(
                     self.store.clone().unwrap(),
                     self.client.media(),
                     source,
+                    kind,
                     picker,
                     permits,
                     size,
@@ -1188,9 +1202,18 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let info = locked.application.get_room_info(room_id.to_owned());
+                    let ChatStore { rooms, previews, settings, worker, .. } =
+                        &mut locked.application;
+                    let info = rooms.get_or_default(room_id.to_owned());
+
                     update_event_receipts(info, &room, ev.event_id()).await;
-                    info.insert_reaction(ev.into_full_event(room_id.to_owned()));
+
+                    info.insert_reaction_with_preview(
+                        ev.into_full_event(room_id.to_owned()),
+                        settings,
+                        previews,
+                        worker,
+                    );
                 }
             },
         );

@@ -14,6 +14,7 @@ use std::str::FromStr;
 use clap::Parser;
 use matrix_sdk::EncryptionState;
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
@@ -837,6 +838,7 @@ pub struct TunableValues {
     pub members_split: Option<SplitDirection>,
     pub default_split: SplitDirection,
     pub ssl_verify: bool,
+    pub cache_policy: MediaRetentionPolicy,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -886,6 +888,7 @@ pub struct Tunables {
     pub members_split: Option<SplitDirection>,
     pub default_split: Option<SplitDirection>,
     pub ssl_verify: Option<bool>,
+    pub cache_policy: Option<MediaRetentionPolicy>,
 }
 
 impl Tunables {
@@ -934,6 +937,7 @@ impl Tunables {
             members_split: self.members_split.or(other.members_split),
             default_split: self.default_split.or(other.default_split),
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
+            cache_policy: self.cache_policy.or(other.cache_policy),
         }
     }
 
@@ -974,6 +978,7 @@ impl Tunables {
             members_split: self.members_split,
             default_split: self.default_split.unwrap_or_default(),
             ssl_verify: self.ssl_verify.unwrap_or(true),
+            cache_policy: self.cache_policy.unwrap_or_default(),
         }
     }
 }

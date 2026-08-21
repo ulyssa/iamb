@@ -55,7 +55,7 @@ use crate::{
     },
     config::ApplicationSettings,
     message::{Message, MessageCursor, MessageKey, Messages},
-    preview::PreviewManager,
+    preview::{PreviewKind, PreviewManager},
 };
 
 fn no_msgs() -> EditError<IambInfo> {
@@ -1364,12 +1364,13 @@ impl StatefulWidget for Scrollback<'_> {
         let mut prev = prevmsg(&corner_key, thread);
 
         // load image previews
-        for (_, item) in thread.range(&corner_key..).rev() {
+        for (key, item) in thread.range(&corner_key..).rev() {
             if let Some(source) = &item.image_preview {
-                self.store
-                    .application
-                    .previews
-                    .load(source, &self.store.application.worker);
+                self.store.application.previews.load(
+                    source,
+                    PreviewKind::Message,
+                    &self.store.application.worker,
+                );
             }
             let reply = item
                 .reply_to()
@@ -1377,10 +1378,20 @@ impl StatefulWidget for Scrollback<'_> {
                 .and_then(|e| info.get_event(&e))
                 .and_then(|msg| msg.image_preview.as_ref());
             if let Some(source) = reply {
-                self.store
-                    .application
-                    .previews
-                    .load(source, &self.store.application.worker);
+                self.store.application.previews.load(
+                    source,
+                    PreviewKind::Message,
+                    &self.store.application.worker,
+                );
+            }
+            if let Some(event_id) = key.id.as_origin() {
+                for source in info.get_reaction_images(event_id) {
+                    self.store.application.previews.load(
+                        source,
+                        PreviewKind::Reaction,
+                        &self.store.application.worker,
+                    );
+                }
             }
         }
 
@@ -1388,7 +1399,7 @@ impl StatefulWidget for Scrollback<'_> {
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
 
-            let (txt, [mut msg_preview, mut reply_preview]) =
+            let (txt, mut msg_previews) =
                 item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings, previews);
 
             let incomplete_ok = !full || !sel;
@@ -1405,17 +1416,9 @@ impl StatefulWidget for Scrollback<'_> {
                     continue;
                 }
 
-                // Only take the preview into the matching row number.
-                // `reply` and `msg` previews are on rows,
-                // so an `or` works to pick the one that matches (if any)
-                let line_preview = match msg_preview {
-                    Some((_, _, y)) if y as usize == row => msg_preview.take(),
-                    _ => None,
-                }
-                .or(match reply_preview {
-                    Some((_, _, y)) if y as usize == row => reply_preview.take(),
-                    _ => None,
-                });
+                // Only take the previews into the matching row number.
+                let line_preview: Vec<_> =
+                    msg_previews.extract_if(.., |(_, _, y)| *y as usize == row).collect();
 
                 lines.push((key, row, line, line_preview));
                 sawit |= sel;
@@ -1440,9 +1443,9 @@ impl StatefulWidget for Scrollback<'_> {
         let mut image_previews = vec![];
         for (_, _, txt, line_preview) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
-            if let Some((backend, msg_x, _)) = line_preview {
-                image_previews.push((x + msg_x, y, backend));
-            }
+            image_previews.extend(
+                line_preview.into_iter().map(|(backend, msg_x, _)| (x + msg_x, y, backend)),
+            );
 
             y += 1;
         }
