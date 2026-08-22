@@ -234,6 +234,8 @@ pub fn mock_settings() -> ApplicationSettings {
         dirs: mock_dirs(),
         layout: Default::default(),
         macros: HashMap::default(),
+        log_level_handle: None,
+        load_file: SettingsFile::Toml("/dev/null".into()),
     }
 }
 
