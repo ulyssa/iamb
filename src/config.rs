@@ -195,7 +195,6 @@ macro_rules! deserialize_str_with_visitor {
 
 deserialize_str_with_visitor!(Keys, KeysVisitor);
 deserialize_str_with_visitor!(VimModes, VimModesVisitor);
-deserialize_str_with_visitor!(UserColor, UserColorVisitor);
 deserialize_str_with_visitor!(EncryptionIndicatorLocation, EncryptionIndicatorLocationVisitor);
 deserialize_str_with_visitor!(NotifyVia, NotifyViaVisitor);
 deserialize_str_with_visitor!(ProxyUrl, ProxyUrlVisitor);
@@ -257,44 +256,6 @@ impl Visitor<'_> for VimModesVisitor {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UserColor(pub Color);
-pub struct UserColorVisitor;
-
-impl Visitor<'_> for UserColorVisitor {
-    type Value = UserColor;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid color")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: SerdeError,
-    {
-        match value {
-            "none" => Ok(UserColor(Color::Reset)),
-            "red" => Ok(UserColor(Color::Red)),
-            "black" => Ok(UserColor(Color::Black)),
-            "green" => Ok(UserColor(Color::Green)),
-            "yellow" => Ok(UserColor(Color::Yellow)),
-            "blue" => Ok(UserColor(Color::Blue)),
-            "magenta" => Ok(UserColor(Color::Magenta)),
-            "cyan" => Ok(UserColor(Color::Cyan)),
-            "gray" => Ok(UserColor(Color::Gray)),
-            "dark-gray" => Ok(UserColor(Color::DarkGray)),
-            "light-red" => Ok(UserColor(Color::LightRed)),
-            "light-green" => Ok(UserColor(Color::LightGreen)),
-            "light-yellow" => Ok(UserColor(Color::LightYellow)),
-            "light-blue" => Ok(UserColor(Color::LightBlue)),
-            "light-magenta" => Ok(UserColor(Color::LightMagenta)),
-            "light-cyan" => Ok(UserColor(Color::LightCyan)),
-            "white" => Ok(UserColor(Color::White)),
-            _ => Err(E::custom("Could not parse color")),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Session {
     access_token: String,
@@ -331,7 +292,7 @@ impl From<MatrixSession> for Session {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct UserDisplayTunables {
-    pub color: Option<UserColor>,
+    pub color: Option<Color>,
     pub name: Option<String>,
 }
 
@@ -730,6 +691,110 @@ pub struct ImagePreviewProtocolValues {
     pub font_size: Option<(u16, u16)>,
 }
 
+#[derive(Clone, Deserialize, Default, Debug)]
+pub struct Colorscheme {
+    pub border: Option<Color>,
+    pub border_unfocused: Option<Color>,
+    pub window_title: Option<Color>,
+    pub tab_title: Option<Color>,
+    pub tab_title_unfocused: Option<Color>,
+    pub room_list: Option<Color>,
+    pub room_list_unread: Option<Color>,
+    pub message_time: Option<Color>,
+    pub message_date: Option<Color>,
+    pub message_normal: Option<Color>,
+    pub message_state: Option<Color>,
+    pub message_sticker: Option<Color>,
+    pub message_redacted: Option<Color>,
+    pub message_notice: Option<Color>,
+    pub message_other: Option<Color>,
+    pub codeblock_background: Option<Color>,
+}
+
+impl Colorscheme {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            border: self.border.or(other.border),
+            border_unfocused: self.border_unfocused.or(other.border_unfocused),
+            window_title: self.window_title.or(other.window_title),
+            tab_title: self.tab_title.or(other.tab_title),
+            tab_title_unfocused: self.tab_title_unfocused.or(other.tab_title_unfocused),
+            room_list: self.room_list.or(other.room_list),
+            room_list_unread: self.room_list_unread.or(other.room_list_unread),
+            message_time: self.message_time.or(other.message_time),
+            message_date: self.message_date.or(other.message_date),
+            message_normal: self.message_normal.or(other.message_normal),
+            message_state: self.message_state.or(other.message_state),
+            message_sticker: self.message_state.or(other.message_sticker),
+            message_redacted: self.message_redacted.or(other.message_redacted),
+            message_notice: self.message_notice.or(other.message_notice),
+            message_other: self.message_other.or(other.message_other),
+            codeblock_background: self.codeblock_background.or(other.codeblock_background),
+        }
+    }
+}
+
+#[derive(Clone, Deserialize)]
+pub struct ColorschemeValues {
+    pub border: Style,
+    pub border_unfocused: Style,
+    pub window_title: Style,
+    pub tab_title: Style,
+    pub tab_title_unfocused: Style,
+    pub room_list: Style,
+    pub room_list_unread: Style,
+    pub message_time: Style,
+    pub message_date: Style,
+    pub message_normal: Style,
+    pub message_state: Style,
+    pub message_sticker: Style,
+    pub message_redacted: Style,
+    pub message_notice: Style,
+    pub message_other: Style,
+    pub codeblock_background: Style,
+}
+
+impl Colorscheme {
+    pub fn values(self) -> ColorschemeValues {
+        let border = self.border.map(Into::into).unwrap_or_default();
+        let border_unfocused = self.border_unfocused.map(Into::into).unwrap_or(border);
+        let window_title = self.window_title.map(Into::into).unwrap_or_default();
+        let tab_title = self.tab_title.map(Into::into).unwrap_or_default();
+        let tab_title_unfocused = self.tab_title_unfocused.map(Into::into).unwrap_or(tab_title);
+        let room_list = self.room_list.map(Into::into).unwrap_or_default();
+        let room_list_unread = self.room_list_unread.map(Into::into).unwrap_or(room_list);
+        let message_time = self.message_time.map(Into::into).unwrap_or_default();
+        let message_date = self.message_date.map(Into::into).unwrap_or_default();
+        let message_normal = self.message_normal.map(Into::into).unwrap_or_default();
+        let message_state = self.message_state.map(Into::into).unwrap_or(message_normal);
+        let message_sticker = self.message_sticker.map(Into::into).unwrap_or(message_normal);
+        let message_redacted = self.message_redacted.map(Into::into).unwrap_or(message_normal);
+        let message_notice = self.message_notice.map(Into::into).unwrap_or(message_state);
+        let message_other = self.message_other.map(Into::into).unwrap_or(message_normal);
+        let codeblock_background =
+            Style::new().bg(self.codeblock_background.unwrap_or(Color::Indexed(236)));
+
+        ColorschemeValues {
+            border,
+            border_unfocused,
+            window_title,
+            tab_title,
+            tab_title_unfocused,
+            room_list,
+            room_list_unread,
+            message_time,
+            message_date,
+            message_normal,
+            message_state,
+            message_sticker,
+            message_redacted,
+            message_notice,
+            message_other,
+            codeblock_background,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SortValues {
     pub chats: Vec<SortColumn<SortFieldRoom>>,
@@ -839,6 +904,7 @@ pub struct TunableValues {
     pub default_split: SplitDirection,
     pub ssl_verify: bool,
     pub cache_policy: MediaRetentionPolicy,
+    pub colors: ColorschemeValues,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -888,6 +954,8 @@ pub struct Tunables {
     pub members_split: Option<SplitDirection>,
     pub default_split: Option<SplitDirection>,
     pub ssl_verify: Option<bool>,
+    #[serde(default)]
+    pub colors: Colorscheme,
     pub cache_policy: Option<MediaRetentionPolicy>,
 }
 
@@ -938,6 +1006,7 @@ impl Tunables {
             default_split: self.default_split.or(other.default_split),
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
             cache_policy: self.cache_policy.or(other.cache_policy),
+            colors: self.colors.merge(other.colors),
         }
     }
 
@@ -979,6 +1048,7 @@ impl Tunables {
             default_split: self.default_split.unwrap_or_default(),
             ssl_verify: self.ssl_verify.unwrap_or(true),
             cache_policy: self.cache_policy.unwrap_or_default(),
+            colors: self.colors.values(),
         }
     }
 }
@@ -1358,12 +1428,7 @@ impl ApplicationSettings {
             .tunables
             .users
             .get(user_id)
-            .map(|user| {
-                (
-                    user.color.as_ref().map(|c| c.0),
-                    user.name.as_ref().and_then(|s| s.chars().next()),
-                )
-            })
+            .map(|user| (user.color, user.name.as_ref().and_then(|s| s.chars().next())))
             .unwrap_or_default();
 
         let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
@@ -1381,7 +1446,7 @@ impl ApplicationSettings {
         self.tunables
             .users
             .get(user_id)
-            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
+            .map(|user| (user.color, user.name.clone().map(Cow::Owned)))
             .unwrap_or_default()
     }
 
@@ -1389,7 +1454,7 @@ impl ApplicationSettings {
         self.tunables
             .users
             .get(user_id)
-            .and_then(|user| user.color.as_ref().map(|c| c.0))
+            .and_then(|user| user.color)
             .unwrap_or_else(|| user_color(user_id.as_str()))
     }
 
@@ -1452,13 +1517,13 @@ mod tests {
     fn test_merge_users() {
         let a = None;
         let b = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Red)),
+            color: Some(Color::Red),
             name: Some("Hello".into()),
         })]
         .into_iter()
         .collect::<HashMap<_, _>>();
         let c = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Green)),
+            color: Some(Color::Green),
             name: Some("World".into()),
         })]
         .into_iter()
@@ -1512,7 +1577,7 @@ mod tests {
         assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
         let users = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Black)),
+            color: Some(Color::Black),
             name: Some("Tim".into()),
         })];
         assert_eq!(res.users, Some(users.into_iter().collect()));
