@@ -202,6 +202,8 @@ impl StatefulWidget for Space<'_> {
     type State = SpaceState;
 
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
+        state.set_ignorecase(self.store.application.settings.tunables.ignorecase);
+
         let mut empty_message = None;
         let need_fetch = match state.last_fetch {
             Some(i) => i.elapsed() >= SPACE_HIERARCHY_DEBOUNCE,
