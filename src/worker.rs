@@ -14,6 +14,10 @@ use std::time::{Duration, Instant};
 use futures::{StreamExt, stream::FuturesUnordered};
 use gethostname::gethostname;
 use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
+use matrix_sdk::ruma::events::key::verification::ready::{
+    OriginalSyncKeyVerificationReadyEvent,
+    ToDeviceKeyVerificationReadyEvent,
+};
 use matrix_sdk::ruma::events::relation::Thread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::room::message::Relation;
@@ -23,7 +27,7 @@ use ratatui_image::picker::Picker;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
-use tracing::{error, warn};
+use tracing::{Instrument as _, error, warn};
 use url::Url;
 
 use matrix_sdk::{
@@ -34,11 +38,7 @@ use matrix_sdk::{
     RoomMemberships,
     authentication::matrix::MatrixSession,
     config::{RequestConfig, SyncSettings},
-    encryption::{
-        BackupDownloadStrategy,
-        EncryptionSettings,
-        verification::{SasVerification, Verification},
-    },
+    encryption::{BackupDownloadStrategy, EncryptionSettings},
     event_handler::Ctx,
     reqwest,
     room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember},
@@ -67,9 +67,6 @@ use matrix_sdk::{
             SyncMessageLikeEvent,
             SyncStateEvent,
             key::verification::{
-                VerificationMethod,
-                done::{OriginalSyncKeyVerificationDoneEvent, ToDeviceKeyVerificationDoneEvent},
-                key::{OriginalSyncKeyVerificationKeyEvent, ToDeviceKeyVerificationKeyEvent},
                 request::ToDeviceKeyVerificationRequestEvent,
                 start::{OriginalSyncKeyVerificationStartEvent, ToDeviceKeyVerificationStartEvent},
             },
@@ -99,6 +96,7 @@ use crate::config::{ImagePreviewSize, ProxyUrl};
 use crate::message::{Message, MessageEvent, MessageId, MessageKey};
 use crate::notifications::register_notifications;
 use crate::preview::PreviewKind;
+use crate::verifications;
 use crate::{
     ApplicationSettings,
     base::{
@@ -111,7 +109,6 @@ use crate::{
         ProgramStore,
         RoomFetchStatus,
         RoomInfo,
-        VerifyAction,
     },
 };
 
@@ -724,8 +721,6 @@ pub enum WorkerTask {
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     TypingNotice(OwnedRoomId),
-    Verify(VerifyAction, SasVerification, ClientReply<IambResult<EditInfo>>),
-    VerifyRequest(OwnedUserId, ClientReply<IambResult<EditInfo>>),
     LoadImage(MediaSource, PreviewKind, ImagePreviewSize, Arc<Picker>, Arc<Semaphore>),
 }
 
@@ -776,19 +771,6 @@ impl Debug for WorkerTask {
             },
             WorkerTask::TypingNotice(room_id) => {
                 f.debug_tuple("WorkerTask::TypingNotice").field(room_id).finish()
-            },
-            WorkerTask::Verify(act, sasv1, _) => {
-                f.debug_tuple("WorkerTask::Verify")
-                    .field(act)
-                    .field(sasv1)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::VerifyRequest(user_id, _) => {
-                f.debug_tuple("WorkerTask::VerifyRequest")
-                    .field(user_id)
-                    .field(&format_args!("_"))
-                    .finish()
             },
             WorkerTask::LoadImage(source, kind, size, _, _) => {
                 f.debug_tuple("WorkerTask::RenderImage")
@@ -969,22 +951,6 @@ impl Requester {
         self.tx.send(WorkerTask::TypingNotice(room_id)).unwrap();
     }
 
-    pub fn verify(&self, act: VerifyAction, sas: SasVerification) -> IambResult<EditInfo> {
-        let (reply, response) = oneshot();
-
-        self.tx.send(WorkerTask::Verify(act, sas, reply)).unwrap();
-
-        return response.recv();
-    }
-
-    pub fn verify_request(&self, user_id: OwnedUserId) -> IambResult<EditInfo> {
-        let (reply, response) = oneshot();
-
-        self.tx.send(WorkerTask::VerifyRequest(user_id, reply)).unwrap();
-
-        return response.recv();
-    }
-
     pub fn load_image(
         &self,
         source: MediaSource,
@@ -1086,14 +1052,6 @@ impl ClientWorker {
                 assert!(self.initialized);
                 self.typing_notice(room_id).await;
             },
-            WorkerTask::Verify(act, sas, reply) => {
-                assert!(self.initialized);
-                reply.send(self.verify(act, sas).await);
-            },
-            WorkerTask::VerifyRequest(user_id, reply) => {
-                assert!(self.initialized);
-                reply.send(self.verify_request(user_id).await);
-            },
             WorkerTask::LoadImage(source, kind, size, picker, permits) => {
                 assert!(self.initialized);
                 tokio::spawn(crate::preview::load_image(
@@ -1164,13 +1122,16 @@ impl ClientWorker {
                     let room_id = room.room_id();
 
                     if let Some(msg) = ev.as_original() &&
-                        let MessageType::VerificationRequest(_) = msg.content.msgtype &&
-                        let Some(request) = client
-                            .encryption()
-                            .get_verification_request(ev.sender(), ev.event_id())
-                            .await
+                        let MessageType::VerificationRequest(content) = &msg.content.msgtype
                     {
-                        request.accept().await.expect("Failed to accept request");
+                        verifications::handle_request(
+                            ev.event_id().into(),
+                            ev.sender().into(),
+                            content.from_device.clone(),
+                            client.clone(),
+                            Arc::clone(&store.0),
+                        )
+                        .await
                     }
 
                     let mut locked = store.lock().await;
@@ -1311,115 +1272,93 @@ impl ClientWorker {
         );
 
         let _ = self.client.add_event_handler(
-            |ev: OriginalSyncKeyVerificationStartEvent,
+            |ev: ToDeviceKeyVerificationRequestEvent,
              client: Client,
              store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let tx_id = ev.content.relates_to.event_id.as_ref();
-
-                    if let Some(Verification::SasV1(sas)) =
-                        client.encryption().get_verification(&ev.sender, tx_id).await
-                    {
-                        sas.accept().await.unwrap();
-
-                        store.lock().await.application.insert_sas(sas)
-                    }
-                }
+                let span = tracing::info_span!(
+                    "to_device_verify_request",
+                    other_user_id = ?ev.sender,
+                    other_device_id = ?ev.content.from_device,
+                    flow_id = ?ev.content.transaction_id,
+                );
+                verifications::handle_request(
+                    ev.content.transaction_id.into(),
+                    ev.sender,
+                    ev.content.from_device,
+                    client,
+                    store.0,
+                )
+                .instrument(span)
             },
         );
 
         let _ = self.client.add_event_handler(
-            |ev: OriginalSyncKeyVerificationKeyEvent,
+            |ev: ToDeviceKeyVerificationReadyEvent,
              client: Client,
              store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let tx_id = ev.content.relates_to.event_id.as_ref();
-
-                    if let Some(Verification::SasV1(sas)) =
-                        client.encryption().get_verification(&ev.sender, tx_id).await
-                    {
-                        store.lock().await.application.insert_sas(sas);
-                    }
-                }
+                let span = tracing::info_span!(
+                    "to_device_verify_ready",
+                    other_user_id = ?ev.sender,
+                    other_device_id = ?ev.content.from_device,
+                    flow_id = ?ev.content.transaction_id,
+                );
+                verifications::handle_ready(
+                    ev.content.transaction_id.into(),
+                    ev.sender,
+                    client,
+                    store.0,
+                )
+                .instrument(span)
             },
         );
 
         let _ = self.client.add_event_handler(
-            |ev: OriginalSyncKeyVerificationDoneEvent,
+            |ev: OriginalSyncKeyVerificationReadyEvent,
              client: Client,
              store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let tx_id = ev.content.relates_to.event_id.as_ref();
-
-                    if let Some(Verification::SasV1(sas)) =
-                        client.encryption().get_verification(&ev.sender, tx_id).await
-                    {
-                        store.lock().await.application.insert_sas(sas);
-                    }
-                }
+                let span = tracing::info_span!(
+                    "room_verify_ready",
+                    other_user_id = ?ev.sender,
+                    other_device_id = ?ev.content.from_device,
+                    flow_id = ?ev.content.relates_to.event_id,
+                );
+                verifications::handle_ready(
+                    ev.content.relates_to.event_id.into(),
+                    ev.sender,
+                    client,
+                    store.0,
+                )
+                .instrument(span)
             },
         );
 
         let _ = self.client.add_event_handler(
-            |ev: ToDeviceKeyVerificationRequestEvent, client: Client| {
-                async move {
-                    let request = client
-                        .encryption()
-                        .get_verification_request(&ev.sender, &ev.content.transaction_id)
-                        .await;
-
-                    if let Some(request) = request {
-                        request.accept().await.unwrap();
-                    }
-                }
+            |ev: ToDeviceKeyVerificationStartEvent, client: Client| {
+                let span = tracing::info_span!(
+                    "to_device_verify_start",
+                    other_user_id = ?ev.sender,
+                    other_device_id = ?ev.content.from_device,
+                    flow_id = ?ev.content.transaction_id,
+                );
+                verifications::handle_start(ev.content.transaction_id.into(), ev.sender, client)
+                    .instrument(span)
             },
         );
 
         let _ = self.client.add_event_handler(
-            |ev: ToDeviceKeyVerificationStartEvent,
-             client: Client,
-             store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let tx_id = ev.content.transaction_id;
-
-                    if let Some(Verification::SasV1(sas)) =
-                        client.encryption().get_verification(&ev.sender, tx_id.as_ref()).await
-                    {
-                        sas.accept().await.unwrap();
-
-                        store.lock().await.application.insert_sas(sas);
-                    }
-                }
-            },
-        );
-
-        let _ = self.client.add_event_handler(
-            |ev: ToDeviceKeyVerificationKeyEvent, client: Client, store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let tx_id = ev.content.transaction_id;
-
-                    if let Some(Verification::SasV1(sas)) =
-                        client.encryption().get_verification(&ev.sender, tx_id.as_ref()).await
-                    {
-                        store.lock().await.application.insert_sas(sas);
-                    }
-                }
-            },
-        );
-
-        let _ = self.client.add_event_handler(
-            |ev: ToDeviceKeyVerificationDoneEvent,
-             client: Client,
-             store: Ctx<AsyncProgramStore>| {
-                async move {
-                    let tx_id = ev.content.transaction_id;
-
-                    if let Some(Verification::SasV1(sas)) =
-                        client.encryption().get_verification(&ev.sender, tx_id.as_ref()).await
-                    {
-                        store.lock().await.application.insert_sas(sas);
-                    }
-                }
+            |ev: OriginalSyncKeyVerificationStartEvent, client: Client| {
+                let span = tracing::info_span!(
+                    "room_verify_start",
+                    other_user_id = ?ev.sender,
+                    other_device_id = ?ev.content.from_device,
+                    flow_id = ?ev.content.relates_to.event_id
+                );
+                verifications::handle_start(
+                    ev.content.relates_to.event_id.into(),
+                    ev.sender,
+                    client,
+                )
+                .instrument(span)
             },
         );
 
@@ -1608,73 +1547,6 @@ impl ClientWorker {
     async fn typing_notice(&mut self, room_id: OwnedRoomId) {
         if let Some(room) = self.client.get_room(room_id.as_ref()) {
             let _ = room.typing_notice(true).await;
-        }
-    }
-
-    async fn verify(&self, action: VerifyAction, sas: SasVerification) -> IambResult<EditInfo> {
-        match action {
-            VerifyAction::Accept => {
-                sas.accept().await.map_err(IambError::from)?;
-
-                Ok(Some(InfoMessage::from("Accepted verification request")))
-            },
-            VerifyAction::Confirm => {
-                if sas.is_done() || sas.is_cancelled() {
-                    let msg = "Can only confirm in-progress verifications!";
-                    let err = UIError::Failure(msg.into());
-
-                    return Err(err);
-                }
-
-                sas.confirm().await.map_err(IambError::from)?;
-
-                Ok(Some(InfoMessage::from("Confirmed verification")))
-            },
-            VerifyAction::Cancel => {
-                if sas.is_done() || sas.is_cancelled() {
-                    let msg = "Can only cancel in-progress verifications!";
-                    let err = UIError::Failure(msg.into());
-
-                    return Err(err);
-                }
-
-                sas.cancel().await.map_err(IambError::from)?;
-
-                Ok(Some(InfoMessage::from("Cancelled verification")))
-            },
-            VerifyAction::Mismatch => {
-                if sas.is_done() || sas.is_cancelled() {
-                    let msg = "Can only cancel in-progress verifications!";
-                    let err = UIError::Failure(msg.into());
-
-                    return Err(err);
-                }
-
-                sas.mismatch().await.map_err(IambError::from)?;
-
-                Ok(Some(InfoMessage::from("Cancelled verification")))
-            },
-        }
-    }
-
-    async fn verify_request(&self, user_id: OwnedUserId) -> IambResult<EditInfo> {
-        let enc = self.client.encryption();
-
-        match enc.get_user_identity(user_id.as_ref()).await.map_err(IambError::from)? {
-            Some(identity) => {
-                let methods = vec![VerificationMethod::SasV1];
-                let request = identity.request_verification_with_methods(methods);
-                let _req = request.await.map_err(IambError::from)?;
-                let info = format!("Sent verification request to {user_id}");
-
-                Ok(Some(InfoMessage::from(info)))
-            },
-            None => {
-                let msg = format!("Could not find identity information for {user_id}");
-                let err = UIError::Failure(msg);
-
-                Err(err)
-            },
         }
     }
 }
