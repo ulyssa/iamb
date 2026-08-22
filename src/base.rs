@@ -891,6 +891,12 @@ impl EventLocation {
             _ => None,
         }
     }
+    fn to_thread_root(&self) -> Option<&EventId> {
+        match self {
+            EventLocation::Message(root, _) => root.as_deref(),
+            _ => None,
+        }
+    }
 }
 
 /// Indicates where a local echo lives in the [`ChatStore`].
@@ -1177,12 +1183,22 @@ impl RoomInfo {
 
     /// Get an event for an identifier.
     pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
-        self.messages.get(self.get_message_key(event_id)?)
+        let loc = self.keys.get(event_id)?;
+
+        let key = loc.to_message_key()?;
+        let root = loc.to_thread_root();
+
+        self.get_thread(root)?.get(key)
     }
 
     /// Get an event for an identifier as mutable.
     pub fn get_event_mut(&mut self, event_id: &EventId) -> Option<&mut Message> {
-        self.messages.get_mut(self.keys.get(event_id)?.to_message_key()?)
+        let loc = self.keys.get(event_id)?.clone();
+
+        let key = loc.to_message_key()?;
+        let root = loc.to_thread_root();
+
+        self.get_thread_mut(root.map(ToOwned::to_owned)).get_mut(key)
     }
 
     pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
