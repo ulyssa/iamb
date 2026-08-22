@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::hash::Hash;
+use std::ops::Deref;
 use std::str::FromStr;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
@@ -16,6 +17,7 @@ use emojis::Emoji;
 use matrix_sdk::ruma::OwnedMxcUri;
 use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
+use matrix_sdk::ruma::events::relation::Reply;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::sticker::StickerEvent;
 use ratatui::{
@@ -95,9 +97,10 @@ use modalkit::{
 };
 
 use crate::config::ImagePreviewSize;
+use crate::message::MessageId;
 use crate::preview::PreviewKind;
 use crate::{
-    config::{ApplicationSettings, ImagePreviewProtocolValues},
+    config::{ApplicationSettings, ImagePreviewProtocolValues, TunableValues},
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     notifications::NotificationHandle,
     preview::{PreviewManager, source_from_event},
@@ -467,6 +470,9 @@ pub enum RoomAction {
 
     /// Open the members window.
     Members(Box<CommandContext>),
+
+    /// Open the message info window.
+    Message(Box<CommandContext>),
 
     /// Set whether a room is a direct message.
     SetDirect(bool),
@@ -1142,27 +1148,23 @@ impl RoomInfo {
     }
 
     /// Get the reactions and their counts for a message.
-    pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize, &Option<MediaSource>)> {
+    pub fn get_reactions(
+        &self,
+        event_id: &EventId,
+    ) -> Vec<(&str, Vec<&UserId>, &Option<MediaSource>)> {
         if let Some(reacts) = self.reactions.get(event_id) {
-            let mut counts = HashMap::new();
-
-            let mut seen_user_reactions = BTreeSet::new();
+            let mut reactions = BTreeMap::new();
 
             for (key, user, source) in reacts.values() {
-                if !seen_user_reactions.contains(&(key, user)) {
-                    seen_user_reactions.insert((key, user));
-                    let count = counts.entry(key.as_str()).or_insert((0, source));
-                    count.0 += 1;
-                }
+                let react =
+                    reactions.entry(key.as_str()).or_insert_with(|| (BTreeSet::new(), source));
+                react.0.insert(user.deref());
             }
 
-            let mut reactions = counts
-                .into_iter()
-                .map(|(key, (count, source))| (key, count, source))
-                .collect::<Vec<_>>();
-            reactions.sort_by_key(|item| (item.0, item.1));
-
             reactions
+                .into_iter()
+                .map(|(key, (users, source))| (key, users.into_iter().collect::<Vec<_>>(), source))
+                .collect::<Vec<_>>()
         } else {
             vec![]
         }
@@ -1179,6 +1181,44 @@ impl RoomInfo {
     /// Map an event identifier to its [MessageKey].
     pub fn get_message_key(&self, event_id: &EventId) -> Option<&MessageKey> {
         self.keys.get(event_id)?.to_message_key()
+    }
+
+    /// Map an event identifier to its [`MessageKey`] and thread root.
+    fn get_message_thread_key(
+        &self,
+        message_id: &MessageId,
+    ) -> Option<(Option<&EventId>, &MessageKey)> {
+        let event_id = match message_id {
+            MessageId::Local(id) => {
+                let loc = self.echo_keys.get(id)?;
+                match loc {
+                    EchoLocation::Message(root, key) => return Some((root.as_deref(), key)),
+                    EchoLocation::Replaced(event_id) => event_id,
+                }
+            },
+            MessageId::Origin(event_id) => event_id,
+        };
+
+        let loc = self.keys.get(event_id)?;
+
+        Some((loc.to_thread_root(), loc.to_message_key()?))
+    }
+
+    /// Get an event for an identifier.
+    pub fn get_message(&self, message_id: &MessageId) -> Option<&Message> {
+        let (root, key) = self.get_message_thread_key(message_id)?;
+
+        self.get_thread(root)?.get(key)
+    }
+
+    /// Get an event for an identifier as mutable.
+    pub fn get_message_mut(&mut self, message_id: &MessageId) -> Option<&mut Message> {
+        let (root, key) = self.get_message_thread_key(message_id)?;
+
+        let root = root.map(ToOwned::to_owned);
+        let key = key.to_owned();
+
+        self.get_thread_mut(root).get_mut(&key)
     }
 
     /// Get an event for an identifier.
@@ -1462,7 +1502,7 @@ impl RoomInfo {
     }
 
     /// Insert a new message event.
-    pub fn insert(&mut self, msg: RoomMessageEvent) {
+    pub fn insert(&mut self, msg: RoomMessageEvent, need_load: &mut RoomNeeds) {
         match msg {
             RoomMessageEvent::Original(OriginalRoomMessageEvent {
                 content: RoomMessageEventContent { relates_to: Some(ref relates_to), .. },
@@ -1477,7 +1517,13 @@ impl RoomInfo {
                         let event_id = event_id.clone();
                         self.insert_thread(msg, event_id);
                     },
-                    Relation::Reply { .. } => self.insert_message(msg),
+                    Relation::Reply(Reply { in_reply_to, .. }) => {
+                        if self.get_message_key(&in_reply_to.event_id).is_none() {
+                            need_load
+                                .need_event(msg.room_id().to_owned(), in_reply_to.event_id.clone());
+                        }
+                        self.insert_message(msg)
+                    },
                     _ => self.insert_message(msg),
                 }
             },
@@ -1492,9 +1538,10 @@ impl RoomInfo {
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
         worker: &Requester,
+        need_load: &mut RoomNeeds,
     ) {
         let source = source_from_event(&ev);
-        self.insert(ev);
+        self.insert(ev, need_load);
 
         if let Some((event_id, source)) = source &&
             let (Some(msg), Some(image_preview)) =
@@ -1611,20 +1658,20 @@ impl RoomInfo {
         }
     }
 
-    fn get_typing_spans<'a>(&'a self, settings: &'a ApplicationSettings) -> Line<'a> {
+    fn get_typing_spans<'a>(&'a self, tunables: &'a TunableValues) -> Line<'a> {
         let typers = self.get_typers();
         let n = typers.len();
 
         match n {
             0 => Line::from(vec![]),
             1 => {
-                let user = settings.get_user_span(typers[0].as_ref(), self);
+                let user = tunables.get_user_span(typers[0].as_ref(), self);
 
                 Line::from(vec![user, Span::from(" is typing...")])
             },
             2 => {
-                let user1 = settings.get_user_span(typers[0].as_ref(), self);
-                let user2 = settings.get_user_span(typers[1].as_ref(), self);
+                let user1 = tunables.get_user_span(typers[0].as_ref(), self);
+                let user2 = tunables.get_user_span(typers[1].as_ref(), self);
 
                 Line::from(vec![
                     user1,
@@ -1648,13 +1695,13 @@ impl RoomInfo {
         &mut self,
         area: Rect,
         buf: &mut Buffer,
-        settings: &ApplicationSettings,
+        tunables: &TunableValues,
     ) -> Rect {
         if area.height <= 2 || area.width <= 20 {
             return area;
         }
 
-        if !settings.tunables.typing_notice_display {
+        if !tunables.typing_notice_display {
             // still keep one line blank, so `render_jump_to_recent` doesn't immediately hide the
             // last line in scrollback
             return Rect::new(area.x, area.y, area.width, area.height - 1);
@@ -1663,7 +1710,7 @@ impl RoomInfo {
         let top = Rect::new(area.x, area.y, area.width, area.height - 1);
         let bar = Rect::new(area.x, area.y + top.height, area.width, 1);
 
-        Paragraph::new(self.get_typing_spans(settings))
+        Paragraph::new(self.get_typing_spans(tunables))
             .alignment(Alignment::Center)
             .render(bar, buf);
 
@@ -1672,7 +1719,7 @@ impl RoomInfo {
 
     /// Checks if a given user has reacted with the given emoji on the given event
     pub fn user_reactions_contains(
-        &mut self,
+        &self,
         user_id: &UserId,
         event_id: &EventId,
         emoji: &str,
@@ -1726,8 +1773,8 @@ fn picker_from_termios(_: Option<ProtocolType>) -> Option<Picker> {
     None
 }
 
-fn picker_from_settings(settings: &ApplicationSettings) -> Option<Picker> {
-    let image_preview = settings.tunables.image_preview.as_ref()?;
+fn picker_from_tunables(tunables: &TunableValues) -> Option<Picker> {
+    let image_preview = tunables.image_preview.as_ref()?;
     let image_preview_protocol = image_preview.protocol.as_ref();
 
     if let Some(&ImagePreviewProtocolValues {
@@ -1785,6 +1832,7 @@ pub struct MessageNeed {
 pub struct Need {
     pub members: bool,
     pub messages: Option<Vec<MessageNeed>>,
+    pub events: Vec<OwnedEventId>,
 }
 
 /// Things that need loading for different rooms.
@@ -1810,6 +1858,11 @@ impl RoomNeeds {
         let messages = &mut self.needs.entry(room_id).or_default().messages.get_or_insert_default();
 
         messages.push(MessageNeed { event_id, ttl: MESSAGE_NEED_TTL });
+    }
+
+    /// Load a single event in the room history.
+    pub fn need_event(&mut self, room_id: OwnedRoomId, event_id: OwnedEventId) {
+        self.needs.entry(room_id).or_default().events.push(event_id);
     }
 
     pub fn need_messages_all(&mut self, room_id: OwnedRoomId, message_needs: Vec<MessageNeed>) {
@@ -1889,7 +1942,7 @@ pub struct ChatStore {
 impl ChatStore {
     /// Create a new [ChatStore].
     pub fn new(worker: Requester, settings: ApplicationSettings) -> Self {
-        let picker = picker_from_settings(&settings);
+        let picker = picker_from_tunables(&settings.tunables);
 
         ChatStore {
             worker,
@@ -1952,11 +2005,39 @@ impl ChatStore {
 
 impl ApplicationStore for ChatStore {}
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum RoomView {
+    /// The main timeline is shown.
+    Main,
+    /// A thread is shown.
+    Thread(OwnedEventId),
+    /// A single message is shown.
+    Message(MessageId),
+}
+
+impl From<Option<OwnedEventId>> for RoomView {
+    fn from(thread: Option<OwnedEventId>) -> Self {
+        match thread {
+            Some(thread) => Self::Thread(thread),
+            None => Self::Main,
+        }
+    }
+}
+
+impl From<Option<&OwnedEventId>> for RoomView {
+    fn from(thread: Option<&OwnedEventId>) -> Self {
+        match thread {
+            Some(thread) => Self::Thread(thread.to_owned()),
+            None => Self::Main,
+        }
+    }
+}
+
 /// Identified used to track window content.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IambId {
-    /// A Matrix room, with an optional thread to show.
-    Room(OwnedRoomId, Option<OwnedEventId>),
+    /// A Matrix room, with an item that is shown.
+    Room(OwnedRoomId, RoomView),
 
     /// The `:dms` window.
     DirectList,
@@ -1989,11 +2070,14 @@ pub enum IambId {
 impl Display for IambId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IambId::Room(room_id, None) => {
+            IambId::Room(room_id, RoomView::Main) => {
                 write!(f, "iamb://room/{room_id}")
             },
-            IambId::Room(room_id, Some(thread)) => {
+            IambId::Room(room_id, RoomView::Thread(thread)) => {
                 write!(f, "iamb://room/{room_id}/threads/{thread}")
+            },
+            IambId::Room(room_id, RoomView::Message(message)) => {
+                write!(f, "iamb://room/{room_id}/messages/{message}")
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -2064,7 +2148,7 @@ impl Visitor<'_> for IambIdVisitor {
                             return Err(E::custom("Invalid room identifier"));
                         };
 
-                        Ok(IambId::Room(room_id, None))
+                        Ok(IambId::Room(room_id, RoomView::Main))
                     },
                     [room_id, "threads", thread_root] => {
                         let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
@@ -2075,7 +2159,18 @@ impl Visitor<'_> for IambIdVisitor {
                             return Err(E::custom("Invalid thread root identifier"));
                         };
 
-                        Ok(IambId::Room(room_id, Some(thread_root)))
+                        Ok(IambId::Room(room_id, RoomView::Thread(thread_root)))
+                    },
+                    [room_id, "messages", message] => {
+                        let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
+                            return Err(E::custom("Invalid room identifier"));
+                        };
+
+                        let message_id = OwnedEventId::try_from(message)
+                            .map(Into::into)
+                            .unwrap_or_else(|_| OwnedTransactionId::from(message).into());
+
+                        Ok(IambId::Room(room_id, RoomView::Message(message_id)))
                     },
                     _ => return Err(E::custom("Invalid members window URL")),
                 }
@@ -2196,7 +2291,7 @@ pub enum IambBufferId {
     Command(CommandType),
 
     /// The message buffer or a specific message in a room.
-    Room(OwnedRoomId, Option<OwnedEventId>, RoomFocus),
+    Room(OwnedRoomId, RoomView, RoomFocus),
 
     /// The `:dms` window.
     DirectList,
@@ -2231,7 +2326,7 @@ impl IambBufferId {
     pub fn to_window(&self) -> Option<IambId> {
         let id = match self {
             IambBufferId::Command(_) => return None,
-            IambBufferId::Room(room, thread, _) => IambId::Room(room.clone(), thread.clone()),
+            IambBufferId::Room(room, view, _) => IambId::Room(room.clone(), view.clone()),
             IambBufferId::DirectList => IambId::DirectList,
             IambBufferId::MemberList(room) => IambId::MemberList(room.clone()),
             IambBufferId::RoomList => IambId::RoomList,
@@ -2463,6 +2558,7 @@ pub mod tests {
         MilliSecondsSinceUnixEpoch,
         events::{reaction::ReactionEventContent, relation::Annotation},
         owned_event_id,
+        owned_user_id,
     };
     use pretty_assertions::assert_eq;
     use ratatui::style::Color;
@@ -2524,13 +2620,19 @@ pub mod tests {
             .into_iter()
             .map(|(key, count, _)| (key, count))
             .collect();
-        assert_eq!(reacts, vec![("🏠", 1), ("🙂", 2)]);
+        assert_eq!(reacts, vec![
+            ("🏠", vec![owned_user_id!("@foo:example.com").deref()]),
+            ("🙂", vec![
+                owned_user_id!("@bar:example.com").deref(),
+                owned_user_id!("@foo:example.com").deref(),
+            ],)
+        ]);
     }
 
     #[test]
     fn test_typing_spans() {
         let mut info = RoomInfo::default();
-        let settings = mock_settings();
+        let tunables = mock_tunables();
 
         let users0 = vec![];
         let users1 = vec![TEST_USER1.clone()];
@@ -2551,18 +2653,18 @@ pub mod tests {
 
         // Nothing set.
         assert_eq!(info.users_typing, None);
-        assert_eq!(info.get_typing_spans(&settings), Line::from(vec![]));
+        assert_eq!(info.get_typing_spans(&tunables), Line::from(vec![]));
 
         // Empty typing list.
         info.set_typing(users0);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Line::from(vec![]));
+        assert_eq!(info.get_typing_spans(&tunables), Line::from(vec![]));
 
         // Single user typing.
         info.set_typing(users1);
         assert!(info.users_typing.is_some());
         assert_eq!(
-            info.get_typing_spans(&settings),
+            info.get_typing_spans(&tunables),
             Line::from(vec![
                 Span::styled("@user1:example.com", user_style("@user1:example.com")),
                 Span::from(" is typing...")
@@ -2573,7 +2675,7 @@ pub mod tests {
         info.set_typing(users2);
         assert!(info.users_typing.is_some());
         assert_eq!(
-            info.get_typing_spans(&settings),
+            info.get_typing_spans(&tunables),
             Line::from(vec![
                 Span::styled("@user1:example.com", user_style("@user1:example.com")),
                 Span::raw(" and "),
@@ -2585,18 +2687,18 @@ pub mod tests {
         // Four users typing.
         info.set_typing(users4);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Line::from("Several people are typing..."));
+        assert_eq!(info.get_typing_spans(&tunables), Line::from("Several people are typing..."));
 
         // Five users typing.
         info.set_typing(users5);
         assert!(info.users_typing.is_some());
-        assert_eq!(info.get_typing_spans(&settings), Line::from("Many people are typing..."));
+        assert_eq!(info.get_typing_spans(&tunables), Line::from("Many people are typing..."));
 
         // Test that USER5 gets rendered using the configured color and name.
         info.set_typing(vec![TEST_USER5.clone()]);
         assert!(info.users_typing.is_some());
         assert_eq!(
-            info.get_typing_spans(&settings),
+            info.get_typing_spans(&tunables),
             Line::from(vec![
                 Span::styled("USER 5", user_style_from_color(Color::Black)),
                 Span::from(" is typing...")
@@ -2607,15 +2709,21 @@ pub mod tests {
     #[test]
     fn test_need_load() {
         let room_id = TEST_ROOM1_ID.clone();
+        let event_id = MSG1_EVID.clone();
 
         let mut need_load = RoomNeeds::default();
 
         need_load.need_messages(room_id.clone());
         need_load.need_members(room_id.clone());
+        need_load.need_event(room_id.clone(), event_id.clone());
 
         assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
             room_id,
-            Need { members: true, messages: Some(Vec::new()) }
+            Need {
+                members: true,
+                messages: Some(Vec::new()),
+                events: vec![event_id]
+            }
         )],);
     }
 
