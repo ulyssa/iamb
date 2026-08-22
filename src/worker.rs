@@ -889,7 +889,7 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
         .media()
         .set_media_retention_policy(settings.tunables.cache_policy)
         .await
-        .expect("Failed to start event cache");
+        .expect("Failed to set media cache policy");
 
     client
 }
