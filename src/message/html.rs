@@ -498,16 +498,14 @@ impl StyleTreeNode {
             },
 
             StyleTreeNode::UserId(user_id, _) => {
-                let span: Span<'a> = printer.settings().get_user_span(user_id, printer.info);
-                let style = span.style;
+                let mut span: Span<'a> = printer.settings().get_user_span(user_id, printer.info);
+                let style = style.patch(span.style);
+                span.style = style;
 
-                let Cow::Borrowed(name) = span.content else {
-                    unreachable!()
-                };
-                if !name.starts_with('@') {
+                if !span.content.starts_with('@') {
                     printer.push_str("@", style);
                 }
-                printer.push_str(name, style);
+                printer.push_span_nobreak(span);
             },
             StyleTreeNode::DisplayName(display_name, user_id, _) => {
                 let style = printer.settings().get_user_style(user_id);
