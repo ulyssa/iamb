@@ -4,7 +4,7 @@
 .\" information, see <https://manpages.bsd.lv/mdoc.html>.
 .\"
 .\" You can preview this file with:
-.\"     $ man ./docs/iamb.1
+.\"     $ man ./docs/iamb.5
 .Dd Mar 24, 2024
 .Dt IAMB 5
 .Os
@@ -75,6 +75,8 @@ object.
 .It Sy user_id
 The user ID to use when connecting to the server.
 For example "user" in "@user:matrix.org".
+.It Sy password_file
+The path to the file containing the password to use when connecting to the server.
 .It Sy url
 The URL of the user's server.
 (For example "https://matrix.org" for "@user:matrix.org".)
@@ -124,20 +126,52 @@ These options are configured as an object under the
 key and can be overridden as described in
 .Sx PROFILES .
 .Bl -tag -width Ds
-
-.It Sy external_edit_file_suffix
-Suffix to append to temporary file names when using the :editor command. Defaults to .md.
-
+.It Sy cache_policy
+Configure how downloaded files and image previews are cached internally.
+Specifying this object will replace the upstream defaults and possibly lead to unconstrained cache growth.
+Possible keys and their effect are documented at:
+.br
+.Lk https://docs.rs/matrix-sdk/latest/matrix_sdk/media/struct.MediaRetentionPolicy.html#fields
+.It Sy default_markup
+Controls how text in the message bar is interpreted by default.
+Possible values are
+.Dq Sy html ,
+.Dq Sy markdown
+(the default) and
+.Dq Sy plaintext .
 .It Sy default_room
 The room to show by default instead of the
 .Sy :welcome
 window.
-
+.It Sy default_split
+Controls which direction
+.Sy <C-W>f
+and
+.Sy <C-W><C-F>
+open a new split when following a room identifier under the cursor.
+Possible values are
+.Dq Sy horizontal
+(the default) and
+.Dq Sy vertical .
+.It Sy encryption
+Configuration subsection for specific settings related to room encryption.
+See
+.Sx ENCRYPTION
+for more details.
+.It Sy external_edit_file_suffix
+Suffix to append to temporary file names when using the :editor command. Defaults to .md.
 .It Sy image_preview
 Enable image previews and configure it.
 An empty object will enable the feature with default settings, omitting it will disable the feature.
 The available fields in this object are:
 .Bl -tag -width Ds
+.It Sy lazy_load
+If
+.Sy true
+(the default), download and render image previews when viewing a message with an image.
+If
+.Sy false ,
+load previews as soon as a message with an image is received.
 .It Sy size
 An optional object with
 .Sy width
@@ -169,57 +203,73 @@ Possible values are:
 .Dq Sy error .
 Also supports the syntax defined by
 .Lk https://docs.rs/tracing_subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
-
 .It Sy max_log_files
 Specifies how many daily log files should be saved.
 Set this to
 .Sy 0
 to disable automatically deleting log files.
-Defaults to 
+Defaults to
 .Sy 7 .
-
 .It Sy mouse
 Enable mouse support
 See
 .Sx MOUSE
 for more details.
-
 .It Sy message_shortcode_display
 Defines whether or not Emoji characters in messages should be replaced by their
 respective shortcodes.
-
+.It Sy members_split
+When set, this forces the
+.Sy :members
+command to open in a new window split instead of in the same window.
+Possible values are
+.Dq Sy vertical
+or
+.Dq Sy horizontal ,
+to control what kind of split is done.
 .It Sy message_user_color
 Defines whether or not the message body is colored like the username.
-
 .It Sy normal_after_send
 Defines whether to reset input to Normal mode after sending a message.
-
 .It Sy notifications
 When this subsection is present, you can enable and configure push notifications.
 See
 .Sx NOTIFICATIONS
 for more details.
-
 .It Sy open_command
 Defines a custom  command and its arguments to run when opening downloads instead of the default.
 (For example,
 .Sy ["my-open",\ "--file"] . )
-
+.Sy proxy
+When this subsection is present, you can configure how requests are proxied to the homeserver.
+See
+.Sx PROXYING
+for more details.
 .It Sy reaction_display
 Defines whether or not reactions should be shown.
-
 .It Sy reaction_shortcode_display
 Defines whether or not reactions should be shown as their respective shortcode.
-
 .It Sy read_receipt_send
-Defines whether or not read confirmations are sent.
-
+Defines whether or not public read confirmations are sent.
+.It Sy read_receipt_trigger
+Defines under what conditions threads and rooms are marked read.
+Possible values are:
+.Bl -tag -width Ds
+.It Sy focused
+The room or thread must be focused and scrolled to the last message.
+This is the default value.
+.It Sy visible
+The room or thread must be on screen and scrolled to the last message.
+.It Sy scrollback
+Some portion of the scrollback for the room or thread must be on screen, but
+the room does not need to be scrolled to the last message.
+.It Sy message
+A message must be sent to the room before marking it read.
+.El
 .It Sy read_receipt_display
 Defines whether or not read confirmations are displayed.
-
 .It Sy request_timeout
 Defines the maximum time per request in seconds.
-
 .It Sy sort
 Configures how to sort the lists shown in windows like
 .Sy :rooms
@@ -228,22 +278,22 @@ or
 See
 .Sx "SORTING LISTS"
 for more details.
-
 .It Sy state_event_display
 Defines whether the state events like joined or left are shown.
-
+.It Sy terminal
+Subsection for configuring how specific terminal features are used (or not used).
+See
+.Sx TERMINAL
+for more details.
 .It Sy typing_notice_send
 Defines whether or not the typing state is sent.
-
 .It Sy typing_notice_display
 Defines whether or not the typing state is displayed.
-
 .It Sy user
 Overrides values for the specified user.
 See
 .Sx "USER OVERRIDES"
 for details on the format.
-
 .It Sy username_display
 Defines how usernames are shown for message senders.
 Possible values are
@@ -251,17 +301,19 @@ Possible values are
 .Dq Sy localpart ,
 or
 .Dq Sy displayname .
-
 .It Sy user_gutter_width
 Specify the width of the column where usernames are displayed in a room.
 Usernames that are too long are truncated.
+If this value is less than 3, the usernames are displayed in an extra line at the top of the message
+and this value is only used to indent the message.
 Defaults to 30.
-
 .It Sy tabstop
 Number of spaces that a <Tab> counts for.
 Defaults to 4.
+.It Sy ssl_verify
+Enable SSL verification for the HTTP requests.
+Defaults to true.
 .El
-
 .Ss Example 1: Avoid showing Emojis (useful for terminals w/o support)
 .Bd -literal -offset indent
 [settings]
@@ -269,20 +321,44 @@ username = "username"
 message_shortcode_display = true
 reaction_shortcode_display = true
 .Ed
-
 .Ss Example 2: Increase request timeout to 2 minutes for a slow homeserver
 .Bd -literal -offset indent
 [settings]
 request_timeout = 120
 .Ed
-
+.Sh ENCRYPTION
+The
+.Sy settings.encryption
+subsection allows controlling how encrypted rooms are presented.
+.Pp
+The available fields in this subsection are:
+.Bl -tag -width Ds
+.It Sy indicator
+Defines when an encryption status indicator is shown.
+Possible values are:
+.Dq Sy enabled
+(default, always indicate status),
+.Dq Sy disabled
+(never indicate status),
+.Dq Sy only-unencrypted ,
+and
+.Dq Sy only-encrypted .
+.It Sy indicator_location
+Defines where the encryption status indicator is shown when relevant.
+Possible values are:
+.Dq Sy title ,
+and
+.Dq Sy prompt
+(the default).
+Both can be used via
+.Dq Sy title|prompt .
+.El
 .Sh MOUSE
-
 The
 .Sy settings.mouse
 subsection allows enabling mouse support.
 Currently the only difference is that scrolling moves the window view instead of changing the selection.
-
+.Pp
 The available fields in this subsection are:
 .Bl -tag -width Ds
 .It Sy enabled
@@ -291,13 +367,12 @@ Defaults to
 Setting this field to
 .Sy true
 enables mouse support.
-
+.El
 .Sh NOTIFICATIONS
-
 The
 .Sy settings.notifications
 subsection allows configuring how notifications for new messages behave.
-
+.Pp
 The available fields in this subsection are:
 .Bl -tag -width Ds
 .It Sy enabled
@@ -306,7 +381,6 @@ Defaults to
 Setting this field to
 .Sy true
 enables notifications.
-
 .It Sy via
 Defaults to
 .Dq Sy desktop
@@ -316,18 +390,15 @@ Setting this field to
 will use the terminal bell instead.
 Both can be used via
 .Dq Sy desktop|bell .
-
 .It Sy show_message
 controls whether to show the message in the desktop notification, and defaults to
 .Sy true .
 Messages are truncated beyond a small length.
 The notification rules are stored server side, loaded once at startup, and are currently not configurable in iamb.
 In other words, you can simply change the rules with another client.
-
 .It Sy sound_hint
 Controls the notification sound name that is passed as a hint to the notification daemon.
 .El
-
 .Ss Example 1: Enable notifications with default options
 .Bd -literal -offset indent
 [settings.notifications]
@@ -347,13 +418,39 @@ enabled = true
 sound_hint = "message-new-instant" # Linux
 sound_hint = "IM"                  # Windows
 .Ed
-
+.Sh "PROXYING"
+The
+.Sy settings.proxy
+subsection allows configuring proxying for requests to the homeserver.
+.Pp
+Fields available within this subsection are:
+.Bl -tag -width Ds
+.It Sy url
+Either a
+.Sy socks5://IP:PORT
+URL for a SOCKS server to proxy request through,
+or a
+.Sy http[s]://[USER:PASS@]HOST[:PORT]/
+URL to do HTTP(S) proxying through.
+Setting this to the empty string will explicitly disable proxying, and any environment variables will be ignored.
+.It Sy auth
+A value to send in a
+.Sy Proxy-Authorization
+header if your HTTP(S) proxy requires it,
+such as for doing Bearer authentication with a token.
+.It Sy headers
+A subsection for specifying additional headers and values to include in requests sent to the proxy.
+For example, custom HTTPS proxy server software may require specifying a
+.Sy User-Agent
+or a custom header like
+.Sy X-Proxy-Token
+in order to be allowed to send request through it.
+.El
 .Sh "SORTING LISTS"
-
 The
 .Sy settings.sort
 subsection allows configuring how different windows have their contents sorted.
-
+.Pp
 Fields available within this subsection are:
 .Bl -tag -width Ds
 .It Sy rooms
@@ -390,8 +487,8 @@ window.
 Defaults to
 .Sy ["power",\ "id"] .
 .El
-
-The available values are:
+.Pp
+The available values for sorting rooms are:
 .Bl -tag -width Ds
 .It Sy favorite
 Put favorite rooms before other rooms.
@@ -403,6 +500,10 @@ Sort rooms by alphabetically ascending room name.
 Sort rooms by alphabetically ascending canonical room alias.
 .It Sy id
 Sort rooms by alphabetically ascending Matrix room identifier.
+.It Sy server
+Sort rooms by alphabetically ascending server name from the room alias.
+This will fall back to the server from the room identifier if there is
+no canonical alias for the room.
 .It Sy unread
 Put unread rooms before other rooms.
 .It Sy recent
@@ -410,31 +511,54 @@ Sort rooms by most recent message timestamp.
 .It Sy invite
 Put invites before other rooms.
 .El
-.El
-
+.Pp
 Add a
 .Dq Sy ~
 in front of any value to flip the order.
-
 .Ss Example 1: Group room members by their server first and descending localpart second
 .Bd -literal -offset indent
 [settings.sort]
 members = ["server", "~localpart"]
 .Ed
-
+.Sh TERMINAL
+The
+.Sy settings.terminal
+subsection allows overriding how
+.Sy iamb
+interacts with your terminal.
+.Pp
+The available fields in this subsection are:
+.Bl -tag -width Ds
+.It Sy cursor_shape
+Control the terminal cursor shape used by iamb.
+Possible values are:
+.Dq Sy default ,
+.Dq Sy block ,
+.Dq Sy line , and
+.Dq Sy underline .
+Defaults to
+.Dq Sy default .
+.It Sy enable_extended_keys
+Defines whether to explicitly enable or disable requesting extended keypresses from your terminal.
+By default, when unset,
+.Sy iamb
+will attempt to auto-detect support in your terminal and request extended keypresses from the terminal if supported.
+.It Sy enable_title
+Whether to set the title of the terminal window to
+.Dq Sy iamb (<user_id>) .
+Defaults to true.
+.El
+.It Sy indicator
 .Sh "USER OVERRIDES"
-
 The
 .Sy settings.users
 subsections allows overriding how specific senders are displayed.
 Overrides are mapped onto Matrix User IDs such as
 .Sy @user:matrix.org ,
 and are typically written as inline tables containing the following keys:
-
 .Bl -tag -width Ds
 .It Sy name
 Change the display name of the user.
-
 .It Sy color
 Change the color the user is shown as.
 Possible values are:
@@ -457,20 +581,16 @@ Possible values are:
 and
 .Dq Sy yellow .
 .El
-
 .Ss Example 1: Override how @ada:example.com appears in chat
 .Bd -literal -offset indent
 [settings.users]
 "@ada:example.com" = { name = "Ada Lovelace", color = "light-red" }
 .Ed
-
 .Sh STARTUP LAYOUT
-
 The
 .Sy layout
 section allows configuring the initial set of tabs and windows to show when
 starting the client.
-
 .Bl -tag -width Ds
 .It Sy style
 Specifies what window layout to load when starting.
@@ -484,7 +604,6 @@ if set), or
 .Dq Sy config
 to open the layout described under
 .Sy tabs .
-
 .It Sy tabs
 If
 .Sy style
@@ -497,7 +616,6 @@ key specifying a username, room identifier or room alias to show, or a
 .Sy split
 key specifying an array of window objects.
 .El
-
 .Ss Example 1: Show a single room every startup
 .Bd -literal -offset indent
 [settings]
@@ -523,93 +641,70 @@ split = [
     { "window" = "#iamb-dev:0x.badd.cafe" }
 ]
 .Ed
-
 .Sh "CUSTOM KEYBINDINGS"
-
 The
 .Sy macros
 subsections allow configuring custom keybindings.
 Available subsections are:
-
 .Bl -tag -width Ds
 .It Sy insert , Sy i
 Map the key sequences in this section in
 .Sy Insert
 mode.
-
 .It Sy normal , Sy n
 Map the key sequences in this section in
 .Sy Normal
 mode.
-
 .It Sy visual , Sy v
 Map the key sequences in this section in
 .Sy Visual
 mode.
-
 .It Sy select
 Map the key sequences in this section in
 .Sy Select
 mode.
-
 .It Sy command , Sy c
 Map the key sequences in this section in
 .Sy Visual
 mode.
-
 .It Sy operator-pending
 Map the key sequences in this section in
 .Sy "Operator Pending"
 mode.
 .El
-
+.Pp
 Multiple modes can be given together by separating their names with
 .Dq Sy | .
-
 .Ss Example 1: Use "jj" to exit Insert mode
 .Bd -literal -offset indent
 [macros.insert]
 "jj" = "<Esc>"
 .Ed
-
 .Ss Example 2: Use "V" for switching between message bar and room history
 .Bd -literal -offset indent
 [macros."normal|visual"]
 "V" = "<C-W>m"
 .Ed
-
 .Sh DIRECTORIES
-
 Specifies the directories to save data in.
 Configured as an object under the key
 .Sy dirs .
-
 .Bl -tag -width Ds
 .It Sy cache
 Specifies where to store assets and temporary data in.
 (For example,
-.Sy image_preview
-and
 .Sy logs
 will also go in here by default.)
 Defaults to
 .Ev $XDG_CACHE_HOME/iamb .
-
 .It Sy data
 Specifies where to store persistent data in, such as E2EE room keys.
 Defaults to
 .Ev $XDG_DATA_HOME/iamb .
-
 .It Sy downloads
 Specifies where to store downloaded files.
 Defaults to
 .Ev $XDG_DOWNLOAD_DIR .
-
-.It Sy image_previews
-Specifies where to store automatically downloaded image previews.
-Defaults to
-.Ev ${cache}/image_preview_downloads .
-
 .It Sy logs
 Specifies where to store log files.
 Defaults to

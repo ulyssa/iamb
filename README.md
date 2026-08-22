@@ -41,7 +41,7 @@ You can create a basic configuration in `$CONFIG_DIR/iamb/config.toml` that look
 user_id = "@user:example.com"
 ```
 
-If you homeserver is located on a different domain than the server part of the
+If your homeserver is located on a different domain than the server part of the
 `user_id` and you don't have a [`/.well-known`][well_known_entry] entry, then
 you can explicitly specify the homeserver URL to use:
 
@@ -59,6 +59,29 @@ containing the sources (ie: from a git clone):
 ```
 cargo install --locked --path .
 ```
+
+If you're willing to wait longer on the build, you can use the `release-lto`
+profile to enable link-time optimization:
+
+```
+cargo install --profile release-lto --locked --path .
+```
+
+If you would prefer to optimize for a smaller binary, you can use the
+`release-light` profile, which will do LTO, optimize code generation
+for smaller output, and strip the binary. The `max_level_error` feature
+will also make sure that any `tracing` logs below the error level have
+their strings removed during compile-time, so that you only get `error`
+logs.
+
+```
+cargo install --profile release-light --features max_level_error --path .
+```
+
+Add `--no-default-features` if you want to skip desktop integration (e.g.
+clipboard and notifications support) and you would like to link against
+your system's OpenSSL and SQLite instead of using rustls and a bundled
+SQLite.
 
 ## Installation (via `crates.io`)
 
@@ -144,6 +167,14 @@ A snap for Linux distributions which [support](https://snapcraft.io/docs/install
 
 ```
 snap install iamb
+```
+
+### Conda (Linux, macOS, Windows)
+
+A Conda [package](https://prefix.dev/channels/conda-forge/packages/iamb) is available on conda-forge. To install it simply run:
+
+```
+pixi global install iamb
 ```
 
 ## License

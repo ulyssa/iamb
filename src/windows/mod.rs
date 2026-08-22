@@ -14,23 +14,23 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use matrix_sdk::{
-    encryption::verification::{format_emojis, SasVerification},
+    RoomState as MatrixRoomState,
+    encryption::verification::{SasVerification, format_emojis},
     room::{Room as MatrixRoom, RoomMember},
     ruma::{
-        events::room::member::MembershipState,
-        events::tag::{TagName, Tags},
         OwnedRoomAliasId,
         OwnedRoomId,
         RoomAliasId,
         RoomId,
+        events::room::member::MembershipState,
+        events::tag::{TagName, Tags},
     },
-    RoomState as MatrixRoomState,
 };
 
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
-    style::{Modifier as StyleModifier, Style},
+    style::{Color, Modifier as StyleModifier, Style},
     text::{Line, Span, Text},
     widgets::StatefulWidget,
 };
@@ -52,11 +52,11 @@ use modalkit::{
 };
 
 use modalkit_ratatui::{
-    list::{List, ListCursor, ListItem, ListState},
     TermOffset,
     TerminalCursor,
     Window,
     WindowOps,
+    list::{List, ListCursor, ListItem, ListState},
 };
 
 use crate::base::{
@@ -79,6 +79,7 @@ use crate::base::{
     SpaceAction,
     UnreadInfo,
 };
+use crate::windows::room::room_command;
 
 use self::{room::RoomState, welcome::WelcomeState};
 use crate::message::MessageTimeStamp;
@@ -125,19 +126,27 @@ fn selected_text(s: &str, selected: bool) -> Text<'_> {
     Text::from(selected_span(s, selected))
 }
 
-fn name_and_labels(name: &str, unread: bool, style: Style) -> (Span<'_>, Vec<Vec<Span<'_>>>) {
-    let name_style = if unread {
+fn name_and_labels<'a>(
+    name: &'a str,
+    unread: &UnreadInfo,
+    style: Style,
+) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
+    // TODO: use different colors for "mention", "notification", "muted room"
+    let name_style = if unread.is_unread() {
         style.add_modifier(StyleModifier::BOLD)
     } else {
         style
     };
 
     let name = Span::styled(name, name_style);
-    let labels = if unread {
-        vec![vec![Span::styled("Unread", style)]]
-    } else {
-        vec![]
-    };
+
+    let mut labels = vec![];
+
+    if unread.unread_mentions > 0 {
+        labels.push(vec![Span::styled("Unread Mention", style)]);
+    } else if unread.is_unread() {
+        labels.push(vec![Span::styled("Unread", style)]);
+    }
 
     (name, labels)
 }
@@ -195,6 +204,17 @@ fn room_cmp<T: RoomLikeItem>(
         SortFieldRoom::Name => collator.collate(a.name(), b.name()),
         SortFieldRoom::Alias => some_cmp(a.alias(), b.alias(), Ord::cmp),
         SortFieldRoom::RoomId => a.room_id().cmp(b.room_id()),
+        SortFieldRoom::Server => {
+            let a = a
+                .alias()
+                .map(RoomAliasId::server_name)
+                .or_else(|| a.room_id().server_name());
+            let b = b
+                .alias()
+                .map(RoomAliasId::server_name)
+                .or_else(|| b.room_id().server_name());
+            some_cmp(a, b, Ord::cmp)
+        },
         SortFieldRoom::Unread => {
             // Sort true (unread) before false (read)
             b.is_unread().cmp(&a.is_unread())
@@ -330,6 +350,7 @@ macro_rules! delegate {
             IambWindow::Welcome($id) => $e,
             IambWindow::ChatList($id) => $e,
             IambWindow::UnreadList($id) => $e,
+            IambWindow::MentionsList($id) => $e,
         }
     };
 }
@@ -344,6 +365,7 @@ pub enum IambWindow {
     Welcome(WelcomeState),
     ChatList(ChatListState),
     UnreadList(UnreadListState),
+    MentionsList(MentionsListState),
 }
 
 impl IambWindow {
@@ -387,8 +409,22 @@ impl IambWindow {
         ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
-        if let IambWindow::Room(w) = self {
-            w.room_command(act, ctx, store).await
+        let id = match self {
+            IambWindow::Room(state) => Some(state.id()),
+            IambWindow::MemberList(_, room_id, _) => Some(&**room_id),
+
+            IambWindow::DirectList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::RoomList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::SpaceList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::ChatList(state) | IambWindow::UnreadList(state) => {
+                state.get().map(|state| state.room_id())
+            },
+
+            _ => None,
+        };
+
+        if let Some(id) = id {
+            room_command(id, act, ctx, store).await
         } else {
             return Err(IambError::NoSelectedRoomOrSpace.into());
         }
@@ -413,6 +449,7 @@ pub type MemberListState = ListState<MemberItem, IambInfo>;
 pub type RoomListState = ListState<RoomItem, IambInfo>;
 pub type ChatListState = ListState<GenericChatItem, IambInfo>;
 pub type UnreadListState = ListState<GenericChatItem, IambInfo>;
+pub type MentionsListState = ListState<GenericChatItem, IambInfo>;
 pub type SpaceListState = ListState<SpaceItem, IambInfo>;
 pub type VerifyListState = ListState<VerifyItem, IambInfo>;
 
@@ -540,17 +577,15 @@ impl WindowOps<IambInfo> for IambWindow {
                     None => true,
                 };
 
-                if need_fetch {
-                    if let Ok(mems) = store.application.worker.members(room_id.clone()) {
-                        let mut items = mems
-                            .into_iter()
-                            .map(|m| MemberItem::new(m, room_id.clone()))
-                            .collect::<Vec<_>>();
-                        let fields = &store.application.settings.tunables.sort.members;
-                        items.sort_by(|a, b| user_fields_cmp(a, b, fields));
-                        state.set(items);
-                        *last_fetch = Some(Instant::now());
-                    }
+                if need_fetch && let Ok(mems) = store.application.worker.members(room_id.clone()) {
+                    let mut items = mems
+                        .into_iter()
+                        .map(|m| MemberItem::new(m, room_id.clone()))
+                        .collect::<Vec<_>>();
+                    let fields = &store.application.settings.tunables.sort.members;
+                    items.sort_by(|a, b| user_fields_cmp(a, b, fields));
+                    state.set(items);
+                    *last_fetch = Some(Instant::now());
                 }
 
                 List::new(store)
@@ -646,6 +681,40 @@ impl WindowOps<IambInfo> for IambWindow {
                     .focus(focused)
                     .render(area, buf, state);
             },
+            IambWindow::MentionsList(state) => {
+                let mut items = store
+                    .application
+                    .sync_info
+                    .rooms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, false))
+                    .filter(GenericChatItem::has_mention)
+                    .collect::<Vec<_>>();
+
+                let dms = store
+                    .application
+                    .sync_info
+                    .dms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, true))
+                    .filter(GenericChatItem::has_mention);
+
+                items.extend(dms);
+
+                let fields = &store.application.settings.tunables.sort.chats;
+                let collator = &mut store.application.collator;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+
+                state.set(items);
+
+                List::new(store)
+                    .empty_message("You do not have any unread mentions yet")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(area, buf, state);
+            },
             IambWindow::SpaceList(state) => {
                 let mut items = store
                     .application
@@ -699,6 +768,7 @@ impl WindowOps<IambInfo> for IambWindow {
             IambWindow::Welcome(w) => w.dup(store).into(),
             IambWindow::ChatList(w) => w.dup(store).into(),
             IambWindow::UnreadList(w) => w.dup(store).into(),
+            IambWindow::MentionsList(w) => w.dup(store).into(),
         }
     }
 
@@ -740,6 +810,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => IambId::Welcome,
             IambWindow::ChatList(_) => IambId::ChatList,
             IambWindow::UnreadList(_) => IambId::UnreadList,
+            IambWindow::MentionsList(_) => IambId::MentionsList,
         }
     }
 
@@ -752,6 +823,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
             IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::MentionsList(_) => bold_spans("Unread Mentions"),
 
             IambWindow::Room(w) => {
                 let title = store.application.get_room_title(w.id());
@@ -780,6 +852,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
             IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::MentionsList(_) => bold_spans("Unread Mentions"),
 
             IambWindow::Room(w) => w.get_title(store),
             IambWindow::MemberList(state, room_id, _) => {
@@ -846,6 +919,11 @@ impl Window<IambInfo> for IambWindow {
 
                 Ok(IambWindow::UnreadList(list))
             },
+            IambId::MentionsList => {
+                let list = MentionsListState::new(IambBufferId::MentionsList, vec![]);
+
+                Ok(IambWindow::MentionsList(list))
+            },
         }
     }
 
@@ -900,7 +978,7 @@ impl GenericChatItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -918,6 +996,11 @@ impl GenericChatItem {
     #[inline]
     fn tags(&self) -> &Option<Tags> {
         &self.room_info.deref().1
+    }
+
+    #[inline]
+    fn has_mention(&self) -> bool {
+        self.unread.has_mention()
     }
 }
 
@@ -968,9 +1051,8 @@ impl ListItem<IambInfo> for GenericChatItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
         let mut spans = vec![name];
 
         labels.push(if self.is_dm {
@@ -1019,7 +1101,7 @@ impl RoomItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -1087,9 +1169,8 @@ impl ListItem<IambInfo> for RoomItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1127,12 +1208,13 @@ pub struct DirectItem {
 
 impl DirectItem {
     fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
+        let room = &room_info.deref().0;
         let room_id = room_info.0.room_id().to_owned();
         let alias = room_info.0.canonical_alias();
 
         let info = store.application.rooms.get_or_default(room_id);
         let name = info.name.clone().unwrap_or_default();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         DirectItem { room_info, name, alias, unread }
@@ -1196,9 +1278,8 @@ impl ListItem<IambInfo> for DirectItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1550,42 +1631,79 @@ impl ListItem<IambInfo> for MemberItem {
         _: &ViewportContext<ListCursor>,
         store: &mut ProgramStore,
     ) -> Text<'_> {
+        use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
+
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let user_id = self.member.user_id();
 
         let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
         let color = color.unwrap_or_else(|| super::config::user_color(user_id.as_str()));
-        let mut style = super::config::user_style_from_color(color);
 
-        if selected {
-            style = style.add_modifier(StyleModifier::REVERSED);
-        }
+        let style = if selected {
+            // Ensure the whole item has the same color when it's selected:
+            Style::default().fg(color).add_modifier(StyleModifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        let user_style = style.patch(super::config::user_style_from_color(color));
+        let role_style = style.add_modifier(StyleModifier::BOLD);
 
         let mut spans = vec![];
-        let mut parens = false;
+        let mut tags = vec![];
 
         if let Some(name) = name {
-            spans.push(Span::styled(name, style));
-            parens = true;
+            spans.push(Span::styled(name, user_style));
+            tags.push(Span::styled(user_id.as_str(), user_style));
         } else if let Some(display) = info.display_names.get(user_id) {
-            spans.push(Span::styled(display.clone(), style));
-            parens = true;
+            spans.push(Span::styled(display.into_owned(), user_style));
+            tags.push(Span::styled(user_id.as_str(), user_style));
+        } else {
+            spans.push(Span::styled(user_id.as_str(), user_style));
         }
 
-        spans.extend(parens.then_some(Span::styled(" (", style)));
-        spans.push(Span::styled(user_id.as_str(), style));
-        spans.extend(parens.then_some(Span::styled(")", style)));
+        let roles = match self.member.power_level() {
+            UserPowerLevel::Infinite => {
+                vec![
+                    Span::styled("Admin", role_style),
+                    Span::styled("Creator", role_style),
+                ]
+            },
+            UserPowerLevel::Int(n) => {
+                match i64::from(n) {
+                    0 => vec![],
+                    50 => vec![Span::styled("Moderator", role_style)],
+                    100 => vec![Span::styled("Admin", role_style)],
+                    _ => {
+                        let custom = format!("Power Level {n}");
+                        vec![Span::styled(custom, role_style)]
+                    },
+                }
+            },
+            _ => vec![],
+        };
 
         let state = match self.member.membership() {
-            MembershipState::Ban => Span::raw(" (banned)").into(),
-            MembershipState::Invite => Span::raw(" (invited)").into(),
-            MembershipState::Knock => Span::raw(" (wants to join)").into(),
-            MembershipState::Leave => Span::raw(" (left)").into(),
+            MembershipState::Ban => Span::styled("banned", style.fg(Color::LightRed)).into(),
+            MembershipState::Invite => Span::styled("invited", style).into(),
+            MembershipState::Knock => Span::styled("wants to join", style).into(),
+            MembershipState::Leave => Span::styled("left", style).into(),
             MembershipState::Join => None,
             _ => None,
         };
 
-        spans.extend(state);
+        tags.extend(roles);
+        tags.extend(state);
+
+        if !tags.is_empty() {
+            spans.push(Span::styled(" (", style));
+            for (i, tag) in tags.into_iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled(", ", style));
+                }
+                spans.push(tag);
+            }
+            spans.push(Span::styled(")", style));
+        }
 
         return Line::from(spans).into();
     }
@@ -1627,7 +1745,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matrix_sdk::ruma::{room_alias_id, server_name};
+    use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, room_alias_id, server_name};
 
     #[derive(Debug, Eq, PartialEq)]
     struct TestRoomItem {
@@ -1746,7 +1864,13 @@ mod tests {
             tags: vec![],
             alias: None,
             name: "Room 1",
-            unread: UnreadInfo { unread: false, latest: None },
+            unread: UnreadInfo {
+                latest: None,
+                unread_mark: false,
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
+            },
             invite: false,
         };
 
@@ -1756,8 +1880,11 @@ mod tests {
             alias: None,
             name: "Room 2",
             unread: UnreadInfo {
-                unread: false,
-                latest: Some(MessageTimeStamp::OriginServer(40u32.into())),
+                latest: Some(MessageTimeStamp(MilliSecondsSinceUnixEpoch(40u32.into()))),
+                unread_mark: false,
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
             },
             invite: false,
         };
@@ -1768,8 +1895,11 @@ mod tests {
             alias: None,
             name: "Room 3",
             unread: UnreadInfo {
-                unread: false,
-                latest: Some(MessageTimeStamp::OriginServer(20u32.into())),
+                latest: Some(MessageTimeStamp(MilliSecondsSinceUnixEpoch(20u32.into()))),
+                unread_mark: false,
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
             },
             invite: false,
         };
@@ -1837,5 +1967,81 @@ mod tests {
         ];
         rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room1, &room2, &room3]);
+    }
+
+    #[test]
+    fn sort_room_servers() {
+        let mut collator = Collator::default();
+        let collator = &mut collator;
+        let server1 = server_name!("a.com");
+        let server3 = server_name!("c.com");
+
+        // No alias, fallback to namespace of V1 room ID:
+        let room1 = TestRoomItem {
+            room_id: RoomId::new_v1(server3).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Room E",
+            unread: UnreadInfo::default(),
+            invite: false,
+        };
+
+        // Alias and V1 room ID agree:
+        let room2 = TestRoomItem {
+            room_id: RoomId::new_v1(server1).to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#name:a.com").to_owned()),
+            name: "Room D",
+            unread: UnreadInfo::default(),
+            invite: false,
+        };
+
+        // Alias, V2 room id:
+        let room3 = TestRoomItem {
+            room_id: RoomId::new_v2("refhash").unwrap().to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#alias:b.com").to_owned()),
+            name: "Room C",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // Alias and V2 room ID disagree, alias is used:
+        let room4 = TestRoomItem {
+            room_id: RoomId::new_v1(server3).to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#alias:a.com").to_owned()),
+            name: "Room B",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // No alias and V2 room ID:
+        let room5 = TestRoomItem {
+            room_id: RoomId::new_v2("refhash").unwrap().to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Room A",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // Sort servers first ascending, name tie breaks:
+        let mut rooms = vec![&room1, &room2, &room3, &room4, &room5];
+        let fields = &[
+            SortColumn(SortFieldRoom::Server, SortOrder::Ascending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+        assert_eq!(rooms, vec![&room4, &room2, &room3, &room1, &room5]);
+
+        // Sort servers first descending, name tie breaks:
+        let mut rooms = vec![&room1, &room2, &room3, &room4, &room5];
+        let fields = &[
+            SortColumn(SortFieldRoom::Server, SortOrder::Descending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+        assert_eq!(rooms, vec![&room5, &room1, &room3, &room4, &room2]);
     }
 }
