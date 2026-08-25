@@ -52,7 +52,7 @@ impl<'a> TextPrinter<'a> {
 
     /// The `(x, y)` position where the next text will be printed.
     pub fn cursor_pos(&self) -> (usize, usize) {
-        (self.curr_width, self.text.lines.len().saturating_sub(1))
+        (self.curr_width, self.text.lines.len())
     }
 
     /// Configure the alignment for each line.
