@@ -7,6 +7,35 @@ use unicode_width::UnicodeWidthStr;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span, Text};
 
+/// Adaptation of [`dbg`] that uses [`debug!`](tracing::debug) instead of stderr.
+#[macro_export]
+macro_rules! iamb_dbg {
+    () => {
+        tracing::debug!("[{}:{}:{}]", std::file!(), std::line!(), std::column!())
+    };
+    ($val:expr $(,)?) => {
+        // Use of `match` here is intentional because it affects the lifetimes
+        // of temporaries - https://stackoverflow.com/a/48732525/1063961
+        match $val {
+            tmp => {
+                tracing::debug!("[{}:{}:{}] {} = {:#?}",
+                    std::file!(),
+                    std::line!(),
+                    std::column!(),
+                    std::stringify!($val),
+                    // The `&T: Debug` check happens here (not in the format literal desugaring)
+                    // to avoid format literal related messages and suggestions.
+                    &&tmp as &dyn std::fmt::Debug,
+                );
+                tmp
+            }
+        }
+    };
+    ($($val:expr),+ $(,)?) => {
+        ($($crate::iamb_dbg!($val)),+,)
+    };
+}
+
 pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) {
     match cow {
         Cow::Borrowed(s) => {
