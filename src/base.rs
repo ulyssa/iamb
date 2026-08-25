@@ -15,9 +15,11 @@ use emojis::Emoji;
 
 use matrix_sdk::ruma::OwnedMxcUri;
 use matrix_sdk::ruma::OwnedTransactionId;
+use matrix_sdk::ruma::events::OriginalMessageLikeEvent;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::events::sticker::StickerEvent;
+use matrix_sdk::ruma::events::room::message::MessageType;
+use matrix_sdk::ruma::events::sticker::{StickerEvent, StickerEventContent};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -100,7 +102,7 @@ use crate::{
     config::{ApplicationSettings, ImagePreviewProtocolValues},
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     notifications::NotificationHandle,
-    preview::{PreviewManager, source_from_event},
+    preview::PreviewManager,
     worker::Requester,
 };
 
@@ -876,9 +878,6 @@ pub enum EventLocation {
     /// The [EventId] belongs to a state event in the main timeline of the room.
     State(MessageKey),
 
-    /// The [EventId] belongs to a sticker event in the main scrollback
-    Sticker(MessageKey),
-
     /// The [EventId] belongs to an edit for the given event and has key [MessageKey].
     Edit(OwnedEventId, MessageKey),
 }
@@ -887,7 +886,6 @@ impl EventLocation {
     fn to_message_key(&self) -> Option<&MessageKey> {
         match self {
             EventLocation::Message(_, key) => Some(key),
-            EventLocation::Sticker(key) => Some(key),
             _ => None,
         }
     }
@@ -1253,12 +1251,6 @@ impl RoomInfo {
 
                 self.keys.remove(redacts);
             },
-            Some(EventLocation::Sticker(key)) => {
-                if let Some(msg) = self.messages.get_mut(key) {
-                    let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev);
-                }
-            },
         }
     }
 
@@ -1281,49 +1273,52 @@ impl RoomInfo {
     }
 
     /// Insert a sticker
-    pub fn insert_sticker(
+    pub fn insert_sticker_with_preview(
         &mut self,
         sticker: StickerEvent,
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
         worker: &Requester,
     ) {
-        match sticker {
-            MessageLikeEvent::Original(ref sticker_content) => {
-                let key = MessageKey {
-                    ts: sticker_content.origin_server_ts.into(),
-                    id: sticker_content.event_id.clone().into(),
-                };
+        let event_id = sticker.event_id().to_owned();
+        let key = MessageKey {
+            ts: sticker.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
 
-                let loc = EventLocation::Sticker(key.clone());
+        let thread_root = match &sticker {
+            MessageLikeEvent::Original(OriginalMessageLikeEvent {
+                content:
+                    StickerEventContent {
+                        relates_to: Some(Relation::Thread(Thread { event_id, .. })),
+                        ..
+                    },
+                ..
+            }) => Some(event_id.to_owned()),
+            _ => None,
+        };
 
-                self.keys.insert(sticker_content.event_id.clone(), loc);
-                self.messages.insert_message(key.clone(), sticker.clone());
-
-                if let (Some(msg), Some(image_preview)) = (
-                    self.get_event_mut(&sticker_content.event_id),
-                    &settings.tunables.image_preview,
-                ) {
-                    let source: MediaSource = sticker_content.content.source.clone().into();
-                    msg.image_preview = Some(source.clone());
-                    previews.register_preview(
-                        settings,
-                        source,
-                        PreviewKind::Message,
-                        image_preview.size,
-                        worker,
-                    );
-                }
-            },
-            MessageLikeEvent::Redacted(ref redaction) => {
-                let key = MessageKey {
-                    ts: redaction.origin_server_ts.into(),
-                    id: redaction.event_id.clone().into(),
-                };
-
-                self.messages.insert_message(key.clone(), sticker.clone());
-            },
+        if let MessageLikeEvent::Original(OriginalMessageLikeEvent {
+            content: StickerEventContent { source, .. },
+            ..
+        }) = &sticker &&
+            let Some(image_preview) = &settings.tunables.image_preview
+        {
+            let source = source.clone().into();
+            previews.register_preview(
+                settings,
+                &source,
+                PreviewKind::Message,
+                image_preview.size,
+                worker,
+            );
         }
+
+        let loc = EventLocation::Message(thread_root.clone(), key.clone());
+        self.keys.insert(event_id, loc);
+
+        let thread = self.get_thread_mut(thread_root);
+        thread.insert_message(key, sticker);
     }
 
     /// Insert a reaction to a message.
@@ -1348,7 +1343,7 @@ impl RoomInfo {
 
         if let (Some(source), Some(_)) = (source, &settings.tunables.image_preview) {
             let size = ImagePreviewSize { width: 2, height: 1 };
-            previews.register_preview(settings, source, PreviewKind::Reaction, size, worker);
+            previews.register_preview(settings, &source, PreviewKind::Reaction, size, worker);
         }
     }
 
@@ -1493,22 +1488,22 @@ impl RoomInfo {
         previews: &mut PreviewManager,
         worker: &Requester,
     ) {
-        let source = source_from_event(&ev);
-        self.insert(ev);
-
-        if let Some((event_id, source)) = source &&
-            let (Some(msg), Some(image_preview)) =
-                (self.get_event_mut(&event_id), &settings.tunables.image_preview)
+        if let MessageLikeEvent::Original(OriginalMessageLikeEvent {
+            content: RoomMessageEventContent { msgtype: MessageType::Image(c), .. },
+            ..
+        }) = &ev &&
+            let Some(image_preview) = &settings.tunables.image_preview
         {
-            msg.image_preview = Some(source.clone());
             previews.register_preview(
                 settings,
-                source,
+                &c.source,
                 PreviewKind::Message,
                 image_preview.size,
                 worker,
             )
         }
+
+        self.insert(ev);
     }
 
     /// Indicates whether we've recently fetched scrollback for this room.
