@@ -697,28 +697,18 @@ pub struct ImagePreviewValues {
     pub protocol: ImagePreviewProtocolValues,
 }
 
-impl ImagePreviewValues {
-    pub fn disabled() -> Self {
-        Self {
-            enabled: false,
-            lazy_load: true,
-            size: Default::default(),
-            protocol: Default::default(),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct ImagePreview {
+    pub enabled: Option<bool>,
     pub lazy_load: Option<bool>,
     pub size: Option<ImagePreviewSize>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
 impl ImagePreview {
-    fn values(self) -> ImagePreviewValues {
+    pub fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
-            enabled: true,
+            enabled: self.enabled.unwrap_or(true),
             lazy_load: self.lazy_load.unwrap_or(true),
             size: self.size.unwrap_or_default(),
             protocol: self.protocol.unwrap_or_default(),
@@ -983,10 +973,7 @@ impl Tunables {
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),
-            image_preview: self
-                .image_preview
-                .map(ImagePreview::values)
-                .unwrap_or_else(ImagePreviewValues::disabled),
+            image_preview: self.image_preview.unwrap_or_default().values(),
             user_gutter_width: self.user_gutter_width.unwrap_or(30),
             external_edit_file_suffix: self
                 .external_edit_file_suffix
