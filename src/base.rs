@@ -1710,7 +1710,6 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
     return emojis;
 }
 
-#[cfg(unix)]
 fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
     let mut picker = match Picker::from_query_stdio() {
         Ok(picker) => picker,
@@ -1725,15 +1724,6 @@ fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
     }
 
     Some(picker)
-}
-
-/// Windows cannot guess the right protocol, and always needs type and font_size.
-#[cfg(windows)]
-fn picker_from_termios(_: Option<ProtocolType>) -> Option<Picker> {
-    tracing::error!(
-        "\"image_preview\" requires \"protocol\" with \"type\" and \"font_size\" options on Windows."
-    );
-    None
 }
 
 fn picker_from_settings(settings: &ApplicationSettings) -> Option<Picker> {
