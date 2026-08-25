@@ -189,6 +189,19 @@ An optional string set to one of the protocol types:
 .Dq Sy iterm2 ,
 and
 .Dq Sy halfblocks .
+.It Sy filter
+The sample filter used to scale images.
+Possible values are:
+.Dq Sy Nearest ,
+.Dq Sy Triangle
+(default) ,
+.Dq Sy CatmullRom ,
+.Dq Sy Gaussian ,
+and
+.Dq Sy Lanczos3 .
+See
+.Lk https://docs.rs/image/0.25.10/image/imageops/enum.FilterType.html
+for more information.
 .El
 .El
 .It Sy log_level

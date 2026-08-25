@@ -29,7 +29,7 @@ indicator = "only-encrypted"
 indicator_location = "title|prompt"
 
 [settings.image_preview]
-protocol.type = "sixel"
+protocol = { type = "sixel", filter = "Nearest" }
 size = { "width" = 66, "height" = 10 }
 
 [settings.proxy]

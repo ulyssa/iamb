@@ -19,6 +19,7 @@ use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
+use ratatui_image::FilterType;
 use ratatui_image::picker::ProtocolType;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as SerdeError, de::Visitor};
 use url::Url;
@@ -693,7 +694,7 @@ pub struct ImagePreviewValues {
     pub enabled: bool,
     pub lazy_load: bool,
     pub size: ImagePreviewSize,
-    pub protocol_type: Option<ProtocolType>,
+    pub protocol: ImagePreviewProtocolValues,
 }
 
 impl ImagePreviewValues {
@@ -702,7 +703,7 @@ impl ImagePreviewValues {
             enabled: false,
             lazy_load: true,
             size: Default::default(),
-            protocol_type: None,
+            protocol: Default::default(),
         }
     }
 }
@@ -720,7 +721,7 @@ impl ImagePreview {
             enabled: true,
             lazy_load: self.lazy_load.unwrap_or(true),
             size: self.size.unwrap_or_default(),
-            protocol_type: self.protocol.unwrap_or_default().r#type,
+            protocol: self.protocol.unwrap_or_default(),
         }
     }
 }
@@ -740,6 +741,7 @@ impl Default for ImagePreviewSize {
 #[derive(Clone, Debug, Deserialize, Default)]
 pub struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,
+    pub filter: Option<FilterType>,
 }
 
 #[derive(Clone)]

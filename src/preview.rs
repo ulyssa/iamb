@@ -6,7 +6,7 @@ use matrix_sdk::{
     ruma::events::room::MediaSource,
 };
 use ratatui::layout::Rect;
-use ratatui_image::{Resize, picker::Picker, protocol::Protocol};
+use ratatui_image::{FilterType, Resize, picker::Picker, protocol::Protocol};
 use tokio::sync::Semaphore;
 
 use crate::{
@@ -113,7 +113,7 @@ fn picker_from_settings(settings: &ApplicationSettings) -> Picker {
     match Picker::from_query_stdio() {
         Ok(mut picker) => {
             // user forced protocol type; use that
-            if let Some(protocol_type) = settings.tunables.image_preview.protocol_type {
+            if let Some(protocol_type) = settings.tunables.image_preview.protocol.r#type {
                 picker.set_protocol_type(protocol_type);
             }
 
@@ -154,6 +154,7 @@ pub async fn load_image(
         picker: Arc<Picker>,
         permits: Arc<Semaphore>,
         size: ImagePreviewSize,
+        filter: FilterType,
     ) -> Result<ImageStatus, IambError> {
         let reader = media
             .get_media_content(&MediaRequestParameters { source, format: MediaFormat::File }, true)
@@ -163,16 +164,16 @@ pub async fn load_image(
             .map_err(IambError::Matrix)
             .and_then(|reader| reader.with_guessed_format().map_err(IambError::IOError))?;
 
-        let image = reader.decode().map_err(IambError::Image)?;
-
         let permit = permits
             .acquire()
             .await
             .map_err(|err| IambError::Preview(err.to_string()))?;
 
         let handle = tokio::task::spawn_blocking(move || {
+            let image = reader.decode().map_err(IambError::Image)?;
+
             picker
-                .new_protocol(image, size.into(), Resize::Fit(None))
+                .new_protocol(image, size.into(), Resize::Fit(Some(filter)))
                 .map_err(|err| IambError::Preview(err.to_string()))
         });
 
@@ -183,7 +184,18 @@ pub async fn load_image(
     }
     let key = source.unique_key();
 
-    let status = match load_image_inner(media, source, picker, permits, size).await {
+    let filter = store
+        .lock()
+        .await
+        .application
+        .settings
+        .tunables
+        .image_preview
+        .protocol
+        .filter
+        .unwrap_or(FilterType::Triangle);
+
+    let status = match load_image_inner(media, source, picker, permits, size, filter).await {
         Ok(status) => status,
         Err(err) => ImageStatus::Error(format!("{err:?}")),
     };
