@@ -202,7 +202,7 @@ pub fn mock_tunables() -> TunableValues {
             show_message: true,
             sound_hint: None,
         },
-        image_preview: None,
+        image_preview: ImagePreviewValues::disabled(),
         user_gutter_width: 30,
         tabstop: 4,
         members_split: Default::default(),

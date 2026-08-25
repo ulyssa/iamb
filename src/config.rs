@@ -690,9 +690,21 @@ pub struct Notifications {
 
 #[derive(Clone)]
 pub struct ImagePreviewValues {
+    pub enabled: bool,
     pub lazy_load: bool,
     pub size: ImagePreviewSize,
-    pub protocol: Option<ImagePreviewProtocolValues>,
+    pub protocol_type: Option<ProtocolType>,
+}
+
+impl ImagePreviewValues {
+    pub fn disabled() -> Self {
+        Self {
+            enabled: false,
+            lazy_load: true,
+            size: Default::default(),
+            protocol_type: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -705,9 +717,10 @@ pub struct ImagePreview {
 impl ImagePreview {
     fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
+            enabled: true,
             lazy_load: self.lazy_load.unwrap_or(true),
             size: self.size.unwrap_or_default(),
-            protocol: self.protocol,
+            protocol_type: self.protocol.unwrap_or_default().r#type,
         }
     }
 }
@@ -724,10 +737,9 @@ impl Default for ImagePreviewSize {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,
-    pub font_size: Option<(u16, u16)>,
 }
 
 #[derive(Clone)]
@@ -831,7 +843,7 @@ pub struct TunableValues {
     pub mouse: Mouse,
     pub notifications: Notifications,
     pub terminal: TerminalValues,
-    pub image_preview: Option<ImagePreviewValues>,
+    pub image_preview: ImagePreviewValues,
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
@@ -969,7 +981,10 @@ impl Tunables {
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),
-            image_preview: self.image_preview.map(ImagePreview::values),
+            image_preview: self
+                .image_preview
+                .map(ImagePreview::values)
+                .unwrap_or_else(ImagePreviewValues::disabled),
             user_gutter_width: self.user_gutter_width.unwrap_or(30),
             external_edit_file_suffix: self
                 .external_edit_file_suffix

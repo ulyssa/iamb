@@ -30,7 +30,7 @@ pub enum PreviewKind {
 
 pub struct PreviewManager {
     /// Image preview "protocol" picker.
-    picker: Option<Arc<Picker>>,
+    picker: Arc<Picker>,
 
     /// Permits for rendering images in background thread.
     permits: Arc<Semaphore>,
@@ -40,9 +40,11 @@ pub struct PreviewManager {
 }
 
 impl PreviewManager {
-    pub fn new(picker: Option<Picker>) -> Self {
+    pub fn new(settings: &ApplicationSettings) -> Self {
+        let picker = picker_from_settings(settings);
+
         Self {
-            picker: picker.map(Into::into),
+            picker: picker.into(),
             permits: Arc::new(Semaphore::new(2)),
             previews: Default::default(),
         }
@@ -61,7 +63,6 @@ impl PreviewManager {
         let Some(status) = self.previews.get_mut(&(source.unique_key(), kind)) else {
             return;
         };
-        let Some(picker) = &self.picker else { return };
 
         if let ImageStatus::Queued(size) = status {
             let size = *size;
@@ -71,7 +72,7 @@ impl PreviewManager {
                 source.to_owned(),
                 kind,
                 size.to_owned(),
-                Arc::clone(picker),
+                Arc::clone(&self.picker),
                 Arc::clone(&self.permits),
             );
         }
@@ -85,24 +86,35 @@ impl PreviewManager {
         size: ImagePreviewSize,
         worker: &Requester,
     ) {
-        if self.picker.is_none() {
-            return;
-        }
-
         let key = (source.unique_key(), kind);
         if self.previews.contains_key(&key) {
             return;
         }
         self.previews.insert(key, ImageStatus::Queued(size));
 
-        if settings
-            .tunables
-            .image_preview
-            .as_ref()
-            .is_some_and(|setting| !setting.lazy_load)
-        {
+        if settings.tunables.image_preview.enabled && !settings.tunables.image_preview.lazy_load {
             self.load(source, kind, worker);
         }
+    }
+}
+
+fn picker_from_settings(settings: &ApplicationSettings) -> Picker {
+    // XXX: documentation says to use this query on alternate screen but it seems to be fine
+    match Picker::from_query_stdio() {
+        Ok(mut picker) => {
+            // user forced protocol type; use that
+            if let Some(protocol_type) = settings.tunables.image_preview.protocol_type {
+                picker.set_protocol_type(protocol_type);
+            }
+
+            picker
+        },
+        Err(e) => {
+            tracing::warn!(
+                "Failed to setup image previews (falling back to halfblock rendering): {e}"
+            );
+            Picker::halfblocks()
+        },
     }
 }
 

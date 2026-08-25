@@ -25,7 +25,6 @@ use ratatui::{
     text::{Line, Span},
     widgets::{Paragraph, Widget},
 };
-use ratatui_image::picker::{Picker, ProtocolType};
 use serde::{
     Deserialize,
     Deserializer,
@@ -98,7 +97,7 @@ use modalkit::{
 use crate::config::ImagePreviewSize;
 use crate::preview::PreviewKind;
 use crate::{
-    config::{ApplicationSettings, ImagePreviewProtocolValues},
+    config::ApplicationSettings,
     message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
     notifications::NotificationHandle,
     preview::PreviewManager,
@@ -1317,14 +1316,14 @@ impl RoomInfo {
             content: StickerEventContent { source, .. },
             ..
         }) = &sticker &&
-            let Some(image_preview) = &settings.tunables.image_preview
+            settings.tunables.image_preview.enabled
         {
             let source = source.clone().into();
             previews.register_preview(
                 settings,
                 &source,
                 PreviewKind::Message,
-                image_preview.size,
+                settings.tunables.image_preview.size,
                 worker,
             );
         }
@@ -1348,7 +1347,7 @@ impl RoomInfo {
             return;
         };
         let image_uri = OwnedMxcUri::from(orig_react.content.relates_to.key.as_str());
-        let source = if image_uri.is_valid() && settings.tunables.image_preview.is_some() {
+        let source = if image_uri.is_valid() && settings.tunables.image_preview.enabled {
             Some(MediaSource::Plain(image_uri))
         } else {
             None
@@ -1356,7 +1355,9 @@ impl RoomInfo {
 
         self.insert_reaction(react, source.clone());
 
-        if let (Some(source), Some(_)) = (source, &settings.tunables.image_preview) {
+        if settings.tunables.image_preview.enabled &&
+            let Some(source) = source
+        {
             let size = ImagePreviewSize { width: 2, height: 1 };
             previews.register_preview(settings, &source, PreviewKind::Reaction, size, worker);
         }
@@ -1507,13 +1508,13 @@ impl RoomInfo {
             content: RoomMessageEventContent { msgtype: MessageType::Image(c), .. },
             ..
         }) = &ev &&
-            let Some(image_preview) = &settings.tunables.image_preview
+            settings.tunables.image_preview.enabled
         {
             previews.register_preview(
                 settings,
                 &c.source,
                 PreviewKind::Message,
-                image_preview.size,
+                settings.tunables.image_preview.size,
                 worker,
             )
         }
@@ -1710,41 +1711,6 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
     return emojis;
 }
 
-fn picker_from_termios(protocol_type: Option<ProtocolType>) -> Option<Picker> {
-    let mut picker = match Picker::from_query_stdio() {
-        Ok(picker) => picker,
-        Err(e) => {
-            tracing::error!("Failed to setup image previews: {e}");
-            return None;
-        },
-    };
-
-    if let Some(protocol_type) = protocol_type {
-        picker.set_protocol_type(protocol_type);
-    }
-
-    Some(picker)
-}
-
-fn picker_from_settings(settings: &ApplicationSettings) -> Option<Picker> {
-    let image_preview = settings.tunables.image_preview.as_ref()?;
-    let image_preview_protocol = image_preview.protocol.as_ref();
-
-    if let Some(&ImagePreviewProtocolValues {
-        r#type: Some(protocol_type),
-        font_size: Some(font_size),
-    }) = image_preview_protocol
-    {
-        // User forced type and font_size: use that.
-        let mut picker = Picker::from_fontsize(font_size);
-        picker.set_protocol_type(protocol_type);
-        Some(picker)
-    } else {
-        // Guess, but use type if forced.
-        picker_from_termios(image_preview_protocol.and_then(|p| p.r#type))
-    }
-}
-
 /// Information gathered during server syncs about joined rooms.
 #[derive(Default)]
 pub struct SyncInfo {
@@ -1889,12 +1855,12 @@ pub struct ChatStore {
 impl ChatStore {
     /// Create a new [ChatStore].
     pub fn new(worker: Requester, settings: ApplicationSettings) -> Self {
-        let picker = picker_from_settings(&settings);
+        let previews = PreviewManager::new(&settings);
 
         ChatStore {
             worker,
             settings,
-            previews: PreviewManager::new(picker),
+            previews,
             cmds: crate::commands::setup_commands(),
             emojis: emoji_map(),
 
