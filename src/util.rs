@@ -23,12 +23,11 @@ pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) 
         },
     }
 }
-
 pub fn take_width(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usize), Cow<'_, str>) {
     // Find where to split the line.
     let mut cur_width = 0;
 
-    let mut idx = UnicodeSegmentation::split_word_bound_indices(s.as_ref())
+    let idx = UnicodeSegmentation::split_word_bound_indices(s.as_ref())
         .find_map(|(i, word)| {
             let word_width = UnicodeWidthStr::width(word);
             if cur_width + word_width > width {
@@ -42,21 +41,29 @@ pub fn take_width(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usize), Cow<
 
     if idx == 0 {
         // first word is wider than available; fall back to splitting by width
-        idx = UnicodeSegmentation::grapheme_indices(s.as_ref(), true)
-            .find_map(|(i, graph)| {
-                let graph_width = UnicodeWidthStr::width(graph);
-                if cur_width + graph_width > width {
-                    Some(i)
-                } else {
-                    cur_width += graph_width;
-                    None
-                }
-            })
-            .unwrap_or(s.len());
+        return take_width_grapheme(s, width);
     }
 
     let (s0, s1) = split_cow(s, idx);
 
+    ((s0, cur_width), s1)
+}
+
+pub fn take_width_grapheme(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usize), Cow<'_, str>) {
+    let mut cur_width = 0;
+    let idx = UnicodeSegmentation::grapheme_indices(s.as_ref(), true)
+        .find_map(|(i, graph)| {
+            let graph_width = UnicodeWidthStr::width(graph);
+            if cur_width + graph_width > width {
+                Some(i)
+            } else {
+                cur_width += graph_width;
+                None
+            }
+        })
+        .unwrap_or(s.len());
+
+    let (s0, s1) = split_cow(s, idx);
     ((s0, cur_width), s1)
 }
 
