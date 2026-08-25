@@ -79,9 +79,18 @@ cargo install --profile release-light --features max_level_error --path .
 ```
 
 Add `--no-default-features` if you want to skip desktop integration (e.g.
-clipboard and notifications support) and you would like to link against
-your system's OpenSSL and SQLite instead of using rustls and a bundled
-SQLite.
+clipboard and notifications support) and you would like to link against your
+system's SQLite instead of using a bundled SQLite.
+
+### Crate features
+
+- `bundled`: use bundled SQLite instead of system library (default)
+- `desktop`: enable desktop notifications and clipboard support (default)
+- `max_level_warn`: disable support for more verbose logging than the default `warn` level
+- `max_level_error`: disable support for more verbose logging than the `error` level
+- `max_level_off`: disable all logs at compile time
+- `chafa-dyn`: use [chafa](https://hpjansson.org/chafa/) as a dynamic library for halfblock rendering
+- `chafa-static`: use [chafa](https://hpjansson.org/chafa/) as a static library for halfblock rendering
 
 ## Installation (via `crates.io`)
 

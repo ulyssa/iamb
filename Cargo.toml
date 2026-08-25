@@ -21,6 +21,8 @@ desktop = ["dep:notify-rust", "modalkit/clipboard"]
 max_level_warn = ["tracing/max_level_warn"]
 max_level_error = ["tracing/max_level_error"]
 max_level_off = ["tracing/max_level_off"]
+chafa-dyn = ["ratatui-image/chafa-dyn"]
+chafa-static = ["ratatui-image/chafa-static"]
 
 [build-dependencies.vergen-gitcl]
 version = "9"
