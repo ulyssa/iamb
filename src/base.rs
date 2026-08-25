@@ -94,7 +94,6 @@ use modalkit::{
     prelude::{CommandType, MoveDir1D, WordStyle},
 };
 
-use crate::config::ImagePreviewSize;
 use crate::preview::PreviewKind;
 use crate::{
     config::ApplicationSettings,
@@ -1319,13 +1318,7 @@ impl RoomInfo {
             settings.tunables.image_preview.enabled
         {
             let source = source.clone().into();
-            previews.register_preview(
-                settings,
-                &source,
-                PreviewKind::Message,
-                settings.tunables.image_preview.size,
-                worker,
-            );
+            previews.register_preview(settings, &source, PreviewKind::Message, worker);
         }
 
         let loc = EventLocation::Message(thread_root.clone(), key.clone());
@@ -1353,14 +1346,13 @@ impl RoomInfo {
             None
         };
 
-        self.insert_reaction(react, source.clone());
-
         if settings.tunables.image_preview.enabled &&
-            let Some(source) = source
+            let Some(source) = source.as_ref()
         {
-            let size = ImagePreviewSize { width: 2, height: 1 };
-            previews.register_preview(settings, &source, PreviewKind::Reaction, size, worker);
+            previews.register_preview(settings, source, PreviewKind::Reaction, worker);
         }
+
+        self.insert_reaction(react, source);
     }
 
     /// Insert an edit.
@@ -1510,13 +1502,7 @@ impl RoomInfo {
         }) = &ev &&
             settings.tunables.image_preview.enabled
         {
-            previews.register_preview(
-                settings,
-                &c.source,
-                PreviewKind::Message,
-                settings.tunables.image_preview.size,
-                worker,
-            )
+            previews.register_preview(settings, &c.source, PreviewKind::Message, worker)
         }
 
         self.insert(ev);

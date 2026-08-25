@@ -11,7 +11,7 @@ use tokio::sync::Semaphore;
 
 use crate::{
     base::{AsyncProgramStore, IambError},
-    config::{ApplicationSettings, ImagePreviewSize},
+    config::{ApplicationSettings, ImagePreviewSize, ImagePreviewValues},
     worker::Requester,
 };
 
@@ -26,6 +26,15 @@ pub enum ImageStatus {
 pub enum PreviewKind {
     Message,
     Reaction,
+}
+
+impl PreviewKind {
+    fn image_size(self, image_preview: &ImagePreviewValues) -> ImagePreviewSize {
+        match self {
+            Self::Message => image_preview.size,
+            Self::Reaction => ImagePreviewSize { width: 2, height: 1 },
+        }
+    }
 }
 
 pub struct PreviewManager {
@@ -83,13 +92,14 @@ impl PreviewManager {
         settings: &ApplicationSettings,
         source: &MediaSource,
         kind: PreviewKind,
-        size: ImagePreviewSize,
         worker: &Requester,
     ) {
         let key = (source.unique_key(), kind);
         if self.previews.contains_key(&key) {
             return;
         }
+
+        let size = kind.image_size(&settings.tunables.image_preview);
         self.previews.insert(key, ImageStatus::Queued(size));
 
         if settings.tunables.image_preview.enabled && !settings.tunables.image_preview.lazy_load {
