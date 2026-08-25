@@ -427,6 +427,9 @@ pub enum RoomField {
 
     /// The room's canonical alias.
     CanonicalAlias,
+
+    /// The users own display name.
+    UserName,
 }
 
 /// An action that operates on a room member.
@@ -837,6 +840,10 @@ pub enum IambError {
     /// A failure while trying to show an image preview.
     #[error("Preview error: {0}")]
     Preview(String),
+
+    /// A generic error that doesn't need a specific error type.
+    #[error("{0}")]
+    Custom(String),
 }
 
 impl From<IambError> for UIError<IambInfo> {

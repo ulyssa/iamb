@@ -579,6 +579,18 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         // :room unread [unset|clear]
         ("unread", "unset" | "clear", None) => RoomAction::SetUnread(false).into(),
 
+        // :room username set <name>
+        ("username", "set", Some(s)) => RoomAction::Set(RoomField::UserName, s).into(),
+        ("username", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room username unset
+        ("username", "unset", None) => RoomAction::Unset(RoomField::UserName).into(),
+        ("username", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room username show
+        ("username", "show", None) => RoomAction::Show(RoomField::UserName).into(),
+        ("username", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
         _ => return Result::Err(CommandError::InvalidArgument),
     };
 
