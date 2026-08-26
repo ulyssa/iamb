@@ -995,7 +995,7 @@ impl UnreadInfo {
 /// those with overlapping names.
 #[derive(Default)]
 pub struct DisplayNameStore {
-    by_ids: CompletionMap<OwnedUserId, String>,
+    by_ids: CompletionMap<OwnedUserId, Option<String>>,
     by_names: CompletionMap<String, HashSet<OwnedUserId>>,
 }
 
@@ -1019,26 +1019,21 @@ impl DisplayNameStore {
             self.set_by_name(user_id.clone(), name);
         }
 
-        let previous = if let Some(name) = name {
-            // Replacing existing name:
-            if let Some(entry) = self.by_ids.get_mut(&user_id) {
-                if entry == &name {
-                    None
-                } else {
-                    Some((user_id, std::mem::replace(entry, name)))
-                }
+        let previous = if let Some(prev) = self.by_ids.get_mut(&user_id) {
+            if *prev == name {
+                // nothing to do
+                return;
             }
-            // Setting initial display name for user:
-            else {
-                self.by_ids.insert(user_id, name);
-                None
-            }
+
+            std::mem::replace(prev, name)
         } else {
-            // Unsetting display name if it exists:
-            self.by_ids.remove(&user_id).map(|name| (user_id, name))
+            // no previous name existed
+
+            self.by_ids.insert(user_id, name);
+            return;
         };
 
-        let Some((user_id, previous)) = previous else {
+        let Some(previous) = previous else {
             return;
         };
 
@@ -1054,7 +1049,7 @@ impl DisplayNameStore {
     }
 
     pub fn get<'a>(&'a self, user_id: &UserId) -> Option<Cow<'a, str>> {
-        let displayname = self.by_ids.get(user_id)?;
+        let displayname = self.by_ids.get(user_id)?.as_ref()?;
         let users = self.by_names.get(displayname)?;
 
         if !users.contains(user_id) {
@@ -1087,7 +1082,11 @@ impl DisplayNameStore {
             .collect();
 
         users.extend(self.by_ids.complete(prefix).into_iter().map(|id| {
-            format!("[{}]({})", self.by_ids.get(&id).unwrap_or(&id.to_string()), id.matrix_to_uri())
+            format!(
+                "[{}]({})",
+                self.by_ids.get(&id).and_then(Option::as_ref).unwrap_or(&id.to_string()),
+                id.matrix_to_uri()
+            )
         }));
 
         users.into_iter().collect()
