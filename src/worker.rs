@@ -40,7 +40,7 @@ use matrix_sdk::ruma::events::presence::PresenceEvent;
 use matrix_sdk::ruma::events::reaction::ReactionEventContent;
 use matrix_sdk::ruma::events::receipt::{ReceiptEventContent, ReceiptType};
 use matrix_sdk::ruma::events::room::encryption::RoomEncryptionEventContent;
-use matrix_sdk::ruma::events::room::member::OriginalSyncRoomMemberEvent;
+use matrix_sdk::ruma::events::room::member::{MembershipState, OriginalSyncRoomMemberEvent};
 use matrix_sdk::ruma::events::room::name::RoomNameEventContent;
 use matrix_sdk::ruma::events::room::redaction::OriginalSyncRoomRedactionEvent;
 use matrix_sdk::ruma::events::sticker::StickerEventContent;
@@ -360,6 +360,10 @@ async fn members_load(client: &Client, room_id: &RoomId) -> IambResult<Vec<RoomM
     }
 }
 
+fn member_active(state: &MembershipState) -> bool {
+    matches!(state, MembershipState::Invite | MembershipState::Join)
+}
+
 fn members_insert(
     room_id: OwnedRoomId,
     res: IambResult<Vec<RoomMember>>,
@@ -372,7 +376,9 @@ fn members_insert(
         for member in members {
             let user_id = member.user_id().to_owned();
             let name = member.display_name().map(|s| s.to_owned());
-            info.display_names.set(user_id, name);
+            let is_active = member_active(member.membership());
+
+            info.display_names.set(user_id, name, is_active);
         }
     }
     // else ???
@@ -1248,7 +1254,8 @@ impl ClientWorker {
 
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
-                    info.display_names.set(user_id, ev.content.displayname);
+                    let is_active = member_active(&ev.content.membership);
+                    info.display_names.set(user_id, ev.content.displayname, is_active);
                 }
             },
         );
