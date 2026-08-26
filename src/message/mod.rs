@@ -40,7 +40,14 @@ use crate::message::poll::{Poll, UnstablePoll};
 use crate::message::state::{body_cow_state, html_state};
 use crate::prelude::*;
 use crate::preview::ImageStatus;
-use crate::util::{replace_emojis_in_str, space, space_span, take_width_grapheme, wrapped_text};
+use crate::util::{
+    replace_emojis_in_str,
+    space,
+    space_span,
+    take_width,
+    take_width_grapheme,
+    wrapped_text,
+};
 
 mod compose;
 mod html;
@@ -714,16 +721,6 @@ enum MessageColumns {
     One,
 }
 
-impl MessageColumns {
-    fn user_gutter_width(&self, settings: &ApplicationSettings) -> u16 {
-        if let MessageColumns::One = self {
-            2
-        } else {
-            settings.tunables.user_gutter_width as u16
-        }
-    }
-}
-
 #[derive(Default, Debug)]
 enum SenderSpan<'a> {
     /// Show the sender name in the user gutter.
@@ -732,6 +729,15 @@ enum SenderSpan<'a> {
 
     /// Show the sender name in an extra line at the top of the message.
     Line(Span<'a>),
+
+    /// Show the sender name in an extra line with an avatar placeholder in that line and the first
+    /// of the message.
+    AvatarLine {
+        /// This goes above the first message line.
+        line: Line<'a>,
+        /// This goes in the gutter of the first message line.
+        gutter: Span<'a>,
+    },
 
     /// The sender name has already been printed.
     #[default]
@@ -772,6 +778,14 @@ impl<'a> MessageFormatter<'a> {
         self.fill
     }
 
+    fn user_gutter_width(&self) -> u16 {
+        if let MessageColumns::One = self.cols {
+            2
+        } else {
+            self.settings.tunables.user_gutter_width as u16
+        }
+    }
+
     fn message_start_line(&self) -> u16 {
         let mut line = 0;
 
@@ -783,7 +797,7 @@ impl<'a> MessageFormatter<'a> {
             line += 1;
         }
 
-        if let SenderSpan::Line(_) = self.user {
+        if matches!(self.user, SenderSpan::Line(..) | SenderSpan::AvatarLine { .. }) {
             line += 1;
         }
 
@@ -808,7 +822,7 @@ impl<'a> MessageFormatter<'a> {
         }
 
         let user_gutter_empty_span =
-            space_span(self.settings.tunables.user_gutter_width, Style::default());
+            space_span(self.user_gutter_width() as usize, Style::default());
 
         let user_gutter = match std::mem::take(&mut self.user) {
             SenderSpan::Line(user) => {
@@ -817,6 +831,10 @@ impl<'a> MessageFormatter<'a> {
             },
             SenderSpan::Gutter(user) => user,
             SenderSpan::None => user_gutter_empty_span,
+            SenderSpan::AvatarLine { line, gutter } => {
+                text.lines.push(line);
+                gutter
+            },
         };
 
         match self.cols {
@@ -919,7 +937,7 @@ impl<'a> MessageFormatter<'a> {
             .map(|(p, x, y)| {
                 let y_off = text.lines.len() as u16;
                 // Adjust x_off by 2 to account for the vertical line and indent
-                let x_off = self.cols.user_gutter_width(settings) + 2;
+                let x_off = self.user_gutter_width() + 2;
                 (p, x + x_off, y + y_off)
             })
             .collect();
@@ -939,7 +957,6 @@ impl<'a> MessageFormatter<'a> {
         counts: Vec<(&'a str, Vec<&'a UserId>, &'a Option<MediaSource>)>,
         style: Style,
         text: &mut Text<'a>,
-        settings: &ApplicationSettings,
         previews: &'a PreviewManager,
     ) -> Vec<ProtocolPreview> {
         let mut emojis = printer::TextPrinter::new(
@@ -1001,7 +1018,7 @@ impl<'a> MessageFormatter<'a> {
         if reactions > 0 {
             let (txt, protos) = emojis.finish();
 
-            let x_off = self.cols.user_gutter_width(settings);
+            let x_off = self.user_gutter_width();
             let y_off = text.lines.len() as u16;
 
             self.push_text(txt, style, text);
@@ -1208,6 +1225,7 @@ impl Message {
         width: usize,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
     ) -> MessageFormatter<'a> {
         let orig = width;
         let date = self.show_date(prev).then(|| self.timestamp.show_date(settings));
@@ -1220,7 +1238,7 @@ impl Message {
         {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - time_gutter - READ_GUTTER;
-            let user = self.show_sender(prev, true, info, settings, width);
+            let user = self.show_sender(prev, true, info, settings, previews, width);
             let time = Some(self.timestamp.show_time(settings));
 
             let read = self
@@ -1257,7 +1275,7 @@ impl Message {
         } else if user_gutter + time_gutter + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - time_gutter;
-            let user = self.show_sender(prev, true, info, settings, width);
+            let user = self.show_sender(prev, true, info, settings, previews, width);
             let time = Some(self.timestamp.show_time(settings));
             let read = Vec::new();
 
@@ -1276,40 +1294,40 @@ impl Message {
         } else if user_gutter + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Two;
             let fill = width - user_gutter;
-            let user = self.show_sender(prev, true, info, settings, width);
+            let user = self.show_sender(prev, true, info, settings, previews, width);
             let time = None;
             let read = Vec::new();
 
             MessageFormatter {
+                trackbar,
+                info,
                 settings,
                 cols,
                 orig,
                 fill,
                 user,
                 date,
-                trackbar,
                 time,
                 read,
-                info,
             }
         } else {
             let cols = MessageColumns::One;
             let fill = width.saturating_sub(2);
-            let user = self.show_sender(prev, false, info, settings, width);
+            let user = self.show_sender(prev, false, info, settings, previews, width);
             let time = None;
             let read = Vec::new();
 
             MessageFormatter {
+                trackbar,
+                info,
                 settings,
                 cols,
                 orig,
                 fill,
                 user,
                 date,
-                trackbar,
                 time,
                 read,
-                info,
             }
         }
     }
@@ -1327,18 +1345,28 @@ impl Message {
         previews: &'a PreviewManager,
     ) -> (Text<'a>, Vec<ProtocolPreview>) {
         let style = self.get_render_style(selected, settings);
-        let mut fmt = self.get_render_format(prev, width, info, settings);
+        let mut fmt = self.get_render_format(prev, width, info, settings, previews);
         let mut text = Text::default();
         let width = fmt.width();
 
         let mut protos = Vec::new();
+
+        if matches!(fmt.user, SenderSpan::AvatarLine { .. }) &&
+            let Some(ImageStatus::Loaded(proto)) = info
+                .avatars
+                .get(&self.sender)
+                .and_then(|source| previews.get(source, PreviewKind::Avatar))
+        {
+            let y_off = u16::from(fmt.date.is_some());
+            protos.push((Arc::clone(proto), 0, y_off));
+        }
 
         // Show the message that this one replied to, if any.
         let reply = self.reply_to().or_else(|| self.thread_root()).map(|e| info.get_event(&e));
         if let Some(r) = reply {
             if let Some(r) = r {
                 // Format the reply header, push it into the `Text` buffer, and get any image.
-                protos = fmt.push_in_reply(r, style, &mut text, info, settings, previews);
+                protos.extend(fmt.push_in_reply(r, style, &mut text, info, settings, previews));
             } else {
                 fmt.push_spans(
                     Line::from(vec![
@@ -1359,7 +1387,7 @@ impl Message {
         // Given our text so far, determine the image offset.
         {
             let y_off = text.lines.len() as u16;
-            let x_off = fmt.cols.user_gutter_width(settings);
+            let x_off = fmt.user_gutter_width();
 
             // Account for extra lines printed before the message;
             let y_off = y_off + fmt.message_start_line();
@@ -1398,7 +1426,7 @@ impl Message {
         if settings.tunables.reaction_display {
             let reactions =
                 self.event.event_id().map(|id| info.get_reactions(id)).unwrap_or_default();
-            let react_protos = fmt.push_reactions(reactions, style, &mut text, settings, previews);
+            let react_protos = fmt.push_reactions(reactions, style, &mut text, previews);
             protos.extend(react_protos);
         }
 
@@ -1463,6 +1491,7 @@ impl Message {
         gutter_enabled: bool,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
+        previews: &'a PreviewManager,
         width: usize,
     ) -> SenderSpan<'a> {
         if let Some(prev) = prev &&
@@ -1476,22 +1505,53 @@ impl Message {
         let Span { content, style } = self.sender_span(info, settings);
         let user_gutter = settings.tunables.user_gutter_width;
 
-        let show_in_gutter = gutter_enabled && user_gutter > 2;
-
+        let show_in_gutter = gutter_enabled && !settings.tunables.sender_extra_line;
         if show_in_gutter {
             let ((truncated, width), _) = take_width_grapheme(content, user_gutter - 2);
             let padding = user_gutter - 2 - width;
 
             let sender = format!("{}{}  ", space(padding), truncated);
 
-            SenderSpan::Gutter(Span::styled(sender, style))
-        } else if UnicodeWidthStr::width(content.as_ref()) > width {
-            let ((truncated, _), _) = take_width_grapheme(content, width);
-
-            SenderSpan::Line(Span::styled(truncated, style))
-        } else {
-            SenderSpan::Line(Span::styled(content, style))
+            return SenderSpan::Gutter(Span::styled(sender, style));
         }
+
+        let show_avatar = gutter_enabled &&
+            settings.tunables.image_preview.user_avatar &&
+            match info
+                .avatars
+                .get(&self.sender)
+                .and_then(|source| previews.get(source, PreviewKind::Avatar))
+            {
+                Some(ImageStatus::Error(..)) => false,
+                Some(_) => true,
+                None => false,
+            };
+
+        if !show_avatar {
+            return if UnicodeWidthStr::width(content.as_ref()) > width {
+                let ((truncated, _), _) = take_width_grapheme(content, width);
+
+                SenderSpan::Line(Span::styled(truncated, style))
+            } else {
+                SenderSpan::Line(Span::styled(content, style))
+            };
+        }
+
+        let content = if UnicodeWidthStr::width(content.as_ref()) > width {
+            let ((truncated, _), _) = take_width(content, width);
+            truncated
+        } else {
+            content
+        };
+
+        let line = vec!["\u{230c}  \u{230d}".into(), Span::styled(content, style)].into();
+        let mut gutter: Cow<'_, _> = "\u{230e}  \u{230f}".into();
+
+        if user_gutter > 4 {
+            gutter.to_mut().push_str(&" ".repeat(user_gutter - 4));
+        }
+
+        SenderSpan::AvatarLine { line, gutter: gutter.into() }
     }
 
     pub fn redact(&mut self, redaction: SyncRoomRedactionEvent) {

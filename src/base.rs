@@ -1193,6 +1193,9 @@ pub struct MemberSummary {
     /// The member's display name in this room, if they have one.
     pub display_name: Option<String>,
 
+    /// The member's avatar in this room, if they have one.
+    pub avatar_url: Option<OwnedMxcUri>,
+
     /// The member's power level in the room.
     pub power_level: UserPowerLevel,
 
@@ -1445,6 +1448,9 @@ pub struct RoomInfo {
     /// filter out values when iterating over it, depending on the use case.
     pub memberships: HashMap<OwnedUserId, MemberSummary>,
 
+    /// The avatars for users in this room.
+    pub avatars: HashMap<OwnedUserId, MediaSource>,
+
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
 
@@ -1485,6 +1491,7 @@ impl Default for RoomInfo {
             unloaded_edits: Default::default(),
             unloaded_polls: Default::default(),
             unloaded_unstable_polls: Default::default(),
+            avatars: Default::default(),
         }
     }
 }
@@ -1623,6 +1630,29 @@ impl RoomInfo {
             .map(HashMap::iter)
             .unwrap_or_default()
             .filter_map(|(_, (_, _, source))| source.as_ref())
+    }
+
+    pub fn update_user_avatar(
+        &mut self,
+        user_id: &UserId,
+        url: Option<OwnedMxcUri>,
+        settings: &ApplicationSettings,
+        previews: &mut PreviewManager,
+    ) {
+        let Some(url) = url else {
+            self.avatars.remove(user_id);
+            return;
+        };
+
+        let source = MediaSource::Plain(url);
+
+        previews.register_preview(settings, &source, PreviewKind::Avatar);
+
+        if let Some(avatar) = self.avatars.get_mut(user_id) {
+            *avatar = source;
+        } else {
+            self.avatars.insert(user_id.to_owned(), source);
+        }
     }
 
     /// Map an event identifier to its [MessageKey].

@@ -1,7 +1,7 @@
 use matrix_sdk::Media;
-use matrix_sdk::media::{MediaFormat, MediaRequestParameters, UniqueKey};
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSettings, UniqueKey};
 use ratatui_image::picker::Picker;
-use ratatui_image::{FilterType, Resize};
+use ratatui_image::{FilterType, FontSize, Resize};
 use tokio::sync::Semaphore;
 
 use crate::config::ImagePreviewValues;
@@ -29,6 +29,7 @@ pub enum PreviewKind {
     /// troublesome ZWJ combinations that confuse terminals or ratatui by not having clear
     /// widths across implementations.
     Emoji,
+    Avatar,
 }
 
 impl Default for PreviewKind {
@@ -41,6 +42,7 @@ impl PreviewKind {
     fn image_size(self, picker: &Picker, image_preview: &ImagePreviewValues) -> Size {
         match self {
             Self::Emoji => Size { width: 2, height: 1 },
+            Self::Avatar => Size { width: 4, height: 2 },
             Self::Custom(width, height) => {
                 let font_size = picker.font_size();
 
@@ -169,9 +171,21 @@ pub async fn load_image(
         permits: Arc<Semaphore>,
         size: Size,
         filter: FilterType,
+        kind: PreviewKind,
     ) -> Result<ImageStatus, IambError> {
+        let format = if matches!(kind, PreviewKind::Custom(..)) {
+            // use full size for images to share the cache with `:download`/`:open`
+            MediaFormat::File
+        } else {
+            let FontSize { width, height } = picker.font_size();
+            MediaFormat::Thumbnail(MediaThumbnailSettings::new(
+                (size.width * width).into(),
+                (size.height * height).into(),
+            ))
+        };
+
         let reader = media
-            .get_media_content(&MediaRequestParameters { source, format: MediaFormat::File }, true)
+            .get_media_content(&MediaRequestParameters { source, format }, true)
             .await
             .map(std::io::Cursor::new)
             .map(image::ImageReader::new)
@@ -208,7 +222,7 @@ pub async fn load_image(
         .filter
         .unwrap_or(FilterType::Triangle);
 
-    let status = match load_image_inner(media, source, picker, permits, size, filter).await {
+    let status = match load_image_inner(media, source, picker, permits, size, filter, kind).await {
         Ok(status) => status,
         Err(err) => ImageStatus::Error(format!("{err:?}")),
     };
