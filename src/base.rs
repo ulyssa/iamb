@@ -995,8 +995,12 @@ impl UnreadInfo {
 /// those with overlapping names.
 #[derive(Default)]
 pub struct DisplayNameStore {
-    by_ids: HashMap<OwnedUserId, String>,
-    by_names: HashMap<String, HashSet<OwnedUserId>>,
+    /// The boolean is the same `is_active` field as the argument to [`Self::set`].
+    by_ids: HashMap<OwnedUserId, (String, bool)>,
+
+    /// The first `HashSet` contains active members (invited or joined) and the second `HashSet`
+    /// contains all other memebers.
+    by_names: HashMap<String, (HashSet<OwnedUserId>, HashSet<OwnedUserId>)>,
 }
 
 impl DisplayNameStore {
@@ -1005,18 +1009,28 @@ impl DisplayNameStore {
     /// Note that this *could* be done more elegantly using the Entry API, but
     /// is intentionally written in a way to avoid cloning conflicting display
     /// names.
-    fn set_by_name(&mut self, user_id: OwnedUserId, name: &str) {
+    fn set_by_name(&mut self, user_id: OwnedUserId, name: &str, is_active: bool) {
         if let Some(existing) = self.by_names.get_mut(name) {
-            existing.insert(user_id);
+            if is_active {
+                existing.0.insert(user_id);
+            } else {
+                existing.1.insert(user_id);
+            }
         } else {
-            self.by_names.insert(name.to_owned(), HashSet::from([user_id]));
+            let value = if is_active {
+                (HashSet::from([user_id]), HashSet::new())
+            } else {
+                (HashSet::new(), HashSet::from([user_id]))
+            };
+            self.by_names.insert(name.to_owned(), value);
         }
     }
 
-    /// Track a new user ID to displayname mapping, or unset any existing ones.
-    pub fn set(&mut self, user_id: OwnedUserId, name: Option<String>) {
+    /// Track a new user ID to displayname mapping, or unset any existing ones. `is_active` tracks,
+    /// whether the user is an active member (invited or joined) or not.
+    pub fn set(&mut self, user_id: OwnedUserId, name: Option<String>, is_active: bool) {
         if let Some(name) = name.as_deref() {
-            self.set_by_name(user_id.clone(), name);
+            self.set_by_name(user_id.clone(), name, is_active);
         }
 
         let previous = match (self.by_ids.entry(user_id), name) {
@@ -1025,7 +1039,7 @@ impl DisplayNameStore {
 
             // Setting initial display name for user:
             (Entry::Vacant(v), Some(name)) => {
-                v.insert(name);
+                v.insert((name, is_active));
                 None
             },
 
@@ -1034,10 +1048,11 @@ impl DisplayNameStore {
 
             // Replacing existing name:
             (Entry::Occupied(mut o), Some(name)) => {
-                if o.get() == &name {
+                let key = (name, is_active);
+                if o.get() == &key {
                     None
                 } else {
-                    Some((o.key().clone(), o.insert(name)))
+                    Some((o.key().clone(), o.insert(key)))
                 }
             },
         };
@@ -1046,27 +1061,32 @@ impl DisplayNameStore {
             return;
         };
 
-        let Some(users) = self.by_names.get_mut(&previous) else {
+        let Some(users) = self.by_names.get_mut(&previous.0) else {
             return;
         };
 
-        users.remove(&user_id);
+        if previous.1 {
+            users.0.remove(&user_id);
+        } else {
+            users.1.remove(&user_id);
+        }
 
-        if users.is_empty() {
-            self.by_names.remove(&previous);
+        if users.0.is_empty() && users.1.is_empty() {
+            self.by_names.remove(&previous.0);
         }
     }
 
     pub fn get<'a>(&'a self, user_id: &UserId) -> Option<Cow<'a, str>> {
-        let displayname = self.by_ids.get(user_id)?;
+        let (displayname, is_active) = self.by_ids.get(user_id)?;
         let users = self.by_names.get(displayname)?;
 
-        if !users.contains(user_id) {
+        if !users.0.contains(user_id) && !users.1.contains(user_id) {
             // Internal consistency error? Assume no display name:
             return None;
         }
 
-        if users.len() == 1 {
+        // Inactive members are always assumed to be ambiguous.
+        if *is_active && users.0.len() == 1 {
             // Unambiguous!
             return Some(Cow::Borrowed(displayname.as_str()));
         }
@@ -2428,11 +2448,11 @@ pub mod tests {
     fn test_ambiguous_displaynames() {
         let mut store = DisplayNameStore::default();
 
-        store.set(TEST_USER1.clone(), Some("John".into()));
-        store.set(TEST_USER2.clone(), Some("John".into()));
-        store.set(TEST_USER3.clone(), Some("Jane".into()));
-        store.set(TEST_USER4.clone(), Some("Alice".into()));
-        store.set(TEST_USER5.clone(), Some("Bob".into()));
+        store.set(TEST_USER1.clone(), Some("John".into()), true);
+        store.set(TEST_USER2.clone(), Some("John".into()), true);
+        store.set(TEST_USER3.clone(), Some("Jane".into()), true);
+        store.set(TEST_USER4.clone(), Some("Alice".into()), true);
+        store.set(TEST_USER5.clone(), Some("Bob".into()), true);
 
         // TEST_USER1 and TEST_USER2 are both ambiguous, while the other are unambiguous:
         assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John (@user1:example.com)");
@@ -2442,7 +2462,7 @@ pub mod tests {
         assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "Bob");
 
         // TEST_USER1 becomes unambiguous when TEST_USER2 changes:
-        store.set(TEST_USER2.clone(), Some("Eve".into()));
+        store.set(TEST_USER2.clone(), Some("Eve".into()), true);
         assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John");
         assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "Eve");
         assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "Jane");
@@ -2450,7 +2470,7 @@ pub mod tests {
         assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "Bob");
 
         // TEST_USER5 becomes ambiguous when TEST_USER2 once again changes their name to match:
-        store.set(TEST_USER2.clone(), Some("Bob".into()));
+        store.set(TEST_USER2.clone(), Some("Bob".into()), true);
         assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John");
         assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "Bob (@user2:example.com)");
         assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "Jane");
@@ -2458,25 +2478,26 @@ pub mod tests {
         assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "Bob (@user5:example.com)");
 
         // Now "Everyone is John":
-        store.set(TEST_USER2.clone(), Some("John".into()));
-        store.set(TEST_USER3.clone(), Some("John".into()));
-        store.set(TEST_USER4.clone(), Some("John".into()));
-        store.set(TEST_USER5.clone(), Some("John".into()));
+        store.set(TEST_USER2.clone(), Some("John".into()), true);
+        store.set(TEST_USER3.clone(), Some("John".into()), true);
+        store.set(TEST_USER4.clone(), Some("John".into()), true);
+        store.set(TEST_USER5.clone(), Some("John".into()), true);
         assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John (@user1:example.com)");
         assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "John (@user2:example.com)");
         assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "John (@user3:example.com)");
         assert_eq!(store.get(&TEST_USER4).unwrap().as_ref(), "John (@user4:example.com)");
         assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "John (@user5:example.com)");
 
-        // 2-5 unset their displayname:
-        store.set(TEST_USER2.clone(), None);
-        store.set(TEST_USER3.clone(), None);
-        store.set(TEST_USER4.clone(), None);
-        store.set(TEST_USER5.clone(), None);
+        // 2-4 unset their displayname:
+        store.set(TEST_USER2.clone(), None, true);
+        store.set(TEST_USER3.clone(), None, true);
+        store.set(TEST_USER4.clone(), None, true);
+        // and 5 leaves
+        store.set(TEST_USER5.clone(), Some("John".into()), false);
         assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John");
         assert_eq!(store.get(&TEST_USER2), None);
         assert_eq!(store.get(&TEST_USER3), None);
         assert_eq!(store.get(&TEST_USER4), None);
-        assert_eq!(store.get(&TEST_USER5), None);
+        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "John (@user5:example.com)");
     }
 }
