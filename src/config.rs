@@ -732,6 +732,7 @@ impl Default for ImagePreviewSize {
 pub struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,
     pub filter: Option<FilterType>,
+    pub font_size: Option<(u16, u16)>,
 }
 
 #[derive(Clone)]

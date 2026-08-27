@@ -108,24 +108,37 @@ impl PreviewManager {
     }
 }
 
-fn picker_from_settings(settings: &ApplicationSettings) -> Picker {
+#[cfg(not(windows))]
+fn picker_from_query() -> Picker {
     // XXX: documentation says to use this query on alternate screen but it seems to be fine
-    match Picker::from_query_stdio() {
-        Ok(mut picker) => {
-            // user forced protocol type; use that
-            if let Some(protocol_type) = settings.tunables.image_preview.protocol.r#type {
-                picker.set_protocol_type(protocol_type);
-            }
+    Picker::from_query_stdio().unwrap_or_else(|e| {
+        tracing::warn!("Failed to setup image previews (falling back to halfblock rendering): {e}");
+        Picker::halfblocks()
+    })
+}
 
-            picker
-        },
-        Err(e) => {
-            tracing::warn!(
-                "Failed to setup image previews (falling back to halfblock rendering): {e}"
-            );
-            Picker::halfblocks()
-        },
+#[cfg(windows)]
+fn picker_from_query() -> Picker {
+    tracing::error!(
+        "\"image_preview\" requires \"protocol\" with \"type\" and \"font_size\" options on Windows."
+    );
+    Picker::halfblocks()
+}
+
+fn picker_from_settings(settings: &ApplicationSettings) -> Picker {
+    let mut picker = if let Some(font_size) = settings.tunables.image_preview.protocol.font_size {
+        #[expect(deprecated, reason = "from_query_stdio doesn't work on windows")]
+        Picker::from_fontsize(font_size)
+    } else {
+        picker_from_query()
+    };
+
+    // user forced protocol type; use that
+    if let Some(protocol_type) = settings.tunables.image_preview.protocol.r#type {
+        picker.set_protocol_type(protocol_type);
     }
+
+    picker
 }
 
 impl From<ImagePreviewSize> for Rect {
