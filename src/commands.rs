@@ -4,12 +4,12 @@
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
 use std::{convert::TryFrom, str::FromStr as _};
 
-use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, events::tag::TagName};
+use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, RoomVersionId, events::tag::TagName};
 
 use modalkit::{
     commands::{CommandError, CommandResult, CommandStep},
     env::vim::command::{CommandContext, CommandDescription, OptionType},
-    prelude::OpenTarget,
+    prelude::{MoveDir1D, OpenTarget},
 };
 
 use crate::base::{
@@ -196,6 +196,27 @@ fn iamb_leave(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     let leave = IambAction::Room(RoomAction::Leave(desc.bang));
     let step = CommandStep::Continue(leave.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_follow(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let dir = match args.pop().as_deref() {
+        None | Some("next") => MoveDir1D::Next,
+        Some("prev") | Some("previous") => MoveDir1D::Previous,
+        Some(_) => return Result::Err(CommandError::InvalidArgument),
+    };
+
+    let context = Box::new(ctx.clone());
+    let follow = RoomAction::Follow(context, dir);
+    let follow = IambAction::Room(follow);
+    let step = CommandStep::Continue(follow.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -448,20 +469,22 @@ fn iamb_create(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 }
 
 fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    let mut args = desc.arg.strings()?;
+    let mut iter = desc.arg.strings()?.into_iter();
+    let field = iter.next().ok_or(CommandError::InvalidArgument)?;
+    let action = iter.next().ok_or(CommandError::InvalidArgument)?;
+    let arg = iter.next();
+    let trailing = iter.collect::<Vec<_>>();
 
-    if args.len() < 2 {
-        return Result::Err(CommandError::InvalidArgument);
+    match (field.as_str(), action.as_str()) {
+        // Skip check for commands that takes a variable number of arguments:
+        ("version", "upgrade") => (),
+
+        // Reject if we have any trailing arguments:
+        (_, _) if !trailing.is_empty() => return Result::Err(CommandError::InvalidArgument),
+        (_, _) => (),
     }
 
-    let field = args.remove(0);
-    let action = args.remove(0);
-
-    if args.len() > 1 {
-        return Result::Err(CommandError::InvalidArgument);
-    }
-
-    let act: IambAction = match (field.as_str(), action.as_str(), args.pop()) {
+    let act: IambAction = match (field.as_str(), action.as_str(), arg) {
         // :room dm set
         ("dm", "set", None) => RoomAction::SetDirect(true).into(),
         ("dm", "set", Some(_)) => return Result::Err(CommandError::InvalidArgument),
@@ -532,6 +555,28 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         // :room notify show
         ("notify", "show", None) => RoomAction::Show(RoomField::NotificationMode).into(),
         ("notify", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room version show
+        ("version", "show", None) => RoomAction::Show(RoomField::Version).into(),
+        ("version", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room version upgrade
+        ("version", "upgrade", Some(s)) => {
+            let version = RoomVersionId::from_str(&s).map_err(|e| {
+                CommandError::Error(format!("{s:?} is not a valid room version: {e}"))
+            })?;
+            let additional_creators = trailing
+                .iter()
+                .map(|u| {
+                    OwnedUserId::from_str(u).map_err(|e| {
+                        let msg = format!("{u:?} is not a valid user identifier: {e}");
+                        CommandError::Error(msg)
+                    })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            RoomAction::Upgrade(version, additional_creators, desc.bang).into()
+        },
+        ("version", "upgrade", None) => return Result::Err(CommandError::InvalidArgument),
 
         // :room aliases show
         ("alias", "show", None) => RoomAction::Show(RoomField::Aliases).into(),
@@ -759,6 +804,16 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand { name: "open".into(), aliases: vec![], f: iamb_open });
     cmds.add_command(ProgramCommand { name: "edit".into(), aliases: vec![], f: iamb_edit });
     cmds.add_command(ProgramCommand {
+        name: "follow".into(),
+        aliases: vec![],
+        f: iamb_follow,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "forget".into(),
+        aliases: vec![],
+        f: iamb_forget,
+    });
+    cmds.add_command(ProgramCommand {
         name: "invite".into(),
         aliases: vec![],
         f: iamb_invite,
@@ -769,11 +824,6 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "leave".into(),
         aliases: vec![],
         f: iamb_leave,
-    });
-    cmds.add_command(ProgramCommand {
-        name: "forget".into(),
-        aliases: vec![],
-        f: iamb_forget,
     });
     cmds.add_command(ProgramCommand {
         name: "members".into(),
@@ -1459,5 +1509,49 @@ mod tests {
 
         let res = cmds.input_cmd("keys import foo bar baz", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
+    }
+
+    #[test]
+    fn test_cmd_multiple_trailing() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        // Trailing arguments disallowed on commands that don't take any:
+        let res = cmds.input_cmd("room version show foo", ctx.clone()).unwrap_err();
+        let err = CommandError::InvalidArgument;
+        assert_eq!(res, err);
+
+        // Trailing arguments allowed on commands that take them:
+        let res = cmds.input_cmd("room version upgrade 12", ctx.clone()).unwrap();
+        let act = IambAction::Room(RoomAction::Upgrade(RoomVersionId::V12, vec![], false));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds
+            .input_cmd("room version upgrade 12 @foo:example.com", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(RoomAction::Upgrade(
+            RoomVersionId::V12,
+            vec![user_id!("@foo:example.com").to_owned()],
+            false,
+        ));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds
+            .input_cmd("room version upgrade 12 @foo:example.com @bar:example.com", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(RoomAction::Upgrade(
+            RoomVersionId::V12,
+            vec![
+                user_id!("@foo:example.com").to_owned(),
+                user_id!("@bar:example.com").to_owned(),
+            ],
+            false,
+        ));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        // But the command must take *some* arguments:
+        let res = cmds.input_cmd("room version upgrade", ctx.clone()).unwrap_err();
+        let err = CommandError::InvalidArgument;
+        assert_eq!(res, err);
     }
 }

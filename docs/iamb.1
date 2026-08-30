@@ -72,7 +72,6 @@ View the startup Welcome window.
 .It Sy ":forget"
 Remove all left rooms from the internal database.
 .El
-
 .Sh "E2EE COMMANDS"
 .Bl -tag -width Ds
 .It Sy ":keys export [path] [passphrase]"
@@ -133,6 +132,10 @@ Create a new room. Arguments can be
 .Dq ++space ,
 and
 .Dq ++encrypted .
+.It Sy ":follow next"
+Follow the tombstone information to the upgraded room.
+.It Sy ":follow previous"
+Follow the room creation information to the pre-upgraded room.
 .It Sy ":invite accept"
 Accept an invitation to the currently focused room.
 .It Sy ":invite reject"
@@ -160,6 +163,11 @@ Mark the currently focused room as read.
 .It Sy ":room unread clear"
 Alias for
 .Sy :room unread unset .
+.It Sy ":room version show"
+Show the Matrix version for this room.
+.It Sy ":room version upgrade [version] [additional creators...]"
+Upgrade the Matrix version for this room to the specified version.
+Note that room upgrading in Matrix works by creating a new room that everyone else will then need to join.
 .It Sy ":room notify set [level]"
 Set a notification level for the currently focused room.
 Valid levels are
