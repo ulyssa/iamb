@@ -1510,4 +1510,48 @@ mod tests {
         let res = cmds.input_cmd("keys import foo bar baz", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
     }
+
+    #[test]
+    fn test_cmd_multiple_trailing() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        // Trailing arguments disallowed on commands that don't take any:
+        let res = cmds.input_cmd("room version show foo", ctx.clone()).unwrap_err();
+        let err = CommandError::InvalidArgument;
+        assert_eq!(res, err);
+
+        // Trailing arguments allowed on commands that take them:
+        let res = cmds.input_cmd("room version upgrade 12", ctx.clone()).unwrap();
+        let act = IambAction::Room(RoomAction::Upgrade(RoomVersionId::V12, vec![], false));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds
+            .input_cmd("room version upgrade 12 @foo:example.com", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(RoomAction::Upgrade(
+            RoomVersionId::V12,
+            vec![user_id!("@foo:example.com").to_owned()],
+            false,
+        ));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds
+            .input_cmd("room version upgrade 12 @foo:example.com @bar:example.com", ctx.clone())
+            .unwrap();
+        let act = IambAction::Room(RoomAction::Upgrade(
+            RoomVersionId::V12,
+            vec![
+                user_id!("@foo:example.com").to_owned(),
+                user_id!("@bar:example.com").to_owned(),
+            ],
+            false,
+        ));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        // But the command must take *some* arguments:
+        let res = cmds.input_cmd("room version upgrade", ctx.clone()).unwrap_err();
+        let err = CommandError::InvalidArgument;
+        assert_eq!(res, err);
+    }
 }
