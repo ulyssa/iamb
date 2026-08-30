@@ -14,10 +14,10 @@ use std::time::{Duration, Instant};
 use emojis::Emoji;
 
 use matrix_sdk::ruma::OwnedMxcUri;
-use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::sticker::StickerEvent;
+use matrix_sdk::ruma::{OwnedTransactionId, RoomVersionId};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -91,7 +91,7 @@ use modalkit::{
     errors::{UIError, UIResult},
     key::TerminalKey,
     keybindings::SequenceStatus,
-    prelude::{CommandType, WordStyle},
+    prelude::{CommandType, MoveDir1D, WordStyle},
 };
 
 use crate::config::ImagePreviewSize;
@@ -407,6 +407,9 @@ pub enum RoomField {
     /// The room name.
     Name,
 
+    /// The room version.
+    Version,
+
     /// The room id.
     Id,
 
@@ -450,6 +453,9 @@ impl Display for MemberUpdateAction {
 /// An action that operates on a focused room.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomAction {
+    /// Follow the room upgrade information.
+    Follow(Box<CommandContext>, MoveDir1D),
+
     /// Accept an invitation to join this room.
     InviteAccept,
 
@@ -476,6 +482,9 @@ pub enum RoomAction {
 
     /// Unset a room property.
     Unset(RoomField),
+
+    /// Upgrade the version of a room.
+    Upgrade(RoomVersionId, Vec<OwnedUserId>, bool),
 
     /// List the values in a list room property.
     Show(RoomField),
