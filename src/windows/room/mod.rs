@@ -384,6 +384,11 @@ pub async fn room_command(
                     ev.alt_aliases = alt_aliases.into_iter().collect();
                     let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                 },
+                RoomField::UserName => {
+                    room.set_own_member_display_name(Some(value))
+                        .await
+                        .map_err(IambError::from)?;
+                },
                 RoomField::Aliases => {
                     // This never happens, aliases is only used for showing
                 },
@@ -483,6 +488,9 @@ pub async fn room_command(
                         .await
                         .map_err(IambError::from)?;
                 },
+                RoomField::UserName => {
+                    room.set_own_member_display_name(None).await.map_err(IambError::from)?;
+                },
                 RoomField::Aliases => {
                     // This will not happen, you cannot unset all aliases
                 },
@@ -565,6 +573,19 @@ pub async fn room_command(
                 RoomField::Tag(_) => "Cannot currently show value for a tag".into(),
                 RoomField::Alias(_) => {
                     "Cannot show a single alias; use `:room aliases show` instead.".into()
+                },
+                RoomField::UserName => {
+                    let user_id = &store.application.settings.profile.user_id;
+                    let Some(member) = room.get_member(user_id).await.map_err(IambError::from)?
+                    else {
+                        let msg = "Cannot find membership data".into();
+                        return Err(IambError::Custom(msg))?;
+                    };
+
+                    match member.display_name() {
+                        Some(name) => format!("User name: \"{name}\""),
+                        None => "No user name set".into(),
+                    }
                 },
             };
 

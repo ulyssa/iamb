@@ -471,6 +471,11 @@ fn iamb_create(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut iter = desc.arg.strings()?.into_iter();
     let field = iter.next().ok_or(CommandError::InvalidArgument)?;
+
+    if field == "user" {
+        return iamb_room_user(iter.collect(), ctx);
+    }
+
     let action = iter.next().ok_or(CommandError::InvalidArgument)?;
     let arg = iter.next();
     let trailing = iter.collect::<Vec<_>>();
@@ -623,6 +628,39 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
         // :room unread [unset|clear]
         ("unread", "unset" | "clear", None) => RoomAction::SetUnread(false).into(),
+
+        _ => return Result::Err(CommandError::InvalidArgument),
+    };
+
+    let step = CommandStep::Continue(act.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_room_user(args: Vec<String>, ctx: &mut ProgContext) -> ProgResult {
+    let mut iter = args.into_iter();
+    let field = iter.next().ok_or(CommandError::InvalidArgument)?;
+    let action = iter.next().ok_or(CommandError::InvalidArgument)?;
+    let arg = iter.next();
+    let trailing = iter.collect::<Vec<_>>();
+
+    // Reject if we have any trailing arguments:
+    if !trailing.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let act: IambAction = match (field.as_str(), action.as_str(), arg) {
+        // :room user name set <name>
+        ("name" | "nick", "set", Some(s)) => RoomAction::Set(RoomField::UserName, s).into(),
+        ("name" | "nick", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room user name unset
+        ("name" | "nick", "unset", None) => RoomAction::Unset(RoomField::UserName).into(),
+        ("name" | "nick", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room user name show
+        ("name" | "nick", "show", None) => RoomAction::Show(RoomField::UserName).into(),
+        ("name" | "nick", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
         _ => return Result::Err(CommandError::InvalidArgument),
     };
