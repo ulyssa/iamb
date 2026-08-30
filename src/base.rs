@@ -13,12 +13,12 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 
-use matrix_sdk::ruma::{OwnedMxcUri, OwnedTransactionId, RoomVersionId};
 use matrix_sdk::ruma::events::OriginalMessageLikeEvent;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::room::message::MessageType;
 use matrix_sdk::ruma::events::sticker::{StickerEvent, StickerEventContent};
+use matrix_sdk::ruma::{OwnedMxcUri, OwnedTransactionId, RoomVersionId};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
