@@ -14,7 +14,7 @@ use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation;
-use matrix_sdk::ruma::events::sticker::StickerEvent;
+use matrix_sdk::ruma::events::sticker::{OriginalStickerEvent, RedactedStickerEvent, StickerEvent};
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
 use matrix_sdk::send_queue::SendHandle;
 use ratatui::style::Color;
@@ -441,7 +441,7 @@ pub enum MessageEvent {
     Original(Box<OriginalRoomMessageEvent>, MessageEdits),
     Redacted(OwnedEventId, Option<String>),
     State(Box<AnySyncStateEvent>),
-    Sticker(Box<StickerEvent>),
+    Sticker(Box<OriginalStickerEvent>, MediaSource),
     Local(OwnedTransactionId, SendHandle, Box<RoomMessageEventContent>),
 }
 
@@ -454,7 +454,7 @@ impl MessageEvent {
             MessageEvent::Redacted(event_id, _) => event_id.as_ref(),
             MessageEvent::State(ev) => ev.event_id(),
             MessageEvent::Local(..) => return None,
-            MessageEvent::Sticker(ev) => ev.event_id(),
+            MessageEvent::Sticker(ev, ..) => ev.event_id.as_ref(),
         };
 
         Some(event_id)
@@ -472,7 +472,7 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(_) => None,
             MessageEvent::Redacted(_, _) => None,
             MessageEvent::State(_) => None,
-            MessageEvent::Sticker(_) => None,
+            MessageEvent::Sticker(..) => None,
             MessageEvent::Local(_, _, content) => Some(&content.msgtype),
         }
     }
@@ -491,7 +491,7 @@ impl MessageEvent {
                 body_cow_reason(redaction_reason_unsigned(&ev.unsigned).as_deref())
             },
             MessageEvent::Redacted(_, reason) => body_cow_reason(reason.as_deref()),
-            MessageEvent::Sticker(ev) => body_cow_sticker(ev),
+            MessageEvent::Sticker(ev, ..) => body_cow_sticker(ev),
             MessageEvent::State(ev) => body_cow_state(ev),
             MessageEvent::Local(_, _, content) => body_cow_content(&content.msgtype),
         }
@@ -515,8 +515,8 @@ impl MessageEvent {
             MessageEvent::EncryptedRedacted(_) => return,
             MessageEvent::Redacted(_, _) => return,
             MessageEvent::State(_) => return,
-            MessageEvent::Sticker(ev) => {
-                let event_id = ev.event_id().to_owned();
+            MessageEvent::Sticker(ev, ..) => {
+                let event_id = ev.event_id.to_owned();
                 let reason = redaction_reason_event(redaction);
                 *self = MessageEvent::Redacted(event_id, reason);
             },
@@ -617,13 +617,8 @@ fn body_cow_content(msgtype: &MessageType) -> Cow<'_, str> {
     Cow::Borrowed(s)
 }
 
-fn body_cow_sticker(content: &StickerEvent) -> Cow<'_, str> {
-    match content {
-        MessageLikeEvent::Original(sticker) => {
-            Cow::Owned(format!("* sent a sticker: {}", sticker.content.body))
-        },
-        MessageLikeEvent::Redacted(_) => Cow::Borrowed("[Redacted]"),
-    }
+fn body_cow_sticker(sticker: &OriginalStickerEvent) -> Cow<'_, str> {
+    Cow::Owned(format!("* sent a sticker: {}", sticker.content.body))
 }
 
 fn redaction_reason_unsigned(unsigned: &RedactedUnsigned) -> Option<String> {
@@ -958,7 +953,6 @@ pub struct Message {
     pub timestamp: MessageTimeStamp,
     pub downloaded: bool,
     pub html: Option<StyleTree>,
-    pub image_preview: Option<MediaSource>,
 }
 
 impl Message {
@@ -966,14 +960,7 @@ impl Message {
         let html = event.html();
         let downloaded = false;
 
-        Message {
-            event,
-            sender,
-            timestamp,
-            downloaded,
-            html,
-            image_preview: None,
-        }
+        Message { event, sender, timestamp, downloaded, html }
     }
 
     pub fn reply_to(&self) -> Option<OwnedEventId> {
@@ -984,7 +971,17 @@ impl Message {
             MessageEvent::Original(ev, _) => &ev.content,
             MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
-            MessageEvent::Sticker(_) => return None,
+            MessageEvent::Sticker(ev, ..) => {
+                return match &ev.content.relates_to {
+                    Some(Relation::Reply(reply)) => Some(reply.in_reply_to.event_id.clone()),
+                    Some(Relation::Thread(Thread {
+                        in_reply_to: Some(in_reply_to),
+                        is_falling_back: false,
+                        ..
+                    })) => Some(in_reply_to.event_id.clone()),
+                    Some(_) | None => None,
+                };
+            },
         };
 
         match &content.relates_to {
@@ -1006,7 +1003,7 @@ impl Message {
             MessageEvent::Original(ev, _) => &ev.content,
             MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
-            MessageEvent::Sticker(_) => return None,
+            MessageEvent::Sticker(..) => return None,
         };
 
         match &content.relates_to {
@@ -1017,6 +1014,18 @@ impl Message {
                 ..
             })) if event_id == &in_reply_to.event_id => Some(event_id.clone()),
             Some(_) | None => None,
+        }
+    }
+
+    pub fn image_preview(&self) -> Option<&MediaSource> {
+        if let Some(MessageType::Image(c)) = self.event.msgtype() {
+            return Some(&c.source);
+        }
+
+        match &self.event {
+            MessageEvent::Sticker(_, source) => Some(source),
+
+            _ => None,
         }
     }
 
@@ -1206,8 +1215,7 @@ impl Message {
     ) -> (Text<'a>, Option<&'a Protocol>) {
         let mut proto = None;
         let placeholder = match self
-            .image_preview
-            .as_ref()
+            .image_preview()
             .and_then(|source| previews.get(source, PreviewKind::Message))
         {
             None => None,
@@ -1300,7 +1308,6 @@ impl Message {
         self.event.redact(redaction);
         self.html = None;
         self.downloaded = false;
-        self.image_preview = None;
     }
 
     pub fn set_edits(&mut self, new_edits: MessageEdits) {
@@ -1403,13 +1410,36 @@ impl From<AnySyncStateEvent> for Message {
     }
 }
 
+impl From<OriginalStickerEvent> for Message {
+    fn from(event: OriginalStickerEvent) -> Self {
+        let timestamp = event.origin_server_ts.into();
+        let user_id = event.sender.clone();
+        let source = event.content.source.clone().into();
+        let content = MessageEvent::Sticker(event.into(), source);
+
+        Message::new(content, user_id, timestamp)
+    }
+}
+
+impl From<RedactedStickerEvent> for Message {
+    fn from(event: RedactedStickerEvent) -> Self {
+        let timestamp = event.origin_server_ts.into();
+        let user_id = event.sender.clone();
+
+        let event_id = event.event_id;
+        let reason = redaction_reason_unsigned(&event.unsigned);
+        let content = MessageEvent::Redacted(event_id, reason);
+
+        Message::new(content, user_id, timestamp)
+    }
+}
+
 impl From<StickerEvent> for Message {
     fn from(event: StickerEvent) -> Self {
-        let timestamp = event.origin_server_ts().into();
-        let user_id = event.sender().to_owned();
-        let event = MessageEvent::Sticker(event.into());
-
-        Message::new(event, user_id, timestamp)
+        match event {
+            MessageLikeEvent::Original(ev) => ev.into(),
+            MessageLikeEvent::Redacted(ev) => ev.into(),
+        }
     }
 }
 

@@ -40,6 +40,7 @@ use matrix_sdk::{
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
+    prelude::Stylize,
     text::{Line, Span},
     widgets::{Paragraph, StatefulWidget, Widget},
 };
@@ -402,7 +403,7 @@ impl ChatState {
                         return Err(err);
                     },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot react to a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -457,7 +458,7 @@ impl ChatState {
                         return Ok(None);
                     },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot redact already redacted message";
                         let err = UIError::Failure(msg.into());
@@ -528,7 +529,7 @@ impl ChatState {
                         return Err(err);
                     },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot unreact to a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -1109,9 +1110,25 @@ impl StatefulWidget for Chat<'_> {
     type State = ChatState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        let settings = &self.store.application.settings;
+
         // Determine whether we have a description to show for the message bar.
         let desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
-            (None, None, None) => None,
+            (None, None, None) => {
+                if state.room.is_tombstoned() {
+                    Some(
+                        Line::from(vec![
+                            Span::from("This room has been upgraded! ").bold(),
+                            Span::from("Use "),
+                            Span::from(":follow").bold(),
+                            Span::from(" to join everyone in the new room."),
+                        ])
+                        .centered(),
+                    )
+                } else {
+                    None
+                }
+            },
             (None, None, Some(_)) => Some(Line::from("Replying in thread")),
             (Some(_), None, None) => Some(Line::from("Editing message")),
             (Some(_), None, Some(_)) => Some(Line::from("Editing message in thread")),
@@ -1153,7 +1170,7 @@ impl StatefulWidget for Chat<'_> {
             Paragraph::new(desc_spans).render(descarea, buf);
         }
 
-        let encryption_settings = &self.store.application.settings.tunables.encryption;
+        let encryption_settings = &settings.tunables.encryption;
         let encryption_indicator = encryption_settings
             .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
         let prompt = match (self.focused, encryption_indicator) {

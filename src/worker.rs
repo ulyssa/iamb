@@ -329,7 +329,7 @@ fn load_insert(
                         info.insert_reaction_with_preview(ev, settings, previews, worker);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
-                        info.insert_sticker(ev, settings, previews, worker);
+                        info.insert_sticker_with_preview(ev, settings, previews, worker);
                     },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
@@ -1238,7 +1238,7 @@ impl ClientWorker {
                     update_event_receipts(info, &room, ev.event_id()).await;
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_sticker(full_ev, settings, previews, worker);
+                    info.insert_sticker_with_preview(full_ev, settings, previews, worker);
                 }
             },
         );

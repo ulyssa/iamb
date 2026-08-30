@@ -1,7 +1,6 @@
 //! # Windows for Matrix rooms and spaces
 use std::collections::HashSet;
 
-use matrix_sdk::ruma::api::error::ErrorKind as ClientApiErrorKind;
 use matrix_sdk::{
     RoomDisplayName,
     RoomState as MatrixRoomState,
@@ -12,6 +11,10 @@ use matrix_sdk::{
         OwnedRoomAliasId,
         OwnedUserId,
         RoomId,
+        api::{
+            client::room::upgrade_room::v3::Request as UpgradeRoomRequest,
+            error::ErrorKind as ClientApiErrorKind,
+        },
         events::{
             room::{
                 canonical_alias::RoomCanonicalAliasEventContent,
@@ -40,6 +43,7 @@ use modalkit::actions::{
     PromptAction,
     Promptable,
     Scrollable,
+    WindowAction,
 };
 use modalkit::errors::{EditResult, UIError};
 use modalkit::prelude::*;
@@ -115,7 +119,32 @@ pub async fn room_command(
     ctx: ProgramContext,
     store: &mut ProgramStore,
 ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
+    let worker = &store.application.worker;
+
     match act {
+        RoomAction::Follow(cmd, dir) => {
+            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            let room_id = match dir {
+                MoveDir1D::Next => {
+                    let successor = room
+                        .successor_room()
+                        .ok_or_else(|| UIError::Failure("No successor room found".into()))?;
+                    successor.room_id
+                },
+                MoveDir1D::Previous => {
+                    let predecessor = room
+                        .predecessor_room()
+                        .ok_or_else(|| UIError::Failure("No predecessor room found".into()))?;
+                    predecessor.room_id
+                },
+            };
+
+            let id = IambId::Room(room_id.to_owned(), None);
+            let target = OpenTarget::Application(id);
+            let act = cmd.switch(target);
+
+            Ok(vec![(act, cmd.context.clone())])
+        },
         RoomAction::InviteAccept => {
             if let Some(room) = store.application.worker.client.get_room(id) {
                 room.join().await.map_err(IambError::from)?;
@@ -355,16 +384,19 @@ pub async fn room_command(
                     ev.alt_aliases = alt_aliases.into_iter().collect();
                     let _ = room.send_state_event(ev).await.map_err(IambError::from)?;
                 },
+                RoomField::UserName => {
+                    room.set_own_member_display_name(Some(value))
+                        .await
+                        .map_err(IambError::from)?;
+                },
                 RoomField::Aliases => {
                     // This never happens, aliases is only used for showing
                 },
                 RoomField::Id => {
                     // This never happens, id is only used for showing
                 },
-                RoomField::UserName => {
-                    room.set_own_member_display_name(Some(value))
-                        .await
-                        .map_err(IambError::from)?;
+                RoomField::Version => {
+                    // This never happens, version is only used for showing or upgrading.
                 },
             }
 
@@ -456,14 +488,17 @@ pub async fn room_command(
                         .await
                         .map_err(IambError::from)?;
                 },
+                RoomField::UserName => {
+                    room.set_own_member_display_name(None).await.map_err(IambError::from)?;
+                },
                 RoomField::Aliases => {
                     // This will not happen, you cannot unset all aliases
                 },
                 RoomField::Id => {
                     // This never happens, id is only used for showing
                 },
-                RoomField::UserName => {
-                    room.set_own_member_display_name(None).await.map_err(IambError::from)?;
+                RoomField::Version => {
+                    // This never happens, version is only used for showing or upgrading.
                 },
             }
 
@@ -484,6 +519,11 @@ pub async fn room_command(
                 RoomField::Id => {
                     let id = room.room_id();
                     format!("Room identifier: {id}")
+                },
+                RoomField::Version => {
+                    let v = room.version();
+                    let v = v.as_ref().map(|v| v.as_str()).unwrap_or("<version unknown>");
+                    format!("Room version: {v}")
                 },
                 RoomField::Name => {
                     match room.name() {
@@ -553,6 +593,32 @@ pub async fn room_command(
             let act = Action::ShowInfoMessage(msg);
 
             Ok(vec![(act, ctx)])
+        },
+        RoomAction::Upgrade(new_version, additional_creators, false) => {
+            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            let alias = room.canonical_alias();
+            let name = alias.as_ref().map(|c| c.as_str()).unwrap_or_else(|| id.as_str());
+            let msg = format!(
+                "Are you sure you want to upgrade {name} to version {new_version} with {} additional creators set?",
+                additional_creators.len()
+            );
+            let upgrade =
+                IambAction::Room(RoomAction::Upgrade(new_version, additional_creators, true));
+            let prompt = PromptYesNo::new(msg, vec![Action::from(upgrade)]);
+            let prompt = Box::new(prompt);
+
+            Err(UIError::NeedConfirm(prompt))
+        },
+        RoomAction::Upgrade(new_version, additional_creators, true) => {
+            let mut request = UpgradeRoomRequest::new(id.to_owned(), new_version);
+            request.additional_creators = additional_creators;
+
+            let response = worker.client.send(request).await.map_err(IambError::from)?;
+            let id = IambId::Room(response.replacement_room, None);
+            let target = OpenTarget::Application(id);
+            let act = WindowAction::Switch(target);
+
+            Ok(vec![(act.into(), ctx)])
         },
     }
 }
