@@ -1365,7 +1365,7 @@ impl StatefulWidget for Scrollback<'_> {
 
         // load image previews
         for (key, item) in thread.range(&corner_key..).rev() {
-            if let Some(source) = &item.image_preview {
+            if let Some(source) = item.image_preview() {
                 self.store.application.previews.load(
                     source,
                     PreviewKind::Message,
@@ -1376,7 +1376,7 @@ impl StatefulWidget for Scrollback<'_> {
                 .reply_to()
                 .or_else(|| item.thread_root())
                 .and_then(|e| info.get_event(&e))
-                .and_then(|msg| msg.image_preview.as_ref());
+                .and_then(|msg| msg.image_preview());
             if let Some(source) = reply {
                 self.store.application.previews.load(
                     source,

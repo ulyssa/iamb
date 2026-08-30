@@ -403,7 +403,7 @@ impl ChatState {
                         return Err(err);
                     },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot react to a redacted message";
                         let err = UIError::Failure(msg.into());
@@ -458,7 +458,7 @@ impl ChatState {
                         return Ok(None);
                     },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot redact already redacted message";
                         let err = UIError::Failure(msg.into());
@@ -529,7 +529,7 @@ impl ChatState {
                         return Err(err);
                     },
                     MessageEvent::State(ev) => ev.event_id().to_owned(),
-                    MessageEvent::Sticker(ev) => ev.event_id().to_owned(),
+                    MessageEvent::Sticker(ev, ..) => ev.event_id.to_owned(),
                     MessageEvent::Redacted(_, _) => {
                         let msg = "Cannot unreact to a redacted message";
                         let err = UIError::Failure(msg.into());
