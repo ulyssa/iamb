@@ -161,37 +161,9 @@ for more details.
 .It Sy external_edit_file_suffix
 Suffix to append to temporary file names when using the :editor command. Defaults to .md.
 .It Sy image_preview
-Enable image previews and configure it.
-An empty object will enable the feature with default settings, omitting it will disable the feature.
-The available fields in this object are:
-.Bl -tag -width Ds
-.It Sy lazy_load
-If
-.Sy true
-(the default), download and render image previews when viewing a message with an image.
-If
-.Sy false ,
-load previews as soon as a message with an image is received.
-.It Sy size
-An optional object with
-.Sy width
-and
-.Sy height
-fields to specify the preview size in cells.
-Defaults to 66 and 10.
-.It Sy protocol
-An optional object to override settings that will normally be guessed automatically:
-.Bl -tag -width Ds
-.It Sy type
-An optional string set to one of the protocol types:
-.Dq Sy sixel ,
-.Dq Sy kitty ,
-and
-.Dq Sy halfblocks .
-.It Sy font_size
-An optional list of two numbers representing font width and height in pixels.
-.El
-.El
+Subsection for configuring image previews. See
+.Sx "IMAGE PREVIEWS"
+for more details.
 .It Sy log_level
 Specifies the lowest log level that should be shown.
 Possible values are:
@@ -240,7 +212,7 @@ for more details.
 Defines a custom  command and its arguments to run when opening downloads instead of the default.
 (For example,
 .Sy ["my-open",\ "--file"] . )
-.Sy proxy
+.It Sy proxy
 When this subsection is present, you can configure how requests are proxied to the homeserver.
 See
 .Sx PROXYING
@@ -352,6 +324,57 @@ and
 (the default).
 Both can be used via
 .Dq Sy title|prompt .
+.El
+.Sh IMAGE PREVIEWS
+The
+.Sy settings.image_preview
+subsection allows configuring image previews.
+.Pp
+The available fields in this subsection are:
+.Bl -tag -width Ds
+.It Sy enabled
+Defaults to
+.Sy true .
+.It Sy lazy_load
+If
+.Sy true
+(the default), download and render image previews when viewing a message with an image.
+If
+.Sy false ,
+load previews as soon as a message with an image is received.
+.It Sy size
+An optional object with
+.Sy width
+and
+.Sy height
+fields to specify the preview size in cells.
+Defaults to 66 and 10.
+.It Sy protocol
+An optional object to override settings that will normally be guessed automatically:
+.Bl -tag -width Ds
+.It Sy type
+An optional string set to one of the protocol types:
+.Dq Sy sixel ,
+.Dq Sy kitty ,
+.Dq Sy iterm2 ,
+and
+.Dq Sy halfblocks .
+.It Sy font_size
+An optional list of two numbers representing font width and height in pixels.
+.It Sy filter
+The sample filter used to scale images.
+Possible values are:
+.Dq Sy Nearest ,
+.Dq Sy Triangle
+(default) ,
+.Dq Sy CatmullRom ,
+.Dq Sy Gaussian ,
+and
+.Dq Sy Lanczos3 .
+See
+.Lk https://docs.rs/image/0.25.10/image/imageops/enum.FilterType.html
+for more information.
+.El
 .El
 .Sh MOUSE
 The

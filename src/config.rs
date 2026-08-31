@@ -19,6 +19,7 @@ use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
+use ratatui_image::FilterType;
 use ratatui_image::picker::ProtocolType;
 use serde::{Deserialize, Deserializer, Serialize, de::Error as SerdeError, de::Visitor};
 use url::Url;
@@ -692,24 +693,27 @@ pub struct Notifications {
 
 #[derive(Clone)]
 pub struct ImagePreviewValues {
+    pub enabled: bool,
     pub lazy_load: bool,
     pub size: ImagePreviewSize,
-    pub protocol: Option<ImagePreviewProtocolValues>,
+    pub protocol: ImagePreviewProtocolValues,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct ImagePreview {
+    pub enabled: Option<bool>,
     pub lazy_load: Option<bool>,
     pub size: Option<ImagePreviewSize>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
 impl ImagePreview {
-    fn values(self) -> ImagePreviewValues {
+    pub fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
+            enabled: self.enabled.unwrap_or(true),
             lazy_load: self.lazy_load.unwrap_or(true),
             size: self.size.unwrap_or_default(),
-            protocol: self.protocol,
+            protocol: self.protocol.unwrap_or_default(),
         }
     }
 }
@@ -726,9 +730,10 @@ impl Default for ImagePreviewSize {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,
+    pub filter: Option<FilterType>,
     pub font_size: Option<(u16, u16)>,
 }
 
@@ -833,7 +838,7 @@ pub struct TunableValues {
     pub mouse: Mouse,
     pub notifications: Notifications,
     pub terminal: TerminalValues,
-    pub image_preview: Option<ImagePreviewValues>,
+    pub image_preview: ImagePreviewValues,
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
@@ -971,7 +976,7 @@ impl Tunables {
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),
-            image_preview: self.image_preview.map(ImagePreview::values),
+            image_preview: self.image_preview.unwrap_or_default().values(),
             user_gutter_width: self.user_gutter_width.unwrap_or(30),
             external_edit_file_suffix: self
                 .external_edit_file_suffix

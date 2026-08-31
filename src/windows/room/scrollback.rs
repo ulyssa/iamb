@@ -1364,33 +1364,35 @@ impl StatefulWidget for Scrollback<'_> {
         let mut prev = prevmsg(&corner_key, thread);
 
         // load image previews
-        for (key, item) in thread.range(&corner_key..).rev() {
-            if let Some(source) = item.image_preview() {
-                self.store.application.previews.load(
-                    source,
-                    PreviewKind::Message,
-                    &self.store.application.worker,
-                );
-            }
-            let reply = item
-                .reply_to()
-                .or_else(|| item.thread_root())
-                .and_then(|e| info.get_event(&e))
-                .and_then(|msg| msg.image_preview());
-            if let Some(source) = reply {
-                self.store.application.previews.load(
-                    source,
-                    PreviewKind::Message,
-                    &self.store.application.worker,
-                );
-            }
-            if let Some(event_id) = key.id.as_origin() {
-                for source in info.get_reaction_images(event_id) {
+        if settings.tunables.image_preview.enabled {
+            for (key, item) in thread.range(&corner_key..).rev() {
+                if let Some(source) = item.image_preview() {
                     self.store.application.previews.load(
                         source,
-                        PreviewKind::Reaction,
+                        PreviewKind::Message,
                         &self.store.application.worker,
                     );
+                }
+                let reply = item
+                    .reply_to()
+                    .or_else(|| item.thread_root())
+                    .and_then(|e| info.get_event(&e))
+                    .and_then(|msg| msg.image_preview());
+                if let Some(source) = reply {
+                    self.store.application.previews.load(
+                        source,
+                        PreviewKind::Message,
+                        &self.store.application.worker,
+                    );
+                }
+                if let Some(event_id) = key.id.as_origin() {
+                    for source in info.get_reaction_images(event_id) {
+                        self.store.application.previews.load(
+                            source,
+                            PreviewKind::Reaction,
+                            &self.store.application.worker,
+                        );
+                    }
                 }
             }
         }

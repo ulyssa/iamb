@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::{collections::HashMap, iter::FromIterator as _};
 
-use matrix_sdk::ruma::MilliSecondsSinceUnixEpoch;
 use matrix_sdk::ruma::{
     EventId,
     OwnedEventId,
@@ -14,6 +13,7 @@ use matrix_sdk::ruma::{
     server_name,
     user_id,
 };
+use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, assign};
 
 use lazy_static::lazy_static;
 use ratatui::style::{Color, Style};
@@ -202,7 +202,7 @@ pub fn mock_tunables() -> TunableValues {
             show_message: true,
             sound_hint: None,
         },
-        image_preview: None,
+        image_preview: assign!(ImagePreview::default().values(), {enabled: false}),
         user_gutter_width: 30,
         tabstop: 4,
         members_split: Default::default(),
