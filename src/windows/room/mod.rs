@@ -171,6 +171,21 @@ pub async fn room_command(
                 Err(IambError::NotJoined.into())
             }
         },
+        RoomAction::KnockAccept(user) => {
+            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            room.invite_user_by_id(&user).await.map_err(IambError::from)?;
+            Ok(vec![])
+        },
+        RoomAction::KnockReject(user, reason) => {
+            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            room.kick_user(&user, reason.as_deref()).await.map_err(IambError::from)?;
+            Ok(vec![])
+        },
+        RoomAction::KnockBan(user, reason) => {
+            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            room.ban_user(&user, reason.as_deref()).await.map_err(IambError::from)?;
+            Ok(vec![])
+        },
         RoomAction::Leave(skip_confirm) => {
             if let Some(room) = store.application.worker.client.get_room(id) {
                 if skip_confirm {
@@ -681,7 +696,7 @@ impl RoomState {
 
     fn draw_invite(
         &self,
-        invited: MatrixRoom,
+        invited: &MatrixRoom,
         area: Rect,
         buf: &mut Buffer,
         store: &mut ProgramStore,
@@ -706,6 +721,48 @@ impl RoomState {
             "You can run `:invite accept` or `:invite reject` to accept or reject this invitation.",
         );
         let text = Text::from(vec![l1, l2]);
+
+        Paragraph::new(text).alignment(Alignment::Center).render(area, buf);
+
+        return;
+    }
+
+    fn draw_knock(
+        &self,
+        knocked: &MatrixRoom,
+        area: Rect,
+        buf: &mut Buffer,
+        store: &mut ProgramStore,
+    ) {
+        let name = match knocked.canonical_alias() {
+            Some(alias) => alias.to_string(),
+            None => format!("{:?}", store.application.get_room_title(self.id())),
+        };
+
+        let l1 = Line::from(format!(
+            "Your request to join {name} is pending review by room moderators."
+        ));
+        let l2 = Line::from("You can run `:leave` to withdraw your knock request.");
+        let text = Text::from(vec![l1, l2]);
+
+        Paragraph::new(text).alignment(Alignment::Center).render(area, buf);
+
+        return;
+    }
+
+    fn draw_left(&self, room: &MatrixRoom, area: Rect, buf: &mut Buffer, store: &mut ProgramStore) {
+        let name = match room.canonical_alias() {
+            Some(alias) => alias.to_string(),
+            None => format!("{:?}", store.application.get_room_title(self.id())),
+        };
+
+        let mut lines = vec![Line::from(format!("You have left {name}!"))];
+
+        if room.is_public().is_some_and(|b| b) {
+            lines.push(Line::from(format!("You can run `:join {name}` to rejoin.")));
+        }
+
+        let text = Text::from(lines);
 
         Paragraph::new(text).alignment(Alignment::Center).render(area, buf);
 
@@ -859,12 +916,15 @@ impl TerminalCursor for RoomState {
 
 impl WindowOps<IambInfo> for RoomState {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
-        if self.room().state() == MatrixRoomState::Invited {
+        if self.room().state() != MatrixRoomState::Joined {
             self.refresh_room(store);
         }
 
-        if self.room().state() == MatrixRoomState::Invited {
-            self.draw_invite(self.room().clone(), area, buf, store);
+        match self.room().state() {
+            MatrixRoomState::Invited => return self.draw_invite(self.room(), area, buf, store),
+            MatrixRoomState::Knocked => return self.draw_knock(self.room(), area, buf, store),
+            MatrixRoomState::Left => return self.draw_left(self.room(), area, buf, store),
+            _ => (),
         }
 
         match self {

@@ -47,8 +47,10 @@ macro_rules! usage {
     }
 }
 
-const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 2] = [
+const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
     SortColumn(SortFieldUser::PowerLevel, SortOrder::Ascending),
+    SortColumn(SortFieldUser::Knock, SortOrder::Ascending),
+    SortColumn(SortFieldUser::Invite, SortOrder::Descending),
     SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
 ];
 

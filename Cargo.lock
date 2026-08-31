@@ -2386,6 +2386,7 @@ dependencies = [
  "linkify",
  "markup5ever_rcdom",
  "matrix-sdk",
+ "matrix-sdk-base",
  "matrix-sdk-crypto",
  "mime",
  "mime_guess",
