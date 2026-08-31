@@ -424,7 +424,7 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
-async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
+async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: bool) {
     let mut names = vec![];
 
     let mut spaces = vec![];
@@ -432,7 +432,18 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore) {
     let mut dms = vec![];
 
     for room in client.invited_rooms().into_iter().chain(client.joined_rooms().into_iter()) {
-        let name = room.cached_display_name().unwrap_or(RoomDisplayName::Empty).to_string();
+        let display = if let Some(name) = room.cached_display_name() {
+            name
+        } else if !first_sync && let Ok(name) = room.display_name().await {
+            // If we are not trying to fill out the SyncInfo during startup,
+            // then we can take our time here and force room information
+            // to be loaded.
+            name
+        } else {
+            RoomDisplayName::Empty
+        };
+
+        let name = display.to_string();
         let tags = room.tags().await.unwrap_or_default();
 
         names.push((room.room_id().to_owned(), name));
@@ -460,7 +471,7 @@ async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
     let mut interval = tokio::time::interval(Duration::from_secs(5));
 
     loop {
-        refresh_rooms(client, store).await;
+        refresh_rooms(client, store, false).await;
         interval.tick().await;
     }
 }
@@ -663,7 +674,7 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
     client.send_queue().respawn_tasks_for_rooms_with_unsent_requests().await;
 
     // Populate sync_info with our initial set of rooms/dms/spaces.
-    refresh_rooms(client, store).await;
+    refresh_rooms(client, store, true).await;
 
     // Insert Need::Messages to fetch accurate recent timestamps in the background.
     let mut locked = store.lock().await;
