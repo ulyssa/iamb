@@ -68,7 +68,7 @@ use crate::{
     base::RoomInfo,
     config::ApplicationSettings,
     message::html::{StyleTree, parse_matrix_html},
-    util::{replace_emojis_in_str, space, space_span, take_width, wrapped_text},
+    util::{replace_emojis_in_str, space, space_span, take_width_grapheme, wrapped_text},
 };
 
 mod compose;
@@ -1289,14 +1289,14 @@ impl Message {
         let show_in_gutter = gutter_enabled && user_gutter > 2;
 
         if show_in_gutter {
-            let ((truncated, width), _) = take_width(content, user_gutter - 2);
+            let ((truncated, width), _) = take_width_grapheme(content, user_gutter - 2);
             let padding = user_gutter - 2 - width;
 
             let sender = format!("{}{}  ", space(padding), truncated);
 
             SenderSpan::Gutter(Span::styled(sender, style))
         } else if UnicodeWidthStr::width(content.as_ref()) > width {
-            let ((truncated, _), _) = take_width(content, width);
+            let ((truncated, _), _) = take_width_grapheme(content, width);
 
             SenderSpan::Line(Span::styled(truncated, style))
         } else {
