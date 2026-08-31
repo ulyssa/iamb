@@ -512,6 +512,22 @@ Sort rooms by most recent message timestamp.
 Put invites before other rooms.
 .El
 .Pp
+The available values for sorting users are:
+.Bl -tag -width Ds
+.It Sy power
+Put users with higher power level before other users.
+.It Sy id
+Sort users by alphabetically ascending Matrix user identifier.
+.It Sy localpart
+Sort users by alphabetically ascending local part of the user identifier.
+.It Sy server
+Sort users by alphabetically ascending server name from the user identifier.
+.It Sy invite
+Put invited users before other members.
+.It Sy knock
+Put knocking users before other members.
+.El
+.Pp
 Add a
 .Dq Sy ~
 in front of any value to flip the order.
