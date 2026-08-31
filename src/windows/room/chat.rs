@@ -32,7 +32,7 @@ use modalkit_ratatui::textbox::{TextBox, TextBoxState};
 use ratatui::prelude::Stylize;
 use regex::Regex;
 
-use crate::base::{DownloadFlags, EchoLocation, RoomFetchStatus};
+use crate::base::{DownloadFlags, EchoLocation};
 use crate::config::EncryptionIndicatorLocation;
 use crate::message::{
     MessageId,
@@ -182,9 +182,7 @@ impl ChatState {
             self.pending_jump = None;
             self.scrollback.goto_message(key);
             self.focus = RoomFocus::Scrollback;
-        } else if matches!(info.fetch_id, RoomFetchStatus::Done) ||
-            requested.elapsed() >= PENDING_JUMP_TIMEOUT
-        {
+        } else if info.reached_timeline_start || requested.elapsed() >= PENDING_JUMP_TIMEOUT {
             // The whole history is loaded without it, or it's too far back to find.
             self.pending_jump = None;
 
