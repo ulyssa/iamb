@@ -4,7 +4,13 @@
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
 use std::{convert::TryFrom, str::FromStr as _};
 
-use matrix_sdk::ruma::{OwnedRoomId, OwnedUserId, RoomVersionId, events::tag::TagName};
+use matrix_sdk::ruma::{
+    OwnedRoomId,
+    OwnedRoomOrAliasId,
+    OwnedUserId,
+    RoomVersionId,
+    events::tag::TagName,
+};
 
 use modalkit::{
     commands::{CommandError, CommandResult, CommandStep},
@@ -124,6 +130,63 @@ fn iamb_keys(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     let vact = IambAction::Keys(act);
     let step = CommandStep::Continue(vact.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_knock(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() < 2 || args.len() > 3 {
+        return Err(CommandError::InvalidArgument);
+    }
+
+    let cmd = args.remove(0);
+    let arg = args.remove(0);
+    let reason = args.pop();
+
+    let act: IambAction = match (cmd.as_str(), arg, reason) {
+        // :knock send #room:example.org "reason"
+        ("send", alias, reason) => {
+            let alias = OwnedRoomOrAliasId::from_str(&alias).map_err(|e| {
+                CommandError::Error(format!(
+                    "{alias:?} is not a valid alias or room identifier: {e}"
+                ))
+            })?;
+            HomeserverAction::KnockSend(alias, reason).into()
+        },
+
+        // :knock accept @user:example.org
+        ("accept", user, None) => {
+            let user = OwnedUserId::from_str(&user).map_err(|e| {
+                CommandError::Error(format!("{user:?} is not a valid user identifier: {e}"))
+            })?;
+            RoomAction::KnockAccept(user).into()
+        },
+        ("accept", _, Some(_)) => return Err(CommandError::InvalidArgument),
+
+        // :knock reject @user:example.org "reason"
+        ("reject", user, reason) => {
+            let user = OwnedUserId::from_str(&user).map_err(|e| {
+                CommandError::Error(format!("{user:?} is not a valid user identifier: {e}"))
+            })?;
+            RoomAction::KnockReject(user, reason).into()
+        },
+
+        // :knock ban @user:example.org "reason"
+        ("ban", user, reason) => {
+            let user = OwnedUserId::from_str(&user).map_err(|e| {
+                CommandError::Error(format!("{user:?} is not a valid user identifier: {e}"))
+            })?;
+            RoomAction::KnockBan(user, reason).into()
+        },
+
+        (cmd, _, _) => {
+            return Err(CommandError::Error(format!("unrecognized `knock` subcommand: {cmd:?}")));
+        },
+    };
+
+    let step = CommandStep::Continue(act.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -858,6 +921,11 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand { name: "join".into(), aliases: vec![], f: iamb_join });
     cmds.add_command(ProgramCommand { name: "keys".into(), aliases: vec![], f: iamb_keys });
+    cmds.add_command(ProgramCommand {
+        name: "knock".into(),
+        aliases: vec![],
+        f: iamb_knock,
+    });
     cmds.add_command(ProgramCommand {
         name: "leave".into(),
         aliases: vec![],

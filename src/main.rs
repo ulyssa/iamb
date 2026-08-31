@@ -651,6 +651,15 @@ impl Application {
 
                 Ok(vec![(action.into(), ctx)])
             },
+            HomeserverAction::KnockSend(alias, reason) => {
+                let _ = self
+                    .worker
+                    .client
+                    .knock(alias, reason, vec![])
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
             HomeserverAction::Logout(user, true) => {
                 self.worker.logout(user)?;
                 let flags = CloseFlags::QUIT | CloseFlags::FORCE;

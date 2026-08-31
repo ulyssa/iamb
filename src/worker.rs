@@ -13,12 +13,7 @@ use std::time::{Duration, Instant};
 
 use futures::{StreamExt, stream::FuturesUnordered};
 use gethostname::gethostname;
-use matrix_sdk::ruma::events::AnyMessageLikeEventContent;
-use matrix_sdk::ruma::events::relation::Thread;
-use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::events::room::message::Relation;
-use matrix_sdk::ruma::events::sticker::StickerEventContent;
-use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
+use matrix_sdk_base::RoomStateFilter;
 use ratatui_image::picker::Picker;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -60,6 +55,7 @@ use matrix_sdk::{
         assign,
         events::{
             AnyMessageLikeEvent,
+            AnyMessageLikeEventContent,
             AnySyncStateEvent,
             AnyTimelineEvent,
             InitialStateEvent,
@@ -76,19 +72,23 @@ use matrix_sdk::{
             presence::PresenceEvent,
             reaction::ReactionEventContent,
             receipt::{ReceiptEventContent, ReceiptThread, ReceiptType},
+            relation::Thread,
             room::{
+                MediaSource,
                 encryption::RoomEncryptionEventContent,
                 member::OriginalSyncRoomMemberEvent,
-                message::{MessageType, RoomMessageEventContent},
+                message::{MessageType, Relation, RoomMessageEventContent},
                 name::RoomNameEventContent,
                 redaction::OriginalSyncRoomRedactionEvent,
             },
+            sticker::StickerEventContent,
             tag::Tags,
             typing::SyncTypingEvent,
         },
         room::RoomType,
         serde::Raw,
     },
+    send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate},
 };
 
 use modalkit::errors::UIError;
@@ -431,7 +431,11 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     let mut rooms = vec![];
     let mut dms = vec![];
 
-    for room in client.invited_rooms().into_iter().chain(client.joined_rooms().into_iter()) {
+    let iter = client.rooms_filtered(
+        RoomStateFilter::JOINED | RoomStateFilter::INVITED | RoomStateFilter::KNOCKED,
+    );
+
+    for room in iter {
         let display = if let Some(name) = room.cached_display_name() {
             name
         } else if !first_sync && let Ok(name) = room.display_name().await {
@@ -1598,7 +1602,10 @@ impl ClientWorker {
 
     async fn members(&mut self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
         if let Some(room) = self.client.get_room(room_id.as_ref()) {
-            Ok(room.members(RoomMemberships::ACTIVE).await.map_err(IambError::from)?)
+            Ok(room
+                .members(RoomMemberships::ACTIVE | RoomMemberships::KNOCK)
+                .await
+                .map_err(IambError::from)?)
         } else {
             Err(IambError::UnknownRoom(room_id).into())
         }

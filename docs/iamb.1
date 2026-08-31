@@ -144,6 +144,14 @@ Reject an invitation to the currently focused room.
 Send an invitation to a user to join the currently focused room.
 .It Sy ":join [room]"
 Join a room or open it if you are already joined.
+.It Sy ":knock accept [user]"
+Accept a knock from the specified user in the currently focused room.
+.It Sy ":knock ban [user] [reason]"
+Reject a knock from the specified user to the currently focused room, and ban them with an optional reason.
+.It Sy ":knock reject [user] [reason]"
+Reject a knock from the specified user to the currently focused room with an optional reason.
+.It Sy ":knock send [room] [reason]"
+Send an invitation to a user to join the currently focused room with an optional reason.
 .It Sy ":leave"
 Leave the currently focused room.
 .It Sy ":members"

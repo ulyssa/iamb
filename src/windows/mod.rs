@@ -128,6 +128,7 @@ fn selected_text(s: &str, selected: bool) -> Text<'_> {
 fn name_and_labels<'a>(
     name: &'a str,
     unread: &UnreadInfo,
+    room: &MatrixRoom,
     style: Style,
 ) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
     // TODO: use different colors for "mention", "notification", "muted room"
@@ -140,6 +141,14 @@ fn name_and_labels<'a>(
     let name = Span::styled(name, name_style);
 
     let mut labels = vec![];
+
+    match room.state() {
+        MatrixRoomState::Joined => {},
+        MatrixRoomState::Left => labels.push(vec![Span::styled("Left", style)]),
+        MatrixRoomState::Banned => labels.push(vec![Span::styled("Banned", style)]),
+        MatrixRoomState::Knocked => labels.push(vec![Span::styled("Knocked", style)]),
+        MatrixRoomState::Invited => labels.push(vec![Span::styled("Invited", style)]),
+    }
 
     if unread.unread_mentions > 0 {
         labels.push(vec![Span::styled("Unread Mention", style)]);
@@ -172,6 +181,14 @@ fn user_cmp(a: &MemberItem, b: &MemberItem, field: &SortFieldUser) -> Ordering {
         SortFieldUser::UserId => a_id.cmp(b_id),
         SortFieldUser::LocalPart => a_id.localpart().cmp(b_id.localpart()),
         SortFieldUser::Server => a_id.server_name().cmp(b_id.server_name()),
+        SortFieldUser::Knock => {
+            // Sort knocks before non-knocks:
+            b.is_knock().cmp(&a.is_knock())
+        },
+        SortFieldUser::Invite => {
+            // Sort invites before non-invites:
+            b.is_invite().cmp(&a.is_invite())
+        },
         SortFieldUser::PowerLevel => {
             // Sort higher power levels towards the top of the list.
             b.member.power_level().cmp(&a.member.power_level())
@@ -1048,7 +1065,7 @@ impl ListItem<IambInfo> for GenericChatItem {
         _: &mut ProgramStore,
     ) -> Text<'_> {
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
         let mut spans = vec![name];
 
         labels.push(if self.is_dm {
@@ -1166,7 +1183,7 @@ impl ListItem<IambInfo> for RoomItem {
         _: &mut ProgramStore,
     ) -> Text<'_> {
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1275,7 +1292,7 @@ impl ListItem<IambInfo> for DirectItem {
         _: &mut ProgramStore,
     ) -> Text<'_> {
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1611,6 +1628,14 @@ pub struct MemberItem {
 impl MemberItem {
     fn new(member: RoomMember, room_id: OwnedRoomId) -> Self {
         Self { member, room_id }
+    }
+
+    fn is_knock(&self) -> bool {
+        self.member.membership() == &MembershipState::Knock
+    }
+
+    fn is_invite(&self) -> bool {
+        self.member.membership() == &MembershipState::Invite
     }
 }
 

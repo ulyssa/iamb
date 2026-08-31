@@ -13,12 +13,6 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 
-use matrix_sdk::ruma::events::OriginalMessageLikeEvent;
-use matrix_sdk::ruma::events::receipt::ReceiptThread;
-use matrix_sdk::ruma::events::room::MediaSource;
-use matrix_sdk::ruma::events::room::message::MessageType;
-use matrix_sdk::ruma::events::sticker::{StickerEvent, StickerEventContent};
-use matrix_sdk::ruma::{OwnedMxcUri, OwnedTransactionId, RoomVersionId};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -44,17 +38,25 @@ use matrix_sdk::{
     ruma::{
         EventId,
         OwnedEventId,
+        OwnedMxcUri,
         OwnedRoomId,
+        OwnedRoomOrAliasId,
+        OwnedTransactionId,
         OwnedUserId,
         RoomId,
+        RoomVersionId,
         UserId,
         events::{
             AnySyncStateEvent,
             MessageLikeEvent,
+            OriginalMessageLikeEvent,
             reaction::ReactionEvent,
+            receipt::ReceiptThread,
             relation::{Replacement, Thread},
+            room::MediaSource,
             room::encrypted::RoomEncryptedEvent,
             room::message::{
+                MessageType,
                 OriginalRoomMessageEvent,
                 Relation,
                 RoomMessageEvent,
@@ -62,6 +64,7 @@ use matrix_sdk::{
                 RoomMessageEventContentWithoutRelation,
             },
             room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
+            sticker::{StickerEvent, StickerEventContent},
             tag::{TagName, Tags},
         },
         presence::PresenceState,
@@ -283,6 +286,8 @@ pub enum SortFieldUser {
     UserId,
     LocalPart,
     Server,
+    Knock,
+    Invite,
 }
 
 /// Whether to use the default sort direction for a field, or to reverse it.
@@ -389,6 +394,8 @@ impl Visitor<'_> for SortUserVisitor {
             "localpart" => SortFieldUser::LocalPart,
             "server" => SortFieldUser::Server,
             "power" => SortFieldUser::PowerLevel,
+            "knock" => SortFieldUser::Knock,
+            "invite" => SortFieldUser::Invite,
             _ => {
                 let msg = format!("Unknown sort field: {value:?}");
                 return Err(E::custom(msg));
@@ -469,6 +476,16 @@ pub enum RoomAction {
     /// Invite a user to this room.
     InviteSend(OwnedUserId),
 
+    /// Accept a knock from someone who wants to join this room.
+    KnockAccept(OwnedUserId),
+
+    /// Reject a knock from someone who wants to join this room.
+    KnockReject(OwnedUserId, Option<String>),
+
+    /// Reject a knock from someone who wants to join this room and ban them
+    /// to prevent them from being able to try knocking again.
+    KnockBan(OwnedUserId, Option<String>),
+
     /// Leave this room.
     Leave(bool),
 
@@ -523,7 +540,13 @@ pub enum SendAction {
 pub enum HomeserverAction {
     /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
+
+    /// "Knock" on a room, aka "request to join".
+    KnockSend(OwnedRoomOrAliasId, Option<String>),
+
+    /// Logout the current iamb session on the homeserver.
     Logout(String, bool),
+
     /// Forget all left rooms
     Forget,
 }
