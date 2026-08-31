@@ -79,11 +79,9 @@ mod message;
 mod notifications;
 mod preview;
 mod sled_export;
+mod util;
 mod windows;
 mod worker;
-
-#[macro_use]
-mod util;
 
 #[cfg(test)]
 mod tests;
