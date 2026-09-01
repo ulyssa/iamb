@@ -656,7 +656,7 @@ enum MessageColumns {
 impl MessageColumns {
     fn user_gutter_width(&self, settings: &ApplicationSettings) -> u16 {
         if let MessageColumns::One = self {
-            0
+            2
         } else {
             settings.tunables.user_gutter_width as u16
         }
