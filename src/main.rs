@@ -30,6 +30,7 @@ use std::time::{Duration, Instant};
 use clap::{CommandFactory, Parser};
 use matrix_sdk::ruma::OwnedUserId;
 use matrix_sdk::ruma::api::error::ErrorKind;
+use matrix_sdk::ruma::profile::{ProfileFieldName, ProfileFieldValue};
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
 use rand::RngExt as _;
@@ -681,6 +682,56 @@ impl Application {
                     room.forget().await.map_err(IambError::from)?;
                 }
                 Ok(vec![])
+            },
+            HomeserverAction::ProfileFieldSet(value) => {
+                let client = &store.application.worker.client;
+                let account = client.account();
+                account.set_profile_field(value).await.map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::ProfileFieldUnset(field) => {
+                let client = &store.application.worker.client;
+                let account = client.account();
+                account.delete_profile_field(field).await.map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::ProfileFieldShow(field) => {
+                let client = &store.application.worker.client;
+                let user_id = store.application.settings.profile.user_id.clone();
+                let account = client.account();
+                let value = account
+                    .fetch_profile_field_of(user_id, field.clone())
+                    .await
+                    .map_err(IambError::from)?;
+
+                let msg = match (field, value) {
+                    (_, Some(ProfileFieldValue::DisplayName(s))) => {
+                        format!("Your profile's display name is set to: {s}")
+                    },
+                    (_, Some(ProfileFieldValue::TimeZone(s))) => {
+                        format!("Your profile's timezone is set to: {s}")
+                    },
+                    (_, Some(ProfileFieldValue::AvatarUrl(s))) => {
+                        format!("Your profile's avatar URL is set to: {s}")
+                    },
+                    (ProfileFieldName::DisplayName, None) => {
+                        format!("Your profile's display name is currently unset")
+                    },
+                    (ProfileFieldName::TimeZone, None) => {
+                        format!("Your profile's timezone is currently unset")
+                    },
+                    (ProfileFieldName::AvatarUrl, None) => {
+                        format!("Your profile's avatar URL is currently unset")
+                    },
+                    (f, None) => {
+                        format!("Your profile's {f:?} is currently unset")
+                    },
+                    (f, Some(s)) => {
+                        format!("Your profile's {f:?} is set to {s:?}")
+                    },
+                };
+
+                Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)])
             },
         }
     }

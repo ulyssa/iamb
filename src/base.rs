@@ -67,6 +67,7 @@ use matrix_sdk::{
             tag::{TagName, Tags},
         },
         presence::PresenceState,
+        profile::{ProfileFieldName, ProfileFieldValue},
     },
 };
 
@@ -547,6 +548,15 @@ pub enum HomeserverAction {
 
     /// Forget all left rooms
     Forget,
+
+    /// Set a profile field.
+    ProfileFieldSet(ProfileFieldValue),
+
+    /// Set a profile field.
+    ProfileFieldUnset(ProfileFieldName),
+
+    /// Set a profile field.
+    ProfileFieldShow(ProfileFieldName),
 }
 
 /// An action performed against the user's room keys.
