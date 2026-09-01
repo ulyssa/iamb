@@ -715,13 +715,13 @@ impl Application {
                         format!("Your profile's avatar URL is set to: {s}")
                     },
                     (ProfileFieldName::DisplayName, None) => {
-                        format!("Your profile's display name is currently unset")
+                        "Your profile's display name is currently unset".into()
                     },
                     (ProfileFieldName::TimeZone, None) => {
-                        format!("Your profile's timezone is currently unset")
+                        "Your profile's timezone is currently unset".into()
                     },
                     (ProfileFieldName::AvatarUrl, None) => {
-                        format!("Your profile's avatar URL is currently unset")
+                        "Your profile's avatar URL is currently unset".into()
                     },
                     (f, None) => {
                         format!("Your profile's {f:?} is currently unset")
