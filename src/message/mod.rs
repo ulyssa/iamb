@@ -1173,7 +1173,7 @@ impl Message {
             fmt.push_spans(
                 Line::from(vec![
                     Span::styled("(edited)", style.fg(Color::Gray)),
-                    space_span(fmt.width() - 8, style),
+                    space_span(fmt.width().saturating_sub(8), style),
                 ]),
                 style,
                 &mut text,
