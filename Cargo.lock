@@ -2362,7 +2362,7 @@ dependencies = [
 
 [[package]]
 name = "iamb"
-version = "0.0.12-alpha.1"
+version = "0.0.12-alpha.2"
 dependencies = [
  "anyhow",
  "bitflags 2.13.0",
