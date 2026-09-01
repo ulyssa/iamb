@@ -87,6 +87,7 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
+use crate::config::CursorShape;
 use crate::{
     base::{
         AsyncProgramStore,
@@ -350,6 +351,15 @@ impl Application {
                     let inner = Rect::new(cx, cy, 1, 1);
                     f.render_widget(para, inner)
                 }
+                if store.application.settings.tunables.terminal.cursor_shape == CursorShape::Auto {
+                    let shape = match cursor.get_insert_style() {
+                        Some(InsertStyle::Insert) => CursorShape::Line,
+                        Some(InsertStyle::Replace) => CursorShape::Underline,
+                        None => CursorShape::Block,
+                    };
+                    let _ = crossterm::execute!(stdout(), SetCursorStyle::from(shape));
+                }
+
                 f.set_cursor_position((cx, cy));
             }
         })?;

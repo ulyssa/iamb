@@ -999,6 +999,7 @@ pub enum CursorShape {
     Block,
     Line,
     Underline,
+    Auto,
 }
 
 impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
@@ -1008,6 +1009,9 @@ impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
             CursorShape::Block => Self::SteadyBlock,
             CursorShape::Line => Self::SteadyBar,
             CursorShape::Underline => Self::SteadyUnderScore,
+
+            // use steady block at startup and switch to the correct value on first render
+            CursorShape::Auto => Self::SteadyBlock,
         }
     }
 }
