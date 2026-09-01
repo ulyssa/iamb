@@ -6,7 +6,8 @@ use matrix_sdk::{
     ruma::events::room::MediaSource,
 };
 use ratatui::layout::Size;
-use ratatui_image::{FilterType, Resize, picker::Picker, protocol::Protocol};
+use ratatui_image::sliced::SlicedProtocol;
+use ratatui_image::{FilterType, Resize, picker::Picker};
 use tokio::sync::Semaphore;
 
 use crate::{
@@ -18,7 +19,7 @@ use crate::{
 pub enum ImageStatus {
     Queued(Size),
     Downloading(Size),
-    Loaded(Protocol),
+    Loaded(SlicedProtocol),
     Error(String),
 }
 
@@ -174,8 +175,7 @@ pub async fn load_image(
         let handle = tokio::task::spawn_blocking(move || {
             let image = reader.decode().map_err(IambError::Image)?;
 
-            picker
-                .new_protocol(image, size, Resize::Fit(Some(filter)))
+            SlicedProtocol::new_with_resize(&picker, image, size, Resize::Fit(Some(filter)))
                 .map_err(|err| IambError::Preview(err.to_string()))
         });
 

@@ -1,5 +1,5 @@
 //! Message scrollback
-use ratatui_image::Image;
+use ratatui_image::sliced::{SignedPosition, SlicedImage};
 use regex::Regex;
 
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId};
@@ -1411,6 +1411,8 @@ impl StatefulWidget for Scrollback<'_> {
         }
 
         let previews = &self.store.application.previews;
+        let mut image_previews = vec![];
+
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
 
@@ -1429,7 +1431,13 @@ impl StatefulWidget for Scrollback<'_> {
                 }
 
                 if key == &corner_key && row < corner.text_row {
-                    // Skip rows above the viewport corner.
+                    // Skip rows above the viewport corner but keep image previews.
+                    let y = area.top() as i16 + row as i16 - corner.text_row as i16;
+                    let line_previews = msg_previews
+                        .extract_if(.., |(_, _, y)| *y as usize == row)
+                        .map(|(backend, msg_x, _)| (area.left() + msg_x, y, backend));
+                    image_previews.extend(line_previews);
+
                     continue;
                 }
 
@@ -1446,7 +1454,16 @@ impl StatefulWidget for Scrollback<'_> {
 
         if lines.len() > height {
             let n = lines.len() - height;
-            let _ = lines.drain(..n);
+            let previews =
+                lines
+                    .drain(..n)
+                    .zip(-(n as i16)..)
+                    .flat_map(|((_, _, _, line_previews, _), y)| {
+                        line_previews.into_iter().map(move |(backend, msg_x, _)| {
+                            (area.left() + msg_x, area.top() as i16 + y, backend)
+                        })
+                    });
+            image_previews.extend(previews);
         }
 
         if let Some((key, row, _, _, _)) = lines.first() {
@@ -1457,11 +1474,12 @@ impl StatefulWidget for Scrollback<'_> {
         let mut y = area.top();
         let x = area.left();
 
-        let mut image_previews = vec![];
         for (key, row, txt, line_preview, includes_date_line) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
             image_previews.extend(
-                line_preview.into_iter().map(|(backend, msg_x, _)| (x + msg_x, y, backend)),
+                line_preview
+                    .into_iter()
+                    .map(|(backend, msg_x, _)| (x + msg_x, y as i16, backend)),
             );
 
             if key == cursor_key && row == usize::from(includes_date_line) {
@@ -1470,16 +1488,28 @@ impl StatefulWidget for Scrollback<'_> {
 
             y += 1;
         }
+
+        let msg_width = Message::message_column_width(&state.viewctx, settings);
+
         // Render image previews after all text lines have been drawn, as the render might draw below the current
         // line.
         for (x, y, backend) in image_previews {
-            let image_widget = Image::new(backend);
-            let mut rect: Rect = backend.size().into();
-            rect.x = x;
-            rect.y = y;
-            // Don't render outside of scrollback area
-            if rect.bottom() <= area.bottom() && rect.right() <= area.right() {
-                image_widget.render(rect, buf);
+            if backend.size().height as i16 + y >= area.y as i16 {
+                let hidden_lines = (area.y as i16 - y).max(0);
+
+                let position = SignedPosition { x: 0, y: -hidden_lines };
+                let image_widget = SlicedImage::new(backend, position);
+                let mut rect: Rect = backend.size().into();
+                rect.x = x;
+                rect.y = (y + hidden_lines) as u16;
+
+                rect.height -= hidden_lines as u16;
+                rect.width = rect.width.min(msg_width as u16);
+
+                let rect = rect.intersection(area);
+                if !rect.is_empty() {
+                    image_widget.render(rect, buf);
+                }
             }
         }
 
