@@ -232,7 +232,6 @@ Delete your per-room user display name.
 .It Sy ":room user name show"
 Show the display name you currently have in this room.
 .El
-
 .Sh "SPACE COMMANDS"
 .Bl -tag -width Ds
 .It Sy ":space child set [room_id] [arguments]"
@@ -244,7 +243,27 @@ specifies a string by which children are lexicographically ordered.
 .It Sy ":space child remove"
 Remove the selected room from the currently focused space.
 .El
-
+.Sh "PROFILE COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":self avatar set [mxc://...]"
+Set the avatar URL for your profile.
+.It Sy ":self avatar unset"
+Unset the avatar for your profile.
+.It Sy ":self avatar show"
+Show the current avatar URL for your profile.
+.It Sy ":self name set [nickname]"
+Set the display name for your profile.
+.It Sy ":self name unset"
+Unset the display name for your profile.
+.It Sy ":self name show"
+Show the current display name for your profile.
+.It Sy ":self timezone set [tz]"
+Set the timezone for your profile.
+.It Sy ":self timezone unset"
+Unset the timezone for your profile.
+.It Sy ":self timezone show"
+Show the current timezone for your profile.
+.El
 .Sh "WINDOW COMMANDS"
 .Bl -tag -width Ds
 .It Sy ":horizontal [cmd]"

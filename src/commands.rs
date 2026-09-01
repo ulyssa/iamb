@@ -5,11 +5,13 @@
 use std::{convert::TryFrom, str::FromStr as _};
 
 use matrix_sdk::ruma::{
+    OwnedMxcUri,
     OwnedRoomId,
     OwnedRoomOrAliasId,
     OwnedUserId,
     RoomVersionId,
     events::tag::TagName,
+    profile::{ProfileFieldName, ProfileFieldValue},
 };
 
 use modalkit::{
@@ -445,6 +447,90 @@ fn iamb_mentions(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult 
 
     let open = ctx.switch(OpenTarget::Application(IambId::MentionsList));
     let step = CommandStep::Continue(open, ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_self(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut iter = desc.arg.strings()?.into_iter();
+    let field = iter.next().ok_or(CommandError::InvalidArgument)?;
+    let action = iter.next().ok_or(CommandError::InvalidArgument)?;
+    let arg = iter.next();
+    let trailing = iter.collect::<Vec<_>>();
+
+    if !trailing.is_empty() {
+        // Reject if we have any trailing arguments:
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let act: IambAction = match (field.as_str(), action.as_str(), arg) {
+        // :self avatar show
+        ("avatar", "show", None) => {
+            HomeserverAction::ProfileFieldShow(ProfileFieldName::AvatarUrl).into()
+        },
+        ("avatar", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self avatar set
+        ("avatar", "set", Some(s)) => {
+            let url = OwnedMxcUri::from(s.as_str());
+            if let Err(e) = url.validate() {
+                return Err(CommandError::Error(format!(
+                    "{s:?} is not a valid Matrix content URI: {e}"
+                )));
+            }
+            HomeserverAction::ProfileFieldSet(ProfileFieldValue::AvatarUrl(url)).into()
+        },
+        ("avatar", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self avatar unset
+        ("avatar", "unset", None) => {
+            HomeserverAction::ProfileFieldUnset(ProfileFieldName::AvatarUrl).into()
+        },
+        ("avatar", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self name show
+        ("name" | "nick", "show", None) => {
+            HomeserverAction::ProfileFieldShow(ProfileFieldName::DisplayName).into()
+        },
+        ("name" | "nick", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self name set
+        ("name" | "nick", "set", Some(s)) => {
+            HomeserverAction::ProfileFieldSet(ProfileFieldValue::DisplayName(s)).into()
+        },
+        ("name" | "nick", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self name unset
+        ("name" | "nick", "unset", None) => {
+            HomeserverAction::ProfileFieldUnset(ProfileFieldName::DisplayName).into()
+        },
+        ("name" | "nick", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self timezone show
+        ("timezone" | "tz", "show", None) => {
+            HomeserverAction::ProfileFieldShow(ProfileFieldName::TimeZone).into()
+        },
+        ("timezone" | "tz", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self timezone set
+        ("timezone" | "tz", "set", Some(s)) => {
+            HomeserverAction::ProfileFieldSet(ProfileFieldValue::TimeZone(s)).into()
+        },
+        ("timezone" | "tz", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self timezone set
+        ("timezone" | "tz", "unset", None) => {
+            HomeserverAction::ProfileFieldUnset(ProfileFieldName::TimeZone).into()
+        },
+        ("timezone" | "tz", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // Reject anything we don't recognize:
+        (f, a, _) => {
+            return Result::Err(CommandError::Error(format!("unrecognized command: {f} {a}")));
+        },
+    };
+
+    let step = CommandStep::Continue(act.into(), ctx.context.clone());
 
     return Ok(step);
 }
@@ -982,6 +1068,7 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         aliases: vec![],
         f: iamb_mentions,
     });
+    cmds.add_command(ProgramCommand { name: "self".into(), aliases: vec![], f: iamb_self });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),
         aliases: vec![],
