@@ -229,8 +229,6 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
 async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan) {
     match plan {
         Plan::Messages(room_id, message_need) => {
-            let client = client.clone();
-
             let Some(room) = client.get_room(&room_id) else {
                 warn!(room_id = room_id.as_str(), "Room not found in cache");
                 store
