@@ -74,6 +74,7 @@ use ratatui::{
 
 mod base;
 mod commands;
+mod completions;
 mod config;
 mod keybindings;
 mod message;
@@ -93,7 +94,6 @@ use crate::{
         ChatStore,
         HomeserverAction,
         IambAction,
-        IambCompleter,
         IambError,
         IambId,
         IambInfo,
@@ -103,6 +103,7 @@ use crate::{
         ProgramContext,
         ProgramStore,
     },
+    completions::IambCompleter,
     config::{ApplicationSettings, Iamb},
     windows::IambWindow,
     worker::{ClientWorker, LoginStyle, Requester, create_room},
