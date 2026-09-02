@@ -1417,6 +1417,8 @@ impl StatefulWidget for Scrollback<'_> {
 
             let incomplete_ok = !full || !sel;
 
+            let includes_date_line = item.show_date(prev);
+
             for (row, line) in txt.lines.into_iter().enumerate() {
                 if sawit && lines.len() >= height && incomplete_ok {
                     // Check whether we've seen the first line of the
@@ -1433,7 +1435,7 @@ impl StatefulWidget for Scrollback<'_> {
                 let line_preview: Vec<_> =
                     msg_previews.extract_if(.., |(_, _, y)| *y as usize == row).collect();
 
-                lines.push((key, row, line, line_preview));
+                lines.push((key, row, line, line_preview, includes_date_line));
                 sawit |= sel;
             }
 
@@ -1445,7 +1447,7 @@ impl StatefulWidget for Scrollback<'_> {
             let _ = lines.drain(..n);
         }
 
-        if let Some((key, row, _, _)) = lines.first() {
+        if let Some((key, row, _, _, _)) = lines.first() {
             state.viewctx.corner.timestamp = Some((*key).clone());
             state.viewctx.corner.text_row = *row;
         }
@@ -1454,13 +1456,13 @@ impl StatefulWidget for Scrollback<'_> {
         let x = area.left();
 
         let mut image_previews = vec![];
-        for (key, row, txt, line_preview) in lines.into_iter() {
+        for (key, row, txt, line_preview, includes_date_line) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
             image_previews.extend(
                 line_preview.into_iter().map(|(backend, msg_x, _)| (x + msg_x, y, backend)),
             );
 
-            if key == cursor_key && row == 0 {
+            if key == cursor_key && row == usize::from(includes_date_line) {
                 state.term_cursor = (x, y);
             }
 
