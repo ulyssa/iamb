@@ -321,7 +321,7 @@ impl Application {
             let area = f.area();
 
             let modestr = bindings.show_mode();
-            let cursor = bindings.get_cursor_indicator();
+            let cursor = bindings.get_cursor_hint();
             let dialogstr = bindings.show_dialog(area.height as usize, area.width as usize);
 
             // Don't show terminal cursor when we show a dialog.
@@ -343,7 +343,7 @@ impl Application {
             }
 
             if let Some((cx, cy)) = sstate.get_term_cursor() {
-                if let Some(c) = cursor {
+                if let Some(c) = cursor.get_indicator() {
                     let style = Style::default().fg(Color::Green);
                     let span = Span::styled(c.to_string(), style);
                     let para = Paragraph::new(span);
