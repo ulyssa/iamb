@@ -994,11 +994,11 @@ impl Tunables {
 #[serde(rename_all = "kebab-case")]
 #[repr(u8)]
 pub enum CursorShape {
-    #[default]
     Default,
     Block,
     Line,
     Underline,
+    #[default]
     Auto,
 }
 
@@ -1756,7 +1756,8 @@ mod tests {
 
     #[test]
     fn test_parse_cursor_shape() {
-        assert_eq!(CursorShape::Default, CursorShape::default());
+        assert_eq!(CursorShape::Auto, CursorShape::default());
+        assert_eq!(CursorShape::Auto, serde_json::from_str(r#""auto""#).unwrap());
         assert_eq!(CursorShape::Default, serde_json::from_str(r#""default""#).unwrap());
         assert_eq!(CursorShape::Block, serde_json::from_str(r#""block""#).unwrap());
         assert_eq!(CursorShape::Line, serde_json::from_str(r#""line""#).unwrap());
