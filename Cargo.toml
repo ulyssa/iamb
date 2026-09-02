@@ -54,7 +54,7 @@ mime_guess = "2.0.4"
 nom = "8.0"
 open = "5.0.0"
 rand = "0.10"
-ratatui = "0.29.0"
+ratatui = "0.30.2"
 regex = "1.5"
 rpassword = "7.2"
 serde = "1.0"
@@ -81,15 +81,15 @@ version = "4.12"
 optional = true
 
 [dependencies.modalkit]
-version = "0.0.25"
+version = "0.0.26"
 default-features = false
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "e40dbb0bfeabe4cfd08facd2acb446080a330d75"
+#rev = "ad12b9ba54dd1f022f54986931b5b1b358a6676d"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.25"
+version = "0.0.26"
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "e40dbb0bfeabe4cfd08facd2acb446080a330d75"
+#rev = "ad12b9ba54dd1f022f54986931b5b1b358a6676d"
 
 [dependencies.matrix-sdk-base]
 version = "0.18.0"
@@ -107,7 +107,7 @@ version = "1.24.1"
 features = ["macros", "net", "rt-multi-thread", "sync", "time"]
 
 [dependencies.ratatui-image]
-version = "9.0"
+version = "11.0.6"
 default-features = false
 features = ["serde", "crossterm", "image-defaults"]
 

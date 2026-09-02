@@ -1227,7 +1227,7 @@ impl Message {
             },
             Some(ImageStatus::Loaded(backend)) => {
                 proto = Some(backend);
-                placeholder_frame(Some("No Space..."), width, &backend.area().into())
+                placeholder_frame(Some("No Space..."), width, &backend.size().into())
             },
             Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
         };
@@ -1243,17 +1243,17 @@ impl Message {
                 filename.push_str(" \u{2705}");
             }
 
-            text = text + wrapped_text(filename, width, style);
+            text += wrapped_text(filename, width, style);
         }
 
         if let Some(html) = &self.html {
-            text = text + html.to_text(width, style, settings);
+            text += html.to_text(width, style, settings);
         } else {
             let mut msg = self.event.body();
             if settings.tunables.message_shortcode_display {
                 msg = Cow::Owned(replace_emojis_in_str(msg.as_ref()));
             }
-            text = text + wrapped_text(msg, width, style);
+            text += wrapped_text(msg, width, style);
         };
 
         (text, proto)

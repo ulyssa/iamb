@@ -5,7 +5,7 @@ use matrix_sdk::{
     media::{MediaFormat, MediaRequestParameters, UniqueKey},
     ruma::events::room::MediaSource,
 };
-use ratatui::layout::Rect;
+use ratatui::layout::{Rect, Size};
 use ratatui_image::{FilterType, Resize, picker::Picker, protocol::Protocol};
 use tokio::sync::Semaphore;
 
@@ -128,7 +128,7 @@ fn picker_from_query() -> Picker {
 fn picker_from_settings(settings: &ApplicationSettings) -> Picker {
     let mut picker = if let Some(font_size) = settings.tunables.image_preview.protocol.font_size {
         #[expect(deprecated, reason = "from_query_stdio doesn't work on windows")]
-        Picker::from_fontsize(font_size)
+        Picker::from_fontsize(font_size.into())
     } else {
         picker_from_query()
     };
@@ -146,9 +146,22 @@ impl From<ImagePreviewSize> for Rect {
         Rect::new(0, 0, value.width as _, value.height as _)
     }
 }
+
+impl From<ImagePreviewSize> for Size {
+    fn from(value: ImagePreviewSize) -> Self {
+        Size::new(value.width as _, value.height as _)
+    }
+}
+
 impl From<Rect> for ImagePreviewSize {
     fn from(rect: Rect) -> Self {
         ImagePreviewSize { width: rect.width as _, height: rect.height as _ }
+    }
+}
+
+impl From<Size> for ImagePreviewSize {
+    fn from(size: Size) -> Self {
+        ImagePreviewSize { width: size.width as _, height: size.height as _ }
     }
 }
 

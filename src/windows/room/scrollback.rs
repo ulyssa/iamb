@@ -1264,6 +1264,10 @@ impl TerminalCursor for ScrollbackState {
     fn get_term_cursor(&self) -> Option<(u16, u16)> {
         None
     }
+
+    fn hide_term_cursor(&self) -> bool {
+        true
+    }
 }
 
 fn render_jump_to_recent(area: Rect, buf: &mut Buffer, focused: bool) -> Rect {
@@ -1455,7 +1459,7 @@ impl StatefulWidget for Scrollback<'_> {
         // line.
         for (x, y, backend) in image_previews {
             let image_widget = Image::new(backend);
-            let mut rect = backend.area();
+            let mut rect: Rect = backend.size().into();
             rect.x = x;
             rect.y = y;
             // Don't render outside of scrollback area
