@@ -17,6 +17,7 @@ use matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelat
 use matrix_sdk::ruma::events::sticker::{OriginalStickerEvent, RedactedStickerEvent, StickerEvent};
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
 use matrix_sdk::send_queue::SendHandle;
+use ratatui::layout::Size;
 use ratatui::style::Color;
 use unicode_width::UnicodeWidthStr;
 
@@ -62,7 +63,6 @@ use modalkit::prelude::*;
 use ratatui_image::protocol::Protocol;
 
 use crate::base::MessageEdits;
-use crate::config::ImagePreviewSize;
 use crate::preview::{ImageStatus, PreviewKind, PreviewManager};
 use crate::{
     base::RoomInfo,
@@ -184,17 +184,17 @@ fn hash_message_id(id: &MessageId) -> Option<usize> {
 fn placeholder_frame(
     text: Option<&str>,
     outer_width: usize,
-    image_preview_size: &ImagePreviewSize,
+    image_preview_size: &Size,
 ) -> Option<String> {
-    let ImagePreviewSize { width, height } = image_preview_size;
-    let width = usize::min(*width, outer_width);
+    let Size { width, height } = image_preview_size;
+    let width = usize::min(*width as usize, outer_width);
     if width < 2 || *height < 2 {
         return None;
     }
     let mut placeholder = "\u{230c}".to_string();
     placeholder.push_str(&" ".repeat(width - 2));
     placeholder.push('\u{230d}');
-    placeholder.push_str(&"\n".repeat((height - 1) / 2));
+    placeholder.push_str(&"\n".repeat((*height as usize - 1) / 2));
 
     if *height > 2 &&
         let Some(text) = text &&
@@ -204,7 +204,7 @@ fn placeholder_frame(
         placeholder.push_str(text);
     }
 
-    placeholder.push_str(&"\n".repeat(height / 2));
+    placeholder.push_str(&"\n".repeat(*height as usize / 2));
     placeholder.push('\u{230e}');
     placeholder.push_str(&" ".repeat(width - 2));
     placeholder.push_str("\u{230f}\n");
@@ -1230,7 +1230,7 @@ impl Message {
             },
             Some(ImageStatus::Loaded(backend)) => {
                 proto = Some(backend);
-                placeholder_frame(Some("No Space..."), width, &backend.size().into())
+                placeholder_frame(Some("No Space..."), width, &backend.size())
             },
             Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
         };
@@ -1582,7 +1582,7 @@ pub mod tests {
         }
 
         assert_eq!(
-            placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(None, 4, &Size { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1594,7 +1594,7 @@ pub mod tests {
         );
 
         assert_eq!(
-            placeholder_frame(None, 2, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(None, 2, &Size { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌⌍
@@ -1604,12 +1604,12 @@ pub mod tests {
 "#
             )
         );
-        assert_eq!(placeholder_frame(None, 4, &ImagePreviewSize { width: 1, height: 4 }), None);
+        assert_eq!(placeholder_frame(None, 4, &Size { width: 1, height: 4 }), None);
 
-        assert_eq!(placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 1 }), None);
+        assert_eq!(placeholder_frame(None, 4, &Size { width: 4, height: 1 }), None);
 
         assert_eq!(
-            placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(Some("OK"), 4, &Size { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1620,7 +1620,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("OK"), 6, &ImagePreviewSize { width: 6, height: 6 }),
+            placeholder_frame(Some("OK"), 6, &Size { width: 6, height: 6 }),
             pretty_frame_test(
                 r#"
 ⌌    ⌍
@@ -1633,7 +1633,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("OK"), 6, &ImagePreviewSize { width: 6, height: 7 }),
+            placeholder_frame(Some("OK"), 6, &Size { width: 6, height: 7 }),
             pretty_frame_test(
                 r#"
 ⌌    ⌍
@@ -1647,7 +1647,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("idontfit"), 4, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(Some("idontfit"), 4, &Size { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1658,7 +1658,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 2 }),
+            placeholder_frame(Some("OK"), 4, &Size { width: 4, height: 2 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1667,7 +1667,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 2, height: 3 }),
+            placeholder_frame(Some("OK"), 4, &Size { width: 2, height: 3 }),
             pretty_frame_test(
                 r#"
 ⌌⌍

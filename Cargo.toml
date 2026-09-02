@@ -54,7 +54,7 @@ mime_guess = "2.0.4"
 nom = "8.0"
 open = "5.0.0"
 rand = "0.10"
-ratatui = "0.30.2"
+ratatui = { version = "0.30.2", features = ["serde"] }
 regex = "1.5"
 rpassword = "7.2"
 serde = "1.0"
