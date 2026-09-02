@@ -32,7 +32,7 @@ use crate::{
 };
 use futures::{StreamExt, stream::FuturesUnordered};
 use gethostname::gethostname;
-use matrix_sdk::deserialized_responses::TimelineEvent;
+use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::ruma::events::key::verification::ready::{
     OriginalSyncKeyVerificationReadyEvent,
     ToDeviceKeyVerificationReadyEvent,
@@ -261,8 +261,46 @@ async fn get_receipts_for_timeline_events(
     let mut msgs = vec![];
 
     for ev in events.into_iter() {
-        let Ok(msg) = ev.into_raw().deserialize() else {
-            continue;
+        let event_id = ev.event_id();
+        let msg = match ev.kind {
+            TimelineEventKind::Decrypted(event) => {
+                match event.event.deserialize() {
+                    Ok(event) => event,
+                    Err(err) => {
+                        warn!(
+                            err = %err,
+                            room_id = room.room_id().as_str(),
+                            ?event_id,
+                            "Failed to deserialize event"
+                        );
+                        continue;
+                    },
+                }
+            },
+            TimelineEventKind::UnableToDecrypt { utd_info, .. } => {
+                warn!(
+                    ?utd_info,
+                    room_id = room.room_id().as_str(),
+                    ?event_id,
+                    "Failed to decrypt event"
+                );
+                continue;
+            },
+            TimelineEventKind::PlainText { event } => {
+                let event = match event.deserialize() {
+                    Ok(event) => event,
+                    Err(err) => {
+                        warn!(
+                            err = %err,
+                            room_id = room.room_id().as_str(),
+                            ?event_id,
+                            "Failed to deserialize event"
+                        );
+                        continue;
+                    },
+                };
+                event.into_full_event(room.room_id().to_owned())
+            },
         };
 
         let event_id = msg.event_id();
@@ -277,7 +315,6 @@ async fn get_receipts_for_timeline_events(
             },
         };
 
-        let msg = msg.into_full_event(room.room_id().to_owned());
         msgs.push((msg, receipts));
     }
 
@@ -330,7 +367,12 @@ fn insert_msgs_and_receipts(
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
                 info.insert_sticker_with_preview(ev, settings, previews, worker);
             },
-            AnyTimelineEvent::MessageLike(_) => {
+            AnyTimelineEvent::MessageLike(ev) => {
+                tracing::debug!(
+                    event_id = ev.event_id().as_str(),
+                    "Ignoring unimplemented event type {}",
+                    ev.event_type()
+                );
                 continue;
             },
             AnyTimelineEvent::State(msg) => {
