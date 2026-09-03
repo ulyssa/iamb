@@ -23,6 +23,12 @@ max_level_error = ["tracing/max_level_error"]
 max_level_off = ["tracing/max_level_off"]
 chafa-dyn = ["ratatui-image/chafa-dyn"]
 chafa-static = ["ratatui-image/chafa-static"]
+voip = [
+    "dep:livekit",
+    "dep:base64",
+    "dep:rustls",
+    "matrix-sdk/experimental-send-custom-to-device",
+]
 
 [build-dependencies.vergen-gitcl]
 version = "9"
@@ -31,6 +37,7 @@ features = ["build"]
 
 [dependencies]
 anyhow = "1.0"
+base64 = { version = "0.22.1", optional = true }
 bitflags = "2.3"
 chrono = "0.4"
 clap = {version = "^4.6", features = ["derive"]}
@@ -93,6 +100,25 @@ version = "0.0.26"
 
 [dependencies.matrix-sdk-base]
 version = "0.18.0"
+
+# VoIP audio + LiveKit SFU, enabled by the `voip` feature.
+[dependencies.livekit]
+version = "0.7.52"
+optional = true
+default-features = false
+# `tokio` = signal-client-tokio + tokio runtime (livekit's default backend);
+# rustls-tls-native-roots keeps us on rustls instead of native-tls/OpenSSL.
+features = ["tokio", "rustls-tls-native-roots"]
+
+# LiveKit's WebSocket TLS goes through rustls, whose automatic CryptoProvider
+# selection panics when the dependency graph enables both `ring` and `aws-lc-rs`
+# (it does, via the two reqwest majors). We install the `ring` provider as the
+# process default at startup; this dependency is only to name that provider.
+[dependencies.rustls]
+version = "0.23"
+optional = true
+default-features = false
+features = ["ring"]
 
 [dependencies.matrix-sdk]
 version = "0.18.0"

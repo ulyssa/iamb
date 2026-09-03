@@ -37,6 +37,8 @@ use matrix_sdk::{
     send_queue::RoomSendQueueError,
 };
 
+#[cfg(feature = "voip")]
+use ratatui::style::{Color, Style};
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
@@ -101,6 +103,13 @@ use crate::message::{
 use crate::worker::Requester;
 
 use super::scrollback::{Scrollback, ScrollbackState};
+
+/// How many call participants the banner names before summarising the rest.
+///
+/// The banner is a single line, so a busy call has to be truncated somewhere;
+/// the remainder is reported as a count.
+#[cfg(feature = "voip")]
+const CALL_BANNER_NAMES: usize = 5;
 
 /// State needed for rendering [Chat].
 pub struct ChatState {
@@ -1154,6 +1163,106 @@ impl StatefulWidget for Chat<'_> {
             },
         };
 
+        // Determine whether to show a banner for an ongoing call in this room.
+        #[cfg(feature = "voip")]
+        let call_line: Option<Line> = {
+            // Whether we ourselves have joined this room's call, and our mute state.
+            let ours = self
+                .store
+                .application
+                .call_status
+                .get()
+                .filter(|call| *call.room_id == *state.id());
+
+            let settings = &self.store.application.settings;
+            let info = self.store.application.rooms.get(state.id());
+
+            // Expired memberships are already filtered out, so a peer whose
+            // client died without retracting drops off the banner by itself.
+            let participants =
+                crate::windows::call_participants(state.id(), &self.store.application);
+
+            // Somebody is waiting for us to pick up. That outranks the roster of
+            // who is already talking: it is the only part of a call banner the
+            // user has to act on, and it goes stale on its own once the ring
+            // times out.
+            let incoming = info
+                .and_then(|info| info.incoming_call.as_ref())
+                .filter(|call| call.is_live() && ours.is_none());
+
+            if let Some(incoming) = incoming {
+                let base = Style::default().fg(Color::LightYellow);
+
+                let caller = info.map(|info| settings.get_user_span(&incoming.from, info));
+                let caller = match caller {
+                    Some(span) => span.content.into_owned(),
+                    None => incoming.from.to_string(),
+                };
+
+                Some(Line::from(vec![
+                    Span::styled(format!("📞 {caller} is calling"), base),
+                    Span::styled(" · :call to answer · :call decline to reject", base),
+                ]))
+            } else if participants.is_empty() && ours.is_none() {
+                None
+            } else {
+                let base = Style::default().fg(Color::Green);
+                let speakers =
+                    ours.as_ref().map(|call| call.speakers.as_slice()).unwrap_or_default();
+
+                // Our own membership can lag the join by a sync, so the list is
+                // briefly empty for a call we are demonstrably in.
+                let header = if participants.is_empty() {
+                    "📞 in call".to_string()
+                } else {
+                    format!("📞 {} in call: ", participants.len())
+                };
+
+                let mut spans = vec![Span::styled(header, base)];
+
+                for (i, user_id) in participants.iter().take(CALL_BANNER_NAMES).enumerate() {
+                    if i > 0 {
+                        spans.push(Span::styled(", ", base));
+                    }
+
+                    // Reuse the room's own naming rules so a participant reads
+                    // the same here as on their messages.
+                    let name = info.map(|info| settings.get_user_span(user_id, info));
+                    let name = match name {
+                        Some(span) => span.content.into_owned(),
+                        None => user_id.to_string(),
+                    };
+
+                    if speakers.contains(user_id) {
+                        spans.push(Span::styled(format!("▸{name}"), base.fg(Color::LightGreen)));
+                    } else {
+                        spans.push(Span::styled(name, base));
+                    }
+                }
+
+                if let Some(extra) =
+                    participants.len().checked_sub(CALL_BANNER_NAMES).filter(|n| *n > 0)
+                {
+                    spans.push(Span::styled(format!(" +{extra} more"), base));
+                }
+
+                if let Some(call) = ours {
+                    spans.push(Span::styled(
+                        match call {
+                            c if !c.connected => " · you: connecting…",
+                            c if c.muted => " · you: muted",
+                            _ => " · you: joined",
+                        },
+                        base,
+                    ));
+                }
+
+                Some(Line::from(spans))
+            }
+        };
+        #[cfg(not(feature = "voip"))]
+        let call_line: Option<Line> = None;
+
         // Determine the region to show each UI element.
         let lines = state.tbox.has_lines(5).max(1) as u16;
         let drawh = area.height;
@@ -1163,11 +1272,22 @@ impl StatefulWidget for Chat<'_> {
         } else {
             0
         };
-        let scrollh = drawh.saturating_sub(texth).saturating_sub(desch);
+        let callh = if call_line.is_some() {
+            drawh.saturating_sub(texth).saturating_sub(desch).min(1)
+        } else {
+            0
+        };
+        let scrollh = drawh.saturating_sub(texth).saturating_sub(desch).saturating_sub(callh);
 
-        let scrollarea = Rect::new(area.x, area.y, area.width, scrollh);
+        let callarea = Rect::new(area.x, area.y, area.width, callh);
+        let scrollarea = Rect::new(area.x, callarea.y + callh, area.width, scrollh);
         let descarea = Rect::new(area.x, scrollarea.y + scrollh, area.width, desch);
         let textarea = Rect::new(area.x, descarea.y + desch, area.width, texth);
+
+        // Render the call banner, if any.
+        if let Some(call_line) = call_line {
+            Paragraph::new(call_line).render(callarea, buf);
+        }
 
         // Render the message bar and any description for it.
         if let Some(desc_spans) = desc_spans {

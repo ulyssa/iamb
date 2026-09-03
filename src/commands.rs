@@ -20,6 +20,8 @@ use modalkit::{
     prelude::{MoveDir1D, OpenTarget},
 };
 
+#[cfg(feature = "voip")]
+use crate::base::CallAction;
 use crate::base::{
     CreateRoomFlags,
     CreateRoomType,
@@ -38,6 +40,8 @@ use crate::base::{
     SpaceAction,
     VerifyAction,
 };
+#[cfg(feature = "voip")]
+use crate::voip::devices::DeviceKind;
 
 type ProgContext = CommandContext;
 type ProgResult = CommandResult<ProgramCommand>;
@@ -190,6 +194,39 @@ fn iamb_knock(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
     let step = CommandStep::Continue(act.into(), ctx.context.clone());
 
+    return Ok(step);
+}
+
+#[cfg(feature = "voip")]
+fn iamb_call(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let args = desc.arg.strings()?;
+
+    let args = args.iter().map(String::as_str).collect::<Vec<_>>();
+
+    let act = match args.as_slice() {
+        [] | ["join"] => CallAction::Join,
+        ["hangup"] => CallAction::Hangup,
+        ["decline"] => CallAction::Decline,
+        ["mute"] => CallAction::Mute(true),
+        ["unmute"] => CallAction::Mute(false),
+        ["devices"] => CallAction::Devices,
+        ["device", kind, spec @ ..] if !spec.is_empty() => {
+            let kind = match *kind {
+                "mic" | "microphone" => DeviceKind::Microphone,
+                "speaker" | "output" => DeviceKind::Speaker,
+                _ => return Err(CommandError::InvalidArgument),
+            };
+
+            // Device names almost always contain spaces ("Yeti Stereo
+            // Microphone"), so take the rest of the line rather than making the
+            // user quote it.
+            CallAction::SetDevice(kind, spec.join(" "))
+        },
+        _ => return Err(CommandError::InvalidArgument),
+    };
+
+    let iact = IambAction::from(act);
+    let step = CommandStep::Continue(iact.into(), ctx.context.clone());
     return Ok(step);
 }
 
@@ -1006,6 +1043,8 @@ fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_invite,
     });
     cmds.add_command(ProgramCommand { name: "join".into(), aliases: vec![], f: iamb_join });
+    #[cfg(feature = "voip")]
+    cmds.add_command(ProgramCommand { name: "call".into(), aliases: vec![], f: iamb_call });
     cmds.add_command(ProgramCommand { name: "keys".into(), aliases: vec![], f: iamb_keys });
     cmds.add_command(ProgramCommand {
         name: "knock".into(),
@@ -1116,6 +1155,56 @@ mod tests {
     use matrix_sdk::ruma::{room_id, user_id};
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
+
+    #[cfg(feature = "voip")]
+    #[test]
+    fn test_cmd_call() {
+        let mut cmds = setup_commands();
+
+        let call = |cmds: &mut ProgramCommands, cmd: &str| {
+            cmds.input_cmd(cmd, EditContext::default()).map(|res| {
+                assert_eq!(res.len(), 1);
+                res.into_iter().next().unwrap().0
+            })
+        };
+
+        for (cmd, expected) in [
+            (":call", CallAction::Join),
+            (":call join", CallAction::Join),
+            (":call hangup", CallAction::Hangup),
+            (":call decline", CallAction::Decline),
+            (":call mute", CallAction::Mute(true)),
+            (":call unmute", CallAction::Mute(false)),
+            (":call devices", CallAction::Devices),
+            (":call device mic 1", CallAction::SetDevice(DeviceKind::Microphone, "1".into())),
+            (":call device speaker 0", CallAction::SetDevice(DeviceKind::Speaker, "0".into())),
+            // A device name is the rest of the line, unquoted, because real
+            // names are full of spaces.
+            (
+                ":call device mic Yeti Stereo Microphone",
+                CallAction::SetDevice(DeviceKind::Microphone, "Yeti Stereo Microphone".into()),
+            ),
+        ] {
+            let act = IambAction::from(expected);
+            assert_eq!(call(&mut cmds, cmd).unwrap(), act.into(), "for {cmd:?}");
+        }
+
+        // A device kind with nothing to select, an unknown kind, and an unknown
+        // subcommand are all rejected rather than silently doing something.
+        // The encryption of a call's media is the room's to decide, so there is
+        // no longer a switch for it.
+        for cmd in [
+            ":call device mic",
+            ":call device",
+            ":call device ears 1",
+            ":call bogus",
+            ":call reject",
+            ":call unencrypted",
+            ":call join unencrypted",
+        ] {
+            assert!(call(&mut cmds, cmd).is_err(), "for {:?}", cmd);
+        }
+    }
 
     #[test]
     fn test_cmd_verify() {

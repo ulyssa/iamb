@@ -38,6 +38,8 @@ use rand::distr::Alphanumeric;
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::Level;
+#[cfg(feature = "voip")]
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use modalkit::crossterm::{
@@ -86,6 +88,8 @@ mod worker;
 
 #[cfg(test)]
 mod tests;
+#[cfg(feature = "voip")]
+mod voip;
 
 use crate::{
     base::{
@@ -267,6 +271,14 @@ struct Application {
 
     /// Whether we need to do a full redraw (e.g., after running a subprocess).
     dirty: bool,
+
+    /// The window the last frame was drawn for, so that switching between them
+    /// can be noticed. See [`Application::resync_on_view_change`].
+    last_focus: Option<IambId>,
+
+    /// Whether the last frame was drawn with a call banner, for the same reason.
+    #[cfg(feature = "voip")]
+    last_call_banner: bool,
 }
 
 impl Application {
@@ -300,7 +312,40 @@ impl Application {
             focused: true,
             last_layout: None,
             dirty: true,
+            last_focus: None,
+            #[cfg(feature = "voip")]
+            last_call_banner: false,
         })
+    }
+
+    /// Ask for one full-clear redraw when the view is replaced wholesale.
+    ///
+    /// Switching rooms, and starting or ending a call, replace everything below
+    /// the border. The new view draws over the old one rather than replacing it,
+    /// leaving ghost text, so the screen has to be redrawn from scratch to
+    /// resync the terminal with ratatui's buffer.
+    ///
+    /// Setting [`Application::dirty`] gives exactly one cleared frame per
+    /// transition. Clearing for a *window of time* instead
+    fn resync_on_view_change(&mut self, _store: &ProgramStore) {
+        let focus = self.screen.current_window().map(|win| win.id());
+
+        if self.last_focus != focus {
+            self.last_focus = focus;
+            self.dirty = true;
+        }
+
+        #[cfg(feature = "voip")]
+        {
+            // Only whether the banner is drawn matters: its content changing
+            // does not move anything else on the screen.
+            let banner = _store.application.call_status.get().is_some();
+
+            if self.last_call_banner != banner {
+                self.last_call_banner = banner;
+                self.dirty = true;
+            }
+        }
     }
 
     fn redraw(&mut self, full: bool, store: &mut ProgramStore) -> Result<(), std::io::Error> {
@@ -359,7 +404,13 @@ impl Application {
 
     async fn step(&mut self) -> Result<TerminalKey, std::io::Error> {
         loop {
-            self.redraw(self.dirty, self.store.clone().lock().await.deref_mut())?;
+            {
+                let store = self.store.clone();
+                let mut locked = store.lock().await;
+
+                self.resync_on_view_change(&locked);
+                self.redraw(self.dirty, locked.deref_mut())?;
+            }
             self.dirty = false;
 
             if !poll(Duration::from_secs(1))? {
@@ -595,6 +646,10 @@ impl Application {
             },
             IambAction::Space(act) => {
                 self.screen.current_window_mut()?.space_command(act, ctx, store).await?
+            },
+            #[cfg(feature = "voip")]
+            IambAction::Call(act) => {
+                self.screen.current_window_mut()?.call_command(act, ctx, store).await?
             },
             IambAction::Room(act) => {
                 let acts = self.screen.current_window_mut()?.room_command(act, ctx, store).await?;
@@ -1043,11 +1098,80 @@ async fn login_normal(
     Ok(())
 }
 
+/// Saved duplicate of the real stderr, so it can be restored after being
+/// redirected by [`silence_native_stderr`]. `-1` means "not redirected".
+#[cfg(all(unix, feature = "voip"))]
+static SAVED_STDERR_FD: std::sync::atomic::AtomicI32 = std::sync::atomic::AtomicI32::new(-1);
+
+/// Send native stderr to `/dev/null` while the TUI owns the terminal.
+///
+/// LiveKit pulls in libwebrtc, and opening audio devices goes through ALSA;
+/// both log directly to file descriptor 2, bypassing our file-based tracing. On
+/// the alternate screen those writes land on top of the UI and corrupt it -
+/// most visibly when a call starts (device + libwebrtc init) and ends (teardown).
+/// [`restore_native_stderr`] puts the real stderr back, and is called from
+/// [`restore_tty`] before any panic message is printed, so crashes are still
+/// visible.
+#[cfg(all(unix, feature = "voip"))]
+fn silence_native_stderr() {
+    use std::os::fd::AsRawFd;
+    use std::sync::atomic::Ordering;
+
+    if SAVED_STDERR_FD.load(Ordering::SeqCst) != -1 {
+        return;
+    }
+
+    let Ok(devnull) = std::fs::OpenOptions::new().write(true).open("/dev/null") else {
+        return;
+    };
+
+    // SAFETY: `dup`/`dup2` on the process's own descriptors. We keep the saved
+    // descriptor in `SAVED_STDERR_FD` and close it in `restore_native_stderr`.
+    unsafe {
+        let saved = libc::dup(libc::STDERR_FILENO);
+        if saved == -1 {
+            return;
+        }
+        if libc::dup2(devnull.as_raw_fd(), libc::STDERR_FILENO) == -1 {
+            libc::close(saved);
+            return;
+        }
+        SAVED_STDERR_FD.store(saved, Ordering::SeqCst);
+    }
+}
+
+/// Restore the real stderr previously redirected by [`silence_native_stderr`].
+#[cfg(all(unix, feature = "voip"))]
+fn restore_native_stderr() {
+    use std::sync::atomic::Ordering;
+
+    let saved = SAVED_STDERR_FD.swap(-1, Ordering::SeqCst);
+    if saved == -1 {
+        return;
+    }
+
+    // SAFETY: `saved` is a descriptor we duplicated from stderr; move it back
+    // onto stderr and drop the duplicate.
+    unsafe {
+        libc::dup2(saved, libc::STDERR_FILENO);
+        libc::close(saved);
+    }
+}
+
+#[cfg(not(all(unix, feature = "voip")))]
+fn silence_native_stderr() {}
+
+#[cfg(not(all(unix, feature = "voip")))]
+fn restore_native_stderr() {}
+
 /// Set up the terminal for drawing the TUI, and getting additional info.
 fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std::io::Result<()> {
     // Enable raw mode and enter the alternate screen.
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(stdout(), EnterAlternateScreen)?;
+
+    // Keep native library logging (libwebrtc, ALSA) off the alternate screen.
+    silence_native_stderr();
 
     if enable_enhanced_keys {
         // Enable the Kitty keyboard enhancement protocol for improved keypresses.
@@ -1091,6 +1215,10 @@ fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
     );
 
     let _ = crossterm::terminal::disable_raw_mode();
+
+    // Now that we have left the alternate screen, put the real stderr back so
+    // that any panic message or exit output reaches the terminal.
+    restore_native_stderr();
 }
 
 async fn run(settings: ApplicationSettings) -> IambResult<()> {
@@ -1153,10 +1281,23 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
 
     // And finally, start running the terminal UI.
     let mut application = Application::new(settings, store).await?;
-    application.run().await?;
+    let res = application.run().await;
+
+    // Leave any call still in progress before the worker goes away with the
+    // process. Dropping the runtime tears the SFU connection down, but nothing
+    // takes our `m.call.member` event back out of the room, so quitting mid-call
+    // would leave us in the room's participant list until the membership
+    // expires - which is up to `MEMBERSHIP_LIFETIME` of everyone else seeing a
+    // participant who is not there.
+    #[cfg(feature = "voip")]
+    if let Some(call) = worker.call_status.get() {
+        worker.call_hangup_on_exit(call.room_id);
+    }
 
     // Clean up the terminal on exit.
     restore_tty(enable_enhanced_keys, enable_mouse);
+
+    res?;
 
     Ok(())
 }
@@ -1194,12 +1335,27 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
         .with_env_filter(filter)
         .finish();
 
+    // `try_init` also installs the `log` compatibility bridge. LiveKit and
+    // libwebrtc log through `log` rather than `tracing` - including the sink
+    // carrying WebRTC's own C++ diagnostics - so without it everything either
+    // of them says is discarded, and a call that fails inside the media stack
+    // leaves nothing behind to debug with.
+    #[cfg(feature = "voip")]
+    subscriber.try_init().expect("setting default subscriber failed");
+
+    #[cfg(not(feature = "voip"))]
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     guard
 }
 
 fn main() {
+    // Both `ring` and `aws-lc-rs` are in the build, so rustls will not choose a
+    // CryptoProvider on its own and LiveKit's first TLS connection panics.
+    // No-op if one is already installed.
+    #[cfg(feature = "voip")]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // Parse command-line flags.
     let iamb = Iamb::parse();
 

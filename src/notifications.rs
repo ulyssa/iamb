@@ -111,6 +111,113 @@ pub async fn register_notifications(
         .await;
 }
 
+/// Announce that a call has started in a room the user is not currently looking
+/// at.
+///
+/// Unlike message notifications this deliberately ignores the room's push
+/// notification mode: a muted room mutes its *messages*, and someone calling you
+/// is not a message. It is still gated on the global notification tunable.
+///
+/// Takes the already-locked store because the caller is a sync event handler
+/// that holds it; locking it again here would deadlock.
+#[cfg(feature = "voip")]
+pub async fn notify_call_started(room_name: &str, room_id: OwnedRoomId, store: &mut ProgramStore) {
+    if !store.application.settings.tunables.notifications.enabled {
+        return;
+    }
+
+    if is_focused(store) && is_open(store, &room_id) {
+        return;
+    }
+
+    let summary = format!("📞 Call in {room_name}");
+
+    let _ = room_id;
+    send_call_notification(&summary, None, false, store).await;
+}
+
+/// Announce that someone is calling and waiting for an answer (MSC4075).
+///
+/// Unlike [`notify_call_started`] this fires even when the room is open and
+/// focused: a ring is a request for an answer, and silently dropping it because
+/// the user happens to be looking at the room means the call goes unanswered
+/// while they stare at it.
+///
+/// `ring` marks the notification urgent, which is what stops a compositor from
+/// expiring it after a few seconds - a ring the user missed because they were
+/// away from the keyboard is a ring that did not work.
+#[cfg(feature = "voip")]
+pub async fn notify_incoming_call(
+    room_name: &str,
+    caller: &str,
+    room_id: OwnedRoomId,
+    ring: bool,
+    store: &mut ProgramStore,
+) {
+    if !store.application.settings.tunables.notifications.enabled {
+        return;
+    }
+
+    let summary = format!("📞 {caller} is calling");
+    let body = format!("in {room_name} — :call to answer, :call decline to reject");
+
+    let _ = room_id;
+    send_call_notification(&summary, Some(&body), ring, store).await;
+}
+
+/// Deliver a call notification from a caller that already holds the store lock.
+///
+/// [`send_notification`] takes the unlocked store and locks it itself, which
+/// would deadlock the sync event handlers the call notices arrive on.
+#[cfg(feature = "voip")]
+async fn send_call_notification(
+    summary: &str,
+    body: Option<&str>,
+    urgent: bool,
+    store: &mut ProgramStore,
+) {
+    let via = store.application.settings.tunables.notifications.via;
+
+    #[cfg(feature = "desktop")]
+    if via.desktop {
+        let mut notification = notify_rust::Notification::new();
+        notification
+            .summary(summary)
+            .appname(IAMB_XDG_NAME)
+            .icon(IAMB_XDG_NAME)
+            .action("default", "default");
+
+        if let Some(body) = body {
+            notification.body(body);
+        }
+
+        // A ring stays up until it is dealt with; ordinary notifications expire
+        // on the compositor's own schedule.
+        #[cfg(all(unix, not(target_os = "macos")))]
+        notification.urgency(if urgent {
+            notify_rust::Urgency::Critical
+        } else {
+            notify_rust::Urgency::Normal
+        });
+
+        #[cfg(all(unix, not(target_os = "macos")))]
+        let res = notification.show_async().await;
+        #[cfg(any(not(unix), target_os = "macos"))]
+        let res = notification.show();
+
+        if let Err(err) = res {
+            tracing::error!("Failed to send call notification: {err}");
+        }
+    }
+
+    #[cfg(not(feature = "desktop"))]
+    let _ = (summary, body, urgent);
+
+    if via.bell {
+        store.application.ring_bell = true;
+    }
+}
+
 async fn send_notification(
     via: &NotifyVia,
     summary: &str,
