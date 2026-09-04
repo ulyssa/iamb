@@ -17,6 +17,7 @@ use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::FilterType;
@@ -695,7 +696,7 @@ pub struct Notifications {
 pub struct ImagePreviewValues {
     pub enabled: bool,
     pub lazy_load: bool,
-    pub size: ImagePreviewSize,
+    pub size: Size,
     pub protocol: ImagePreviewProtocolValues,
 }
 
@@ -703,7 +704,7 @@ pub struct ImagePreviewValues {
 pub struct ImagePreview {
     pub enabled: Option<bool>,
     pub lazy_load: Option<bool>,
-    pub size: Option<ImagePreviewSize>,
+    pub size: Option<Size>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
@@ -712,21 +713,9 @@ impl ImagePreview {
         ImagePreviewValues {
             enabled: self.enabled.unwrap_or(true),
             lazy_load: self.lazy_load.unwrap_or(true),
-            size: self.size.unwrap_or_default(),
+            size: self.size.unwrap_or(Size { width: 66, height: 10 }),
             protocol: self.protocol.unwrap_or_default(),
         }
-    }
-}
-
-#[derive(Clone, Copy, Deserialize, Debug)]
-pub struct ImagePreviewSize {
-    pub width: usize,
-    pub height: usize,
-}
-
-impl Default for ImagePreviewSize {
-    fn default() -> Self {
-        ImagePreviewSize { width: 66, height: 10 }
     }
 }
 
