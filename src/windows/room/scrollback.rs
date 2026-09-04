@@ -702,7 +702,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let dir = flip.resolve(&dir);
 
                         let lsearch = store.registers.get_last_search().to_string();
-                        let needle = Regex::new(lsearch.as_ref())?;
+                        let ci = store.application.settings.tunables.ignorecase;
+                        let needle = crate::util::compile_search(lsearch.as_ref(), ci)?;
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {
@@ -778,7 +779,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         let dir = flip.resolve(&dir);
 
                         let lsearch = store.registers.get_last_search().to_string();
-                        let needle = Regex::new(lsearch.as_ref())?;
+                        let ci = store.application.settings.tunables.ignorecase;
+                        let needle = crate::util::compile_search(lsearch.as_ref(), ci)?;
 
                         let (mc, needs_load) = self.find_message(key, dir, &needle, count, info);
                         if needs_load {

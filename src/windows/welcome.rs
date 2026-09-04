@@ -52,6 +52,7 @@ impl TerminalCursor for WelcomeState {
 
 impl WindowOps<IambInfo> for WelcomeState {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
+        self.tbox.set_ignorecase(store.application.settings.tunables.ignorecase);
         self.tbox.draw(area, buf, focused, store)
     }
 
