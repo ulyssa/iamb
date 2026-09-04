@@ -118,7 +118,10 @@ fn picker_from_query() -> Picker {
 }
 
 fn picker_from_settings(settings: &ApplicationSettings) -> Picker {
-    let mut picker = if let Some(font_size) = settings.tunables.image_preview.protocol.font_size {
+    let mut picker = if !settings.tunables.image_preview.enabled {
+        // Skip any auto-detection and use halfblocks when disabled:
+        Picker::halfblocks()
+    } else if let Some(font_size) = settings.tunables.image_preview.protocol.font_size {
         #[expect(deprecated, reason = "from_query_stdio doesn't work on windows")]
         Picker::from_fontsize(font_size.into())
     } else {
