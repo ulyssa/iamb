@@ -156,14 +156,36 @@ Send an invitation to a user to join the currently focused room with an optional
 Leave the currently focused room.
 .It Sy ":members"
 View a list of members of the currently focused room.
-.It Sy ":room name set [name]"
-Set the name of the currently focused room.
-.It Sy ":room name unset"
-Unset the name of the currently focused room.
+.It Sy ":room access set [rule]"
+Set the join rules for the room to control who can access it.
+Possible values for the
+.Sy rule
+argument are
+.Dq invite ,
+.Dq knock ,
+.Dq knock-restricted ,
+.Dq public ,
+and
+.Dq restricted .
+The
+.Dq knock-restricted
+and
+.Dq restricted
+values allow additional
+.Sy ++members=!room:example.org
+arguments to specify rooms (and spaces) whose members are allowed to join without an invite or knocking.
+.It Sy ":room access unset"
+Set the room to being invite-only so that those not already members cannot join.
+.It Sy ":room access show"
+Show the current join rules for the room.
 .It Sy ":room dm set"
 Mark the currently focused room as a direct message.
 .It Sy ":room dm unset"
 Mark the currently focused room as a normal room.
+.It Sy ":room name set [name]"
+Set the name of the currently focused room.
+.It Sy ":room name unset"
+Unset the name of the currently focused room.
 .It Sy ":room unread set"
 Mark the currently focused room as unread.
 .It Sy ":room unread unset"

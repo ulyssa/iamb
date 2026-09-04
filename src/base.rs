@@ -37,6 +37,7 @@ use matrix_sdk::{
         EventId,
         OwnedEventId,
         OwnedMxcUri,
+        OwnedRoomAliasId,
         OwnedRoomId,
         OwnedRoomOrAliasId,
         OwnedTransactionId,
@@ -67,6 +68,7 @@ use matrix_sdk::{
         },
         presence::PresenceState,
         profile::{ProfileFieldName, ProfileFieldValue},
+        room::JoinRule,
     },
 };
 
@@ -409,6 +411,9 @@ impl Visitor<'_> for SortUserVisitor {
 /// A room property.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomField {
+    /// The room's join rules, aka who can access this room.
+    Access,
+
     /// The room's history visibility.
     History,
 
@@ -497,6 +502,9 @@ pub enum RoomAction {
 
     /// Set whether a room is a direct message.
     SetDirect(bool),
+
+    /// Set the join rules for a room to control who can access it and how.
+    SetAccess(JoinRule),
 
     /// Set a room property.
     Set(RoomField, String),
@@ -1907,6 +1915,11 @@ impl ChatStore {
         } else {
             None
         }
+    }
+
+    /// Get the alias for a room if it has one (and the client knows it).
+    pub fn get_joined_room_alias(&self, room_id: &RoomId) -> Option<OwnedRoomAliasId> {
+        self.worker.client.get_room(room_id).and_then(|r| r.canonical_alias())
     }
 
     /// Get the title for a room.

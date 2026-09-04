@@ -6,11 +6,13 @@ use std::{convert::TryFrom, str::FromStr as _};
 
 use matrix_sdk::ruma::{
     OwnedMxcUri,
+    OwnedRoomId,
     OwnedRoomOrAliasId,
     OwnedUserId,
     RoomVersionId,
     events::tag::TagName,
     profile::{ProfileFieldName, ProfileFieldValue},
+    room::{AllowRule, JoinRule, Restricted as JoinRestrictions},
 };
 
 use modalkit::{
@@ -628,16 +630,63 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let arg = iter.next();
     let trailing = iter.collect::<Vec<_>>();
 
-    match (field.as_str(), action.as_str()) {
+    match (field.as_str(), action.as_str(), arg.as_deref()) {
         // Skip check for commands that takes a variable number of arguments:
-        ("version", "upgrade") => (),
+        ("access", "set", Some("restricted" | "knock-restricted")) => (),
+        ("version", "upgrade", _) => (),
 
         // Reject if we have any trailing arguments:
-        (_, _) if !trailing.is_empty() => return Result::Err(CommandError::InvalidArgument),
-        (_, _) => (),
+        (_, _, _) if !trailing.is_empty() => return Result::Err(CommandError::InvalidArgument),
+        (_, _, _) => (),
     }
 
     let act: IambAction = match (field.as_str(), action.as_str(), arg) {
+        // :room access set
+        ("access", "set", Some(rule)) => {
+            let allow = trailing
+                .iter()
+                .map(|a| {
+                    let (flag, v) = match OptionType::from_str(a)? {
+                        OptionType::Positional(_) => return Err(CommandError::InvalidArgument),
+                        OptionType::Flag(_, None) => return Err(CommandError::InvalidArgument),
+                        OptionType::Flag(f, Some(v)) => (f, v),
+                    };
+
+                    match flag.as_str() {
+                        "members" => {
+                            let room_id = OwnedRoomId::from_str(&v).map_err(|e| {
+                                CommandError::Error(format!(
+                                    "{v:?} is not a valid room identifier: {e}"
+                                ))
+                            })?;
+                            Ok(AllowRule::room_membership(room_id))
+                        },
+                        _ => Err(CommandError::Error(format!("unknown flag {flag:?}"))),
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            let restrictions = JoinRestrictions::new(allow);
+
+            let rule = match rule.as_str() {
+                "invite" => JoinRule::Invite,
+                "knock" => JoinRule::Knock,
+                "knock-restricted" => JoinRule::KnockRestricted(restrictions),
+                "public" => JoinRule::Public,
+                "restricted" => JoinRule::Restricted(restrictions),
+                _ => return Err(CommandError::InvalidArgument),
+            };
+            RoomAction::SetAccess(rule).into()
+        },
+        ("access", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room access unset
+        ("access", "unset", None) => RoomAction::SetAccess(JoinRule::Invite).into(),
+        ("access", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :room access unset
+        ("access", "show", None) => RoomAction::Show(RoomField::Access).into(),
+        ("access", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
         // :room dm set
         ("dm", "set", None) => RoomAction::SetDirect(true).into(),
         ("dm", "set", Some(_)) => return Result::Err(CommandError::InvalidArgument),
@@ -1109,7 +1158,7 @@ pub fn setup_commands() -> ProgramCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matrix_sdk::ruma::user_id;
+    use matrix_sdk::ruma::{owned_room_id, user_id};
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
 
@@ -1742,5 +1791,27 @@ mod tests {
         let res = cmds.input_cmd("room version upgrade", ctx.clone()).unwrap_err();
         let err = CommandError::InvalidArgument;
         assert_eq!(res, err);
+    }
+
+    #[test]
+    fn test_cmd_room_access() {
+        let mut cmds = setup_commands();
+        let ctx = EditContext::default();
+
+        let res = cmds.input_cmd("room access set knock", ctx.clone()).unwrap();
+        let act = IambAction::Room(RoomAction::SetAccess(JoinRule::Knock));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds
+            .input_cmd("room access set knock-restricted ++members=!abcde:example.org", ctx.clone())
+            .unwrap();
+        let allow = AllowRule::room_membership(owned_room_id!("!abcde:example.org"));
+        let restrictions = JoinRestrictions::new(vec![allow]);
+        let act = IambAction::Room(RoomAction::SetAccess(JoinRule::KnockRestricted(restrictions)));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd("room access unset", ctx.clone()).unwrap();
+        let act = IambAction::Room(RoomAction::SetAccess(JoinRule::Invite));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
     }
 }
