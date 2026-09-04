@@ -483,8 +483,20 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
         }
     } else {
         let input = args.last().unwrap();
-        match (args[0].as_str(), args[1].as_str()) {
-            ("version", "upgrade") => complete_users(input, store),
+        match (args[0].as_str(), args[1].as_str(), args[2].as_str()) {
+            ("version", "upgrade", _) => complete_users(input, store),
+            ("access", "set", "restricted") | ("access", "set", "knock-restricted") => {
+                if let Some(remaining) = input.strip_prefix("++members=") {
+                    store
+                        .rooms
+                        .complete(remaining)
+                        .into_iter()
+                        .map(|id| format!("++members={id}"))
+                        .collect()
+                } else {
+                    complete_choices(input, &["++members"])
+                }
+            },
 
             _ => vec![],
         }
