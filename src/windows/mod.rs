@@ -12,6 +12,10 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+#[cfg(feature = "voip")]
+use crate::base::CallAction;
+#[cfg(feature = "voip")]
+use matrix_sdk::ruma::OwnedUserId;
 use matrix_sdk::{
     RoomState as MatrixRoomState,
     encryption::verification::{SasVerification, format_emojis},
@@ -25,6 +29,8 @@ use matrix_sdk::{
         events::tag::{TagName, Tags},
     },
 };
+#[cfg(feature = "voip")]
+use std::collections::HashSet;
 
 use ratatui::{
     buffer::Buffer,
@@ -297,6 +303,57 @@ fn tag_to_span(tag: &TagName, style: Style) -> Vec<Span<'_>> {
     }
 }
 
+/// The users currently in `room_id`'s MatrixRTC call, oldest joiner first.
+///
+/// Read straight out of the SDK rather than tracked alongside it.
+/// [`active_room_call_participants`] already drops expired memberships, keeps
+/// only sessions whose application is `m.call` and whose scope is `m.room`, and
+/// orders by join time - all of which a parallel copy has to reimplement and
+/// can only get wrong.
+///
+/// The SDK yields one entry per *device*, since one user can be in a call from
+/// several clients; this collapses them, because the banner and the room list
+/// both count people rather than sessions.
+///
+/// [`active_room_call_participants`]: matrix_sdk::Room::active_room_call_participants
+#[cfg(feature = "voip")]
+pub fn call_participants(room_id: &RoomId, store: &ChatStore) -> Vec<OwnedUserId> {
+    let Some(room) = store.worker.client.get_room(room_id) else {
+        return Vec::new();
+    };
+
+    // Our retraction is only reflected here once the homeserver echoes it back,
+    // which is a full round trip of being drawn in a call we have demonstrably
+    // left. `CallStatus` knows immediately, so let it overrule the state event.
+    let joined = store.call_status.get().is_some_and(|call| *call.room_id == *room_id);
+    let us = (!joined)
+        .then(|| store.worker.client.user_id().map(ToOwned::to_owned))
+        .flatten();
+
+    let mut seen = HashSet::new();
+
+    room.active_room_call_participants()
+        .into_iter()
+        .filter(|user_id| Some(user_id) != us.as_ref())
+        .filter(|user_id| seen.insert(user_id.clone()))
+        .collect()
+}
+
+/// A room-list label for a room with a MatrixRTC call in progress.
+///
+/// Without this a call is only visible from inside the room it is happening in,
+/// so there is no way to notice one starting anywhere else.
+#[cfg(feature = "voip")]
+fn call_label(room_id: &RoomId, store: &ProgramStore, style: Style) -> Option<Vec<Span<'static>>> {
+    let participants = call_participants(room_id, &store.application).len();
+
+    if participants == 0 {
+        return None;
+    }
+
+    Some(vec![Span::styled(format!("📞 {participants}"), style)])
+}
+
 fn append_tags<'a>(tags: Vec<Vec<Span<'a>>>, spans: &mut Vec<Span<'a>>, style: Style) {
     if tags.is_empty() {
         return;
@@ -425,7 +482,18 @@ impl IambWindow {
         ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
-        let id = match self {
+        if let Some(id) = self.selected_room_id() {
+            let id = id.to_owned();
+            room_command(&id, act, ctx, store).await
+        } else {
+            return Err(IambError::NoSelectedRoomOrSpace.into());
+        }
+    }
+
+    /// The room a room-scoped command should act on: the open room, or the
+    /// entry highlighted in a room, DM, space, member, or chat list.
+    fn selected_room_id(&self) -> Option<&RoomId> {
+        match self {
             IambWindow::Room(state) => Some(state.id()),
             IambWindow::MemberList(_, room_id, _) => Some(&**room_id),
 
@@ -437,12 +505,78 @@ impl IambWindow {
             },
 
             _ => None,
+        }
+    }
+
+    #[cfg(feature = "voip")]
+    pub async fn call_command(
+        &mut self,
+        act: CallAction,
+        _ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        // Audio devices are a property of the machine, not of a room, so these
+        // work anywhere - including outside a call.
+        match act {
+            CallAction::Devices => {
+                return store.application.worker.call_devices();
+            },
+            CallAction::SetDevice(kind, spec) => {
+                return store.application.worker.call_set_device(kind, spec);
+            },
+            _ => {},
+        }
+
+        // Works from an open room or from a room/DM/space list with an entry
+        // highlighted, so a call can be started without first entering the room.
+        let Some(room_id) = self.selected_room_id() else {
+            return Err(IambError::NoSelectedRoom.into());
         };
 
-        if let Some(id) = id {
-            room_command(id, act, ctx, store).await
-        } else {
-            return Err(IambError::NoSelectedRoomOrSpace.into());
+        let room_id = room_id.to_owned();
+
+        // Answering or rejecting settles the ring either way, so it stops being
+        // offered here rather than waiting for the state event to come back
+        // round. Declining needs the notification it is a reply to, which only
+        // the store has - the worker cannot read it, since the UI holds the store
+        // lock while blocking on the worker's reply.
+        let pending = match act {
+            CallAction::Join | CallAction::Decline => {
+                store
+                    .application
+                    .rooms
+                    .get_or_default(room_id.clone())
+                    .incoming_call
+                    .take()
+                    .filter(|call| call.is_live())
+            },
+            _ => None,
+        };
+
+        match act {
+            // The worker owns the call and publishes its state, so none of these
+            // touch the store: mirroring it here is what let the two drift apart.
+            CallAction::Join => store.application.worker.call_join(room_id),
+            CallAction::Hangup => store.application.worker.call_hangup(room_id),
+            CallAction::Decline => {
+                let Some(call) = pending else {
+                    return Ok(Some(InfoMessage::from("No incoming call to decline")));
+                };
+
+                store.application.worker.call_decline(room_id, call.notification)
+            },
+            CallAction::Mute(muted) => {
+                store.application.worker.call_mute(muted);
+
+                let msg = if muted {
+                    "Muted microphone"
+                } else {
+                    "Unmuted microphone"
+                };
+
+                Ok(Some(InfoMessage::from(msg)))
+            },
+            CallAction::Devices | CallAction::SetDevice(..) => unreachable!("handled above"),
         }
     }
 
@@ -1075,8 +1209,11 @@ impl ListItem<IambInfo> for GenericChatItem {
         &self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
-        _: &mut ProgramStore,
+        store: &mut ProgramStore,
     ) -> Text<'_> {
+        #[cfg(not(feature = "voip"))]
+        let _ = store;
+
         let style = selected_style(selected);
         let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
         let mut spans = vec![name];
@@ -1086,6 +1223,9 @@ impl ListItem<IambInfo> for GenericChatItem {
         } else {
             vec![Span::styled("Room", style)]
         });
+
+        #[cfg(feature = "voip")]
+        labels.extend(call_label(self.room_id(), store, style));
 
         if let Some(tags) = &self.tags() {
             labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
@@ -1193,11 +1333,17 @@ impl ListItem<IambInfo> for RoomItem {
         &self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
-        _: &mut ProgramStore,
+        store: &mut ProgramStore,
     ) -> Text<'_> {
+        #[cfg(not(feature = "voip"))]
+        let _ = store;
+
         let style = selected_style(selected);
         let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
         let mut spans = vec![name];
+
+        #[cfg(feature = "voip")]
+        labels.extend(call_label(self.room_id(), store, style));
 
         if let Some(tags) = &self.tags() {
             labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
@@ -1302,11 +1448,17 @@ impl ListItem<IambInfo> for DirectItem {
         &self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
-        _: &mut ProgramStore,
+        store: &mut ProgramStore,
     ) -> Text<'_> {
+        #[cfg(not(feature = "voip"))]
+        let _ = store;
+
         let style = selected_style(selected);
         let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
         let mut spans = vec![name];
+
+        #[cfg(feature = "voip")]
+        labels.extend(call_label(self.room_id(), store, style));
 
         if let Some(tags) = &self.tags() {
             labels.extend(tags.keys().map(|t| tag_to_span(t, style)));

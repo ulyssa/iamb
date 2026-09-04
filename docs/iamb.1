@@ -248,6 +248,28 @@ Delete your per-room user display name.
 .It Sy ":room user name show"
 Show the display name you currently have in this room.
 .El
+
+.Sh "CALL COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":call"
+Join the voice call in the currently selected room, or answer a call you have been rung about.
+Your audio is encrypted when the room is encrypted, and sent in the clear when it is not.
+.It Sy ":call hangup"
+Leave the call and withdraw your membership from it.
+.It Sy ":call decline"
+Reject a call you have been rung about without joining it.
+.It Sy ":call mute"
+Mute your microphone.
+.It Sy ":call unmute"
+Unmute your microphone.
+.It Sy ":call devices"
+List the available microphones and speakers.
+.It Sy ":call device mic [device]"
+Choose the microphone by index or name.
+.It Sy ":call device speaker [device]"
+Choose the speaker by index or name.
+.El
+
 .Sh "SPACE COMMANDS"
 .Bl -tag -width Ds
 .It Sy ":space child set [room] [arguments]"
