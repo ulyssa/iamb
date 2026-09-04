@@ -77,14 +77,16 @@ use crate::base::{
     SpaceAction,
     UnreadInfo,
 };
-use crate::verifications::VerifyItem;
 use crate::windows::room::room_command;
 
-use self::{room::RoomState, welcome::WelcomeState};
+use self::room::RoomState;
+use self::verify::VerifyItem;
+use self::welcome::WelcomeState;
 use crate::message::MessageTimeStamp;
 use feruca::Collator;
 
 pub mod room;
+pub mod verify;
 pub mod welcome;
 
 type MatrixRoomInfo = Arc<(MatrixRoom, Option<Tags>)>;

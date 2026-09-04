@@ -35,8 +35,8 @@ use crate::base::{
     RoomField,
     SendAction,
     SpaceAction,
+    VerifyAction,
 };
-use crate::verifications::VerifyAction;
 
 type ProgContext = CommandContext;
 type ProgResult = CommandResult<ProgramCommand>;
