@@ -109,21 +109,12 @@ impl PreviewManager {
     }
 }
 
-#[cfg(not(windows))]
 fn picker_from_query() -> Picker {
     // XXX: documentation says to use this query on alternate screen but it seems to be fine
     Picker::from_query_stdio().unwrap_or_else(|e| {
         tracing::warn!("Failed to setup image previews (falling back to halfblock rendering): {e}");
         Picker::halfblocks()
     })
-}
-
-#[cfg(windows)]
-fn picker_from_query() -> Picker {
-    tracing::error!(
-        "\"image_preview\" requires \"protocol\" with \"type\" and \"font_size\" options on Windows."
-    );
-    Picker::halfblocks()
 }
 
 fn picker_from_settings(settings: &ApplicationSettings) -> Picker {
