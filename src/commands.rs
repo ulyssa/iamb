@@ -886,7 +886,7 @@ fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
                 return Err(CommandError::Error(msg.into()));
             };
 
-            SpaceAction::SetChild(child, order, suggested).into()
+            SpaceAction::SetChild { child, order, suggested }.into()
         },
         _ => return Result::Err(CommandError::InvalidArgument),
     };
@@ -1489,13 +1489,20 @@ mod tests {
 
         let cmd = "space child set !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
-        let act = SpaceAction::SetChild("!roomid:example.org".to_owned(), None, false);
+        let act = SpaceAction::SetChild {
+            child: "!roomid:example.org".to_owned(),
+            order: None,
+            suggested: false,
+        };
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let cmd = "space child set ++order=abcd ++suggested !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
-        let act =
-            SpaceAction::SetChild("!roomid:example.org".to_owned(), Some("abcd".into()), true);
+        let act = SpaceAction::SetChild {
+            child: "!roomid:example.org".to_owned(),
+            order: Some("abcd".into()),
+            suggested: true,
+        };
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let cmd = "space child set ++order=abcd ++order=1234 !roomid:example.org";

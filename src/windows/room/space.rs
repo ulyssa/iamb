@@ -90,7 +90,7 @@ impl SpaceState {
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
         match act {
-            SpaceAction::SetChild(name, order, suggested) => {
+            SpaceAction::SetChild { child, order, suggested } => {
                 if !self
                     .room
                     .power_levels()
@@ -105,7 +105,7 @@ impl SpaceState {
                     return Err(IambError::InsufficientPermission.into());
                 }
 
-                let child_id = store.application.worker.join_room(name)?;
+                let child_id = store.application.worker.join_room(child)?;
 
                 let via = self.room.route().await.map_err(IambError::from)?;
                 let mut ev = SpaceChildEventContent::new(via);
@@ -204,6 +204,8 @@ impl StatefulWidget for Space<'_> {
     type State = SpaceState;
 
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
+        state.set_ignorecase(self.store.application.settings.tunables.ignorecase);
+
         let mut empty_message = None;
         let need_fetch = match state.last_fetch {
             Some(i) => i.elapsed() >= SPACE_HIERARCHY_DEBOUNCE,

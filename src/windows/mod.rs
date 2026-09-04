@@ -584,6 +584,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("No direct messages yet!")
@@ -608,6 +609,8 @@ impl WindowOps<IambInfo> for IambWindow {
                     *last_fetch = Some(Instant::now());
                 }
 
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+
                 List::new(store)
                     .empty_message("No users here yet!")
                     .empty_alignment(Alignment::Center)
@@ -628,6 +631,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You haven't joined any rooms yet")
@@ -660,6 +664,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You do not have rooms or dms yet")
@@ -694,6 +699,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You do not have any unreads yet")
@@ -728,6 +734,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You do not have any unread mentions yet")
@@ -749,6 +756,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You haven't joined any spaces yet")
@@ -764,6 +772,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort();
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("No in-progress verifications")

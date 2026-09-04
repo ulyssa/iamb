@@ -1184,6 +1184,9 @@ impl StatefulWidget for Chat<'_> {
         };
 
         let tbox = TextBox::new().prompt(prompt);
+        state
+            .tbox
+            .set_ignorecase(self.store.application.settings.tunables.ignorecase);
         tbox.render(textarea, buf, &mut state.tbox);
 
         // Render the message scrollback.

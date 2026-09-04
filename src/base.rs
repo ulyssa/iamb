@@ -191,10 +191,14 @@ pub enum MessageAction {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SpaceAction {
     /// Add a room or update metadata.
-    ///
-    /// The [`Option<String>`] argument is the order parameter.
-    /// The [`bool`] argument indicates whether the room is suggested.
-    SetChild(String, Option<String>, bool),
+    SetChild {
+        /// The room ID, alias, or a user whose DM room should be added to the space.
+        child: String,
+        /// The order parameter to use when sorting children in the space.
+        order: Option<String>,
+        /// Whether the room is suggested.
+        suggested: bool,
+    },
 
     /// Remove the selected room.
     RemoveChild,
