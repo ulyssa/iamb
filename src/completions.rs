@@ -295,6 +295,16 @@ fn complete_matrix_names(input: &str, store: &ChatStore) -> Vec<String> {
     store.rooms.complete(input).into_iter().map(|i| i.to_string()).collect()
 }
 
+/// Tab completion for known room aliases and ids.
+fn complete_room_alias_or_id(input: &str, store: &ChatStore) -> Vec<String> {
+    let list = store.names.complete(input);
+    if !list.is_empty() {
+        return list;
+    }
+
+    store.rooms.complete(input).into_iter().map(|i| i.to_string()).collect()
+}
+
 /// Tab completion for open verification requests
 fn complete_verification(input: &str, store: &ChatStore) -> Vec<String> {
     store.verifications.complete(input)
@@ -487,9 +497,7 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
             ("version", "upgrade", _) => complete_users(input, store),
             ("access", "set", "restricted") | ("access", "set", "knock-restricted") => {
                 if let Some(remaining) = input.strip_prefix("++members=") {
-                    store
-                        .rooms
-                        .complete(remaining)
+                    complete_room_alias_or_id(remaining, store)
                         .into_iter()
                         .map(|id| format!("++members={id}"))
                         .collect()

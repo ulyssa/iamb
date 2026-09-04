@@ -12,7 +12,9 @@ use std::time::{Duration, Instant};
 
 use emojis::Emoji;
 
+use matrix_sdk::Client;
 use matrix_sdk::encryption::verification::VerificationRequest;
+use matrix_sdk::ruma::room::{AllowRule, Restricted};
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
@@ -469,6 +471,52 @@ impl Display for MemberUpdateAction {
     }
 }
 
+/// An internal version of [`JoinRule`]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IambJoinRule {
+    Public,
+    Restricted(Vec<OwnedRoomOrAliasId>),
+    Knock,
+    KnockRestricted(Vec<OwnedRoomOrAliasId>),
+    Invite,
+}
+
+impl IambJoinRule {
+    pub async fn into_join_rule(self, client: &Client) -> Result<JoinRule, IambError> {
+        async fn resolve_aliases(
+            rooms: Vec<OwnedRoomOrAliasId>,
+            client: &Client,
+        ) -> Result<Restricted, IambError> {
+            let mut allow = vec![];
+            for room in rooms {
+                let alias = match OwnedRoomId::try_from(room) {
+                    Ok(room_id) => {
+                        allow.push(AllowRule::room_membership(room_id));
+                        continue;
+                    },
+                    Err(alias) => alias,
+                };
+
+                let resp = client.resolve_room_alias(&alias).await?;
+
+                allow.push(AllowRule::room_membership(resp.room_id));
+            }
+
+            Ok(Restricted::new(allow))
+        }
+
+        Ok(match self {
+            Self::Public => JoinRule::Public,
+            Self::Invite => JoinRule::Invite,
+            Self::Knock => JoinRule::Knock,
+            Self::Restricted(rooms) => JoinRule::Restricted(resolve_aliases(rooms, client).await?),
+            Self::KnockRestricted(rooms) => {
+                JoinRule::KnockRestricted(resolve_aliases(rooms, client).await?)
+            },
+        })
+    }
+}
+
 /// An action that operates on a focused room.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomAction {
@@ -507,7 +555,7 @@ pub enum RoomAction {
     SetDirect(bool),
 
     /// Set the join rules for a room to control who can access it and how.
-    SetAccess(JoinRule),
+    SetAccess(IambJoinRule),
 
     /// Set a room property.
     Set(RoomField, String),
