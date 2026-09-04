@@ -24,6 +24,7 @@ use matrix_sdk::{
             },
             tag::{TagInfo, Tags},
         },
+        room::{AllowRule, JoinRule, Restricted as JoinRestrictions},
     },
 };
 
@@ -255,6 +256,16 @@ pub async fn room_command(
 
             Ok(vec![(act, cmd.context.clone())])
         },
+        RoomAction::SetAccess(rule) => {
+            let Some(room) = store.application.worker.client.get_room(id) else {
+                return Err(IambError::NotJoined.into());
+            };
+            room.privacy_settings()
+                .update_join_rule(rule)
+                .await
+                .map_err(IambError::from)?;
+            Ok(vec![])
+        },
         RoomAction::SetDirect(is_direct) => {
             let room = store
                 .application
@@ -404,14 +415,8 @@ pub async fn room_command(
                         .await
                         .map_err(IambError::from)?;
                 },
-                RoomField::Aliases => {
-                    // This never happens, aliases is only used for showing
-                },
-                RoomField::Id => {
-                    // This never happens, id is only used for showing
-                },
-                RoomField::Version => {
-                    // This never happens, version is only used for showing or upgrading.
+                RoomField::Access | RoomField::Aliases | RoomField::Id | RoomField::Version => {
+                    // These variants exist for RoomAction::Show, so we never actually get here.
                 },
             }
 
@@ -506,14 +511,8 @@ pub async fn room_command(
                 RoomField::UserName => {
                     room.set_own_member_display_name(None).await.map_err(IambError::from)?;
                 },
-                RoomField::Aliases => {
-                    // This will not happen, you cannot unset all aliases
-                },
-                RoomField::Id => {
-                    // This never happens, id is only used for showing
-                },
-                RoomField::Version => {
-                    // This never happens, version is only used for showing or upgrading.
+                RoomField::Access | RoomField::Aliases | RoomField::Id | RoomField::Version => {
+                    // These variants exist for RoomAction::Show, so we never actually get here.
                 },
             }
 
@@ -565,6 +564,55 @@ pub async fn room_command(
                     };
 
                     format!("Room notification level: {level:?}")
+                },
+                RoomField::Access => {
+                    let show_restrictions = |rs: JoinRestrictions| {
+                        rs.allow
+                            .into_iter()
+                            .map(|a| {
+                                match a {
+                                    AllowRule::RoomMembership(m) => {
+                                        if let Some(alias) =
+                                            store.application.get_joined_room_alias(&m.room_id)
+                                        {
+                                            format!("members of {} ({alias})", m.room_id)
+                                        } else {
+                                            format!("members of {}", m.room_id)
+                                        }
+                                    },
+                                    other => format!("{other:?}"),
+                                }
+                            })
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    };
+
+                    let desc = match room.join_rule() {
+                        None => "<unknown>".into(),
+                        Some(JoinRule::Invite) => "invite".into(),
+                        Some(JoinRule::Knock) => "knock".into(),
+                        Some(JoinRule::Private) => "private".into(),
+                        Some(JoinRule::Public) => "public".into(),
+                        Some(JoinRule::Restricted(restrictions)) => {
+                            let allowing = show_restrictions(restrictions);
+                            if allowing.is_empty() {
+                                "restricted".into()
+                            } else {
+                                format!("restricted, allowing {allowing}")
+                            }
+                        },
+                        Some(JoinRule::KnockRestricted(restrictions)) => {
+                            let allowing = show_restrictions(restrictions);
+                            if allowing.is_empty() {
+                                "knock-restricted".into()
+                            } else {
+                                format!("knock-restricted, allowing {allowing}")
+                            }
+                        },
+                        Some(other) => format!("{other:?}"),
+                    };
+
+                    format!("Room join rules are set to: {desc}")
                 },
                 RoomField::Aliases => {
                     let aliases = room

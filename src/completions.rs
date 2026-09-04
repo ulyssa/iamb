@@ -413,6 +413,7 @@ fn complete_iamb_create(args: Vec<String>) -> Vec<String> {
 // "kick","ban","unban", ".. unset" and "dm/tag set/unset"
 fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     let subcmds = [
+        "access",
         "dm",
         "kick",
         "ban",
@@ -437,7 +438,7 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
             "id" => complete_choices(input, &["show"]),
             "dm" | "name" | "tag" => complete_choices(input, &["set", "unset"]),
 
-            "history" | "topic" | "notify" | "alias" | "canonicalalias" | "canon" => {
+            "access" | "history" | "topic" | "notify" | "alias" | "canonicalalias" | "canon" => {
                 complete_choices(input, &["show", "set", "unset"])
             },
 
@@ -449,6 +450,15 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     } else if args.len() == 3 {
         let input = &args[2];
         match (args[0].as_str(), args[1].as_str()) {
+            ("access", "set") => {
+                complete_choices(input, &[
+                    "invite",
+                    "knock",
+                    "knock-restricted",
+                    "public",
+                    "restricted",
+                ])
+            },
             ("history", "set") => {
                 complete_choices(input, &["invited", "joined", "shared", "world_readable"])
             },
