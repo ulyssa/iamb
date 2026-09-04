@@ -125,6 +125,9 @@ pub struct ScrollbackState {
     /// The currently selected message in the scrollback.
     cursor: MessageCursor,
 
+    /// The cursor position relative to the terminal viewport.
+    term_cursor: (u16, u16),
+
     /// Contextual info about the viewport used during rendering.
     viewctx: ViewportContext<MessageCursor>,
 
@@ -154,6 +157,7 @@ impl ScrollbackState {
             viewctx,
             jumped,
             show_full_on_redraw,
+            term_cursor: (0, 0),
         }
     }
 
@@ -607,6 +611,7 @@ impl WindowOps<IambInfo> for ScrollbackState {
             viewctx: self.viewctx.clone(),
             jumped: self.jumped.clone(),
             show_full_on_redraw: false,
+            term_cursor: (0, 0),
         }
     }
 
@@ -1264,7 +1269,7 @@ impl Searchable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
 impl TerminalCursor for ScrollbackState {
     fn get_term_cursor(&self) -> Option<(u16, u16)> {
-        None
+        self.term_cursor.into()
     }
 
     fn hide_term_cursor(&self) -> bool {
@@ -1322,6 +1327,8 @@ impl StatefulWidget for Scrollback<'_> {
     type State = ScrollbackState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        state.term_cursor = (area.left(), area.top());
+
         let info = self.store.application.rooms.get_or_default(state.room_id.clone());
         let settings = &self.store.application.settings;
         let area = if state.cursor.timestamp.is_some() {
@@ -1412,6 +1419,8 @@ impl StatefulWidget for Scrollback<'_> {
 
             let incomplete_ok = !full || !sel;
 
+            let includes_date_line = item.show_date(prev);
+
             for (row, line) in txt.lines.into_iter().enumerate() {
                 if sawit && lines.len() >= height && incomplete_ok {
                     // Check whether we've seen the first line of the
@@ -1428,7 +1437,7 @@ impl StatefulWidget for Scrollback<'_> {
                 let line_preview: Vec<_> =
                     msg_previews.extract_if(.., |(_, _, y)| *y as usize == row).collect();
 
-                lines.push((key, row, line, line_preview));
+                lines.push((key, row, line, line_preview, includes_date_line));
                 sawit |= sel;
             }
 
@@ -1440,7 +1449,7 @@ impl StatefulWidget for Scrollback<'_> {
             let _ = lines.drain(..n);
         }
 
-        if let Some((key, row, _, _)) = lines.first() {
+        if let Some((key, row, _, _, _)) = lines.first() {
             state.viewctx.corner.timestamp = Some((*key).clone());
             state.viewctx.corner.text_row = *row;
         }
@@ -1449,11 +1458,15 @@ impl StatefulWidget for Scrollback<'_> {
         let x = area.left();
 
         let mut image_previews = vec![];
-        for (_, _, txt, line_preview) in lines.into_iter() {
+        for (key, row, txt, line_preview, includes_date_line) in lines.into_iter() {
             let _ = buf.set_line(x, y, &txt, area.width);
             image_previews.extend(
                 line_preview.into_iter().map(|(backend, msg_x, _)| (x + msg_x, y, backend)),
             );
+
+            if key == cursor_key && row == usize::from(includes_date_line) {
+                state.term_cursor = (x, y);
+            }
 
             y += 1;
         }
