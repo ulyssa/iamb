@@ -213,6 +213,7 @@ fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
                 "cancel" => VerifyAction::Cancel,
                 "confirm" => VerifyAction::Confirm,
                 "mismatch" => VerifyAction::Mismatch,
+                "emoji" => VerifyAction::Emoji,
                 "request" => {
                     let iact = IambAction::VerifyRequest(args.remove(1));
                     let step = CommandStep::Continue(iact.into(), ctx.context.clone());
