@@ -11,6 +11,7 @@ use std::ops::{Deref, DerefMut};
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{DECIMAL, format_size};
 use matrix_sdk::ruma::OwnedTransactionId;
+use matrix_sdk::ruma::events::poll::unstable_start::RedactedUnstablePollStartEvent;
 use matrix_sdk::ruma::events::receipt::ReceiptThread;
 use matrix_sdk::ruma::events::room::MediaSource;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation;
@@ -63,6 +64,7 @@ use modalkit::editing::cursor::Cursor;
 use modalkit::prelude::*;
 
 use crate::base::MessageEdits;
+use crate::message::poll::UnstablePoll;
 use crate::preview::{ImageStatus, PreviewKind, PreviewManager};
 use crate::{
     base::RoomInfo,
@@ -70,6 +72,8 @@ use crate::{
     message::html::{StyleTree, parse_matrix_html},
     util::{replace_emojis_in_str, space, space_span, take_width, wrapped_text},
 };
+
+pub mod poll;
 
 mod compose;
 mod html;
@@ -443,6 +447,7 @@ pub enum MessageEvent {
     State(Box<AnySyncStateEvent>),
     Sticker(Box<OriginalStickerEvent>, MediaSource),
     Local(OwnedTransactionId, SendHandle, Box<RoomMessageEventContent>),
+    UnstablePoll(Box<UnstablePoll>),
 }
 
 impl MessageEvent {
@@ -455,6 +460,7 @@ impl MessageEvent {
             MessageEvent::State(ev) => ev.event_id(),
             MessageEvent::Local(..) => return None,
             MessageEvent::Sticker(ev, ..) => ev.event_id.as_ref(),
+            MessageEvent::UnstablePoll(ev) => ev.event_id(),
         };
 
         Some(event_id)
@@ -462,18 +468,19 @@ impl MessageEvent {
 
     pub fn msgtype(&self) -> Option<&MessageType> {
         match self {
-            MessageEvent::EncryptedOriginal(_) => None,
             MessageEvent::Original(ev, edits) => {
                 edits
                     .last_key_value()
                     .map(|(_, ev)| &ev.msgtype)
                     .or(Some(&ev.content.msgtype))
             },
-            MessageEvent::EncryptedRedacted(_) => None,
-            MessageEvent::Redacted(_, _) => None,
-            MessageEvent::State(_) => None,
-            MessageEvent::Sticker(..) => None,
             MessageEvent::Local(_, _, content) => Some(&content.msgtype),
+            MessageEvent::EncryptedOriginal(..) |
+            MessageEvent::EncryptedRedacted(..) |
+            MessageEvent::Redacted(..) |
+            MessageEvent::State(..) |
+            MessageEvent::Sticker(..) |
+            MessageEvent::UnstablePoll(..) => None,
         }
     }
 
@@ -494,6 +501,7 @@ impl MessageEvent {
             MessageEvent::Sticker(ev, ..) => body_cow_sticker(ev),
             MessageEvent::State(ev) => body_cow_state(ev),
             MessageEvent::Local(_, _, content) => body_cow_content(&content.msgtype),
+            MessageEvent::UnstablePoll(poll) => poll.body_cow(),
         }
     }
 
@@ -526,14 +534,19 @@ impl MessageEvent {
                 let reason = redaction_reason_event(redaction);
                 *self = MessageEvent::Redacted(event_id, reason);
             },
+            MessageEvent::UnstablePoll(ev) => {
+                let event_id = ev.event_id().to_owned();
+                let reason = redaction_reason_event(redaction);
+                *self = MessageEvent::Redacted(event_id, reason);
+            },
         }
     }
 
     fn is_edited(&self) -> bool {
-        if let MessageEvent::Original(_, edits) = self {
-            !edits.is_empty()
-        } else {
-            false
+        match self {
+            Self::Original(_, edits) => !edits.is_empty(),
+            Self::UnstablePoll(poll) => !poll.replacements.is_empty(),
+            _ => false,
         }
     }
 }
@@ -982,6 +995,7 @@ impl Message {
                     Some(_) | None => None,
                 };
             },
+            MessageEvent::UnstablePoll(poll) => return poll.reply_to().map(ToOwned::to_owned),
         };
 
         match &content.relates_to {
@@ -995,6 +1009,7 @@ impl Message {
         }
     }
 
+    /// Return the thread root if this is the first message in the thread.
     pub fn thread_root(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
@@ -1004,6 +1019,7 @@ impl Message {
             MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
             MessageEvent::Sticker(..) => return None,
+            MessageEvent::UnstablePoll(poll) => return poll.thread_root().map(ToOwned::to_owned),
         };
 
         match &content.relates_to {
@@ -1419,6 +1435,19 @@ impl From<RoomMessageEvent> for Message {
             RoomMessageEvent::Original(ev) => ev.into(),
             RoomMessageEvent::Redacted(ev) => ev.into(),
         }
+    }
+}
+
+impl From<RedactedUnstablePollStartEvent> for Message {
+    fn from(event: RedactedUnstablePollStartEvent) -> Self {
+        let timestamp = event.origin_server_ts.into();
+        let user_id = event.sender.clone();
+
+        let event_id = event.event_id;
+        let reason = redaction_reason_unsigned(&event.unsigned);
+        let content = MessageEvent::Redacted(event_id, reason);
+
+        Message::new(content, user_id, timestamp)
     }
 }
 
