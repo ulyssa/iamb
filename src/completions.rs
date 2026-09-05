@@ -578,11 +578,11 @@ fn complete_cmdarg(
 
         "logout" => complete_iamb_logout(args, store),
 
-        "react" if args.len() == 1 => complete_emoji(&args[0], store),
-        "react" => vec![],
+        "react" | "rc" | "reac" | "rct" if args.len() == 1 => complete_emoji(&args[0], store),
+        "react" | "rc" | "reac" | "rct" => vec![],
 
         // The redaction reason is free text
-        "redact" => vec![],
+        "redact" | "red" => vec![],
 
         "room" => complete_iamb_room(args, store),
 
@@ -591,12 +591,12 @@ fn complete_cmdarg(
         "space" => complete_iamb_space(args, store),
 
         // TODO: Check whether we can get the id of the focused message to improve completion
-        "unreact" if args.len() == 1 => complete_emoji(&args[0], store),
-        "unreact" => vec![],
+        "unreact" | "unr" if args.len() == 1 => complete_emoji(&args[0], store),
+        "unreact" | "unr" => vec![],
 
-        "unreads" => complete_iamb_unreads(args),
+        "unreads" | "un" => complete_iamb_unreads(args),
 
-        "upload" | "download" | "open" => {
+        "upload" | "u" | "download" | "d" | "open" | "o" => {
             if input.get_char_at_cursor(cursor) == Some('"') {
                 // Use the escaped instead of the qouted filename.
                 let mut args = args;
@@ -610,8 +610,11 @@ fn complete_cmdarg(
         "verify" => complete_iamb_verify(args, store),
 
         // These have no arguments
-        "cancel" | "chats" | "dms" | "editor" | "edit" | "forget" | "leave" | "members" |
-        "mentions" | "replied" | "reply" | "rooms" | "spaces" | "welcome" => vec![],
+        "cancel" | "ca" | "chats" | "c" | "dms" | "editor" | "ed" | "edit" | "e" | "forget" |
+        "leave" | "members" | "me" | "mentions" | "replied" | "reply" | "rep" | "rooms" | "r" |
+        "spaces" | "s" | "welcome" => {
+            vec![]
+        },
 
         "abo" | "aboveleft" | "bel" | "belowright" | "hor" | "horizontal" | "lefta" |
         "leftabove" | "rightb" | "rightbelow" | "tab" | "vert" | "vertical" => {
