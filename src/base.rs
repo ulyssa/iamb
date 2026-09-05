@@ -197,8 +197,8 @@ pub enum MessageAction {
 pub enum SpaceAction {
     /// Add a room or update metadata.
     SetChild {
-        /// The room ID, alias, or a user whose DM room should be added to the space.
-        child: String,
+        /// The room that should be added to the space.
+        child: OwnedRoomOrAliasId,
         /// The order parameter to use when sorting children in the space.
         order: Option<String>,
         /// Whether the room is suggested.

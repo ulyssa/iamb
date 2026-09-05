@@ -931,10 +931,13 @@ fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
                 }
             }
 
-            let Some(child) = raw_child else {
+            let child = raw_child.ok_or_else(|| {
                 let msg = "Must specify a room to add";
-                return Err(CommandError::Error(msg.into()));
-            };
+                CommandError::Error(msg.into())
+            })?;
+            let child = OwnedRoomOrAliasId::from_str(&child).map_err(|e| {
+                CommandError::Error(format!("{child:?} is not a valid room identifier: {e}"))
+            })?;
 
             SpaceAction::SetChild { child, order, suggested }.into()
         },
@@ -1540,7 +1543,7 @@ mod tests {
         let cmd = "space child set !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
         let act = SpaceAction::SetChild {
-            child: "!roomid:example.org".to_owned(),
+            child: owned_room_id!("!roomid:example.org").into(),
             order: None,
             suggested: false,
         };
@@ -1549,7 +1552,7 @@ mod tests {
         let cmd = "space child set ++order=abcd ++suggested !roomid:example.org";
         let res = cmds.input_cmd(cmd, ctx.clone()).unwrap();
         let act = SpaceAction::SetChild {
-            child: "!roomid:example.org".to_owned(),
+            child: owned_room_id!("!roomid:example.org").into(),
             order: Some("abcd".into()),
             suggested: true,
         };
