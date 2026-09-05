@@ -2,13 +2,18 @@ default_profile = "default"
 
 [profiles.default]
 user_id = "@user:matrix.org"
+password_file = "/path/to/password"
 url = "https://matrix.org"
 
 [settings]
+default_markup = "html"
 default_room = "#iamb-users:0x.badd.cafe"
+default_split = "vertical"
 external_edit_file_suffix = ".md"
 # input_prompt = "❯ "  # Overrides the input-area prompt. Unset = default 🔒/🔓/> based on encryption state.
+ignorecase = false
 log_level = "warn"
+members_split = "vertical"
 message_shortcode_display = false
 open_command = ["my-open", "--file"]
 reaction_display = true
@@ -21,13 +26,27 @@ typing_notice_send = true
 user_gutter_width = 30
 username_display = "username"
 
+[settings.encryption]
+indicator = "only-encrypted"
+indicator_location = "title|prompt"
+
 [settings.image_preview]
-protocol.type = "sixel"
+protocol = { type = "sixel", filter = "Nearest" }
 size = { "width" = 66, "height" = 10 }
+
+[settings.proxy]
+url = "" # An empty string disables any proxying
+auth = "Bearer abcd1234"
+headers.X-Proxy-Config = "foobar"
 
 [settings.sort]
 rooms = ["favorite", "lowpriority", "unread", "name"]
 members = ["power", "id"]
+
+[settings.terminal]
+cursor_shape = "default"
+enable_extended_keys = false
+enable_title = true
 
 [settings.users]
 "@user:matrix.org" = { "name" = "John Doe", "color" = "magenta" }

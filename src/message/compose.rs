@@ -1,12 +1,12 @@
 //! Code for converting composed messages into content to send to the homeserver.
 use comrak::{markdown_to_html, options::Options};
 use nom::{
+    IResult,
+    Parser as _,
     branch::alt,
     bytes::complete::tag,
     character::complete::space0,
     combinator::value,
-    IResult,
-    Parser as _,
 };
 
 use matrix_sdk::ruma::events::room::message::{
@@ -15,6 +15,8 @@ use matrix_sdk::ruma::events::room::message::{
     RoomMessageEventContent,
     TextMessageEventContent,
 };
+
+use crate::config::MarkupFormat;
 
 #[derive(Clone, Debug, Default)]
 enum SlashCommand {
@@ -102,6 +104,16 @@ impl SlashCommand {
     }
 }
 
+impl From<MarkupFormat> for SlashCommand {
+    fn from(markup: MarkupFormat) -> Self {
+        match markup {
+            MarkupFormat::Html => Self::Html,
+            MarkupFormat::Markdown => Self::Markdown,
+            MarkupFormat::Plaintext => Self::Plaintext,
+        }
+    }
+}
+
 fn parse_slash_command_inner(input: &str) -> IResult<&str, SlashCommand> {
     let (input, _) = space0(input)?;
     let (input, slash) = alt((
@@ -172,12 +184,38 @@ fn text_to_message_content(input: String) -> TextMessageEventContent {
     }
 }
 
-pub fn text_to_message(input: String) -> RoomMessageEventContent {
-    let msg = parse_slash_command(input.as_str())
-        .and_then(|(input, slash)| slash.to_message(input))
+pub fn text_to_message(input: String, default_markup: MarkupFormat) -> RoomMessageEventContent {
+    let (rest, slash) = parse_slash_command(input.as_str())
+        .unwrap_or_else(|_| (&input, SlashCommand::from(default_markup)));
+    let msg = slash
+        .to_message(rest)
         .unwrap_or_else(|_| MessageType::Text(text_to_message_content(input)));
 
     RoomMessageEventContent::new(msg)
+}
+
+/// Returns `None` if `input` contains a non-text slash command.
+pub fn text_to_text_message_event_content(
+    input: String,
+    default_markup: MarkupFormat,
+) -> Option<TextMessageEventContent> {
+    let (body, cmd) = parse_slash_command(&input)
+        .unwrap_or_else(|_| (&input, SlashCommand::from(default_markup)));
+
+    let content = match cmd {
+        SlashCommand::Html => TextMessageEventContent::html(body, body),
+        SlashCommand::Plaintext => TextMessageEventContent::plain(body),
+        SlashCommand::Markdown => {
+            if let Some(html) = text_to_html(body) {
+                TextMessageEventContent::html(body, html)
+            } else {
+                TextMessageEventContent::plain(body)
+            }
+        },
+        _ => return None,
+    };
+
+    Some(content)
 }
 
 #[cfg(test)]
@@ -320,59 +358,103 @@ pub mod tests {
 
     #[test]
     fn text_to_message_slash_commands() {
-        let MessageType::Text(content) = text_to_message("/html <b>bold</b>".into()).msgtype else {
+        let MessageType::Text(content) =
+            text_to_message("/html <b>bold</b>".into(), Default::default()).msgtype
+        else {
             panic!("Expected MessageType::Text");
         };
         assert_eq!(content.body, "<b>bold</b>");
         assert_eq!(content.formatted.unwrap().body, "<b>bold</b>");
 
-        let MessageType::Text(content) = text_to_message("/h <b>bold</b>".into()).msgtype else {
+        let MessageType::Text(content) =
+            text_to_message("/h <b>bold</b>".into(), Default::default()).msgtype
+        else {
             panic!("Expected MessageType::Text");
         };
         assert_eq!(content.body, "<b>bold</b>");
         assert_eq!(content.formatted.unwrap().body, "<b>bold</b>");
 
-        let MessageType::Text(content) = text_to_message("/plain <b>bold</b>".into()).msgtype
+        let MessageType::Text(content) =
+            text_to_message("/plain <b>bold</b>".into(), Default::default()).msgtype
         else {
             panic!("Expected MessageType::Text");
         };
         assert_eq!(content.body, "<b>bold</b>");
         assert!(content.formatted.is_none(), "{:?}", content.formatted);
 
-        let MessageType::Text(content) = text_to_message("/p <b>bold</b>".into()).msgtype else {
+        let MessageType::Text(content) =
+            text_to_message("/p <b>bold</b>".into(), Default::default()).msgtype
+        else {
             panic!("Expected MessageType::Text");
         };
         assert_eq!(content.body, "<b>bold</b>");
         assert!(content.formatted.is_none(), "{:?}", content.formatted);
 
-        let MessageType::Emote(content) = text_to_message("/me *bold*".into()).msgtype else {
+        let MessageType::Emote(content) =
+            text_to_message("/me *bold*".into(), Default::default()).msgtype
+        else {
             panic!("Expected MessageType::Emote");
         };
         assert_eq!(content.body, "*bold*");
         assert_eq!(content.formatted.unwrap().body, "<p><em>bold</em></p>\n");
 
-        let content = text_to_message("/confetti hello".into()).msgtype;
+        let content = text_to_message("/confetti hello".into(), Default::default()).msgtype;
         assert_eq!(content.msgtype(), "nic.custom.confetti");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/fireworks hello".into()).msgtype;
+        let content = text_to_message("/fireworks hello".into(), Default::default()).msgtype;
         assert_eq!(content.msgtype(), "nic.custom.fireworks");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/hearts hello".into()).msgtype;
+        let content = text_to_message("/hearts hello".into(), Default::default()).msgtype;
         assert_eq!(content.msgtype(), "io.element.effect.hearts");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/rainfall hello".into()).msgtype;
+        let content = text_to_message("/rainfall hello".into(), Default::default()).msgtype;
         assert_eq!(content.msgtype(), "io.element.effect.rainfall");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/snowfall hello".into()).msgtype;
+        let content = text_to_message("/snowfall hello".into(), Default::default()).msgtype;
         assert_eq!(content.msgtype(), "io.element.effect.snowfall");
         assert_eq!(content.body(), "hello");
 
-        let content = text_to_message("/spaceinvaders hello".into()).msgtype;
+        let content = text_to_message("/spaceinvaders hello".into(), Default::default()).msgtype;
         assert_eq!(content.msgtype(), "io.element.effects.space_invaders");
         assert_eq!(content.body(), "hello");
+    }
+
+    #[test]
+    fn text_to_message_slash_default() {
+        let MessageType::Text(content) =
+            text_to_message("*hello*".into(), MarkupFormat::Html).msgtype
+        else {
+            panic!("Expected MessageType::Text");
+        };
+        assert_eq!(content.body, "*hello*");
+        assert_eq!(content.formatted.unwrap().body, "*hello*");
+
+        let MessageType::Text(content) =
+            text_to_message("/markdown *hello*".into(), MarkupFormat::Html).msgtype
+        else {
+            panic!("Expected MessageType::Text");
+        };
+        assert_eq!(content.body, "*hello*");
+        assert_eq!(content.formatted.unwrap().body, "<p><em>hello</em></p>\n");
+
+        let MessageType::Text(content) =
+            text_to_message("<b>hello</b>".into(), MarkupFormat::Plaintext).msgtype
+        else {
+            panic!("Expected MessageType::Text");
+        };
+        assert_eq!(content.body, "<b>hello</b>");
+        assert!(content.formatted.is_none(), "{:?}", content.formatted);
+
+        let MessageType::Text(content) =
+            text_to_message("/html <b>hello</b>".into(), MarkupFormat::Plaintext).msgtype
+        else {
+            panic!("Expected MessageType::Text");
+        };
+        assert_eq!(content.body, "<b>hello</b>");
+        assert_eq!(content.formatted.unwrap().body, "<b>hello</b>");
     }
 }

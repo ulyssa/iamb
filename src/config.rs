@@ -9,17 +9,26 @@ use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 use std::process;
+use std::str::FromStr;
 
 use clap::Parser;
+use matrix_sdk::EncryptionState;
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::media::MediaRetentionPolicy;
+use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
+use ratatui_image::FilterType;
 use ratatui_image::picker::ProtocolType;
-use serde::{de::Error as SerdeError, de::Visitor, Deserialize, Deserializer, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, de::Error as SerdeError, de::Visitor};
 use url::Url;
 
-use modalkit::{env::vim::VimMode, key::TerminalKey, keybindings::InputKey};
+use modalkit::env::vim::VimMode;
+use modalkit::key::TerminalKey;
+use modalkit::keybindings::InputKey;
+use modalkit::prelude::Axis;
 
 use super::base::{
     IambError,
@@ -40,8 +49,10 @@ macro_rules! usage {
     }
 }
 
-const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 2] = [
+const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
     SortColumn(SortFieldUser::PowerLevel, SortOrder::Ascending),
+    SortColumn(SortFieldUser::Knock, SortOrder::Ascending),
+    SortColumn(SortFieldUser::Invite, SortOrder::Descending),
     SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
 ];
 
@@ -53,7 +64,15 @@ const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 
+const DEFAULT_ENABLE_TITLE: bool = true;
+const DEFAULT_ENC_INDICATOR_LOC: EncryptionIndicatorLocation = EncryptionIndicatorLocation::PROMPT;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
+
+const DEFAULT_LOG_LEVEL: &str = if cfg!(feature = "max_level_error") {
+    "error"
+} else {
+    "warn"
+};
 
 const COLORS: [Color; 13] = [
     Color::Blue,
@@ -120,6 +139,20 @@ fn validate_profile_names(names: &BTreeMap<String, ProfileConfig>) {
     }
 }
 
+fn deserialize_from_str_opt<'de, D, T>(deserializer: D) -> Result<Option<T>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+    T: FromStr,
+    <T as FromStr>::Err: fmt::Display,
+{
+    <Option<&'de str>>::deserialize(deserializer)?
+        .map(|s| {
+            let t = T::from_str(s);
+            t.map_err(|e| D::Error::custom(format!("failed to parse string: {e}")))
+        })
+        .transpose()
+}
+
 const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
     None => env!("CARGO_PKG_VERSION"),
     Some(_) => concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")"),
@@ -129,6 +162,9 @@ const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
 #[clap(version = VERSION, about, long_about = None)]
 #[clap(propagate_version = true)]
 pub struct Iamb {
+    #[clap(long, value_parser)]
+    pub completions: Option<clap_complete::Shell>,
+
     #[clap(short = 'P', long, value_parser)]
     pub profile: Option<String>,
 
@@ -147,6 +183,26 @@ pub enum ConfigError {
     #[error("Error loading JSON configuration file: {0}")]
     InvalidJSON(#[from] serde_json::Error),
 }
+
+macro_rules! deserialize_str_with_visitor {
+    ($t: ident, $v: ident) => {
+        impl<'de> Deserialize<'de> for $t {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                deserializer.deserialize_str($v)
+            }
+        }
+    };
+}
+
+deserialize_str_with_visitor!(Keys, KeysVisitor);
+deserialize_str_with_visitor!(VimModes, VimModesVisitor);
+deserialize_str_with_visitor!(UserColor, UserColorVisitor);
+deserialize_str_with_visitor!(EncryptionIndicatorLocation, EncryptionIndicatorLocationVisitor);
+deserialize_str_with_visitor!(NotifyVia, NotifyViaVisitor);
+deserialize_str_with_visitor!(ProxyUrl, ProxyUrlVisitor);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Keys(pub Vec<TerminalKey>, pub String);
@@ -167,15 +223,6 @@ impl Visitor<'_> for KeysVisitor {
             Ok(keys) => Ok(Keys(keys, value.to_string())),
             Err(e) => Err(E::custom(format!("Could not parse key sequence: {e}"))),
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for Keys {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(KeysVisitor)
     }
 }
 
@@ -214,15 +261,6 @@ impl Visitor<'_> for VimModesVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for VimModes {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(VimModesVisitor)
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct UserColor(pub Color);
 pub struct UserColorVisitor;
@@ -258,15 +296,6 @@ impl Visitor<'_> for UserColorVisitor {
             "white" => Ok(UserColor(Color::White)),
             _ => Err(E::custom("Could not parse color")),
         }
-    }
-}
-
-impl<'de> Deserialize<'de> for UserColor {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(UserColorVisitor)
     }
 }
 
@@ -312,16 +341,6 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
-fn merge_sorts(profile: SortOverrides, global: SortOverrides) -> SortOverrides {
-    SortOverrides {
-        chats: profile.chats.or(global.chats),
-        dms: profile.dms.or(global.dms),
-        rooms: profile.rooms.or(global.rooms),
-        spaces: profile.spaces.or(global.spaces),
-        members: profile.members.or(global.members),
-    }
-}
-
 fn merge_maps<K, V>(
     profile: Option<HashMap<K, V>>,
     global: Option<HashMap<K, V>>,
@@ -342,6 +361,93 @@ where
     }
 }
 
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum ReadReceiptTrigger {
+    /// Update read receipts for a room when a window for it is focused, and it is scrolled to the
+    /// last message.
+    #[default]
+    Focused,
+    /// Update read receipts for a room when a window for it is visible, and it is scrolled to the
+    /// last message.
+    Visible,
+    /// Update read receipts for a room whenever some portion of its scrollback is rendered.
+    Scrollback,
+    /// Update read receipts for a room once the user sends a message to it.
+    Message,
+}
+
+impl ReadReceiptTrigger {
+    /// Whether to update read receipts when a room is being rendered.
+    pub fn on_render(&self, last_visible: bool, room_focused: bool) -> bool {
+        match self {
+            Self::Scrollback => true,
+            Self::Focused => last_visible && room_focused,
+            Self::Visible => last_visible,
+            Self::Message => false,
+        }
+    }
+
+    pub fn on_message(&self) -> bool {
+        matches!(self, Self::Message)
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum EncryptionIndicator {
+    /// Always indicate the room's encryption status.
+    #[default]
+    Enabled,
+    /// Never indicate the room's encryption status.
+    Disabled,
+    /// Only indicate the room's encryption status when it is encrypted.
+    OnlyEncrypted,
+    /// Only indicate the room's encryption status when it is unencrypted.
+    OnlyUnencrypted,
+}
+
+bitflags::bitflags! {
+    /// Available options for where to show the encryption status indicator.
+    #[derive(Clone, Debug, Eq, PartialEq)]
+    pub struct EncryptionIndicatorLocation: u8 {
+        const NONE   = 0b00000000;
+        const TITLE  = 0b00000001;
+        const PROMPT = 0b00000010;
+    }
+}
+
+pub struct EncryptionIndicatorLocationVisitor;
+
+impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
+    type Value = EncryptionIndicatorLocation;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid encryption indicator location (e.g. \"title\" or \"prompt\")")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        let mut location = EncryptionIndicatorLocation::NONE;
+
+        for value in value.split('|') {
+            match value.to_ascii_lowercase().as_str() {
+                "title" => location |= EncryptionIndicatorLocation::TITLE,
+                "prompt" => location |= EncryptionIndicatorLocation::PROMPT,
+                _ => {
+                    return Err(E::custom("could not parse into an encryption indicator location"));
+                },
+            };
+        }
+
+        Ok(location)
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum UserDisplayStyle {
@@ -358,6 +464,23 @@ pub enum UserDisplayStyle {
     // it can wind up being the Matrix username if there are display name collisions in the room,
     // in order to avoid any confusion.
     DisplayName,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum SplitDirection {
+    #[default]
+    Horizontal,
+    Vertical,
+}
+
+impl SplitDirection {
+    pub fn to_axis(self) -> Axis {
+        match self {
+            Self::Horizontal => Axis::Horizontal,
+            Self::Vertical => Axis::Vertical,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -408,7 +531,7 @@ impl Visitor<'_> for NotifyViaVisitor {
                 },
                 #[cfg(not(feature = "desktop"))]
                 "desktop" => {
-                    return Err(E::custom("desktop notification support was compiled out"))
+                    return Err(E::custom("desktop notification support was compiled out"));
                 },
                 _ => return Err(E::custom("could not parse into a notify destination")),
             };
@@ -418,13 +541,137 @@ impl Visitor<'_> for NotifyViaVisitor {
     }
 }
 
-impl<'de> Deserialize<'de> for NotifyVia {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_str(NotifyViaVisitor)
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Encryption {
+    indicator: Option<EncryptionIndicator>,
+    indicator_location: Option<EncryptionIndicatorLocation>,
+}
+
+impl Encryption {
+    fn merge(profile: Self, global: Self) -> Self {
+        Encryption {
+            indicator: profile.indicator.or(global.indicator),
+            indicator_location: profile.indicator_location.or(global.indicator_location),
+        }
     }
+
+    pub fn values(self) -> EncryptionValues {
+        EncryptionValues {
+            indicator: self.indicator.unwrap_or_default(),
+            indicator_location: self.indicator_location.unwrap_or(DEFAULT_ENC_INDICATOR_LOC),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct EncryptionValues {
+    pub indicator: EncryptionIndicator,
+    pub indicator_location: EncryptionIndicatorLocation,
+}
+
+impl EncryptionValues {
+    pub fn get_indicator(
+        &self,
+        location: EncryptionIndicatorLocation,
+        state: EncryptionState,
+    ) -> Option<Span<'static>> {
+        if !self.indicator_location.contains(location) {
+            return None;
+        }
+
+        let indicator = match (self.indicator, state) {
+            (EncryptionIndicator::Disabled, _) |
+            (EncryptionIndicator::OnlyUnencrypted, EncryptionState::Encrypted) |
+            (EncryptionIndicator::OnlyEncrypted, EncryptionState::NotEncrypted) => {
+                // User doesn't want to see anything:
+                return None;
+            },
+            (
+                EncryptionIndicator::Enabled | EncryptionIndicator::OnlyEncrypted,
+                EncryptionState::Encrypted,
+            ) => {
+                // Green lock:
+                Span::styled("\u{1F512}\u{FE0E} ", Style::new().fg(Color::LightGreen))
+            },
+            (
+                EncryptionIndicator::Enabled | EncryptionIndicator::OnlyUnencrypted,
+                EncryptionState::NotEncrypted,
+            ) => {
+                // Red unlocked lock:
+                Span::styled("\u{1F513}\u{FE0E} ", Style::new().fg(Color::Red))
+            },
+
+            (_, EncryptionState::Unknown) => {
+                // Yellow question mark:
+                Span::styled("? ", Style::new().fg(Color::Yellow))
+            },
+        };
+
+        Some(indicator)
+    }
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum ProxyUrl {
+    Disabled,
+    Endpoint(Url),
+    #[default]
+    System,
+}
+
+pub struct ProxyUrlVisitor;
+
+impl Visitor<'_> for ProxyUrlVisitor {
+    type Value = ProxyUrl;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid proxy URL (e.g. \"socks5://localhost:9050\")")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        if value.is_empty() {
+            return Ok(ProxyUrl::Disabled);
+        }
+
+        match Url::from_str(value) {
+            Ok(uri) => Ok(ProxyUrl::Endpoint(uri)),
+            Err(e) => Err(E::custom(format!("could not parse {value:?}: {e}"))),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Proxy {
+    /// How and where to proxy the client's requests to the homeserver.
+    url: Option<ProxyUrl>,
+
+    /// An optional value to include in the `Proxy-Authorization` header.
+    #[serde(default, deserialize_with = "deserialize_from_str_opt")]
+    auth: Option<HeaderValue>,
+
+    /// Optional headers to include in requests sent to the proxy.
+    #[serde(default, with = "http_serde::header_map")]
+    headers: HeaderMap,
+}
+
+impl Proxy {
+    pub fn values(self) -> ProxyValues {
+        ProxyValues {
+            url: self.url.unwrap_or_default(),
+            auth: self.auth,
+            headers: self.headers,
+        }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ProxyValues {
+    pub url: ProxyUrl,
+    pub auth: Option<HeaderValue>,
+    pub headers: HeaderMap,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
@@ -447,40 +694,35 @@ pub struct Notifications {
 
 #[derive(Clone)]
 pub struct ImagePreviewValues {
-    pub size: ImagePreviewSize,
-    pub protocol: Option<ImagePreviewProtocolValues>,
+    pub enabled: bool,
+    pub lazy_load: bool,
+    pub size: Size,
+    pub protocol: ImagePreviewProtocolValues,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct ImagePreview {
-    pub size: Option<ImagePreviewSize>,
+    pub enabled: Option<bool>,
+    pub lazy_load: Option<bool>,
+    pub size: Option<Size>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
 impl ImagePreview {
-    fn values(self) -> ImagePreviewValues {
+    pub fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
-            size: self.size.unwrap_or_default(),
-            protocol: self.protocol,
+            enabled: self.enabled.unwrap_or(true),
+            lazy_load: self.lazy_load.unwrap_or(true),
+            size: self.size.unwrap_or(Size { width: 66, height: 10 }),
+            protocol: self.protocol.unwrap_or_default(),
         }
     }
 }
 
-#[derive(Clone, Deserialize)]
-pub struct ImagePreviewSize {
-    pub width: usize,
-    pub height: usize,
-}
-
-impl Default for ImagePreviewSize {
-    fn default() -> Self {
-        ImagePreviewSize { width: 66, height: 10 }
-    }
-}
-
-#[derive(Clone, Deserialize)]
+#[derive(Clone, Debug, Deserialize, Default)]
 pub struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,
+    pub filter: Option<FilterType>,
     pub font_size: Option<(u16, u16)>,
 }
 
@@ -493,7 +735,7 @@ pub struct SortValues {
     pub members: Vec<SortColumn<SortFieldUser>>,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct SortOverrides {
     pub chats: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub dms: Option<Vec<SortColumn<SortFieldRoom>>>,
@@ -503,6 +745,16 @@ pub struct SortOverrides {
 }
 
 impl SortOverrides {
+    fn merge(profile: Self, global: Self) -> Self {
+        Self {
+            chats: profile.chats.or(global.chats),
+            dms: profile.dms.or(global.dms),
+            rooms: profile.rooms.or(global.rooms),
+            spaces: profile.spaces.or(global.spaces),
+            members: profile.members.or(global.members),
+        }
+    }
+
     pub fn values(self) -> SortValues {
         let rooms = self.rooms.unwrap_or_else(|| Vec::from(DEFAULT_ROOM_SORT));
         let chats = self.chats.unwrap_or_else(|| rooms.clone());
@@ -514,15 +766,54 @@ impl SortOverrides {
     }
 }
 
+#[derive(Clone, Debug, Default, Deserialize)]
+pub struct Terminal {
+    pub cursor_shape: Option<CursorShape>,
+    pub enable_extended_keys: Option<bool>,
+    pub enable_title: Option<bool>,
+}
+
+impl Terminal {
+    fn merge(profile: Self, global: Self) -> Self {
+        Self {
+            cursor_shape: profile.cursor_shape.or(global.cursor_shape),
+            enable_extended_keys: profile.enable_extended_keys.or(global.enable_extended_keys),
+            enable_title: profile.enable_title.or(global.enable_title),
+        }
+    }
+
+    pub fn values(self) -> TerminalValues {
+        TerminalValues {
+            cursor_shape: self.cursor_shape.unwrap_or_default(),
+            enable_extended_keys: self.enable_extended_keys,
+            enable_title: self.enable_title.unwrap_or(DEFAULT_ENABLE_TITLE),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct TerminalValues {
+    pub cursor_shape: CursorShape,
+    pub enable_extended_keys: Option<bool>,
+    pub enable_title: bool,
+}
+
+/// The configuration settings to run with, after merging the
+/// per-profile overrides on top of the global settings.
 #[derive(Clone)]
 pub struct TunableValues {
+    pub encryption: EncryptionValues,
+    pub default_markup: MarkupFormat,
+    pub ignorecase: bool,
     pub log_level: String,
     pub max_log_files: usize,
     pub message_shortcode_display: bool,
     pub normal_after_send: bool,
+    pub proxy: ProxyValues,
     pub reaction_display: bool,
     pub reaction_shortcode_display: bool,
     pub read_receipt_send: bool,
+    pub read_receipt_trigger: ReadReceiptTrigger,
     pub read_receipt_display: bool,
     pub request_timeout: u64,
     pub sort: SortValues,
@@ -536,15 +827,40 @@ pub struct TunableValues {
     pub open_command: Option<Vec<String>>,
     pub mouse: Mouse,
     pub notifications: Notifications,
-    pub image_preview: Option<ImagePreviewValues>,
+    pub terminal: TerminalValues,
+    pub image_preview: ImagePreviewValues,
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
     pub input_prompt: Option<String>,
+    pub members_split: Option<SplitDirection>,
+    pub default_split: SplitDirection,
+    pub ssl_verify: bool,
+    pub cache_policy: MediaRetentionPolicy,
 }
 
-#[derive(Clone, Default, Deserialize)]
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Tunables {
+    /// Subsection for overriding encryption-related settings.
+    #[serde(default)]
+    pub encryption: Encryption,
+
+    /// Subsection for configuring an HTTP(S) proxy.
+    pub proxy: Option<Proxy>,
+
+    /// Subsection for overriding sort orders in UI lists.
+    #[serde(default)]
+    pub sort: SortOverrides,
+
+    /// Subsection for overriding terminal settings.
+    #[serde(default)]
+    pub terminal: Terminal,
+
+    /// Subsection for overriding how specific Matrix users are rendered.
+    pub users: Option<UserOverrides>,
+
+    pub default_markup: Option<MarkupFormat>,
+    pub ignorecase: Option<bool>,
     pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
     pub message_shortcode_display: Option<bool>,
@@ -552,14 +868,12 @@ pub struct Tunables {
     pub reaction_display: Option<bool>,
     pub reaction_shortcode_display: Option<bool>,
     pub read_receipt_send: Option<bool>,
+    pub read_receipt_trigger: Option<ReadReceiptTrigger>,
     pub read_receipt_display: Option<bool>,
     pub request_timeout: Option<u64>,
-    #[serde(default)]
-    pub sort: SortOverrides,
     pub state_event_display: Option<bool>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
-    pub users: Option<UserOverrides>,
     pub username_display: Option<UserDisplayStyle>,
     pub message_user_color: Option<bool>,
     pub default_room: Option<String>,
@@ -571,11 +885,27 @@ pub struct Tunables {
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
     pub input_prompt: Option<String>,
+    pub members_split: Option<SplitDirection>,
+    pub default_split: Option<SplitDirection>,
+    pub ssl_verify: Option<bool>,
+    pub cache_policy: Option<MediaRetentionPolicy>,
 }
 
 impl Tunables {
     fn merge(self, other: Self) -> Self {
         Tunables {
+            encryption: Encryption::merge(self.encryption, other.encryption),
+            sort: SortOverrides::merge(self.sort, other.sort),
+            terminal: Terminal::merge(self.terminal, other.terminal),
+            users: merge_maps(self.users, other.users),
+
+            // Proxy configuration sub-field do *not* get merged, so that a
+            // per-profile override won't inherit auth or headers from the
+            // global settings.
+            proxy: self.proxy.or(other.proxy),
+
+            default_markup: self.default_markup.or(other.default_markup),
+            ignorecase: self.ignorecase.or(other.ignorecase),
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
             message_shortcode_display: self
@@ -587,13 +917,12 @@ impl Tunables {
                 .reaction_shortcode_display
                 .or(other.reaction_shortcode_display),
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
+            read_receipt_trigger: self.read_receipt_trigger.or(other.read_receipt_trigger),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
             request_timeout: self.request_timeout.or(other.request_timeout),
-            sort: merge_sorts(self.sort, other.sort),
             state_event_display: self.state_event_display.or(other.state_event_display),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
-            users: merge_maps(self.users, other.users),
             username_display: self.username_display.or(other.username_display),
             message_user_color: self.message_user_color.or(other.message_user_color),
             default_room: self.default_room.or(other.default_room),
@@ -607,40 +936,87 @@ impl Tunables {
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
             input_prompt: self.input_prompt.or(other.input_prompt),
+            members_split: self.members_split.or(other.members_split),
+            default_split: self.default_split.or(other.default_split),
+            ssl_verify: self.ssl_verify.or(other.ssl_verify),
+            cache_policy: self.cache_policy.or(other.cache_policy),
         }
     }
 
     fn values(self) -> TunableValues {
         TunableValues {
-            log_level: self.log_level.unwrap_or_else(|| "warn".to_string()),
+            encryption: self.encryption.values(),
+            proxy: self.proxy.unwrap_or_default().values(),
+            sort: self.sort.values(),
+            terminal: self.terminal.values(),
+            users: self.users.unwrap_or_default(),
+
+            default_markup: self.default_markup.unwrap_or_default(),
+            log_level: self.log_level.unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_owned()),
+            ignorecase: self.ignorecase.unwrap_or(false),
             max_log_files: self.max_log_files.unwrap_or(7),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
             reaction_display: self.reaction_display.unwrap_or(true),
             reaction_shortcode_display: self.reaction_shortcode_display.unwrap_or(false),
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
+            read_receipt_trigger: self.read_receipt_trigger.unwrap_or_default(),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
-            sort: self.sort.values(),
             state_event_display: self.state_event_display.unwrap_or(true),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
-            users: self.users.unwrap_or_default(),
             username_display: self.username_display.unwrap_or_default(),
             message_user_color: self.message_user_color.unwrap_or(false),
             default_room: self.default_room,
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),
-            image_preview: self.image_preview.map(ImagePreview::values),
+            image_preview: self.image_preview.unwrap_or_default().values(),
             user_gutter_width: self.user_gutter_width.unwrap_or(30),
             external_edit_file_suffix: self
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
             input_prompt: self.input_prompt,
+            members_split: self.members_split,
+            default_split: self.default_split.unwrap_or_default(),
+            ssl_verify: self.ssl_verify.unwrap_or(true),
+            cache_policy: self.cache_policy.unwrap_or_default(),
         }
     }
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum CursorShape {
+    #[default]
+    Default,
+    Block,
+    Line,
+    Underline,
+}
+
+impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
+    fn from(shape: CursorShape) -> Self {
+        match shape {
+            CursorShape::Default => Self::DefaultUserShape,
+            CursorShape::Block => Self::SteadyBlock,
+            CursorShape::Line => Self::SteadyBar,
+            CursorShape::Underline => Self::SteadyUnderScore,
+        }
+    }
+}
+
+#[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum MarkupFormat {
+    Html,
+    #[default]
+    Markdown,
+    Plaintext,
 }
 
 #[derive(Clone)]
@@ -649,19 +1025,17 @@ pub struct DirectoryValues {
     pub data: PathBuf,
     pub logs: PathBuf,
     pub downloads: Option<PathBuf>,
-    pub image_previews: PathBuf,
 }
 
 impl DirectoryValues {
     fn create_dir_all(&self) -> std::io::Result<()> {
         use std::fs::create_dir_all;
 
-        let Self { cache, data, logs, downloads, image_previews } = self;
+        let Self { cache, data, logs, downloads } = self;
 
         create_dir_all(cache)?;
         create_dir_all(data)?;
         create_dir_all(logs)?;
-        create_dir_all(image_previews)?;
 
         if let Some(downloads) = downloads {
             create_dir_all(downloads)?;
@@ -677,7 +1051,6 @@ pub struct Directories {
     pub data: Option<String>,
     pub logs: Option<String>,
     pub downloads: Option<String>,
-    pub image_previews: Option<String>,
 }
 
 impl Directories {
@@ -687,7 +1060,6 @@ impl Directories {
             data: self.data.or(other.data),
             logs: self.logs.or(other.logs),
             downloads: self.downloads.or(other.downloads),
-            image_previews: self.image_previews.or(other.image_previews),
         }
     }
 
@@ -742,20 +1114,7 @@ impl Directories {
             })
             .or_else(dirs::download_dir);
 
-        let image_previews = self
-            .image_previews
-            .map(|dir| {
-                let dir = shellexpand::full(&dir)
-                    .expect("unable to expand shell variables in dirs.cache");
-                Path::new(dir.as_ref()).to_owned()
-            })
-            .unwrap_or_else(|| {
-                let mut dir = cache.clone();
-                dir.push("image_preview_downloads");
-                dir
-            });
-
-        DirectoryValues { cache, data, logs, downloads, image_previews }
+        DirectoryValues { cache, data, logs, downloads }
     }
 }
 
@@ -792,6 +1151,7 @@ pub enum Layout {
 #[derive(Clone, Deserialize)]
 pub struct ProfileConfig {
     pub user_id: OwnedUserId,
+    pub password_file: Option<PathBuf>,
     pub url: Option<Url>,
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
@@ -913,10 +1273,10 @@ impl ApplicationSettings {
                         For more information try '--help'",
                     );
                 }
-                if let Ok(i) = input.trim().parse::<usize>() {
-                    if i < profiles.len() {
-                        break profiles.into_iter().nth(i).unwrap();
-                    }
+                if let Ok(i) = input.trim().parse::<usize>() &&
+                    i < profiles.len()
+                {
+                    break profiles.into_iter().nth(i).unwrap();
                 }
                 println!("\nInvalid index.");
             }
@@ -1051,8 +1411,8 @@ impl ApplicationSettings {
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
             (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
             (None, UserDisplayStyle::DisplayName) => {
-                if let Some(display) = info.display_names.get(user_id) {
-                    Cow::Borrowed(display.as_str())
+                if let Some(name) = info.display_names.get(user_id) {
+                    name
                 } else {
                     Cow::Borrowed(user_id.as_str())
                 }
@@ -1213,6 +1573,82 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_tunables_proxy_invalid() {
+        let res =
+            serde_json::from_str::<Tunables>(r#"{"proxy": {"url": "localhost"}}"#).unwrap_err();
+
+        // Should result in a validation error:
+        assert_eq!(res.classify(), serde_json::error::Category::Data);
+    }
+
+    #[test]
+    fn test_parse_tunables_proxy_empty() {
+        let res: Tunables = serde_json::from_str(r#"{"proxy": {"url": ""}}"#).unwrap();
+        let proxy = res.proxy.unwrap();
+        assert_eq!(proxy.url.unwrap(), ProxyUrl::Disabled);
+    }
+
+    #[test]
+    fn test_parse_tunables_proxy_socks5() {
+        let res: Tunables =
+            serde_json::from_str(r#"{"proxy": {"url": "socks5://localhost:1080"}}"#).unwrap();
+        let proxy = res.proxy.unwrap();
+        let ProxyUrl::Endpoint(url) = proxy.url.unwrap() else {
+            panic!("should parse ProxyUrl::Endpoint")
+        };
+
+        assert_eq!(url.scheme(), "socks5");
+        assert_eq!(url.host_str().unwrap(), "localhost");
+        assert_eq!(url.port().unwrap(), 1080);
+        assert_eq!(url.authority(), "localhost:1080");
+    }
+
+    #[test]
+    fn test_parse_tunables_proxy_https() {
+        let res: Tunables = serde_json::from_str(
+            r#"{"proxy": {"url": "https://localhost:8080","auth": "Bearer abcd1234","headers":{"User-Agent": "iamb"}}}"#
+        ).unwrap();
+        let proxy = res.proxy.unwrap();
+        let ProxyUrl::Endpoint(url) = proxy.url.unwrap() else {
+            panic!("should parse ProxyUrl::Endpoint")
+        };
+
+        // Verify URL fields:
+        assert_eq!(url.scheme(), "https");
+        assert_eq!(url.host_str().unwrap(), "localhost");
+        assert_eq!(url.port().unwrap(), 8080);
+        assert_eq!(url.authority(), "localhost:8080");
+
+        // Verify our `Proxy-Authorization` value:
+        assert_eq!(proxy.auth.unwrap(), "Bearer abcd1234");
+
+        // Verify our custom header is present:
+        assert_eq!(proxy.headers.len(), 1);
+        assert_eq!(proxy.headers.get("user-agent").unwrap(), "iamb");
+    }
+
+    #[test]
+    fn test_parse_tunables_proxy_merge() {
+        let global: Tunables = serde_json::from_str(
+            r#"{"proxy": {"url": "https://localhost:8080","auth": "Bearer abcd1234","headers":{"User-Agent": "iamb"}}}"#
+        ).unwrap();
+        let profile: Tunables =
+            serde_json::from_str(r#"{"proxy": {"url": "socks5://localhost:1080"}}"#).unwrap();
+
+        // The configuration merge should select the entirety of the profile proxy config,
+        // and not merge subfields, to ensure that things like `auth` and `headers` are
+        // not ever sent to a `url` they were meant for.
+        let merged = profile.merge(global).values();
+        let ProxyUrl::Endpoint(url) = merged.proxy.url else {
+            panic!("should parse ProxyUrl::Endpoint")
+        };
+        assert_eq!(url.scheme(), "socks5");
+        assert_eq!(url.authority(), "localhost:1080");
+        assert_eq!(merged.proxy.auth, None);
+        assert_eq!(merged.proxy.headers.is_empty(), true);
+    }
+
+    #[test]
     fn test_parse_layout() {
         let user = WindowPath::UserId(user_id!("@user:example.com").to_owned());
         let alias = WindowPath::AliasId(OwnedRoomAliasId::try_from("#room:example.com").unwrap());
@@ -1312,6 +1748,16 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_cursor_shape() {
+        assert_eq!(CursorShape::Default, CursorShape::default());
+        assert_eq!(CursorShape::Default, serde_json::from_str(r#""default""#).unwrap());
+        assert_eq!(CursorShape::Block, serde_json::from_str(r#""block""#).unwrap());
+        assert_eq!(CursorShape::Line, serde_json::from_str(r#""line""#).unwrap());
+        assert_eq!(CursorShape::Underline, serde_json::from_str(r#""underline""#).unwrap());
+        assert!(serde_json::from_str::<CursorShape>(r#""beam""#).is_err());
+    }
+
+    #[test]
     fn test_load_example_config_toml() {
         let path = PathBuf::from("config.example.toml");
         let config = IambConfig::load_toml(&path).expect("can load example_config.toml");
@@ -1332,5 +1778,108 @@ mod tests {
         assert!(dirs.is_some());
         assert!(layout.is_some());
         assert!(macros.is_some());
+    }
+
+    #[test]
+    fn test_encryption_indicator_enabled() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::Enabled,
+            indicator_location: EncryptionIndicatorLocation::TITLE,
+        };
+
+        // Always shows in the title:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+                .is_some()
+        );
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
+
+        // Doesn't show in the prompt:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+                .is_none()
+        );
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+    }
+
+    #[test]
+    fn test_encryption_indicator_disabled() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::Disabled,
+            indicator_location: EncryptionIndicatorLocation::TITLE,
+        };
+
+        // Never shows in the title or the prompt:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+                .is_none()
+        );
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+                .is_none()
+        );
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+    }
+
+    #[test]
+    fn test_encryption_indicator_only_encrypted() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::OnlyEncrypted,
+            indicator_location: EncryptionIndicatorLocation::PROMPT,
+        };
+
+        // Shows in the prompt when encrypted or unknown:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_some());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+
+        // But is hidden when unencrypted:
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+                .is_none()
+        );
+
+        // Doesn't show in the title:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+                .is_none()
+        );
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
+    }
+    #[test]
+    fn test_encryption_indicator_only_unencrypted() {
+        use EncryptionState::*;
+
+        let enc = EncryptionValues {
+            indicator: EncryptionIndicator::OnlyUnencrypted,
+            indicator_location: EncryptionIndicatorLocation::all(),
+        };
+
+        // Shows in both the prompt and title when unencrypted or unknown:
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+                .is_some()
+        );
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+                .is_some()
+        );
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+
+        // But is hidden when encrypted:
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
+        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
     }
 }

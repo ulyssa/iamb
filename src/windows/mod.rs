@@ -6,30 +6,29 @@
 //! Additionally, some of the iamb commands delegate behaviour to the current UI element. For
 //! example, [sending messages][crate::base::SendAction] delegate to the [room window][RoomState],
 //! where we have the message bar and room ID easily accessible and resettable.
-use std::cmp::{Ord, Ordering, PartialOrd};
+use std::cmp::{Ord, Ordering};
 use std::fmt::{self, Display};
 use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use matrix_sdk::{
-    encryption::verification::{format_emojis, SasVerification},
+    RoomState as MatrixRoomState,
     room::{Room as MatrixRoom, RoomMember},
     ruma::{
-        events::room::member::MembershipState,
-        events::tag::{TagName, Tags},
         OwnedRoomAliasId,
         OwnedRoomId,
         RoomAliasId,
         RoomId,
+        events::room::member::MembershipState,
+        events::tag::{TagName, Tags},
     },
-    RoomState as MatrixRoomState,
 };
 
 use ratatui::{
     buffer::Buffer,
     layout::{Alignment, Rect},
-    style::{Modifier as StyleModifier, Style},
+    style::{Color, Modifier as StyleModifier, Style},
     text::{Line, Span, Text},
     widgets::StatefulWidget,
 };
@@ -51,11 +50,11 @@ use modalkit::{
 };
 
 use modalkit_ratatui::{
-    list::{List, ListCursor, ListItem, ListState},
     TermOffset,
     TerminalCursor,
     Window,
     WindowOps,
+    list::{List, ListCursor, ListItem, ListState},
 };
 
 use crate::base::{
@@ -78,12 +77,16 @@ use crate::base::{
     SpaceAction,
     UnreadInfo,
 };
+use crate::windows::room::room_command;
 
-use self::{room::RoomState, welcome::WelcomeState};
+use self::room::RoomState;
+use self::verify::VerifyItem;
+use self::welcome::WelcomeState;
 use crate::message::MessageTimeStamp;
 use feruca::Collator;
 
 pub mod room;
+pub mod verify;
 pub mod welcome;
 
 type MatrixRoomInfo = Arc<(MatrixRoom, Option<Tags>)>;
@@ -106,7 +109,7 @@ fn bold_spans(s: &str) -> Line<'_> {
 }
 
 #[inline]
-fn selected_style(selected: bool) -> Style {
+pub fn selected_style(selected: bool) -> Style {
     if selected {
         Style::default().add_modifier(StyleModifier::REVERSED)
     } else {
@@ -124,19 +127,36 @@ fn selected_text(s: &str, selected: bool) -> Text<'_> {
     Text::from(selected_span(s, selected))
 }
 
-fn name_and_labels(name: &str, unread: bool, style: Style) -> (Span<'_>, Vec<Vec<Span<'_>>>) {
-    let name_style = if unread {
+fn name_and_labels<'a>(
+    name: &'a str,
+    unread: &UnreadInfo,
+    room: &MatrixRoom,
+    style: Style,
+) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
+    // TODO: use different colors for "mention", "notification", "muted room"
+    let name_style = if unread.is_unread() {
         style.add_modifier(StyleModifier::BOLD)
     } else {
         style
     };
 
     let name = Span::styled(name, name_style);
-    let labels = if unread {
-        vec![vec![Span::styled("Unread", style)]]
-    } else {
-        vec![]
-    };
+
+    let mut labels = vec![];
+
+    match room.state() {
+        MatrixRoomState::Joined => {},
+        MatrixRoomState::Left => labels.push(vec![Span::styled("Left", style)]),
+        MatrixRoomState::Banned => labels.push(vec![Span::styled("Banned", style)]),
+        MatrixRoomState::Knocked => labels.push(vec![Span::styled("Knocked", style)]),
+        MatrixRoomState::Invited => labels.push(vec![Span::styled("Invited", style)]),
+    }
+
+    if unread.unread_mentions > 0 {
+        labels.push(vec![Span::styled("Unread Mention", style)]);
+    } else if unread.is_unread() {
+        labels.push(vec![Span::styled("Unread", style)]);
+    }
 
     (name, labels)
 }
@@ -163,6 +183,14 @@ fn user_cmp(a: &MemberItem, b: &MemberItem, field: &SortFieldUser) -> Ordering {
         SortFieldUser::UserId => a_id.cmp(b_id),
         SortFieldUser::LocalPart => a_id.localpart().cmp(b_id.localpart()),
         SortFieldUser::Server => a_id.server_name().cmp(b_id.server_name()),
+        SortFieldUser::Knock => {
+            // Sort knocks before non-knocks:
+            b.is_knock().cmp(&a.is_knock())
+        },
+        SortFieldUser::Invite => {
+            // Sort invites before non-invites:
+            b.is_invite().cmp(&a.is_invite())
+        },
         SortFieldUser::PowerLevel => {
             // Sort higher power levels towards the top of the list.
             b.member.power_level().cmp(&a.member.power_level())
@@ -194,6 +222,17 @@ fn room_cmp<T: RoomLikeItem>(
         SortFieldRoom::Name => collator.collate(a.name(), b.name()),
         SortFieldRoom::Alias => some_cmp(a.alias(), b.alias(), Ord::cmp),
         SortFieldRoom::RoomId => a.room_id().cmp(b.room_id()),
+        SortFieldRoom::Server => {
+            let a = a
+                .alias()
+                .map(RoomAliasId::server_name)
+                .or_else(|| a.room_id().server_name());
+            let b = b
+                .alias()
+                .map(RoomAliasId::server_name)
+                .or_else(|| b.room_id().server_name());
+            some_cmp(a, b, Ord::cmp)
+        },
         SortFieldRoom::Unread => {
             // Sort true (unread) before false (read)
             b.is_unread().cmp(&a.is_unread())
@@ -329,6 +368,7 @@ macro_rules! delegate {
             IambWindow::Welcome($id) => $e,
             IambWindow::ChatList($id) => $e,
             IambWindow::UnreadList($id) => $e,
+            IambWindow::MentionsList($id) => $e,
         }
     };
 }
@@ -343,6 +383,7 @@ pub enum IambWindow {
     Welcome(WelcomeState),
     ChatList(ChatListState),
     UnreadList(UnreadListState),
+    MentionsList(MentionsListState),
 }
 
 impl IambWindow {
@@ -386,8 +427,22 @@ impl IambWindow {
         ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
-        if let IambWindow::Room(w) = self {
-            w.room_command(act, ctx, store).await
+        let id = match self {
+            IambWindow::Room(state) => Some(state.id()),
+            IambWindow::MemberList(_, room_id, _) => Some(&**room_id),
+
+            IambWindow::DirectList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::RoomList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::SpaceList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::ChatList(state) | IambWindow::UnreadList(state) => {
+                state.get().map(|state| state.room_id())
+            },
+
+            _ => None,
+        };
+
+        if let Some(id) = id {
+            room_command(id, act, ctx, store).await
         } else {
             return Err(IambError::NoSelectedRoomOrSpace.into());
         }
@@ -412,6 +467,7 @@ pub type MemberListState = ListState<MemberItem, IambInfo>;
 pub type RoomListState = ListState<RoomItem, IambInfo>;
 pub type ChatListState = ListState<GenericChatItem, IambInfo>;
 pub type UnreadListState = ListState<GenericChatItem, IambInfo>;
+pub type MentionsListState = ListState<GenericChatItem, IambInfo>;
 pub type SpaceListState = ListState<SpaceItem, IambInfo>;
 pub type VerifyListState = ListState<VerifyItem, IambInfo>;
 
@@ -506,6 +562,10 @@ impl TerminalCursor for IambWindow {
     fn get_term_cursor(&self) -> Option<TermOffset> {
         delegate!(self, w => w.get_term_cursor())
     }
+
+    fn hide_term_cursor(&self) -> bool {
+        delegate!(self, w => w.hide_term_cursor())
+    }
 }
 
 impl WindowOps<IambInfo> for IambWindow {
@@ -526,6 +586,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("No direct messages yet!")
@@ -539,18 +600,18 @@ impl WindowOps<IambInfo> for IambWindow {
                     None => true,
                 };
 
-                if need_fetch {
-                    if let Ok(mems) = store.application.worker.members(room_id.clone()) {
-                        let mut items = mems
-                            .into_iter()
-                            .map(|m| MemberItem::new(m, room_id.clone()))
-                            .collect::<Vec<_>>();
-                        let fields = &store.application.settings.tunables.sort.members;
-                        items.sort_by(|a, b| user_fields_cmp(a, b, fields));
-                        state.set(items);
-                        *last_fetch = Some(Instant::now());
-                    }
+                if need_fetch && let Ok(mems) = store.application.worker.members(room_id.clone()) {
+                    let mut items = mems
+                        .into_iter()
+                        .map(|m| MemberItem::new(m, room_id.clone()))
+                        .collect::<Vec<_>>();
+                    let fields = &store.application.settings.tunables.sort.members;
+                    items.sort_by(|a, b| user_fields_cmp(a, b, fields));
+                    state.set(items);
+                    *last_fetch = Some(Instant::now());
                 }
+
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("No users here yet!")
@@ -572,6 +633,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You haven't joined any rooms yet")
@@ -604,6 +666,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You do not have rooms or dms yet")
@@ -638,9 +701,45 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You do not have any unreads yet")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(area, buf, state);
+            },
+            IambWindow::MentionsList(state) => {
+                let mut items = store
+                    .application
+                    .sync_info
+                    .rooms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, false))
+                    .filter(GenericChatItem::has_mention)
+                    .collect::<Vec<_>>();
+
+                let dms = store
+                    .application
+                    .sync_info
+                    .dms
+                    .clone()
+                    .into_iter()
+                    .map(|room_info| GenericChatItem::new(room_info, store, true))
+                    .filter(GenericChatItem::has_mention);
+
+                items.extend(dms);
+
+                let fields = &store.application.settings.tunables.sort.chats;
+                let collator = &mut store.application.collator;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+
+                state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+
+                List::new(store)
+                    .empty_message("You do not have any unread mentions yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
                     .render(area, buf, state);
@@ -659,6 +758,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You haven't joined any spaces yet")
@@ -667,13 +767,22 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::VerifyList(state) => {
-                let verifications = &store.application.verifications;
-                let mut items = verifications.iter().map(VerifyItem::from).collect::<Vec<_>>();
+                let mut items = store
+                    .application
+                    .verifications
+                    .iter()
+                    .map(|(_, req)| VerifyItem::new(req.to_owned()))
+                    .collect::<Vec<_>>();
 
                 // Sort the active verifications towards the top.
                 items.sort();
 
+                if let Some(item) = items.first_mut() {
+                    item.show_help();
+                }
+
                 state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("No in-progress verifications")
@@ -698,6 +807,7 @@ impl WindowOps<IambInfo> for IambWindow {
             IambWindow::Welcome(w) => w.dup(store).into(),
             IambWindow::ChatList(w) => w.dup(store).into(),
             IambWindow::UnreadList(w) => w.dup(store).into(),
+            IambWindow::MentionsList(w) => w.dup(store).into(),
         }
     }
 
@@ -739,6 +849,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => IambId::Welcome,
             IambWindow::ChatList(_) => IambId::ChatList,
             IambWindow::UnreadList(_) => IambId::UnreadList,
+            IambWindow::MentionsList(_) => IambId::MentionsList,
         }
     }
 
@@ -751,6 +862,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
             IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::MentionsList(_) => bold_spans("Unread Mentions"),
 
             IambWindow::Room(w) => {
                 let title = store.application.get_room_title(w.id());
@@ -779,6 +891,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
             IambWindow::ChatList(_) => bold_spans("DMs & Rooms"),
             IambWindow::UnreadList(_) => bold_spans("Unread Messages"),
+            IambWindow::MentionsList(_) => bold_spans("Unread Mentions"),
 
             IambWindow::Room(w) => w.get_title(store),
             IambWindow::MemberList(state, room_id, _) => {
@@ -845,6 +958,11 @@ impl Window<IambInfo> for IambWindow {
 
                 Ok(IambWindow::UnreadList(list))
             },
+            IambId::MentionsList => {
+                let list = MentionsListState::new(IambBufferId::MentionsList, vec![]);
+
+                Ok(IambWindow::MentionsList(list))
+            },
         }
     }
 
@@ -896,7 +1014,7 @@ impl GenericChatItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -914,6 +1032,11 @@ impl GenericChatItem {
     #[inline]
     fn tags(&self) -> &Option<Tags> {
         &self.room_info.deref().1
+    }
+
+    #[inline]
+    fn has_mention(&self) -> bool {
+        self.unread.has_mention()
     }
 }
 
@@ -964,9 +1087,8 @@ impl ListItem<IambInfo> for GenericChatItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
         let mut spans = vec![name];
 
         labels.push(if self.is_dm {
@@ -1015,7 +1137,7 @@ impl RoomItem {
         let info = store.application.rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         if let Some(alias) = &alias {
@@ -1083,9 +1205,8 @@ impl ListItem<IambInfo> for RoomItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1123,12 +1244,13 @@ pub struct DirectItem {
 
 impl DirectItem {
     fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
+        let room = &room_info.deref().0;
         let room_id = room_info.0.room_id().to_owned();
         let alias = room_info.0.canonical_alias();
 
         let info = store.application.rooms.get_or_default(room_id);
         let name = info.name.clone().unwrap_or_default();
-        let unread = info.unreads(&store.application.settings);
+        let unread = info.unreads(room);
         info.tags.clone_from(&room_info.deref().1);
 
         DirectItem { room_info, name, alias, unread }
@@ -1192,9 +1314,8 @@ impl ListItem<IambInfo> for DirectItem {
         _: &ViewportContext<ListCursor>,
         _: &mut ProgramStore,
     ) -> Text<'_> {
-        let unread = self.unread.is_unread();
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, unread, style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
         let mut spans = vec![name];
 
         if let Some(tags) = &self.tags() {
@@ -1320,208 +1441,6 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for SpaceItem {
 }
 
 #[derive(Clone)]
-pub struct VerifyItem {
-    user_dev: String,
-    sasv1: SasVerification,
-}
-
-impl VerifyItem {
-    fn new(user_dev: String, sasv1: SasVerification) -> Self {
-        VerifyItem { user_dev, sasv1 }
-    }
-
-    fn show_item(&self) -> String {
-        let state = if self.sasv1.is_done() {
-            "done"
-        } else if self.sasv1.is_cancelled() {
-            "cancelled"
-        } else if self.sasv1.emoji().is_some() {
-            "accepted"
-        } else {
-            "not accepted"
-        };
-
-        if self.sasv1.is_self_verification() {
-            let device = self.sasv1.other_device();
-
-            if let Some(display_name) = device.display_name() {
-                format!("Device verification with {display_name} ({state})")
-            } else {
-                format!("Device verification with device {} ({})", device.device_id(), state)
-            }
-        } else {
-            format!("User Verification with {} ({})", self.sasv1.other_user_id(), state)
-        }
-    }
-}
-
-impl PartialEq for VerifyItem {
-    fn eq(&self, other: &Self) -> bool {
-        self.user_dev == other.user_dev
-    }
-}
-
-impl Eq for VerifyItem {}
-
-impl Ord for VerifyItem {
-    fn cmp(&self, other: &Self) -> Ordering {
-        fn state_val(sas: &SasVerification) -> usize {
-            if sas.is_done() {
-                return 3;
-            } else if sas.is_cancelled() {
-                return 2;
-            } else {
-                return 1;
-            }
-        }
-
-        fn device_val(sas: &SasVerification) -> usize {
-            if sas.is_self_verification() {
-                return 1;
-            } else {
-                return 2;
-            }
-        }
-
-        let state1 = state_val(&self.sasv1);
-        let state2 = state_val(&other.sasv1);
-
-        let dev1 = device_val(&self.sasv1);
-        let dev2 = device_val(&other.sasv1);
-
-        let scmp = state1.cmp(&state2);
-        let dcmp = dev1.cmp(&dev2);
-
-        scmp.then(dcmp).then_with(|| {
-            let did1 = self.sasv1.other_device().device_id();
-            let did2 = other.sasv1.other_device().device_id();
-
-            did1.cmp(did2)
-        })
-    }
-}
-
-impl PartialOrd for VerifyItem {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl From<(&String, &SasVerification)> for VerifyItem {
-    fn from((user_dev, sasv1): (&String, &SasVerification)) -> Self {
-        VerifyItem::new(user_dev.clone(), sasv1.clone())
-    }
-}
-
-impl Display for VerifyItem {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        if self.sasv1.is_done() {
-            return Ok(());
-        }
-
-        if self.sasv1.is_cancelled() {
-            write!(f, ":verify request {}", self.sasv1.other_user_id())
-        } else if self.sasv1.emoji().is_some() {
-            write!(f, ":verify confirm {}", self.user_dev)
-        } else {
-            write!(f, ":verify accept {}", self.user_dev)
-        }
-    }
-}
-
-impl ListItem<IambInfo> for VerifyItem {
-    fn show(
-        &self,
-        selected: bool,
-        _: &ViewportContext<ListCursor>,
-        _: &mut ProgramStore,
-    ) -> Text<'_> {
-        let mut lines = vec![];
-
-        let bold = Style::default().add_modifier(StyleModifier::BOLD);
-        let item = Span::styled(self.show_item(), selected_style(selected));
-        lines.push(Line::from(item));
-
-        if self.sasv1.is_done() {
-            // Print nothing.
-        } else if self.sasv1.is_cancelled() {
-            if let Some(info) = self.sasv1.cancel_info() {
-                lines.push(Line::from(format!("    Cancelled: {}", info.reason())));
-                lines.push(Line::from(""));
-            }
-
-            lines.push(Line::from("    You can start a new verification request with:"));
-        } else if let Some(emoji) = self.sasv1.emoji() {
-            lines.push(Line::from(
-                "    Both devices should see the following Emoji sequence:".to_string(),
-            ));
-            lines.push(Line::from(""));
-
-            for line in format_emojis(emoji).lines() {
-                lines.push(Line::from(format!("    {line}")));
-            }
-
-            lines.push(Line::from(""));
-            lines.push(Line::from("    If they don't match, run:"));
-            lines.push(Line::from(""));
-            lines.push(Line::from(Span::styled(
-                format!(":verify mismatch {}", self.user_dev),
-                bold,
-            )));
-            lines.push(Line::from(""));
-            lines.push(Line::from("    If everything looks right, you can confirm with:"));
-        } else {
-            lines.push(Line::from("    To accept this request, run:"));
-        }
-
-        let cmd = self.to_string();
-
-        if !cmd.is_empty() {
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![Span::from("        "), Span::styled(cmd, bold)]));
-            lines.push(Line::from(""));
-            lines.push(Line::from(vec![
-                Span::from("You can copy the above command with "),
-                Span::styled("yy", bold),
-                Span::from(" and then execute it with "),
-                Span::styled("@\"", bold),
-            ]));
-        }
-
-        Text::from(lines)
-    }
-
-    fn get_word(&self) -> Option<String> {
-        None
-    }
-}
-
-impl Promptable<ProgramContext, ProgramStore, IambInfo> for VerifyItem {
-    fn prompt(
-        &mut self,
-        act: &PromptAction,
-        _: &ProgramContext,
-        _: &mut ProgramStore,
-    ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
-        match act {
-            PromptAction::Submit => Ok(vec![]),
-            PromptAction::Abort(_) => {
-                let msg = "Cannot abort entry inside a list";
-                let err = EditError::Failure(msg.into());
-
-                Err(err)
-            },
-            PromptAction::Recall(..) => {
-                let msg = "Cannot recall history inside a list";
-                let err = EditError::Failure(msg.into());
-
-                Err(err)
-            },
-        }
-    }
-}
-
-#[derive(Clone)]
 pub struct MemberItem {
     member: RoomMember,
     room_id: OwnedRoomId,
@@ -1530,6 +1449,14 @@ pub struct MemberItem {
 impl MemberItem {
     fn new(member: RoomMember, room_id: OwnedRoomId) -> Self {
         Self { member, room_id }
+    }
+
+    fn is_knock(&self) -> bool {
+        self.member.membership() == &MembershipState::Knock
+    }
+
+    fn is_invite(&self) -> bool {
+        self.member.membership() == &MembershipState::Invite
     }
 }
 
@@ -1546,42 +1473,79 @@ impl ListItem<IambInfo> for MemberItem {
         _: &ViewportContext<ListCursor>,
         store: &mut ProgramStore,
     ) -> Text<'_> {
+        use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
+
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let user_id = self.member.user_id();
 
         let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
         let color = color.unwrap_or_else(|| super::config::user_color(user_id.as_str()));
-        let mut style = super::config::user_style_from_color(color);
 
-        if selected {
-            style = style.add_modifier(StyleModifier::REVERSED);
-        }
+        let style = if selected {
+            // Ensure the whole item has the same color when it's selected:
+            Style::default().fg(color).add_modifier(StyleModifier::REVERSED)
+        } else {
+            Style::default()
+        };
+        let user_style = style.patch(super::config::user_style_from_color(color));
+        let role_style = style.add_modifier(StyleModifier::BOLD);
 
         let mut spans = vec![];
-        let mut parens = false;
+        let mut tags = vec![];
 
         if let Some(name) = name {
-            spans.push(Span::styled(name, style));
-            parens = true;
+            spans.push(Span::styled(name, user_style));
+            tags.push(Span::styled(user_id.as_str(), user_style));
         } else if let Some(display) = info.display_names.get(user_id) {
-            spans.push(Span::styled(display.clone(), style));
-            parens = true;
+            spans.push(Span::styled(display.into_owned(), user_style));
+            tags.push(Span::styled(user_id.as_str(), user_style));
+        } else {
+            spans.push(Span::styled(user_id.as_str(), user_style));
         }
 
-        spans.extend(parens.then_some(Span::styled(" (", style)));
-        spans.push(Span::styled(user_id.as_str(), style));
-        spans.extend(parens.then_some(Span::styled(")", style)));
+        let roles = match self.member.power_level() {
+            UserPowerLevel::Infinite => {
+                vec![
+                    Span::styled("Admin", role_style),
+                    Span::styled("Creator", role_style),
+                ]
+            },
+            UserPowerLevel::Int(n) => {
+                match i64::from(n) {
+                    0 => vec![],
+                    50 => vec![Span::styled("Moderator", role_style)],
+                    100 => vec![Span::styled("Admin", role_style)],
+                    _ => {
+                        let custom = format!("Power Level {n}");
+                        vec![Span::styled(custom, role_style)]
+                    },
+                }
+            },
+            _ => vec![],
+        };
 
         let state = match self.member.membership() {
-            MembershipState::Ban => Span::raw(" (banned)").into(),
-            MembershipState::Invite => Span::raw(" (invited)").into(),
-            MembershipState::Knock => Span::raw(" (wants to join)").into(),
-            MembershipState::Leave => Span::raw(" (left)").into(),
+            MembershipState::Ban => Span::styled("banned", style.fg(Color::LightRed)).into(),
+            MembershipState::Invite => Span::styled("invited", style).into(),
+            MembershipState::Knock => Span::styled("wants to join", style).into(),
+            MembershipState::Leave => Span::styled("left", style).into(),
             MembershipState::Join => None,
             _ => None,
         };
 
-        spans.extend(state);
+        tags.extend(roles);
+        tags.extend(state);
+
+        if !tags.is_empty() {
+            spans.push(Span::styled(" (", style));
+            for (i, tag) in tags.into_iter().enumerate() {
+                if i > 0 {
+                    spans.push(Span::styled(", ", style));
+                }
+                spans.push(tag);
+            }
+            spans.push(Span::styled(")", style));
+        }
 
         return Line::from(spans).into();
     }
@@ -1623,7 +1587,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matrix_sdk::ruma::{room_alias_id, server_name};
+    use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, room_alias_id, server_name};
 
     #[derive(Debug, Eq, PartialEq)]
     struct TestRoomItem {
@@ -1742,7 +1706,13 @@ mod tests {
             tags: vec![],
             alias: None,
             name: "Room 1",
-            unread: UnreadInfo { unread: false, latest: None },
+            unread: UnreadInfo {
+                latest: None,
+                unread_mark: false,
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
+            },
             invite: false,
         };
 
@@ -1752,8 +1722,11 @@ mod tests {
             alias: None,
             name: "Room 2",
             unread: UnreadInfo {
-                unread: false,
-                latest: Some(MessageTimeStamp::OriginServer(40u32.into())),
+                latest: Some(MessageTimeStamp(MilliSecondsSinceUnixEpoch(40u32.into()))),
+                unread_mark: false,
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
             },
             invite: false,
         };
@@ -1764,8 +1737,11 @@ mod tests {
             alias: None,
             name: "Room 3",
             unread: UnreadInfo {
-                unread: false,
-                latest: Some(MessageTimeStamp::OriginServer(20u32.into())),
+                latest: Some(MessageTimeStamp(MilliSecondsSinceUnixEpoch(20u32.into()))),
+                unread_mark: false,
+                unread_messages: 0,
+                unread_notifications: 0,
+                unread_mentions: 0,
             },
             invite: false,
         };
@@ -1833,5 +1809,81 @@ mod tests {
         ];
         rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
         assert_eq!(rooms, vec![&room1, &room2, &room3]);
+    }
+
+    #[test]
+    fn sort_room_servers() {
+        let mut collator = Collator::default();
+        let collator = &mut collator;
+        let server1 = server_name!("a.com");
+        let server3 = server_name!("c.com");
+
+        // No alias, fallback to namespace of V1 room ID:
+        let room1 = TestRoomItem {
+            room_id: RoomId::new_v1(server3).to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Room E",
+            unread: UnreadInfo::default(),
+            invite: false,
+        };
+
+        // Alias and V1 room ID agree:
+        let room2 = TestRoomItem {
+            room_id: RoomId::new_v1(server1).to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#name:a.com").to_owned()),
+            name: "Room D",
+            unread: UnreadInfo::default(),
+            invite: false,
+        };
+
+        // Alias, V2 room id:
+        let room3 = TestRoomItem {
+            room_id: RoomId::new_v2("refhash").unwrap().to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#alias:b.com").to_owned()),
+            name: "Room C",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // Alias and V2 room ID disagree, alias is used:
+        let room4 = TestRoomItem {
+            room_id: RoomId::new_v1(server3).to_owned(),
+            tags: vec![],
+            alias: Some(room_alias_id!("#alias:a.com").to_owned()),
+            name: "Room B",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // No alias and V2 room ID:
+        let room5 = TestRoomItem {
+            room_id: RoomId::new_v2("refhash").unwrap().to_owned(),
+            tags: vec![],
+            alias: None,
+            name: "Room A",
+            unread: UnreadInfo::default(),
+            invite: true,
+        };
+
+        // Sort servers first ascending, name tie breaks:
+        let mut rooms = vec![&room1, &room2, &room3, &room4, &room5];
+        let fields = &[
+            SortColumn(SortFieldRoom::Server, SortOrder::Ascending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+        assert_eq!(rooms, vec![&room4, &room2, &room3, &room1, &room5]);
+
+        // Sort servers first descending, name tie breaks:
+        let mut rooms = vec![&room1, &room2, &room3, &room4, &room5];
+        let fields = &[
+            SortColumn(SortFieldRoom::Server, SortOrder::Descending),
+            SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+        ];
+        rooms.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+        assert_eq!(rooms, vec![&room5, &room1, &room3, &room4, &room2]);
     }
 }
