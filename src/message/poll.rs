@@ -3,7 +3,14 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt::Write as _;
 
 use indexmap::IndexMap;
-use matrix_sdk::ruma::events::poll::start::PollKind;
+use matrix_sdk::ruma::events::poll::end::{OriginalPollEndEvent, PollEndEventContent};
+use matrix_sdk::ruma::events::poll::response::OriginalPollResponseEvent;
+use matrix_sdk::ruma::events::poll::start::{
+    PollContentBlock,
+    PollKind,
+    PollStartEventContent,
+    PollStartEventContentWithoutRelation,
+};
 use matrix_sdk::ruma::events::poll::unstable_end::{
     OriginalUnstablePollEndEvent,
     UnstablePollEndEventContent,
@@ -15,7 +22,7 @@ use matrix_sdk::ruma::events::poll::unstable_start::{
     UnstablePollStartContentBlock,
 };
 use matrix_sdk::ruma::events::relation::Thread;
-use matrix_sdk::ruma::events::room::message::RelationWithoutReplacement;
+use matrix_sdk::ruma::events::room::message::{Relation, RelationWithoutReplacement};
 use matrix_sdk::ruma::events::{OriginalMessageLikeEvent, poll};
 use matrix_sdk::ruma::{EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedUserId, UserId};
 
@@ -77,6 +84,208 @@ fn body_cow<'a>(
     }
 
     text
+}
+
+/// All data related to a poll in an unsupported room version.
+#[derive(Debug, Clone)]
+pub struct Poll {
+    event_id: OwnedEventId,
+    own_user_id: OwnedUserId,
+    pub start: PollStartEventContent,
+    pub replacements: BTreeMap<MessageKey, PollStartEventContentWithoutRelation>,
+
+    pub responeses: BTreeMap<MessageKey, OriginalPollResponseEvent>,
+
+    pub end: Option<OriginalMessageLikeEvent<PollEndEventContent>>,
+}
+
+impl Poll {
+    pub fn new(
+        event_id: OwnedEventId,
+        own_user_id: OwnedUserId,
+        start: PollStartEventContent,
+        unloaded: UnloadedPoll,
+    ) -> Self {
+        Self {
+            event_id,
+            own_user_id,
+            start,
+            replacements: unloaded.replacements,
+            responeses: unloaded.responeses,
+            end: unloaded.end,
+        }
+    }
+
+    fn content(&self) -> &PollContentBlock {
+        self.replacements
+            .iter()
+            .rev()
+            .map(|(_, v)| &v.poll)
+            .next()
+            .unwrap_or(&self.start.poll)
+    }
+
+    // fn results(&self) -> IndexMap<&str, BTreeSet<&UserId>> {
+    fn results(&self) -> impl IntoIterator<Item = (&str, BTreeSet<&UserId>)> {
+        let poll = self.content();
+        let responses = self.responeses.values().map(OriginalPollResponseEvent::data);
+        let end_timestamp = self.end.as_ref().map(|end| end.origin_server_ts);
+
+        poll::compile_poll_results(poll, responses, end_timestamp)
+    }
+
+    pub fn event_id(&self) -> &EventId {
+        self.event_id.as_ref()
+    }
+
+    /// The message this poll replied to if it is a reply.
+    pub fn reply_to(&self) -> Option<&EventId> {
+        match &self.start.relates_to {
+            Some(Relation::Reply(reply)) => Some(reply.in_reply_to.event_id.as_ref()),
+            Some(Relation::Thread(Thread {
+                in_reply_to: Some(in_reply_to),
+                is_falling_back: false,
+                ..
+            })) => Some(in_reply_to.event_id.as_ref()),
+            _ => None,
+        }
+    }
+
+    /// Return the thread root if this is the first message in the thread.
+    pub fn thread_root(&self) -> Option<&EventId> {
+        match &self.start.relates_to {
+            Some(Relation::Thread(Thread {
+                event_id,
+                in_reply_to: Some(in_reply_to),
+                is_falling_back: true,
+                ..
+            })) if event_id == &in_reply_to.event_id => Some(event_id.as_ref()),
+            _ => None,
+        }
+    }
+
+    pub fn redact(&mut self, loc: &PollEventLocation) {
+        match loc {
+            PollEventLocation::Replacement(key) => {
+                self.replacements.remove(key);
+            },
+            PollEventLocation::Response(key) => {
+                self.responeses.remove(key);
+            },
+            PollEventLocation::End => self.end = None,
+        }
+    }
+
+    pub fn insert_relation(&mut self, value: PollRelation) -> PollEventLocation {
+        match value {
+            PollRelation::Response(ev) => {
+                let key = MessageKey {
+                    ts: ev.origin_server_ts.into(),
+                    id: ev.event_id.clone().into(),
+                };
+
+                self.responeses.insert(key.clone(), ev);
+
+                PollEventLocation::Response(key)
+            },
+            PollRelation::End(ev) => {
+                self.end = Some(ev);
+                PollEventLocation::End
+            },
+        }
+    }
+
+    pub fn body_cow(&self) -> Cow<'_, str> {
+        let start = self.content();
+
+        let question = start.question.text.find_plain().unwrap_or("Question not found");
+        let answers = start
+            .answers
+            .iter()
+            .filter_map(|answer| answer.text.find_plain().map(|text| (answer.id.as_str(), text)));
+        let results = self.results();
+        let ended = self.end.as_ref().map(|ev| ev.origin_server_ts);
+
+        body_cow(&start.kind, &self.own_user_id, question, answers, results, ended).into()
+    }
+}
+
+/// All data accumulated for a [`Poll`] before the start event was loaded.
+#[derive(Debug, Clone, Default)]
+pub struct UnloadedPoll {
+    pub replacements: BTreeMap<MessageKey, PollStartEventContentWithoutRelation>,
+
+    pub responeses: BTreeMap<MessageKey, OriginalPollResponseEvent>,
+
+    pub end: Option<OriginalMessageLikeEvent<PollEndEventContent>>,
+}
+
+impl UnloadedPoll {
+    pub fn redact(&mut self, loc: &PollEventLocation) {
+        match loc {
+            PollEventLocation::Replacement(key) => {
+                self.replacements.remove(key);
+            },
+            PollEventLocation::Response(key) => {
+                self.responeses.remove(key);
+            },
+            PollEventLocation::End => self.end = None,
+        }
+    }
+
+    pub fn insert_relation(&mut self, value: PollRelation) -> PollEventLocation {
+        match value {
+            PollRelation::Response(ev) => {
+                let key = MessageKey {
+                    ts: ev.origin_server_ts.into(),
+                    id: ev.event_id.clone().into(),
+                };
+
+                self.responeses.insert(key.clone(), ev);
+
+                PollEventLocation::Response(key)
+            },
+            PollRelation::End(ev) => {
+                self.end = Some(ev);
+                PollEventLocation::End
+            },
+        }
+    }
+}
+
+/// A response or end event that is stored with the poll. Used for more unified
+/// insertion logic.
+pub enum PollRelation {
+    Response(OriginalPollResponseEvent),
+    End(OriginalPollEndEvent),
+}
+
+impl PollRelation {
+    pub fn event_id(&self) -> &EventId {
+        match self {
+            PollRelation::Response(ev) => &ev.event_id,
+            PollRelation::End(ev) => &ev.event_id,
+        }
+    }
+
+    /// The [`EventId`] of the poll start this event relates to.
+    pub fn poll_event_id(&self) -> &EventId {
+        match self {
+            PollRelation::Response(ev) => &ev.content.relates_to.event_id,
+            PollRelation::End(ev) => &ev.content.relates_to.event_id,
+        }
+    }
+}
+
+impl From<OriginalPollResponseEvent> for PollRelation {
+    fn from(value: OriginalPollResponseEvent) -> Self {
+        Self::Response(value)
+    }
+}
+impl From<OriginalPollEndEvent> for PollRelation {
+    fn from(value: OriginalPollEndEvent) -> Self {
+        Self::End(value)
+    }
 }
 
 /// All data related to a poll in an unsupported room version.
