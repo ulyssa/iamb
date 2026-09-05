@@ -410,6 +410,7 @@ impl ChatState {
 
                         return Err(err);
                     },
+                    MessageEvent::Poll(ev) => ev.event_id().to_owned(),
                     MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
                 };
 
@@ -466,6 +467,7 @@ impl ChatState {
 
                         return Err(err);
                     },
+                    MessageEvent::Poll(ev) => ev.event_id().to_owned(),
                     MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
                 };
 
@@ -538,6 +540,7 @@ impl ChatState {
 
                         return Err(err);
                     },
+                    MessageEvent::Poll(ev) => ev.event_id().to_owned(),
                     MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
                 };
 

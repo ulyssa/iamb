@@ -11,9 +11,13 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use emojis::Emoji;
+use matrix_sdk::ruma::events::poll::start::PollStartEvent;
 
 use crate::message::poll::{
+    Poll,
     PollEventLocation,
+    PollRelation,
+    UnloadedPoll,
     UnloadedUnstablePoll,
     UnstablePoll,
     UnstablePollRelation,
@@ -1115,7 +1119,8 @@ pub struct RoomInfo {
     /// A map of message identifiers to a list of edit events for message that are not yet cached.
     pub unloaded_edits: HashMap<OwnedEventId, MessageEdits>,
     /// A map of message identifiers to the aggregated data for a poll that hasn't been loaded.
-    pub unloaded_polls: HashMap<OwnedEventId, UnloadedUnstablePoll>,
+    pub unloaded_polls: HashMap<OwnedEventId, UnloadedPoll>,
+    pub unloaded_unstable_polls: HashMap<OwnedEventId, UnloadedUnstablePoll>,
 
     /// A map of message identifiers to thread replies.
     threads: HashMap<OwnedEventId, Messages>,
@@ -1160,6 +1165,7 @@ impl Default for RoomInfo {
             draw_last: Default::default(),
             unloaded_edits: Default::default(),
             unloaded_polls: Default::default(),
+            unloaded_unstable_polls: Default::default(),
         }
     }
 }
@@ -1299,11 +1305,13 @@ impl RoomInfo {
             Some(EventLocation::Poll(poll_event_id, loc)) => {
                 let poll_event_id = poll_event_id.to_owned();
                 let loc = loc.to_owned();
-                if let Some(Message { event: MessageEvent::UnstablePoll(poll), .. }) =
-                    self.get_event_mut(&poll_event_id)
-                {
-                    poll.redact(&loc);
-                } else if let Some(poll) = self.unloaded_polls.get_mut(&poll_event_id) {
+                if let Some(Message { event, .. }) = self.get_event_mut(&poll_event_id) {
+                    match event {
+                        MessageEvent::Poll(poll) => poll.redact(&loc),
+                        MessageEvent::UnstablePoll(poll) => poll.redact(&loc),
+                        _ => (),
+                    }
+                } else if let Some(poll) = self.unloaded_unstable_polls.get_mut(&poll_event_id) {
                     poll.redact(&loc);
                 }
             },
@@ -1426,6 +1434,75 @@ impl RoomInfo {
     }
 
     /// Insert the start of a poll.
+    pub fn insert_poll_start(&mut self, poll: PollStartEvent) {
+        let event_id = poll.event_id().to_owned();
+        let key = MessageKey {
+            ts: poll.origin_server_ts().into(),
+            id: event_id.to_owned().into(),
+        };
+
+        match poll {
+            MessageLikeEvent::Original(ev) => {
+                if matches!(ev.content.relates_to, Some(Relation::Replacement(..))) {
+                    let Some(Relation::Replacement(Replacement {
+                        event_id: poll_event_id,
+                        new_content,
+                        ..
+                    })) = ev.content.relates_to
+                    else {
+                        unreachable!()
+                    };
+
+                    let loc = EventLocation::Poll(
+                        poll_event_id.to_owned(),
+                        PollEventLocation::Replacement(key.clone()),
+                    );
+                    self.keys.insert(event_id, loc);
+
+                    if let Some(msg) = self.get_event_mut(&poll_event_id) {
+                        let MessageEvent::Poll(poll) = &mut msg.event else {
+                            tracing::warn!("encounterd poll replacement for non-poll message");
+                            return;
+                        };
+
+                        poll.replacements.insert(key, new_content);
+                    } else {
+                        self.unloaded_polls
+                            .entry(poll_event_id)
+                            .or_default()
+                            .replacements
+                            .insert(key, new_content);
+                    }
+                } else {
+                    let thread_root = match &ev.content.relates_to {
+                        Some(Relation::Thread(Thread { event_id, .. })) => {
+                            Some(event_id.to_owned())
+                        },
+                        _ => None,
+                    };
+
+                    let loc = EventLocation::Message(thread_root.clone(), key.clone());
+                    self.keys.insert(event_id, loc);
+
+                    let unloaded = self.unloaded_polls.remove(&ev.event_id).unwrap_or_default();
+                    let msg = MessageEvent::Poll(
+                        Poll::new(ev.event_id, ev.sender.to_owned(), ev.content, unloaded).into(),
+                    );
+                    let msg = Message::new(msg, ev.sender, ev.origin_server_ts.into());
+
+                    self.get_thread_mut(thread_root).insert_message(key, msg);
+                }
+            },
+            MessageLikeEvent::Redacted(ev) => {
+                let loc = EventLocation::Message(None, key.clone());
+                let message: Message = ev.into();
+                self.keys.insert(event_id, loc);
+                self.messages.insert_message(key, message);
+            },
+        }
+    }
+
+    /// Insert the start of a poll.
     pub fn insert_unstable_poll_start(&mut self, poll: UnstablePollStartEvent) {
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
@@ -1447,7 +1524,8 @@ impl RoomInfo {
                         let loc = EventLocation::Message(thread_root.clone(), key.clone());
                         self.keys.insert(event_id, loc);
 
-                        let unloaded = self.unloaded_polls.remove(&ev.event_id).unwrap_or_default();
+                        let unloaded =
+                            self.unloaded_unstable_polls.remove(&ev.event_id).unwrap_or_default();
                         let msg = MessageEvent::UnstablePoll(
                             UnstablePoll::new(ev.event_id, ev.sender.to_owned(), content, unloaded)
                                 .into(),
@@ -1471,7 +1549,7 @@ impl RoomInfo {
 
                             poll.replacements.insert(key, content);
                         } else {
-                            self.unloaded_polls
+                            self.unloaded_unstable_polls
                                 .entry(content.relates_to.event_id.to_owned())
                                 .or_default()
                                 .replacements
@@ -1493,6 +1571,28 @@ impl RoomInfo {
     }
 
     /// Insert an event that relates to a poll
+    pub fn insert_poll_relation(&mut self, relation: PollRelation) {
+        let event_id = relation.event_id().to_owned();
+        let poll_event_id = relation.poll_event_id().to_owned();
+
+        let loc = if let Some(msg) = self.get_event_mut(&poll_event_id) {
+            let MessageEvent::Poll(poll) = &mut msg.event else {
+                tracing::warn!("encounterd poll replacement for non-poll message");
+                return;
+            };
+
+            poll.insert_relation(relation)
+        } else {
+            self.unloaded_polls
+                .entry(poll_event_id.to_owned())
+                .or_default()
+                .insert_relation(relation)
+        };
+
+        self.keys.insert(event_id, EventLocation::Poll(poll_event_id, loc));
+    }
+
+    /// Insert an event that relates to a poll
     pub fn insert_unstable_poll_relation(&mut self, relation: UnstablePollRelation) {
         let event_id = relation.event_id().to_owned();
         let poll_event_id = relation.poll_event_id().to_owned();
@@ -1505,7 +1605,7 @@ impl RoomInfo {
 
             poll.insert_relation(relation)
         } else {
-            self.unloaded_polls
+            self.unloaded_unstable_polls
                 .entry(poll_event_id.to_owned())
                 .or_default()
                 .insert_relation(relation)
