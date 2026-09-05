@@ -2532,6 +2532,8 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "sled",
+ "strum",
+ "strum_macros",
  "temp-dir",
  "thiserror 2.0.18",
  "tokio",

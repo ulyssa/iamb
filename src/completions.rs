@@ -1,7 +1,8 @@
 //! Tab completions for iamb
-use std::borrow::Cow;
 use std::str::FromStr;
+use std::{borrow::Cow, ops::Deref};
 
+use matrix_sdk::ruma::UserId;
 use modalkit::{
     editing::{
         completion::{Completer, complete_path},
@@ -19,8 +20,31 @@ use modalkit::{
         WordStyle,
     },
 };
+use strum::{EnumProperty as _, VariantArray as _, VariantNames as _};
 
-use crate::base::{ChatStore, IambBufferId, IambInfo, MATRIX_ID_WORD, RoomFocus};
+use crate::base::{
+    ChatStore,
+    IambBufferId,
+    IambInfo,
+    MATRIX_ID_WORD,
+    RoomFocus,
+    SortFieldRoom,
+    SortFieldUser,
+};
+use crate::config::{
+    CursorShape,
+    EncryptionIndicator,
+    EncryptionUpdateDiscriminants,
+    IambProtocolType,
+    MarkupFormat,
+    NotificationsUpdateDiscriminants,
+    ReadReceiptTrigger,
+    SortUpdateDiscriminants,
+    SplitDirection,
+    TerminalUpdateDiscriminants,
+    TunablesUpdateDiscriminants,
+    UserDisplayStyle,
+};
 
 mod parse {
     use nom::{
@@ -328,6 +352,29 @@ fn complete_options(args: &[String], options: &[&'static str]) -> Vec<String> {
     complete_choices(args.last().unwrap(), opts.as_slice())
 }
 
+/// Tab completion for [`Color`](ratatui::style::Color).
+fn complete_colors(input: &str) -> Vec<String> {
+    complete_choices(input, &[
+        "black",
+        "red",
+        "green",
+        "yellow",
+        "blue",
+        "magenta",
+        "cyan",
+        "gray",
+        "dark-gray",
+        "light-red",
+        "light-green",
+        "light-yellow",
+        "light-blue",
+        "light-magenta",
+        "light-cyan",
+        "white",
+        "reset",
+    ])
+}
+
 /// Tab completion for `:invite`
 fn complete_iamb_invite(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     match args.len() {
@@ -398,6 +445,281 @@ fn complete_iamb_self(args: Vec<String>) -> Vec<String> {
             complete_choices(&args[1], &["set", "unset", "show"])
         },
         _ => vec![],
+    }
+}
+
+/// Tab completion for `:set`
+fn complete_iamb_set(arg: &str, store: &ChatStore) -> Vec<String> {
+    if let Some((orig_option, value)) = arg.split_once('=') {
+        let mut option = orig_option.to_string();
+        option.retain(|c| c != '_');
+
+        match option.as_str() {
+            "loglevel" => {
+                complete_choices(value, &["off", "error", "warn", "info", "debug", "trace"])
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "usernamedisplay" => {
+                complete_choices(value, UserDisplayStyle::VARIANTS)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "defaultmarkup" => {
+                complete_choices(value, MarkupFormat::VARIANTS)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "defaultsplit" => {
+                complete_choices(value, SplitDirection::VARIANTS)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "memberssplit" => {
+                complete_choices(value, SplitDirection::VARIANTS)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "readreceipttrigger" => {
+                complete_choices(value, ReadReceiptTrigger::VARIANTS)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "encryption.indicator" => {
+                complete_choices(value, EncryptionIndicator::VARIANTS)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "encryption.indicatorlocation" => {
+                let choices = ["title", "prompt", "title|prompt", "prompt|title"];
+                complete_choices(value, &choices)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "imagepreview.protocol.type" => {
+                complete_choices(value, IambProtocolType::VARIANTS)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "imagepreview.protocol.filter" => {
+                let choices = ["Nearest", "Triangle", "CatmullRom", "Gaussian", "Lanczos3"];
+                complete_choices(value, &choices)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "sort.chats" | "sort.dms" | "sort.rooms" | "sort.spaces" => {
+                let last = value.rsplit_once(',').map(|(_, v)| v).unwrap_or(value);
+                let prev = arg.strip_suffix(last).unwrap();
+
+                SortFieldRoom::VARIANTS
+                    .iter()
+                    .flat_map(|option| vec![format!("{prev}{option}"), format!("{prev}~{option}")])
+                    .filter(|option| option.starts_with(arg))
+                    .collect()
+            },
+            "sort.members" => {
+                let last = value.rsplit_once(',').map(|(_, v)| v).unwrap_or(value);
+                let prev = arg.strip_suffix(last).unwrap();
+
+                SortFieldUser::VARIANTS
+                    .iter()
+                    .flat_map(|option| vec![format!("{prev}{option}"), format!("{prev}~{option}")])
+                    .filter(|option| option.starts_with(arg))
+                    .collect()
+            },
+            "terminal.cursorshape" => {
+                complete_choices(value, CursorShape::VARIANTS)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            "notifications.via" => {
+                #[cfg(feature = "desktop")]
+                let choices = ["bell", "desktop", "desktop|bell", "bell|desktop"];
+                #[cfg(not(feature = "desktop"))]
+                let choices = ["bell"];
+
+                complete_choices(value, &choices)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            opt if opt.starts_with("users.") && opt.ends_with(".color") => {
+                complete_colors(value)
+                    .into_iter()
+                    .map(|mut s| {
+                        s.insert(0, '=');
+                        s.insert_str(0, orig_option);
+                        s
+                    })
+                    .collect()
+            },
+            _ => vec![],
+        }
+    } else {
+        let mut orig_option = arg.to_string();
+        orig_option.retain(|c| c != '_');
+
+        match orig_option.split_once('.') {
+            Some(("sort", _)) => {
+                SortUpdateDiscriminants::VARIANTS
+                    .iter()
+                    .map(|variant| {
+                        let name = <_ as Into<&'static str>>::into(variant);
+                        format!("sort.{name}")
+                    })
+                    .filter(|option| option.starts_with(&orig_option) | option.starts_with(arg))
+                    .collect()
+            },
+            Some(("encryption", _)) => {
+                EncryptionUpdateDiscriminants::VARIANTS
+                    .iter()
+                    .map(|variant| {
+                        let name = <_ as Into<&'static str>>::into(variant);
+                        format!("encryption.{name}")
+                    })
+                    .filter(|option| option.starts_with(&orig_option) | option.starts_with(arg))
+                    .collect()
+            },
+            Some(("imagepreview", rest)) => {
+                let choices = [
+                    "enabled",
+                    "noenabled",
+                    "protocol.filter",
+                    "protocol.type",
+                    "size.height",
+                    "size.width",
+                ];
+                complete_choices(rest, &choices)
+                    .into_iter()
+                    .map(|mut option| {
+                        option.insert_str(0, "image_preview.");
+                        option
+                    })
+                    .collect()
+            },
+            Some(("notifications", _)) => {
+                NotificationsUpdateDiscriminants::VARIANTS
+                    .iter()
+                    .flat_map(|variant| {
+                        let name = <_ as Into<&'static str>>::into(variant);
+                        if variant.get_bool("is_bool") == Some(true) {
+                            vec![
+                                format!("notifications.no{name}"),
+                                format!("notifications.{name}"),
+                            ]
+                        } else {
+                            vec![format!("notifications.{name}")]
+                        }
+                    })
+                    .filter(|option| option.starts_with(&orig_option) | option.starts_with(arg))
+                    .collect()
+            },
+            Some(("terminal", _)) => {
+                TerminalUpdateDiscriminants::VARIANTS
+                    .iter()
+                    .map(|variant| {
+                        let name = <_ as Into<&'static str>>::into(variant);
+                        format!("terminal.{name}")
+                    })
+                    .filter(|option| option.starts_with(&orig_option) | option.starts_with(arg))
+                    .collect()
+            },
+            Some(("users", _)) => {
+                let suboption = arg.strip_prefix("users.").unwrap();
+                let mut completions = complete_users(suboption, store);
+
+                for completion in &mut completions {
+                    completion.insert_str(0, "users.");
+                }
+
+                if let Some((user, end)) = suboption.rsplit_once('.') &&
+                    UserId::parse(user).and_then(|user| user.validate_strict()).is_ok()
+                {
+                    if "name".starts_with(end) {
+                        completions.push(format!("users.{user}.name"));
+                    }
+                    if "color".starts_with(end) {
+                        completions.push(format!("users.{user}.color"));
+                    }
+                }
+
+                completions
+            },
+            None => {
+                TunablesUpdateDiscriminants::VARIANTS
+                    .iter()
+                    .flat_map(|variant| {
+                        let name = <_ as Into<&'static str>>::into(variant);
+                        if variant.get_bool("is_bool") == Some(true) {
+                            vec![format!("no{name}"), name.to_string()]
+                        } else {
+                            vec![name.to_string()]
+                        }
+                    })
+                    .filter(|option| option.starts_with(arg))
+                    .collect()
+            },
+            _ => vec![],
+        }
     }
 }
 
@@ -588,6 +910,8 @@ fn complete_cmdarg(
 
         "self" => complete_iamb_self(args),
 
+        "set" => complete_iamb_set(args.last().map(Deref::deref).unwrap_or_default(), store),
+
         "space" => complete_iamb_space(args, store),
 
         // TODO: Check whether we can get the id of the focused message to improve completion
@@ -596,7 +920,8 @@ fn complete_cmdarg(
 
         "unreads" => complete_iamb_unreads(args),
 
-        "upload" | "download" | "open" => {
+        // complete file path
+        "upload" | "download" | "open" | "reload" => {
             if input.get_char_at_cursor(cursor) == Some('"') {
                 // Use the escaped instead of the qouted filename.
                 let mut args = args;

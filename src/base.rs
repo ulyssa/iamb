@@ -7,6 +7,7 @@ use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::convert::TryFrom;
 use std::fmt::{self, Display};
 use std::hash::Hash;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -27,6 +28,7 @@ use serde::{
     de::Error as SerdeError,
     de::Visitor,
 };
+use strum::VariantNames;
 use tokio::sync::Mutex as AsyncMutex;
 use url::Url;
 
@@ -72,6 +74,15 @@ use matrix_sdk::{
     },
 };
 
+use crate::config::{ReloadError, TunablesUpdate};
+use crate::preview::PreviewKind;
+use crate::{
+    config::ApplicationSettings,
+    message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
+    notifications::NotificationHandle,
+    preview::PreviewManager,
+    worker::Requester,
+};
 use modalkit::{
     actions::Action,
     editing::{
@@ -95,15 +106,6 @@ use modalkit::{
     key::TerminalKey,
     keybindings::SequenceStatus,
     prelude::{CommandType, MoveDir1D, WordStyle},
-};
-
-use crate::preview::PreviewKind;
-use crate::{
-    config::ApplicationSettings,
-    message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
-    notifications::NotificationHandle,
-    preview::PreviewManager,
-    worker::Requester,
 };
 
 /// The set of characters used in different Matrix IDs.
@@ -250,7 +252,8 @@ bitflags::bitflags! {
 }
 
 /// Fields that rooms and spaces can be sorted by.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, VariantNames)]
+#[strum(serialize_all = "lowercase")]
 pub enum SortFieldRoom {
     /// Sort rooms by whether they have the Favorite tag.
     Favorite,
@@ -265,6 +268,7 @@ pub enum SortFieldRoom {
     Alias,
 
     /// Sort rooms by their Matrix room identifier.
+    #[strum(serialize = "id")]
     RoomId,
 
     /// Sort rooms by the server portion of their canonical room alias.
@@ -285,9 +289,12 @@ pub enum SortFieldRoom {
 }
 
 /// Fields that users can be sorted by.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, VariantNames)]
+#[strum(serialize_all = "lowercase")]
 pub enum SortFieldUser {
+    #[strum(serialize = "power")]
     PowerLevel,
+    #[strum(serialize = "id")]
     UserId,
     LocalPart,
     Server,
@@ -316,7 +323,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldRoom> {
 }
 
 /// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
-struct SortRoomVisitor;
+pub(crate) struct SortRoomVisitor;
 
 impl Visitor<'_> for SortRoomVisitor {
     type Value = SortColumn<SortFieldRoom>;
@@ -370,7 +377,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldUser> {
 }
 
 /// [serde] visitor for deserializing [SortColumn] for users.
-struct SortUserVisitor;
+pub(crate) struct SortUserVisitor;
 
 impl Visitor<'_> for SortUserVisitor {
     type Value = SortColumn<SortFieldUser>;
@@ -580,6 +587,16 @@ pub enum KeysAction {
     Import(String, String),
 }
 
+/// An action performed on the application settings.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SettingsAction {
+    /// Change some settings.
+    Set(Vec<TunablesUpdate>),
+
+    /// Reload the (specified) config file.
+    Reload(Option<PathBuf>),
+}
+
 /// An action that the main program loop should.
 ///
 /// See [the commands module][super::commands] for where these are usually created.
@@ -596,6 +613,9 @@ pub enum IambAction {
 
     /// Perform an action on the current space.
     Space(SpaceAction),
+
+    /// Perform an action on the application settings.
+    Settings(SettingsAction),
 
     /// Open a URL.
     OpenLink(String),
@@ -644,6 +664,12 @@ impl From<SpaceAction> for IambAction {
     }
 }
 
+impl From<SettingsAction> for IambAction {
+    fn from(act: SettingsAction) -> Self {
+        IambAction::Settings(act)
+    }
+}
+
 impl From<RoomAction> for IambAction {
     fn from(act: RoomAction) -> Self {
         IambAction::Room(act)
@@ -667,6 +693,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
+            IambAction::Settings(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
@@ -683,6 +710,7 @@ impl ApplicationAction for IambAction {
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
+            IambAction::Settings(..) => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
@@ -699,6 +727,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
+            IambAction::Settings(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
@@ -714,6 +743,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => false,
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
+            IambAction::Settings(..) => false,
             IambAction::OpenLink(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
@@ -897,6 +927,10 @@ pub enum IambError {
     /// A generic error that doesn't need a specific error type.
     #[error("{0}")]
     Custom(String),
+
+    /// Config couldn't be reloaded
+    #[error("Reload error: {0}")]
+    ConfigReload(#[from] ReloadError),
 }
 
 impl From<IambError> for UIError<IambInfo> {
