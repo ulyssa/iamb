@@ -576,11 +576,21 @@ The available fields in this subsection are:
 Control the terminal cursor shape used by iamb.
 Possible values are:
 .Dq Sy default ,
+.Dq Sy auto ,
 .Dq Sy block ,
 .Dq Sy line , and
 .Dq Sy underline .
+The mode
+.Dq Sy auto
+switches between
+.Dq Sy block
+in normal mode,
+.Dq Sy line
+in insert mode, and
+.Dq Sy underline
+in replace mode.
 Defaults to
-.Dq Sy default .
+.Dq Sy auto .
 .It Sy enable_extended_keys
 Defines whether to explicitly enable or disable requesting extended keypresses from your terminal.
 By default, when unset,
