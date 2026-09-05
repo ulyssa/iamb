@@ -277,6 +277,12 @@ pub enum SortFieldRoom {
     /// Sort rooms by whether they have unread messages.
     Unread,
 
+    /// Sort rooms by whether they have unread notifications.
+    Notifications,
+
+    /// Sort rooms by whether they have unread mentions.
+    Mentions,
+
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
 
@@ -345,6 +351,8 @@ impl Visitor<'_> for SortRoomVisitor {
             "lowpriority" => SortFieldRoom::LowPriority,
             "recent" => SortFieldRoom::Recent,
             "unread" => SortFieldRoom::Unread,
+            "notifications" => SortFieldRoom::Notifications,
+            "mentions" => SortFieldRoom::Mentions,
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
             "id" => SortFieldRoom::RoomId,
@@ -978,14 +986,6 @@ pub struct UnreadInfo {
 }
 
 impl UnreadInfo {
-    pub fn is_unread(&self) -> bool {
-        self.unread_mark || self.unread_notifications > 0 || self.unread_mentions > 0
-    }
-
-    pub fn has_mention(&self) -> bool {
-        self.unread_mentions > 0
-    }
-
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
         self.latest.as_ref()
     }
