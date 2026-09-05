@@ -69,12 +69,13 @@ View a list of joined spaces.
 View a list of unread rooms.
 .It Sy ":unreads clear"
 Mark all rooms as read.
+.It Sy ":mentions"
+View a list of rooms with mentions of the current user.
 .It Sy ":welcome"
 View the startup Welcome window.
 .It Sy ":forget"
 Remove all left rooms from the internal database.
 .El
-
 .Sh "E2EE COMMANDS"
 .Bl -tag -width Ds
 .It Sy ":keys export [path] [passphrase]"
@@ -87,6 +88,8 @@ Import and decrypt keys from
 View a list of ongoing E2EE verifications.
 .It Sy ":verify accept [key]"
 Accept a verification request.
+.It Sy ":verify emoji [key]"
+Transition a request to use interactive emoji verification.
 .It Sy ":verify cancel [key]"
 Cancel an in-progress verification.
 .It Sy ":verify confirm [key]"
@@ -135,6 +138,10 @@ Create a new room. Arguments can be
 .Dq ++space ,
 and
 .Dq ++encrypted .
+.It Sy ":follow next"
+Follow the tombstone information to the upgraded room.
+.It Sy ":follow previous"
+Follow the room creation information to the pre-upgraded room.
 .It Sy ":invite accept"
 Accept an invitation to the currently focused room.
 .It Sy ":invite reject"
@@ -143,18 +150,60 @@ Reject an invitation to the currently focused room.
 Send an invitation to a user to join the currently focused room.
 .It Sy ":join [room]"
 Join a room or open it if you are already joined.
+.It Sy ":knock accept [user]"
+Accept a knock from the specified user in the currently focused room.
+.It Sy ":knock ban [user] [reason]"
+Reject a knock from the specified user to the currently focused room, and ban them with an optional reason.
+.It Sy ":knock reject [user] [reason]"
+Reject a knock from the specified user to the currently focused room with an optional reason.
+.It Sy ":knock send [room] [reason]"
+Send an invitation to a user to join the currently focused room with an optional reason.
 .It Sy ":leave"
 Leave the currently focused room.
 .It Sy ":members"
 View a list of members of the currently focused room.
-.It Sy ":room name set [name]"
-Set the name of the currently focused room.
-.It Sy ":room name unset"
-Unset the name of the currently focused room.
+.It Sy ":room access set [rule]"
+Set the join rules for the room to control who can access it.
+Possible values for the
+.Sy rule
+argument are
+.Dq invite ,
+.Dq knock ,
+.Dq knock-restricted ,
+.Dq public ,
+and
+.Dq restricted .
+The
+.Dq knock-restricted
+and
+.Dq restricted
+values allow additional
+.Sy ++members=!room:example.org
+arguments to specify rooms (and spaces) whose members are allowed to join without an invite or knocking.
+.It Sy ":room access unset"
+Set the room to being invite-only so that those not already members cannot join.
+.It Sy ":room access show"
+Show the current join rules for the room.
 .It Sy ":room dm set"
 Mark the currently focused room as a direct message.
 .It Sy ":room dm unset"
 Mark the currently focused room as a normal room.
+.It Sy ":room name set [name]"
+Set the name of the currently focused room.
+.It Sy ":room name unset"
+Unset the name of the currently focused room.
+.It Sy ":room unread set"
+Mark the currently focused room as unread.
+.It Sy ":room unread unset"
+Mark the currently focused room as read.
+.It Sy ":room unread clear"
+Alias for
+.Sy :room unread unset .
+.It Sy ":room version show"
+Show the Matrix version for this room.
+.It Sy ":room version upgrade [version] [additional creators...]"
+Upgrade the Matrix version for this room to the specified version.
+Note that room upgrading in Matrix works by creating a new room that everyone else will then need to join.
 .It Sy ":room notify set [level]"
 Set a notification level for the currently focused room.
 Valid levels are
@@ -198,17 +247,38 @@ Set the room's canonical alias to the one provided, and make the previous one an
 Delete the room's canonical alias.
 .It Sy ":room canon show"
 Show the room's canonical alias, if any is set.
+.It Sy ":room history show"
+Show the history visibility setting for the current room.
+.It Sy ":room history set [mode]" .\" TODO: get options
+Set the history visibility for the current room.
+Valid modes are
+.Dq invited
+(new events after invitation),
+.Dq joined
+(new events after join),
+.Dq shared
+(whole history after join),
+.Dq world_readable
+(whole history for unjoined users).
+.It Sy ":room history unset"
+Reset the room visibility setting to
+.Dq joined .
 .It Sy ":room ban [user] [reason]"
 Ban a user from this room with an optional reason.
 .It Sy ":room unban [user] [reason]"
 Unban a user from this room with an optional reason.
 .It Sy ":room kick [user] [reason]"
 Kick a user from this room with an optional reason.
+.It Sy ":room user name set [name]"
+Set your user display name for this room.
+.It Sy ":room user name unset"
+Delete your per-room user display name.
+.It Sy ":room user name show"
+Show the display name you currently have in this room.
 .El
-
 .Sh "SPACE COMMANDS"
 .Bl -tag -width Ds
-.It Sy ":space child set [room_id] [arguments]"
+.It Sy ":space child set [room] [arguments]"
 Add a room to the currently focused space.
 .Dq ++suggested
 marks the room as a suggested child.
@@ -217,7 +287,27 @@ specifies a string by which children are lexicographically ordered.
 .It Sy ":space child remove"
 Remove the selected room from the currently focused space.
 .El
-
+.Sh "PROFILE COMMANDS"
+.Bl -tag -width Ds
+.It Sy ":self avatar set [mxc://...]"
+Set the avatar URL for your profile.
+.It Sy ":self avatar unset"
+Unset the avatar for your profile.
+.It Sy ":self avatar show"
+Show the current avatar URL for your profile.
+.It Sy ":self name set [nickname]"
+Set the display name for your profile.
+.It Sy ":self name unset"
+Unset the display name for your profile.
+.It Sy ":self name show"
+Show the current display name for your profile.
+.It Sy ":self timezone set [tz]"
+Set the timezone for your profile.
+.It Sy ":self timezone unset"
+Unset the timezone for your profile.
+.It Sy ":self timezone show"
+Show the current timezone for your profile.
+.El
 .Sh "WINDOW COMMANDS"
 .Bl -tag -width Ds
 .It Sy ":horizontal [cmd]"
@@ -304,12 +394,17 @@ The behaviour of
 .Nm
 is affected by the following environment variables.
 .Bl -tag -width Ds
+.It Sy "ALL_PROXY, HTTP_PROXY, HTTPS_PROXY"
+Sets the proxy server to use.
+These names also work in lowercase.
+Example:
+.Dq export ALL_PROXY=socks5://localhost:9050 .
 .It Sy "RUST_LOG"
 Overwrites the value set by the
 .Sy log_level
 config value.
 The syntax is defined at
-.Lk https://docs.rs/tracing-subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
+.Lk https://docs.rs/tracing_subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
 
 .Sh EXAMPLES
 .Ss Example 1: Starting with a specific profile

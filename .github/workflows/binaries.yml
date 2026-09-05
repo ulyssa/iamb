@@ -25,6 +25,7 @@ jobs:
             triple: apple-darwin
           - platform: windows-latest
             triple: pc-windows-msvc
+      fail-fast: false
     runs-on: ${{ matrix.platform }}
     env:
       TARGET: ${{ matrix.arch }}-${{ matrix.triple }}

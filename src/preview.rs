@@ -1,175 +1,201 @@
-use std::{
-    fs::File,
-    io::{Read, Write},
-    path::{Path, PathBuf},
-};
+use std::{collections::HashMap, sync::Arc};
 
 use matrix_sdk::{
-    media::{MediaFormat, MediaRequestParameters},
-    ruma::{
-        events::{
-            room::{
-                message::{MessageType, RoomMessageEventContent},
-                MediaSource,
-            },
-            MessageLikeEvent,
-        },
-        OwnedEventId,
-        OwnedRoomId,
-    },
     Media,
+    media::{MediaFormat, MediaRequestParameters, UniqueKey},
+    ruma::events::room::MediaSource,
 };
-use ratatui::layout::Rect;
-use ratatui_image::Resize;
+use ratatui::layout::Size;
+use ratatui_image::sliced::SlicedProtocol;
+use ratatui_image::{FilterType, Resize, picker::Picker};
+use tokio::sync::Semaphore;
 
 use crate::{
-    base::{AsyncProgramStore, ChatStore, IambError},
-    config::ImagePreviewSize,
-    message::ImageStatus,
+    base::{AsyncProgramStore, IambError},
+    config::{ApplicationSettings, ImagePreviewValues},
+    worker::Requester,
 };
 
-pub fn source_from_event(
-    ev: &MessageLikeEvent<RoomMessageEventContent>,
-) -> Option<(OwnedEventId, MediaSource)> {
-    if let MessageLikeEvent::Original(ev) = &ev {
-        if let MessageType::Image(c) = &ev.content.msgtype {
-            return Some((ev.event_id.clone(), c.source.clone()));
+pub enum ImageStatus {
+    Queued(Size),
+    Downloading(Size),
+    Loaded(SlicedProtocol),
+    Error(String),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum PreviewKind {
+    Message,
+    Reaction,
+}
+
+impl PreviewKind {
+    fn image_size(self, image_preview: &ImagePreviewValues) -> Size {
+        match self {
+            Self::Message => image_preview.size,
+            Self::Reaction => Size { width: 2, height: 1 },
         }
     }
-    None
 }
 
-impl From<ImagePreviewSize> for Rect {
-    fn from(value: ImagePreviewSize) -> Self {
-        Rect::new(0, 0, value.width as _, value.height as _)
-    }
+pub struct PreviewManager {
+    /// Image preview "protocol" picker.
+    picker: Arc<Picker>,
+
+    /// Permits for rendering images in background thread.
+    permits: Arc<Semaphore>,
+
+    /// Indexed by [`MediaSource::unique_key`]
+    previews: HashMap<(String, PreviewKind), ImageStatus>,
 }
-impl From<Rect> for ImagePreviewSize {
-    fn from(rect: Rect) -> Self {
-        ImagePreviewSize { width: rect.width as _, height: rect.height as _ }
+
+impl PreviewManager {
+    pub fn new(settings: &ApplicationSettings) -> Self {
+        let picker = picker_from_settings(settings);
+
+        Self {
+            picker: picker.into(),
+            permits: Arc::new(Semaphore::new(2)),
+            previews: Default::default(),
+        }
+    }
+
+    pub fn get(&self, source: &MediaSource, kind: PreviewKind) -> Option<&ImageStatus> {
+        self.previews.get(&(source.unique_key(), kind))
+    }
+
+    fn insert(&mut self, key: String, kind: PreviewKind, status: ImageStatus) {
+        self.previews.insert((key, kind), status);
+    }
+
+    /// Queue download and preparation of preview
+    pub fn load(&mut self, source: &MediaSource, kind: PreviewKind, worker: &Requester) {
+        let Some(status) = self.previews.get_mut(&(source.unique_key(), kind)) else {
+            return;
+        };
+
+        if let ImageStatus::Queued(size) = status {
+            let size = *size;
+            *status = ImageStatus::Downloading(size);
+
+            worker.load_image(
+                source.to_owned(),
+                kind,
+                size.to_owned(),
+                Arc::clone(&self.picker),
+                Arc::clone(&self.permits),
+            );
+        }
+    }
+
+    pub fn register_preview(
+        &mut self,
+        settings: &ApplicationSettings,
+        source: &MediaSource,
+        kind: PreviewKind,
+        worker: &Requester,
+    ) {
+        let key = (source.unique_key(), kind);
+        if self.previews.contains_key(&key) {
+            return;
+        }
+
+        let size = kind.image_size(&settings.tunables.image_preview);
+        self.previews.insert(key, ImageStatus::Queued(size));
+
+        if settings.tunables.image_preview.enabled && !settings.tunables.image_preview.lazy_load {
+            self.load(source, kind, worker);
+        }
     }
 }
 
-/// Download and prepare the preview, and then lock the store to insert it.
-pub fn spawn_insert_preview(
+fn picker_from_query() -> Picker {
+    // XXX: documentation says to use this query on alternate screen but it seems to be fine
+    Picker::from_query_stdio().unwrap_or_else(|e| {
+        tracing::warn!("Failed to setup image previews (falling back to halfblock rendering): {e}");
+        Picker::halfblocks()
+    })
+}
+
+fn picker_from_settings(settings: &ApplicationSettings) -> Picker {
+    let mut picker = if !settings.tunables.image_preview.enabled {
+        // Skip any auto-detection and use halfblocks when disabled:
+        Picker::halfblocks()
+    } else if let Some(font_size) = settings.tunables.image_preview.protocol.font_size {
+        #[expect(deprecated, reason = "from_query_stdio doesn't work on windows")]
+        Picker::from_fontsize(font_size.into())
+    } else {
+        picker_from_query()
+    };
+
+    // user forced protocol type; use that
+    if let Some(protocol_type) = settings.tunables.image_preview.protocol.r#type {
+        picker.set_protocol_type(protocol_type);
+    }
+
+    picker
+}
+
+pub async fn load_image(
     store: AsyncProgramStore,
-    room_id: OwnedRoomId,
-    event_id: OwnedEventId,
-    source: MediaSource,
     media: Media,
-    cache_dir: PathBuf,
+    source: MediaSource,
+    kind: PreviewKind,
+    picker: Arc<Picker>,
+    permits: Arc<Semaphore>,
+    size: Size,
 ) {
-    tokio::spawn(async move {
-        let img = download_or_load(event_id.to_owned(), source, media, cache_dir)
+    async fn load_image_inner(
+        media: Media,
+        source: MediaSource,
+        picker: Arc<Picker>,
+        permits: Arc<Semaphore>,
+        size: Size,
+        filter: FilterType,
+    ) -> Result<ImageStatus, IambError> {
+        let reader = media
+            .get_media_content(&MediaRequestParameters { source, format: MediaFormat::File }, true)
             .await
             .map(std::io::Cursor::new)
             .map(image::ImageReader::new)
             .map_err(IambError::Matrix)
-            .and_then(|reader| reader.with_guessed_format().map_err(IambError::IOError))
-            .and_then(|reader| reader.decode().map_err(IambError::Image));
+            .and_then(|reader| reader.with_guessed_format().map_err(IambError::IOError))?;
 
-        match img {
-            Err(err) => {
-                try_set_msg_preview_error(
-                    &mut store.lock().await.application,
-                    room_id,
-                    event_id,
-                    err,
-                );
-            },
-            Ok(img) => {
-                let mut locked = store.lock().await;
-                let ChatStore { rooms, picker, settings, .. } = &mut locked.application;
+        let permit = permits
+            .acquire()
+            .await
+            .map_err(|err| IambError::Preview(err.to_string()))?;
 
-                match picker
-                    .as_mut()
-                    .ok_or_else(|| IambError::Preview("Picker is empty".to_string()))
-                    .and_then(|picker| {
-                        Ok((
-                            picker,
-                            rooms
-                                .get_or_default(room_id.clone())
-                                .get_event_mut(&event_id)
-                                .ok_or_else(|| {
-                                    IambError::Preview("Message not found".to_string())
-                                })?,
-                            settings.tunables.image_preview.clone().ok_or_else(|| {
-                                IambError::Preview("image_preview settings not found".to_string())
-                            })?,
-                        ))
-                    })
-                    .and_then(|(picker, msg, image_preview)| {
-                        picker
-                            .new_protocol(img, image_preview.size.into(), Resize::Fit(None))
-                            .map_err(|err| IambError::Preview(format!("{err:?}")))
-                            .map(|backend| (backend, msg))
-                    }) {
-                    Err(err) => {
-                        try_set_msg_preview_error(&mut locked.application, room_id, event_id, err);
-                    },
-                    Ok((backend, msg)) => {
-                        msg.image_preview = ImageStatus::Loaded(backend);
-                    },
-                }
-            },
-        }
-    });
-}
+        let handle = tokio::task::spawn_blocking(move || {
+            let image = reader.decode().map_err(IambError::Image)?;
 
-fn try_set_msg_preview_error(
-    application: &mut ChatStore,
-    room_id: OwnedRoomId,
-    event_id: OwnedEventId,
-    err: IambError,
-) {
-    let rooms = &mut application.rooms;
+            SlicedProtocol::new_with_resize(&picker, image, size, Resize::Fit(Some(filter)))
+                .map_err(|err| IambError::Preview(err.to_string()))
+        });
 
-    match rooms
-        .get_or_default(room_id.clone())
-        .get_event_mut(&event_id)
-        .ok_or_else(|| IambError::Preview("Message not found".to_string()))
-    {
-        Ok(msg) => msg.image_preview = ImageStatus::Error(format!("{err:?}")),
-        Err(err) => {
-            tracing::error!(
-                "Failed to set error on msg.image_backend for event {}, room {}: {}",
-                event_id,
-                room_id,
-                err
-            )
-        },
+        let image = handle.await.map_err(|err| IambError::Preview(err.to_string()))??;
+        std::mem::drop(permit);
+
+        Ok(ImageStatus::Loaded(image))
     }
-}
+    let key = source.unique_key();
 
-async fn download_or_load(
-    event_id: OwnedEventId,
-    source: MediaSource,
-    media: Media,
-    mut cache_path: PathBuf,
-) -> Result<Vec<u8>, matrix_sdk::Error> {
-    cache_path.push(Path::new(event_id.localpart()));
+    let filter = store
+        .lock()
+        .await
+        .application
+        .settings
+        .tunables
+        .image_preview
+        .protocol
+        .filter
+        .unwrap_or(FilterType::Triangle);
 
-    match File::open(&cache_path) {
-        Ok(mut f) => {
-            let mut buffer = Vec::new();
-            f.read_to_end(&mut buffer)?;
-            Ok(buffer)
-        },
-        Err(_) => {
-            media
-                .get_media_content(
-                    &MediaRequestParameters { source, format: MediaFormat::File },
-                    true,
-                )
-                .await
-                .and_then(|buffer| {
-                    if let Err(err) =
-                        File::create(&cache_path).and_then(|mut f| f.write_all(&buffer))
-                    {
-                        return Err(err.into());
-                    }
-                    Ok(buffer)
-                })
-        },
-    }
+    let status = match load_image_inner(media, source, picker, permits, size, filter).await {
+        Ok(status) => status,
+        Err(err) => ImageStatus::Error(format!("{err:?}")),
+    };
+
+    let mut locked = store.lock().await;
+    locked.application.previews.insert(key, kind, status);
 }

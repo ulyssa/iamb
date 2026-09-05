@@ -19,23 +19,24 @@
 use std::collections::VecDeque;
 use std::convert::TryFrom;
 use std::fmt::Display;
-use std::fs::{create_dir_all, File};
-use std::io::{stdout, BufWriter, Stdout, Write};
+use std::fs::{File, create_dir_all};
+use std::io::{BufWriter, Stdout, Write, stdout};
 use std::ops::DerefMut;
 use std::process;
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
-use clap::Parser;
-use matrix_sdk::ruma::api::client::error::ErrorKind;
+use clap::{CommandFactory, Parser};
+use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk::ruma::matrix_uri::MatrixId;
-use matrix_sdk::ruma::{MatrixToUri, MatrixUri, OwnedUserId};
+use matrix_sdk::ruma::profile::{ProfileFieldName, ProfileFieldValue};
+use matrix_sdk::ruma::{MatrixToUri, MatrixUri, UserId};
 use matrix_sdk::{OwnedServerName, RoomState};
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::keybindings::InputBindings;
-use rand::distr::Alphanumeric;
 use rand::RngExt as _;
+use rand::distr::Alphanumeric;
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::Level;
@@ -43,10 +44,8 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use modalkit::crossterm::{
     self,
-    cursor::Show as CursorShow,
+    cursor::{SetCursorStyle, Show as CursorShow},
     event::{
-        poll,
-        read,
         DisableBracketedPaste,
         DisableFocusChange,
         DisableMouseCapture,
@@ -59,22 +58,25 @@ use modalkit::crossterm::{
         MouseEventKind,
         PopKeyboardEnhancementFlags,
         PushKeyboardEnhancementFlags,
+        poll,
+        read,
     },
     execute,
     terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle},
 };
 
 use ratatui::{
+    Terminal,
     backend::CrosstermBackend,
     layout::Rect,
     style::{Color, Modifier, Style},
     text::Span,
     widgets::Paragraph,
-    Terminal,
 };
 
 mod base;
 mod commands;
+mod completions;
 mod config;
 mod keybindings;
 mod message;
@@ -87,6 +89,7 @@ mod worker;
 
 #[cfg(test)]
 mod tests;
+mod verifications;
 
 use crate::{
     base::{
@@ -94,7 +97,6 @@ use crate::{
         ChatStore,
         HomeserverAction,
         IambAction,
-        IambCompleter,
         IambError,
         IambId,
         IambInfo,
@@ -104,9 +106,10 @@ use crate::{
         ProgramContext,
         ProgramStore,
     },
+    completions::IambCompleter,
     config::{ApplicationSettings, Iamb},
     windows::IambWindow,
-    worker::{create_room, ClientWorker, LoginStyle, Requester},
+    worker::{ClientWorker, LoginStyle, Requester, create_room},
 };
 
 use modalkit::{
@@ -129,20 +132,20 @@ use modalkit::{
     errors::{EditError, UIError},
     key::TerminalKey,
     keybindings::{
-        dialog::{Pager, PromptYesNo},
         BindingMachine,
+        dialog::{Pager, PromptYesNo},
     },
     prelude::*,
     ui::FocusList,
 };
 
 use modalkit_ratatui::{
-    cmdbar::CommandBarState,
-    screen::{Screen, ScreenState, TabbedLayoutDescription},
-    windows::{WindowLayoutDescription, WindowLayoutState},
     TerminalCursor,
     TerminalExtOps,
     Window,
+    cmdbar::CommandBarState,
+    screen::{Screen, ScreenState, TabbedLayoutDescription},
+    windows::{WindowLayoutDescription, WindowLayoutState},
 };
 
 fn config_tab_to_desc(
@@ -280,10 +283,8 @@ fn setup_screen(
                 };
                 setup_tty(&settings, false)?;
 
-                if join_or_create {
-                    if let Ok(id) = resolve_mxid(store, id, &via, true)? {
-                        return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
-                    }
+                if join_or_create && let Ok(id) = resolve_mxid(store, id, &via, true)? {
+                    return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
                 }
             },
         }
@@ -408,7 +409,7 @@ impl Application {
             let area = f.area();
 
             let modestr = bindings.show_mode();
-            let cursor = bindings.get_cursor_indicator();
+            let cursor = bindings.get_cursor_hint();
             let dialogstr = bindings.show_dialog(area.height as usize, area.width as usize);
 
             // Don't show terminal cursor when we show a dialog.
@@ -430,7 +431,7 @@ impl Application {
             }
 
             if let Some((cx, cy)) = sstate.get_term_cursor() {
-                if let Some(c) = cursor {
+                if let Some(c) = cursor.get_indicator() {
                     let style = Style::default().fg(Color::Green);
                     let span = Span::styled(c.to_string(), style);
                     let para = Paragraph::new(span);
@@ -440,6 +441,9 @@ impl Application {
                 f.set_cursor_position((cx, cy));
             }
         })?;
+        if sstate.hide_term_cursor() {
+            term.hide_cursor()?;
+        }
 
         Ok(())
     }
@@ -657,7 +661,7 @@ impl Application {
 
                 for room_id in store.application.sync_info.chats() {
                     if let Some(room) = store.application.rooms.get_mut(room_id) {
-                        room.fully_read(user_id);
+                        room.fully_read_all(user_id);
                     }
                 }
 
@@ -728,19 +732,15 @@ impl Application {
                 }
             },
 
-            IambAction::Verify(act, user_dev) => {
-                if let Some(sas) = store.application.verifications.get(&user_dev) {
-                    self.worker.verify(act, sas.clone())?
-                } else {
-                    return Err(IambError::InvalidVerificationId(user_dev).into());
-                }
+            IambAction::Verify(act, flow_id) => {
+                return verifications::iamb_verify(act, flow_id, store).await;
             },
             IambAction::VerifyRequest(user_id) => {
-                if let Ok(user_id) = OwnedUserId::try_from(user_id.as_str()) {
-                    self.worker.verify_request(user_id)?
-                } else {
+                let Ok(user_id) = <&UserId>::try_from(user_id.as_str()) else {
                     return Err(IambError::InvalidUserId(user_id).into());
-                }
+                };
+
+                return verifications::iamb_verify_request(user_id, store).await;
             },
         };
 
@@ -763,6 +763,15 @@ impl Application {
 
                 Ok(vec![(action.into(), ctx)])
             },
+            HomeserverAction::KnockSend(alias, reason) => {
+                let _ = self
+                    .worker
+                    .client
+                    .knock(alias, reason, vec![])
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
             HomeserverAction::Logout(user, true) => {
                 self.worker.logout(user)?;
                 let flags = CloseFlags::QUIT | CloseFlags::FORCE;
@@ -784,6 +793,56 @@ impl Application {
                     room.forget().await.map_err(IambError::from)?;
                 }
                 Ok(vec![])
+            },
+            HomeserverAction::ProfileFieldSet(value) => {
+                let client = &store.application.worker.client;
+                let account = client.account();
+                account.set_profile_field(value).await.map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::ProfileFieldUnset(field) => {
+                let client = &store.application.worker.client;
+                let account = client.account();
+                account.delete_profile_field(field).await.map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::ProfileFieldShow(field) => {
+                let client = &store.application.worker.client;
+                let user_id = store.application.settings.profile.user_id.clone();
+                let account = client.account();
+                let value = account
+                    .fetch_profile_field_of(user_id, field.clone())
+                    .await
+                    .map_err(IambError::from)?;
+
+                let msg = match (field, value) {
+                    (_, Some(ProfileFieldValue::DisplayName(s))) => {
+                        format!("Your profile's display name is set to: {s}")
+                    },
+                    (_, Some(ProfileFieldValue::TimeZone(s))) => {
+                        format!("Your profile's timezone is set to: {s}")
+                    },
+                    (_, Some(ProfileFieldValue::AvatarUrl(s))) => {
+                        format!("Your profile's avatar URL is set to: {s}")
+                    },
+                    (ProfileFieldName::DisplayName, None) => {
+                        "Your profile's display name is currently unset".into()
+                    },
+                    (ProfileFieldName::TimeZone, None) => {
+                        "Your profile's timezone is currently unset".into()
+                    },
+                    (ProfileFieldName::AvatarUrl, None) => {
+                        "Your profile's avatar URL is currently unset".into()
+                    },
+                    (f, None) => {
+                        format!("Your profile's {f:?} is currently unset")
+                    },
+                    (f, Some(s)) => {
+                        format!("Your profile's {f:?} is set to {s:?}")
+                    },
+                };
+
+                Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)])
             },
         }
     }
@@ -924,6 +983,17 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
         return Ok(());
     }
 
+    if let Some(ref password_file) = settings.profile.password_file {
+        if let Err(e) = std::fs::read_to_string(password_file)
+            .map(|password| worker.login(LoginStyle::Password(password)))
+        {
+            println!("Failed to log in using password file {password_file:?}: {e}");
+            println!("Continuing on to interactive login");
+        } else {
+            return Ok(());
+        }
+    }
+
     loop {
         let login_style =
             match read_response("Please select login type: [p]assword / [s]ingle sign on")
@@ -1003,7 +1073,7 @@ async fn check_import_keys(
     let encrypted = match encrypt_room_key_export(&keys, &passphrase, 500000) {
         Ok(encrypted) => encrypted,
         Err(e) => {
-            println!("* Failed to encrypt room keys during export: {e}");
+            eprintln!("* Failed to encrypt room keys during export: {e}");
             process::exit(2);
         },
     };
@@ -1086,8 +1156,6 @@ async fn login_normal(
 
 /// Set up the terminal for drawing the TUI, and getting additional info.
 fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std::io::Result<()> {
-    let title = format!("iamb ({})", settings.profile.user_id.as_str());
-
     // Enable raw mode and enter the alternate screen.
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(stdout(), EnterAlternateScreen)?;
@@ -1104,7 +1172,14 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
         crossterm::execute!(stdout(), EnableMouseCapture)?;
     }
 
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, SetTitle(title))
+    if settings.tunables.terminal.enable_title {
+        let title = format!("iamb ({})", settings.profile.user_id.as_str());
+        crossterm::execute!(stdout(), SetTitle(title))?;
+    }
+
+    let cursor_shape = SetCursorStyle::from(settings.tunables.terminal.cursor_shape);
+
+    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, cursor_shape)
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
@@ -1121,6 +1196,7 @@ fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
         stdout(),
         DisableBracketedPaste,
         DisableFocusChange,
+        SetCursorStyle::DefaultUserShape,
         LeaveAlternateScreen,
         CursorShow,
     );
@@ -1157,7 +1233,10 @@ async fn run(
     match res {
         Err(UIError::Application(IambError::Matrix(e))) => {
             if let Some(ErrorKind::UnknownToken { .. }) = e.client_api_error_kind() {
-                print_exit(format!("Server did not recognize our API token; did you log out from this session elsewhere?\nTry deleting `{}` to force a clean login.", settings.session_json.display()))
+                print_exit(format!(
+                    "Server did not recognize our API token; did you log out from this session elsewhere?\nTry deleting `{}` to force a clean login.",
+                    settings.session_json.display()
+                ))
             } else {
                 print_exit(e)
             }
@@ -1167,14 +1246,15 @@ async fn run(
     }
 
     // Set up the terminal for drawing, and cleanup properly on panics.
-    let enable_enhanced_keys = match crossterm::terminal::supports_keyboard_enhancement() {
-        Ok(supported) => supported,
-        Err(e) => {
-            tracing::warn!(err = %e,
-               "Failed to determine whether the terminal supports keyboard enhancements");
-            false
-        },
-    };
+    let enable_enhanced_keys =
+        settings.tunables.terminal.enable_extended_keys.unwrap_or_else(|| {
+            crossterm::terminal::supports_keyboard_enhancement()
+                .inspect_err(|e| tracing::warn!(
+                        err = %e,
+                       "Failed to determine whether the terminal supports keyboard enhancements"
+               ))
+                .unwrap_or_default()
+        });
     setup_tty(&settings, enable_enhanced_keys)?;
 
     let orig_hook = std::panic::take_hook();
@@ -1238,9 +1318,14 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
     guard
 }
 
-fn main() -> IambResult<()> {
+fn main() {
     // Parse command-line flags.
     let iamb = Iamb::parse();
+
+    if let Some(shell) = iamb.completions {
+        clap_complete::generate(shell, &mut Iamb::command(), "iamb", &mut std::io::stdout());
+        return;
+    }
 
     let initial_room = if let Some(uri) = &iamb.uri {
         MatrixUri::parse(uri)
@@ -1275,8 +1360,10 @@ fn main() -> IambResult<()> {
         .build()
         .unwrap();
 
-    rt.block_on(async move { run(settings, initial_room).await })?;
+    if let Err(err) = rt.block_on(async move { run(settings, initial_room).await }) {
+        eprintln!("\n{err}\n");
+        process::exit(2);
+    }
 
     drop(guard);
-    process::exit(0);
 }

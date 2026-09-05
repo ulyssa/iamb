@@ -3,14 +3,14 @@ use std::borrow::Cow;
 use std::str::FromStr;
 
 use matrix_sdk::ruma::{
-    events::{
-        room::member::MembershipChange,
-        AnyFullStateEventContent,
-        AnySyncStateEvent,
-        FullStateEventContent,
-    },
     OwnedRoomId,
     UserId,
+    events::{
+        AnyStateEventContentChange,
+        AnySyncStateEvent,
+        StateEventContentChange,
+        room::member::MembershipChange,
+    },
 };
 
 use crate::message::TreeGenState;
@@ -25,8 +25,8 @@ fn bold(s: impl Into<Cow<'static, str>>) -> StyleTreeNode {
 }
 
 pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
-    let event = match ev.content() {
-        AnyFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Original {
+    let event = match ev.content_change() {
+        AnyStateEventContentChange::PolicyRuleRoom(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -44,7 +44,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 
             m
         },
-        AnyFullStateEventContent::PolicyRuleServer(FullStateEventContent::Original {
+        AnyStateEventContentChange::PolicyRuleServer(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -62,7 +62,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 
             m
         },
-        AnyFullStateEventContent::PolicyRuleUser(FullStateEventContent::Original {
+        AnyStateEventContentChange::PolicyRuleUser(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -80,22 +80,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 
             m
         },
-        AnyFullStateEventContent::RoomAliases(FullStateEventContent::Original {
-            content, ..
-        }) => {
-            let mut m = String::from("* set the room aliases to: ");
-
-            for (i, alias) in content.aliases.iter().enumerate() {
-                if i != 0 {
-                    m.push_str(", ");
-                }
-
-                m.push_str(alias.as_str());
-            }
-
-            m
-        },
-        AnyFullStateEventContent::RoomAvatar(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomAvatar(StateEventContentChange::Original {
             content,
             prev_content,
         }) => {
@@ -114,7 +99,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 (None, None) => return Cow::Borrowed("* updated the room avatar state"),
             }
         },
-        AnyFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomCanonicalAlias(StateEventContentChange::Original {
             content,
             prev_content,
         }) => {
@@ -140,8 +125,9 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 },
             }
         },
-        AnyFullStateEventContent::RoomCreate(FullStateEventContent::Original {
-            content, ..
+        AnyStateEventContentChange::RoomCreate(StateEventContentChange::Original {
+            content,
+            ..
         }) => {
             if content.federate {
                 return Cow::Borrowed("* created a federated room");
@@ -149,16 +135,18 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 return Cow::Borrowed("* created a non-federated room");
             }
         },
-        AnyFullStateEventContent::RoomEncryption(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::RoomEncryption(StateEventContentChange::Original {
+            ..
+        }) => {
             return Cow::Borrowed("* updated the encryption settings for the room");
         },
-        AnyFullStateEventContent::RoomGuestAccess(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomGuestAccess(StateEventContentChange::Original {
             content,
             ..
         }) => {
             format!("* set guest access for the room to {:?}", content.guest_access.as_str())
         },
-        AnyFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomHistoryVisibility(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -167,13 +155,13 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 content.history_visibility.as_str()
             )
         },
-        AnyFullStateEventContent::RoomJoinRules(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomJoinRules(StateEventContentChange::Original {
             content,
             ..
         }) => {
             format!("* update the join rules for the room to {:?}", content.join_rule.as_str())
         },
-        AnyFullStateEventContent::RoomMember(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomMember(StateEventContentChange::Original {
             content,
             prev_content,
         }) => {
@@ -286,25 +274,37 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 },
             }
         },
-        AnyFullStateEventContent::RoomName(FullStateEventContent::Original { content, .. }) => {
+        AnyStateEventContentChange::RoomName(StateEventContentChange::Original {
+            content, ..
+        }) => {
             format!("* updated the room name to {:?}", content.name)
         },
-        AnyFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::RoomPinnedEvents(StateEventContentChange::Original {
+            ..
+        }) => {
             return Cow::Borrowed("* updated the pinned events for the room");
         },
-        AnyFullStateEventContent::RoomPowerLevels(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::RoomPolicy(StateEventContentChange::Original {
+            content,
+            ..
+        }) => {
+            format!("* updated the room policy server to {}", content.via)
+        },
+        AnyStateEventContentChange::RoomPowerLevels(StateEventContentChange::Original {
+            ..
+        }) => {
             return Cow::Borrowed("* updated the power levels for the room");
         },
-        AnyFullStateEventContent::RoomServerAcl(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::RoomServerAcl(StateEventContentChange::Original { .. }) => {
             return Cow::Borrowed("* updated the room's server ACLs");
         },
-        AnyFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomThirdPartyInvite(StateEventContentChange::Original {
             content,
             ..
         }) => {
             format!("* sent a third-party invite to {:?}", content.display_name)
         },
-        AnyFullStateEventContent::RoomTombstone(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomTombstone(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -313,16 +313,18 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 content.replacement_room.as_str()
             )
         },
-        AnyFullStateEventContent::RoomTopic(FullStateEventContent::Original {
-            content, ..
+        AnyStateEventContentChange::RoomTopic(StateEventContentChange::Original {
+            content,
+            ..
         }) => {
             format!("* set the room topic to {:?}", content.topic)
         },
-        AnyFullStateEventContent::SpaceChild(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::SpaceChild(StateEventContentChange::Original { .. }) => {
             format!("* added a space child: {}", ev.state_key())
         },
-        AnyFullStateEventContent::SpaceParent(FullStateEventContent::Original {
-            content, ..
+        AnyStateEventContentChange::SpaceParent(StateEventContentChange::Original {
+            content,
+            ..
         }) => {
             if content.canonical {
                 format!("* added a canonical parent space: {}", ev.state_key())
@@ -330,14 +332,15 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
                 format!("* added a parent space: {}", ev.state_key())
             }
         },
-        AnyFullStateEventContent::BeaconInfo(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::BeaconInfo(StateEventContentChange::Original { .. }) => {
             return Cow::Borrowed("* shared beacon information");
         },
-        AnyFullStateEventContent::CallMember(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::CallMember(StateEventContentChange::Original { .. }) => {
             return Cow::Borrowed("* updated membership for room call");
         },
-        AnyFullStateEventContent::MemberHints(FullStateEventContent::Original {
-            content, ..
+        AnyStateEventContentChange::MemberHints(StateEventContentChange::Original {
+            content,
+            ..
         }) => {
             let mut m = String::from("* updated the list of service members in the room hints: ");
 
@@ -353,78 +356,78 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
         },
 
         // Redacted variants of state events:
-        AnyFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::PolicyRuleRoom(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated a room policy rule (redacted)");
         },
-        AnyFullStateEventContent::PolicyRuleServer(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::PolicyRuleServer(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated a server policy rule (redacted)");
         },
-        AnyFullStateEventContent::PolicyRuleUser(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::PolicyRuleUser(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated a user policy rule (redacted)");
         },
-        AnyFullStateEventContent::RoomAliases(FullStateEventContent::Redacted(_)) => {
-            return Cow::Borrowed("* updated the room aliases for the room (redacted)");
-        },
-        AnyFullStateEventContent::RoomAvatar(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomAvatar(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the room avatar (redacted)");
         },
-        AnyFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomCanonicalAlias(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the canonical alias for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomCreate(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomCreate(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* created the room (redacted)");
         },
-        AnyFullStateEventContent::RoomEncryption(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomEncryption(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the encryption settings for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomGuestAccess(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomGuestAccess(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed(
                 "* updated the guest access configuration for the room (redacted)",
             );
         },
-        AnyFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomHistoryVisibility(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated history visilibity for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomJoinRules(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomJoinRules(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the join rules for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomMember(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomMember(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the room membership (redacted)");
         },
-        AnyFullStateEventContent::RoomName(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomName(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the room name (redacted)");
         },
-        AnyFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomPinnedEvents(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the pinned events for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomPowerLevels(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomPolicy(StateEventContentChange::Redacted(_)) => {
+            return Cow::Borrowed("* updated the room policy server (redacted)");
+        },
+        AnyStateEventContentChange::RoomPowerLevels(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the power levels for the room (redacted)");
         },
-        AnyFullStateEventContent::RoomServerAcl(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomServerAcl(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the room's server ACLs (redacted)");
         },
-        AnyFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomThirdPartyInvite(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* sent a third-party invite (redacted)");
         },
-        AnyFullStateEventContent::RoomTombstone(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomTombstone(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* upgraded the room (redacted)");
         },
-        AnyFullStateEventContent::RoomTopic(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomTopic(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* updated the room topic (redacted)");
         },
-        AnyFullStateEventContent::SpaceChild(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::SpaceChild(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* added a space child (redacted)");
         },
-        AnyFullStateEventContent::SpaceParent(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::SpaceParent(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* added a parent space (redacted)");
         },
-        AnyFullStateEventContent::BeaconInfo(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::BeaconInfo(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("* shared beacon information (redacted)");
         },
-        AnyFullStateEventContent::CallMember(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::CallMember(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("Call membership changed");
         },
-        AnyFullStateEventContent::MemberHints(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::MemberHints(StateEventContentChange::Redacted(_)) => {
             return Cow::Borrowed("Member hints changed");
         },
 
@@ -438,8 +441,8 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
 }
 
 pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
-    let children = match ev.content() {
-        AnyFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Original {
+    let children = match ev.content_change() {
+        AnyStateEventContentChange::PolicyRuleRoom(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -457,7 +460,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             cs
         },
-        AnyFullStateEventContent::PolicyRuleServer(FullStateEventContent::Original {
+        AnyStateEventContentChange::PolicyRuleServer(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -475,7 +478,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             cs
         },
-        AnyFullStateEventContent::PolicyRuleUser(FullStateEventContent::Original {
+        AnyStateEventContentChange::PolicyRuleUser(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -493,27 +496,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             cs
         },
-        AnyFullStateEventContent::RoomAliases(FullStateEventContent::Original {
-            content, ..
-        }) => {
-            let prefix = StyleTreeNode::Text("* set the room aliases to: ".into());
-            let mut cs = vec![prefix];
-
-            let mut state = TreeGenState { link_num: 0 };
-
-            for (i, alias) in content.aliases.iter().enumerate() {
-                if i != 0 {
-                    cs.push(StyleTreeNode::Text(", ".into()));
-                }
-
-                let c = state.next_link_char();
-
-                cs.push(StyleTreeNode::RoomAlias(alias.clone(), c));
-            }
-
-            cs
-        },
-        AnyFullStateEventContent::RoomAvatar(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomAvatar(StateEventContentChange::Original {
             content,
             prev_content,
         }) => {
@@ -534,12 +517,12 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             vec![node]
         },
-        AnyFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomCanonicalAlias(StateEventContentChange::Original {
             content,
             ..
         }) => {
             if let Some(canon) = content.alias.as_ref() {
-                let canon = bold(canon.to_string());
+                let canon = StyleTreeNode::RoomAlias(canon.to_owned(), Some('0'));
                 let prefix =
                     StyleTreeNode::Text("* updated the canonical alias for the room to: ".into());
                 vec![prefix, canon]
@@ -549,8 +532,9 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                 )]
             }
         },
-        AnyFullStateEventContent::RoomCreate(FullStateEventContent::Original {
-            content, ..
+        AnyStateEventContentChange::RoomCreate(StateEventContentChange::Original {
+            content,
+            ..
         }) => {
             if content.federate {
                 vec![StyleTreeNode::Text("* created a federated room".into())]
@@ -558,12 +542,14 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                 vec![StyleTreeNode::Text("* created a non-federated room".into())]
             }
         },
-        AnyFullStateEventContent::RoomEncryption(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::RoomEncryption(StateEventContentChange::Original {
+            ..
+        }) => {
             vec![StyleTreeNode::Text(
                 "* updated the encryption settings for the room".into(),
             )]
         },
-        AnyFullStateEventContent::RoomGuestAccess(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomGuestAccess(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -571,7 +557,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let prefix = StyleTreeNode::Text("* set guest access for the room to ".into());
             vec![prefix, access]
         },
-        AnyFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomHistoryVisibility(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -580,7 +566,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let vis = bold(format!("{:?}", content.history_visibility.as_str()));
             vec![prefix, vis]
         },
-        AnyFullStateEventContent::RoomJoinRules(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomJoinRules(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -588,7 +574,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let rule = bold(format!("{:?}", content.join_rule.as_str()));
             vec![prefix, rule]
         },
-        AnyFullStateEventContent::RoomMember(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomMember(StateEventContentChange::Original {
             content,
             prev_content,
         }) => {
@@ -746,27 +732,41 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
                 },
             }
         },
-        AnyFullStateEventContent::RoomName(FullStateEventContent::Original { content, .. }) => {
+        AnyStateEventContentChange::RoomName(StateEventContentChange::Original {
+            content, ..
+        }) => {
             let prefix = StyleTreeNode::Text("* updated the room name to ".into());
             let name = bold(format!("{:?}", content.name));
             vec![prefix, name]
         },
-        AnyFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::RoomPinnedEvents(StateEventContentChange::Original {
+            ..
+        }) => {
             vec![StyleTreeNode::Text(
                 "* updated the pinned events for the room".into(),
             )]
         },
-        AnyFullStateEventContent::RoomPowerLevels(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::RoomPolicy(StateEventContentChange::Original {
+            content,
+            ..
+        }) => {
+            let prefix = StyleTreeNode::Text("* updated the room policy server to ".into());
+            let server = bold(format!("{}", content.via));
+            vec![prefix, server]
+        },
+        AnyStateEventContentChange::RoomPowerLevels(StateEventContentChange::Original {
+            ..
+        }) => {
             vec![StyleTreeNode::Text(
                 "* updated the power levels for the room".into(),
             )]
         },
-        AnyFullStateEventContent::RoomServerAcl(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::RoomServerAcl(StateEventContentChange::Original { .. }) => {
             vec![StyleTreeNode::Text(
                 "* updated the room's server ACLs".into(),
             )]
         },
-        AnyFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomThirdPartyInvite(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -774,7 +774,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let name = bold(format!("{:?}", content.display_name));
             vec![prefix, name]
         },
-        AnyFullStateEventContent::RoomTombstone(FullStateEventContent::Original {
+        AnyStateEventContentChange::RoomTombstone(StateEventContentChange::Original {
             content,
             ..
         }) => {
@@ -782,14 +782,15 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             let room = StyleTreeNode::RoomId(content.replacement_room.clone(), vec![], Some('0'));
             vec![prefix, room]
         },
-        AnyFullStateEventContent::RoomTopic(FullStateEventContent::Original {
-            content, ..
+        AnyStateEventContentChange::RoomTopic(StateEventContentChange::Original {
+            content,
+            ..
         }) => {
             let prefix = StyleTreeNode::Text("* set the room topic to ".into());
             let topic = bold(format!("{:?}", content.topic));
             vec![prefix, topic]
         },
-        AnyFullStateEventContent::SpaceChild(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::SpaceChild(StateEventContentChange::Original { .. }) => {
             let prefix = StyleTreeNode::Text("* added a space child: ".into());
 
             let room_id = if let Ok(room_id) = OwnedRoomId::from_str(ev.state_key()) {
@@ -800,8 +801,9 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             vec![prefix, room_id]
         },
-        AnyFullStateEventContent::SpaceParent(FullStateEventContent::Original {
-            content, ..
+        AnyStateEventContentChange::SpaceParent(StateEventContentChange::Original {
+            content,
+            ..
         }) => {
             let prefix = if content.canonical {
                 StyleTreeNode::Text("* added a canonical parent space: ".into())
@@ -817,16 +819,17 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
 
             vec![prefix, room_id]
         },
-        AnyFullStateEventContent::BeaconInfo(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::BeaconInfo(StateEventContentChange::Original { .. }) => {
             vec![StyleTreeNode::Text("* shared beacon information".into())]
         },
-        AnyFullStateEventContent::CallMember(FullStateEventContent::Original { .. }) => {
+        AnyStateEventContentChange::CallMember(StateEventContentChange::Original { .. }) => {
             vec![StyleTreeNode::Text(
                 "* updated membership for room call".into(),
             )]
         },
-        AnyFullStateEventContent::MemberHints(FullStateEventContent::Original {
-            content, ..
+        AnyStateEventContentChange::MemberHints(StateEventContentChange::Original {
+            content,
+            ..
         }) => {
             let prefix = StyleTreeNode::Text(
                 "* updated the list of service members in the room hints: ".into(),
@@ -849,116 +852,116 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
         },
 
         // Redacted variants of state events:
-        AnyFullStateEventContent::PolicyRuleRoom(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::PolicyRuleRoom(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated a room policy rule (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::PolicyRuleServer(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::PolicyRuleServer(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated a server policy rule (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::PolicyRuleUser(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::PolicyRuleUser(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated a user policy rule (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomAliases(FullStateEventContent::Redacted(_)) => {
-            vec![StyleTreeNode::Text(
-                "* updated the room aliases for the room (redacted)".into(),
-            )]
-        },
-        AnyFullStateEventContent::RoomAvatar(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomAvatar(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room avatar (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomCanonicalAlias(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomCanonicalAlias(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the canonical alias for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomCreate(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomCreate(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text("* created the room (redacted)".into())]
         },
-        AnyFullStateEventContent::RoomEncryption(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomEncryption(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the encryption settings for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomGuestAccess(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomGuestAccess(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the guest access configuration for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomHistoryVisibility(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomHistoryVisibility(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated history visilibity for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomJoinRules(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomJoinRules(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the join rules for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomMember(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomMember(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room membership (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomName(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomName(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room name (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomPinnedEvents(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomPinnedEvents(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the pinned events for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomPowerLevels(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomPolicy(StateEventContentChange::Redacted(_)) => {
+            vec![StyleTreeNode::Text(
+                "* updated the room policy server (redacted)".into(),
+            )]
+        },
+        AnyStateEventContentChange::RoomPowerLevels(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the power levels for the room (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomServerAcl(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomServerAcl(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room's server ACLs (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomThirdPartyInvite(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomThirdPartyInvite(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* sent a third-party invite (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::RoomTombstone(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomTombstone(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text("* upgraded the room (redacted)".into())]
         },
-        AnyFullStateEventContent::RoomTopic(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::RoomTopic(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* updated the room topic (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::SpaceChild(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::SpaceChild(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* added a space child (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::SpaceParent(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::SpaceParent(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* added a parent space (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::BeaconInfo(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::BeaconInfo(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text(
                 "* shared beacon information (redacted)".into(),
             )]
         },
-        AnyFullStateEventContent::CallMember(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::CallMember(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text("Call membership changed".into())]
         },
-        AnyFullStateEventContent::MemberHints(FullStateEventContent::Redacted(_)) => {
+        AnyStateEventContentChange::MemberHints(StateEventContentChange::Redacted(_)) => {
             vec![StyleTreeNode::Text("Member hints changed".into())]
         },
 

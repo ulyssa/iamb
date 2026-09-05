@@ -26,7 +26,6 @@ pub struct TextPrinter<'a> {
     text: Text<'a>,
     width: usize,
     base_style: Style,
-    hide_reply: bool,
 
     alignment: Alignment,
     curr_spans: Vec<Span<'a>>,
@@ -42,7 +41,6 @@ impl<'a> TextPrinter<'a> {
     pub fn new(
         width: usize,
         base_style: Style,
-        hide_reply: bool,
         settings: &'a ApplicationSettings,
         info: &'a RoomInfo,
     ) -> Self {
@@ -50,7 +48,6 @@ impl<'a> TextPrinter<'a> {
             text: Text::default(),
             width,
             base_style,
-            hide_reply,
 
             alignment: Alignment::Left,
             curr_spans: vec![],
@@ -59,6 +56,11 @@ impl<'a> TextPrinter<'a> {
             settings,
             info,
         }
+    }
+
+    /// The `(x, y)` position where the next text will be printed.
+    pub fn cursor_pos(&self) -> (usize, usize) {
+        (self.curr_width, self.text.lines.len())
     }
 
     /// Configure the alignment for each line.
@@ -71,11 +73,6 @@ impl<'a> TextPrinter<'a> {
     pub fn literal(mut self, literal: bool) -> Self {
         self.literal = literal;
         self
-    }
-
-    /// Indicates whether replies should be pushed to the printer.
-    pub fn hide_reply(&self) -> bool {
-        self.hide_reply
     }
 
     /// Indicates whether emojis should be replaced by shortcodes
@@ -102,7 +99,6 @@ impl<'a> TextPrinter<'a> {
             text: Text::default(),
             width: self.width.saturating_sub(indent),
             base_style: self.base_style,
-            hide_reply: self.hide_reply,
 
             alignment: self.alignment,
             curr_spans: vec![],
@@ -314,7 +310,7 @@ pub mod tests {
     fn test_push_nobreak() {
         let settings = mock_settings();
         let info = mock_room();
-        let mut printer = TextPrinter::new(5, Style::default(), false, &settings, &info);
+        let mut printer = TextPrinter::new(5, Style::default(), &settings, &info);
         printer.push_span_nobreak("hello world".into());
         let text = printer.finish();
         assert_eq!(text.lines.len(), 1);

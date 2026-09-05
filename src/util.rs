@@ -1,6 +1,7 @@
 //! # Utility functions
 use std::borrow::Cow;
 
+use regex::{Regex, RegexBuilder};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
@@ -26,23 +27,38 @@ pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) 
 
 pub fn take_width(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usize), Cow<'_, str>) {
     // Find where to split the line.
-    let mut w = 0;
+    let mut cur_width = 0;
 
-    let idx = UnicodeSegmentation::grapheme_indices(s.as_ref(), true)
-        .find_map(|(i, g)| {
-            let gw = UnicodeWidthStr::width(g);
-            if w + gw > width {
+    let mut idx = UnicodeSegmentation::split_word_bound_indices(s.as_ref())
+        .find_map(|(i, word)| {
+            let word_width = UnicodeWidthStr::width(word);
+            if cur_width + word_width > width {
                 Some(i)
             } else {
-                w += gw;
+                cur_width += word_width;
                 None
             }
         })
         .unwrap_or(s.len());
 
+    if idx == 0 {
+        // first word is wider than available; fall back to splitting by width
+        idx = UnicodeSegmentation::grapheme_indices(s.as_ref(), true)
+            .find_map(|(i, graph)| {
+                let graph_width = UnicodeWidthStr::width(graph);
+                if cur_width + graph_width > width {
+                    Some(i)
+                } else {
+                    cur_width += graph_width;
+                    None
+                }
+            })
+            .unwrap_or(s.len());
+    }
+
     let (s0, s1) = split_cow(s, idx);
 
-    ((s0, w), s1)
+    ((s0, cur_width), s1)
 }
 
 pub struct WrappedLinesIterator<'a> {
@@ -167,9 +183,27 @@ pub fn replace_emojis_in_line(line: &mut Line) {
     }
 }
 
+/// Compile a search pattern, optionally ignoring case.
+pub fn compile_search(pattern: &str, case_insensitive: bool) -> Result<Regex, regex::Error> {
+    RegexBuilder::new(pattern).case_insensitive(case_insensitive).build()
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
+    #[test]
+    fn test_compile_search_case_insensitive() {
+        let re = compile_search("chicken", true).unwrap();
+        assert!(re.is_match("CHICKEN"));
+        assert!(re.is_match("Chicken"));
+        assert!(re.is_match("chicken"));
+
+        let re = compile_search("chicken", false).unwrap();
+        assert!(!re.is_match("CHICKEN"));
+        assert!(!re.is_match("Chicken"));
+        assert!(re.is_match("chicken"));
+    }
 
     #[test]
     fn test_wrapped_lines_ascii() {
@@ -183,8 +217,9 @@ pub mod tests {
 
         let mut iter = wrap(s, 5);
         assert_eq!(iter.next(), Some((Cow::Borrowed("hello"), 5)));
-        assert_eq!(iter.next(), Some((Cow::Borrowed(" worl"), 5)));
-        assert_eq!(iter.next(), Some((Cow::Borrowed("d!"), 2)));
+        assert_eq!(iter.next(), Some((Cow::Borrowed(" "), 1)));
+        assert_eq!(iter.next(), Some((Cow::Borrowed("world"), 5)));
+        assert_eq!(iter.next(), Some((Cow::Borrowed("!"), 1)));
         assert_eq!(iter.next(), Some((Cow::Borrowed("abcde"), 5)));
         assert_eq!(iter.next(), Some((Cow::Borrowed("fghij"), 5)));
         assert_eq!(iter.next(), Some((Cow::Borrowed("klmno"), 5)));
