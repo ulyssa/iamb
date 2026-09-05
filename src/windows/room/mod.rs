@@ -260,6 +260,7 @@ pub async fn room_command(
             let Some(room) = store.application.worker.client.get_room(id) else {
                 return Err(IambError::NotJoined.into());
             };
+            let rule = rule.into_join_rule(&store.application.worker.client).await?;
             room.privacy_settings()
                 .update_join_rule(rule)
                 .await

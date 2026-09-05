@@ -6,13 +6,11 @@ use std::{convert::TryFrom, str::FromStr as _};
 
 use matrix_sdk::ruma::{
     OwnedMxcUri,
-    OwnedRoomId,
     OwnedRoomOrAliasId,
     OwnedUserId,
     RoomVersionId,
     events::tag::TagName,
     profile::{ProfileFieldName, ProfileFieldValue},
-    room::{AllowRule, JoinRule, Restricted as JoinRestrictions},
 };
 
 use modalkit::{
@@ -28,6 +26,7 @@ use crate::base::{
     HomeserverAction,
     IambAction,
     IambId,
+    IambJoinRule,
     KeysAction,
     MemberUpdateAction,
     MessageAction,
@@ -644,7 +643,7 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let act: IambAction = match (field.as_str(), action.as_str(), arg) {
         // :room access set
         ("access", "set", Some(rule)) => {
-            let allow = trailing
+            let rooms = trailing
                 .iter()
                 .map(|a| {
                     let (flag, v) = match OptionType::from_str(a)? {
@@ -655,25 +654,23 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 
                     match flag.as_str() {
                         "members" => {
-                            let room_id = OwnedRoomId::from_str(&v).map_err(|e| {
+                            OwnedRoomOrAliasId::from_str(&v).map_err(|e| {
                                 CommandError::Error(format!(
                                     "{v:?} is not a valid room identifier: {e}"
                                 ))
-                            })?;
-                            Ok(AllowRule::room_membership(room_id))
+                            })
                         },
                         _ => Err(CommandError::Error(format!("unknown flag {flag:?}"))),
                     }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
-            let restrictions = JoinRestrictions::new(allow);
 
             let rule = match rule.as_str() {
-                "invite" => JoinRule::Invite,
-                "knock" => JoinRule::Knock,
-                "knock-restricted" => JoinRule::KnockRestricted(restrictions),
-                "public" => JoinRule::Public,
-                "restricted" => JoinRule::Restricted(restrictions),
+                "invite" => IambJoinRule::Invite,
+                "knock" => IambJoinRule::Knock,
+                "knock-restricted" => IambJoinRule::KnockRestricted(rooms),
+                "public" => IambJoinRule::Public,
+                "restricted" => IambJoinRule::Restricted(rooms),
                 _ => return Err(CommandError::InvalidArgument),
             };
             RoomAction::SetAccess(rule).into()
@@ -681,7 +678,7 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         ("access", "set", None) => return Result::Err(CommandError::InvalidArgument),
 
         // :room access unset
-        ("access", "unset", None) => RoomAction::SetAccess(JoinRule::Invite).into(),
+        ("access", "unset", None) => RoomAction::SetAccess(IambJoinRule::Invite).into(),
         ("access", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
         // :room access unset
@@ -1800,19 +1797,19 @@ mod tests {
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room access set knock", ctx.clone()).unwrap();
-        let act = IambAction::Room(RoomAction::SetAccess(JoinRule::Knock));
+        let act = IambAction::Room(RoomAction::SetAccess(IambJoinRule::Knock));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
             .input_cmd("room access set knock-restricted ++members=!abcde:example.org", ctx.clone())
             .unwrap();
-        let allow = AllowRule::room_membership(owned_room_id!("!abcde:example.org"));
-        let restrictions = JoinRestrictions::new(vec![allow]);
-        let act = IambAction::Room(RoomAction::SetAccess(JoinRule::KnockRestricted(restrictions)));
+        let restrictions = vec![owned_room_id!("!abcde:example.org").into()];
+        let act =
+            IambAction::Room(RoomAction::SetAccess(IambJoinRule::KnockRestricted(restrictions)));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("room access unset", ctx.clone()).unwrap();
-        let act = IambAction::Room(RoomAction::SetAccess(JoinRule::Invite));
+        let act = IambAction::Room(RoomAction::SetAccess(IambJoinRule::Invite));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
     }
 }

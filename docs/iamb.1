@@ -174,8 +174,9 @@ The
 and
 .Dq restricted
 values allow additional
-.Sy ++members=!room:example.org
+.Sy ++members=[room]
 arguments to specify rooms (and spaces) whose members are allowed to join without an invite or knocking.
+If a room alias is given instead of an id, it is resolved immediately.
 .It Sy ":room access unset"
 Set the room to being invite-only so that those not already members cannot join.
 .It Sy ":room access show"
