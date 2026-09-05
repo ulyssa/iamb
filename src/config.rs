@@ -1154,6 +1154,7 @@ pub enum TunablesUpdate {
     // value options
     DefaultMarkup(MarkupFormat),
     DefaultSplit(SplitDirection),
+    InputPrompt(Option<String>),
     LogLevel(Box<LogLevelUpdate>),
     MembersSplit(Option<SplitDirection>),
     ReadReceiptTrigger(ReadReceiptTrigger),
@@ -1256,6 +1257,13 @@ impl TunablesUpdate {
                     Self::DefaultSplit(SplitDirection::from_str(value)?)
                 } else {
                     return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "inputprompt" => {
+                match value {
+                    Some("") => Self::InputPrompt(None),
+                    Some(value) => Self::InputPrompt(Some(value.to_string())),
+                    None => return Err(TunablesUpdateError::NoArguments),
                 }
             },
             "memberssplit" => {
@@ -2153,6 +2161,9 @@ impl ApplicationSettings {
             },
             TunablesUpdate::Ignorecase(ic) => {
                 self.tunables.ignorecase = ic;
+            },
+            TunablesUpdate::InputPrompt(prompt) => {
+                self.tunables.input_prompt = prompt;
             },
         }
     }
