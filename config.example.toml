@@ -30,6 +30,12 @@ username_display = "username"
 indicator = "only-encrypted"
 indicator_location = "title|prompt"
 
+[settings.colors]
+message_state = "cyan"
+message_redacted = "245" # light gray
+# commented out because some terminals don't support truecolor
+#room_list_unread = "#ff55bb" # pink
+
 [settings.image_preview]
 protocol = { type = "sixel", filter = "Nearest" }
 size = { "width" = 66, "height" = 10 }
