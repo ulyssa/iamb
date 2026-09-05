@@ -29,6 +29,7 @@ use matrix_sdk::ruma::api::client::room::create_room::v3::{
 };
 use matrix_sdk::ruma::api::client::space::get_hierarchy::v1::Request as SpaceHierarchyRequest;
 use matrix_sdk::ruma::assign;
+use matrix_sdk::ruma::events::MessageLikeEvent;
 use matrix_sdk::ruma::events::key::verification::ready::{
     OriginalSyncKeyVerificationReadyEvent,
     ToDeviceKeyVerificationReadyEvent,
@@ -38,6 +39,9 @@ use matrix_sdk::ruma::events::key::verification::start::{
     OriginalSyncKeyVerificationStartEvent,
     ToDeviceKeyVerificationStartEvent,
 };
+use matrix_sdk::ruma::events::poll::unstable_end::UnstablePollEndEventContent;
+use matrix_sdk::ruma::events::poll::unstable_response::UnstablePollResponseEventContent;
+use matrix_sdk::ruma::events::poll::unstable_start::UnstablePollStartEventContent;
 use matrix_sdk::ruma::events::presence::PresenceEvent;
 use matrix_sdk::ruma::events::reaction::ReactionEventContent;
 use matrix_sdk::ruma::events::receipt::{ReceiptEventContent, ReceiptType};
@@ -296,6 +300,21 @@ fn load_insert(
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
                         info.insert_sticker_with_preview(ev, settings, previews);
+                    },
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::UnstablePollStart(ev)) => {
+                        info.insert_unstable_poll_start(ev);
+                    },
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::UnstablePollResponse(
+                        ev,
+                    )) => {
+                        if let MessageLikeEvent::Original(ev) = ev {
+                            info.insert_unstable_poll_relation(ev.into());
+                        }
+                    },
+                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::UnstablePollEnd(ev)) => {
+                        if let MessageLikeEvent::Original(ev) = ev {
+                            info.insert_unstable_poll_relation(ev.into());
+                        }
                     },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
@@ -1235,6 +1254,76 @@ impl ClientWorker {
                                 event_id.clone(),
                             );
                         }
+                    }
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |ev: SyncMessageLikeEvent<UnstablePollStartEventContent>,
+             room: MatrixRoom,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+
+                    let mut locked = store.lock().await;
+
+                    let sender = ev.sender().to_owned();
+                    let _ = locked.application.presences.get_or_default(sender);
+
+                    let info = locked.application.rooms.get_or_default(room_id.to_owned());
+
+                    update_event_receipts(info, &room, ev.event_id()).await;
+
+                    let full_ev = ev.into_full_event(room_id.to_owned());
+                    info.insert_unstable_poll_start(full_ev);
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |ev: SyncMessageLikeEvent<UnstablePollResponseEventContent>,
+             room: MatrixRoom,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+
+                    let mut locked = store.lock().await;
+
+                    let sender = ev.sender().to_owned();
+                    let _ = locked.application.presences.get_or_default(sender);
+
+                    let info = locked.application.rooms.get_or_default(room_id.to_owned());
+
+                    update_event_receipts(info, &room, ev.event_id()).await;
+
+                    let full_ev = ev.into_full_event(room_id.to_owned());
+                    if let MessageLikeEvent::Original(ev) = full_ev {
+                        info.insert_unstable_poll_relation(ev.into());
+                    }
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |ev: SyncMessageLikeEvent<UnstablePollEndEventContent>,
+             room: MatrixRoom,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id();
+
+                    let mut locked = store.lock().await;
+
+                    let sender = ev.sender().to_owned();
+                    let _ = locked.application.presences.get_or_default(sender);
+
+                    let info = locked.application.rooms.get_or_default(room_id.to_owned());
+
+                    update_event_receipts(info, &room, ev.event_id()).await;
+
+                    let full_ev = ev.into_full_event(room_id.to_owned());
+                    if let MessageLikeEvent::Original(ev) = full_ev {
+                        info.insert_unstable_poll_relation(ev.into());
                     }
                 }
             },
