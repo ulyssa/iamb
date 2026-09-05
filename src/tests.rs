@@ -170,6 +170,7 @@ pub fn mock_tunables() -> TunableValues {
         ignorecase: false,
         default_room: None,
         encryption: Encryption::default().values(),
+        input_prompt: None,
         log_level: "warn".into(),
         max_log_files: 7,
         message_shortcode_display: false,

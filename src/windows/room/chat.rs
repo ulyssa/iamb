@@ -1177,10 +1177,12 @@ impl StatefulWidget for Chat<'_> {
         let encryption_settings = &settings.tunables.encryption;
         let encryption_indicator = encryption_settings
             .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
-        let prompt = match (self.focused, encryption_indicator) {
-            (false, _) => Span::raw("  "),
-            (true, Some(i)) => i,
-            (true, None) => Span::raw("> "),
+        let input_prompt = settings.tunables.input_prompt.as_deref();
+        let prompt = match (self.focused, encryption_indicator, input_prompt) {
+            (false, _, _) => Span::raw("  "),
+            (true, Some(i), _) => i,
+            (true, None, None) => Span::raw("> "),
+            (true, None, Some(s)) => Span::raw(s),
         };
 
         let tbox = TextBox::new().prompt(prompt);

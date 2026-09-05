@@ -832,6 +832,7 @@ pub struct TunableValues {
     pub user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
+    pub input_prompt: Option<String>,
     pub members_split: Option<SplitDirection>,
     pub default_split: SplitDirection,
     pub ssl_verify: bool,
@@ -883,6 +884,7 @@ pub struct Tunables {
     pub user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
+    pub input_prompt: Option<String>,
     pub members_split: Option<SplitDirection>,
     pub default_split: Option<SplitDirection>,
     pub ssl_verify: Option<bool>,
@@ -933,6 +935,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
             tabstop: self.tabstop.or(other.tabstop),
+            input_prompt: self.input_prompt.or(other.input_prompt),
             members_split: self.members_split.or(other.members_split),
             default_split: self.default_split.or(other.default_split),
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
@@ -975,6 +978,7 @@ impl Tunables {
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),
             tabstop: self.tabstop.unwrap_or(4),
+            input_prompt: self.input_prompt,
             members_split: self.members_split,
             default_split: self.default_split.unwrap_or_default(),
             ssl_verify: self.ssl_verify.unwrap_or(true),
