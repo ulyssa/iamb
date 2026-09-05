@@ -105,7 +105,7 @@ impl SpaceState {
                     return Err(IambError::InsufficientPermission.into());
                 }
 
-                let child_id = store.application.worker.join_room(child)?;
+                let child_id = store.application.worker.join_room(child, vec![])?;
 
                 let via = self.room.route().await.map_err(IambError::from)?;
                 let mut ev = SpaceChildEventContent::new(via);

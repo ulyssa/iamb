@@ -11,6 +11,7 @@ use ratatui::text::{Line, Span, Text};
 use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
 
+use crate::base::RoomInfo;
 use crate::config::{ApplicationSettings, TunableValues};
 use crate::util::{
     replace_emojis_in_line,
@@ -32,11 +33,17 @@ pub struct TextPrinter<'a> {
     literal: bool,
 
     pub(super) settings: &'a ApplicationSettings,
+    pub(super) info: &'a RoomInfo,
 }
 
 impl<'a> TextPrinter<'a> {
     /// Create a new printer.
-    pub fn new(width: usize, base_style: Style, settings: &'a ApplicationSettings) -> Self {
+    pub fn new(
+        width: usize,
+        base_style: Style,
+        settings: &'a ApplicationSettings,
+        info: &'a RoomInfo,
+    ) -> Self {
         TextPrinter {
             text: Text::default(),
             width,
@@ -47,6 +54,7 @@ impl<'a> TextPrinter<'a> {
             curr_width: 0,
             literal: false,
             settings,
+            info,
         }
     }
 
@@ -97,6 +105,7 @@ impl<'a> TextPrinter<'a> {
             curr_width: 0,
             literal: self.literal,
             settings: self.settings,
+            info: self.info,
         }
     }
 
@@ -295,12 +304,13 @@ impl<'a> TextPrinter<'a> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::tests::mock_settings;
+    use crate::tests::{mock_room, mock_settings};
 
     #[test]
     fn test_push_nobreak() {
         let settings = mock_settings();
-        let mut printer = TextPrinter::new(5, Style::default(), &settings);
+        let info = mock_room();
+        let mut printer = TextPrinter::new(5, Style::default(), &settings, &info);
         printer.push_span_nobreak("hello world".into());
         let text = printer.finish();
         assert_eq!(text.lines.len(), 1);

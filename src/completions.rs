@@ -2,6 +2,7 @@
 use std::borrow::Cow;
 use std::str::FromStr;
 
+use matrix_sdk::ruma::RoomId;
 use modalkit::{
     editing::{
         completion::{Completer, complete_path},
@@ -284,7 +285,7 @@ fn complete_users(input: &str, store: &ChatStore) -> Vec<String> {
 fn complete_matrix_names(input: &str, store: &ChatStore) -> Vec<String> {
     let list = store.names.complete(input);
     if !list.is_empty() {
-        return list;
+        return list.into_iter().map(|i| i.to_string()).collect();
     }
 
     let list = store.presences.complete(input);
@@ -685,26 +686,38 @@ fn complete_cmdbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
 }
 
 /// Tab completion within the message bar.
-fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> Vec<String> {
+fn complete_msgbar(
+    text: &EditRope,
+    cursor: &mut Cursor,
+    store: &mut ChatStore,
+    room_id: &RoomId,
+) -> Vec<String> {
     let id = text
         .get_prefix_word_mut(cursor, &MATRIX_ID_WORD)
         .unwrap_or_else(EditRope::empty);
     let id = Cow::from(&id);
 
+    let info = store.rooms.get_or_default(room_id.to_owned());
+
     match id.chars().next() {
         // Complete room aliases.
         Some('#') => {
-            return store.names.complete(id.as_ref());
+            store
+                .names
+                .complete(id.as_ref())
+                .into_iter()
+                .map(|i| format!("[{}]({})", i, i.matrix_to_uri()))
+                .collect()
         },
 
         // Complete room identifiers.
         Some('!') => {
-            return store
+            store
                 .rooms
                 .complete(id.as_ref())
                 .into_iter()
-                .map(|i| i.to_string())
-                .collect();
+                .map(|i| format!("[{}]({})", i, i.matrix_to_uri()))
+                .collect()
         },
 
         // Complete Emoji shortcodes.
@@ -716,14 +729,7 @@ fn complete_msgbar(text: &EditRope, cursor: &mut Cursor, store: &ChatStore) -> V
         },
 
         // Complete usernames for @ and empty strings.
-        Some('@') | None => {
-            return store
-                .presences
-                .complete(id.as_ref())
-                .into_iter()
-                .map(|i| i.to_string())
-                .collect();
-        },
+        Some('@') | None => info.display_names.complete_mention(&id),
 
         // Unknown sigil.
         Some(_) => return vec![],
@@ -743,7 +749,9 @@ impl Completer<IambInfo> for IambCompleter {
         match content {
             IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
             IambBufferId::Command(CommandType::Search) => vec![],
-            IambBufferId::Room(_, _, RoomFocus::MessageBar) => complete_msgbar(text, cursor, store),
+            IambBufferId::Room(room_id, _, RoomFocus::MessageBar) => {
+                complete_msgbar(text, cursor, store, room_id)
+            },
             IambBufferId::Room(_, _, RoomFocus::Scrollback) => vec![],
 
             IambBufferId::DirectList => vec![],
@@ -773,24 +781,25 @@ pub mod tests {
     #[tokio::test]
     async fn test_complete_msgbar() {
         let store = mock_store().await;
-        let store = store.application;
+        let mut store = store.application;
+        let room_id = TEST_ROOM1_ID.clone();
 
         let text = EditRope::from("going for a walk :walk ");
         let mut cursor = Cursor::new(0, 22);
-        let res = complete_msgbar(&text, &mut cursor, &store);
+        let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
         assert_eq!(res, vec![":walking:", ":walking_man:", ":walking_woman:"]);
         assert_eq!(cursor, Cursor::new(0, 17));
 
-        let text = EditRope::from("hello @user1 ");
+        let text = EditRope::from("hello @user2 ");
         let mut cursor = Cursor::new(0, 12);
-        let res = complete_msgbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec!["@user1:example.com"]);
+        let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
+        assert_eq!(res, vec!["[User 2](https://matrix.to/#/@user2:example.com)"]);
         assert_eq!(cursor, Cursor::new(0, 6));
 
         let text = EditRope::from("see #room ");
         let mut cursor = Cursor::new(0, 9);
-        let res = complete_msgbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec!["#room1:example.com"]);
+        let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
+        assert_eq!(res, vec!["[#room1:example.com](https://matrix.to/#/%23room1:example.com)"]);
         assert_eq!(cursor, Cursor::new(0, 4));
     }
 
