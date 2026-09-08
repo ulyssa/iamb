@@ -336,8 +336,11 @@ fn insert_msgs_and_receipts(
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
                 info.insert_sticker_with_preview(ev, settings, previews);
             },
+            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomRedaction(..)) => {
+                // ignoring redaction events because we get them bundled with the redacted event
+            },
             AnyTimelineEvent::MessageLike(ev) => {
-                tracing::debug!(
+                tracing::trace!(
                     event_id = ev.event_id().as_str(),
                     "Ignoring unimplemented event type {}",
                     ev.event_type()
