@@ -1,20 +1,17 @@
 //! Code for displaying state events.
 use std::borrow::Cow;
-use std::str::FromStr;
+use std::str::FromStr as _;
 
-use matrix_sdk::ruma::{
-    OwnedRoomId,
-    UserId,
-    events::{
-        AnyStateEventContentChange,
-        AnySyncStateEvent,
-        StateEventContentChange,
-        room::member::MembershipChange,
-    },
+use matrix_sdk::ruma::events::room::member::MembershipChange;
+use matrix_sdk::ruma::events::{
+    AnyStateEventContentChange,
+    AnySyncStateEvent,
+    StateEventContentChange,
 };
-
-use super::html::{StyleTree, StyleTreeNode};
+use matrix_sdk::ruma::{OwnedRoomId, UserId};
 use ratatui::style::{Modifier as StyleModifier, Style};
+
+use crate::message::html::{StyleTree, StyleTreeNode};
 
 fn bold(s: impl Into<Cow<'static, str>>) -> StyleTreeNode {
     let bold = Style::default().add_modifier(StyleModifier::BOLD);

@@ -1,20 +1,17 @@
 //! Code for converting composed messages into content to send to the homeserver.
-use comrak::{markdown_to_html, options::Options};
-use nom::{
-    IResult,
-    Parser as _,
-    branch::alt,
-    bytes::complete::tag,
-    character::complete::space0,
-    combinator::value,
-};
-
+use comrak::markdown_to_html;
+use comrak::options::Options;
 use matrix_sdk::ruma::events::room::message::{
     EmoteMessageEventContent,
     MessageType,
     RoomMessageEventContent,
     TextMessageEventContent,
 };
+use nom::branch::alt;
+use nom::bytes::complete::tag;
+use nom::character::complete::space0;
+use nom::combinator::value;
+use nom::{IResult, Parser as _};
 
 use crate::config::MarkupFormat;
 

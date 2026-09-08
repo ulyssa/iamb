@@ -1,25 +1,22 @@
 use std::time::SystemTime;
 
-use matrix_sdk::{
-    Client,
-    EncryptionState,
-    deserialized_responses::RawAnySyncOrStrippedTimelineEvent,
-    notification_settings::{IsEncrypted, IsOneToOne, NotificationSettings, RoomNotificationMode},
-    room::Room as MatrixRoom,
-    ruma::{
-        MilliSecondsSinceUnixEpoch,
-        OwnedRoomId,
-        RoomId,
-        events::{AnyMessageLikeEventContent, AnySyncTimelineEvent, room::message::MessageType},
-        serde::Raw,
-    },
+use matrix_sdk::deserialized_responses::RawAnySyncOrStrippedTimelineEvent;
+use matrix_sdk::notification_settings::{
+    IsEncrypted,
+    IsOneToOne,
+    NotificationSettings,
+    RoomNotificationMode,
 };
+use matrix_sdk::room::Room as MatrixRoom;
+use matrix_sdk::ruma::events::room::message::MessageType;
+use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, AnySyncTimelineEvent};
+use matrix_sdk::ruma::serde::Raw;
+use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedRoomId, RoomId};
+use matrix_sdk::{Client, EncryptionState};
 use unicode_segmentation::UnicodeSegmentation;
 
-use crate::{
-    base::{AsyncProgramStore, IambError, IambResult, ProgramStore},
-    config::{ApplicationSettings, NotifyVia},
-};
+use crate::base::{AsyncProgramStore, IambError, IambResult, ProgramStore};
+use crate::config::{ApplicationSettings, NotifyVia};
 
 const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
     None => "iamb",

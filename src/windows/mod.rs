@@ -12,50 +12,32 @@ use std::ops::Deref;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use matrix_sdk::{
-    RoomState as MatrixRoomState,
-    room::{Room as MatrixRoom, RoomMember},
-    ruma::{
-        OwnedRoomAliasId,
-        OwnedRoomId,
-        RoomAliasId,
-        RoomId,
-        events::room::member::MembershipState,
-        events::tag::{TagName, Tags},
-    },
+use feruca::Collator;
+use matrix_sdk::RoomState as MatrixRoomState;
+use matrix_sdk::room::{Room as MatrixRoom, RoomMember};
+use matrix_sdk::ruma::events::room::member::MembershipState;
+use matrix_sdk::ruma::events::tag::{TagName, Tags};
+use matrix_sdk::ruma::{OwnedRoomAliasId, OwnedRoomId, RoomAliasId, RoomId};
+use modalkit::actions::{
+    Action,
+    Editable,
+    EditorAction,
+    Jumpable,
+    PromptAction,
+    Promptable,
+    Scrollable,
+    WindowAction,
 };
-
-use ratatui::{
-    buffer::Buffer,
-    layout::{Alignment, Rect},
-    style::{Color, Modifier as StyleModifier, Style},
-    text::{Line, Span, Text},
-    widgets::StatefulWidget,
-};
-
-use modalkit::{
-    actions::{
-        Action,
-        Editable,
-        EditorAction,
-        Jumpable,
-        PromptAction,
-        Promptable,
-        Scrollable,
-        WindowAction,
-    },
-    editing::completion::CompletionList,
-    errors::{EditError, EditResult, UIError},
-    prelude::*,
-};
-
-use modalkit_ratatui::{
-    TermOffset,
-    TerminalCursor,
-    Window,
-    WindowOps,
-    list::{List, ListCursor, ListItem, ListState},
-};
+use modalkit::editing::completion::CompletionList;
+use modalkit::errors::{EditError, EditResult, UIError};
+use modalkit::prelude::*;
+use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
+use modalkit_ratatui::{TermOffset, TerminalCursor, Window, WindowOps};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Alignment, Rect};
+use ratatui::style::{Color, Modifier as StyleModifier, Style};
+use ratatui::text::{Line, Span, Text};
+use ratatui::widgets::StatefulWidget;
 
 use crate::base::{
     ChatStore,
@@ -77,13 +59,10 @@ use crate::base::{
     SpaceAction,
     UnreadInfo,
 };
-use crate::windows::room::room_command;
-
-use self::room::RoomState;
-use self::verify::VerifyItem;
-use self::welcome::WelcomeState;
 use crate::message::MessageTimeStamp;
-use feruca::Collator;
+use crate::windows::room::{RoomState, room_command};
+use crate::windows::verify::VerifyItem;
+use crate::windows::welcome::WelcomeState;
 
 pub mod room;
 pub mod verify;
@@ -1587,6 +1566,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, room_alias_id, server_name};
 
     #[derive(Debug, Eq, PartialEq)]

@@ -1,39 +1,30 @@
 //! Tab completions for iamb
 use std::borrow::Cow;
-use std::str::FromStr;
+use std::str::FromStr as _;
 
-use modalkit::{
-    editing::{
-        completion::{Completer, complete_path},
-        cursor::Cursor,
-        rope::EditRope,
-    },
-    env::vim::command::CommandDescription,
-    prelude::{
-        CommandType,
-        Count,
-        CursorMovements,
-        CursorMovementsContext,
-        MoveDir1D,
-        MoveType,
-        WordStyle,
-    },
+use modalkit::editing::completion::{Completer, complete_path};
+use modalkit::editing::cursor::Cursor;
+use modalkit::editing::rope::EditRope;
+use modalkit::env::vim::command::CommandDescription;
+use modalkit::prelude::{
+    CommandType,
+    Count,
+    CursorMovements,
+    CursorMovementsContext,
+    MoveDir1D,
+    MoveType,
+    WordStyle,
 };
 
 use crate::base::{ChatStore, IambBufferId, IambInfo, MATRIX_ID_WORD, RoomFocus};
 
 mod parse {
-    use nom::{
-        IResult,
-        Input,
-        OutputMode,
-        Parser,
-        branch::alt,
-        bytes::complete::{escaped_transform, is_not, tag},
-        character::complete::{char, space0, space1},
-        combinator::{cut, eof, opt, value},
-        error::{ErrorKind, ParseError},
-    };
+    use nom::branch::alt;
+    use nom::bytes::complete::{escaped_transform, is_not, tag};
+    use nom::character::complete::{char, space0, space1};
+    use nom::combinator::{cut, eof, opt, value};
+    use nom::error::{ErrorKind, ParseError};
+    use nom::{IResult, Input, OutputMode, Parser};
 
     fn parse_text(input: &str) -> IResult<&str, String> {
         if input.is_empty() {
@@ -782,13 +773,14 @@ impl Completer<IambInfo> for IambCompleter {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::{
-        base::{ProgramCommand, ProgramCommands},
-        commands::add_iamb_commands,
-        tests::*,
-    };
-    use modalkit::{commands::CommandResult, env::vim::command::CommandContext};
+
+    use modalkit::commands::CommandResult;
+    use modalkit::env::vim::command::CommandContext;
     use pretty_assertions::assert_eq;
+
+    use crate::base::{ProgramCommand, ProgramCommands};
+    use crate::commands::add_iamb_commands;
+    use crate::tests::*;
 
     #[tokio::test]
     async fn test_complete_msgbar() {

@@ -2,15 +2,13 @@
 //!
 //! The keybindings are set up here. We define some iamb-specific keybindings, but the default Vim
 //! keys come from [modalkit::env::vim::keybindings].
-use modalkit::{
-    actions::{InsertTextAction, MacroAction, WindowAction},
-    env::CommonKeyClass,
-    env::vim::VimMode,
-    env::vim::keybindings::{InputStep, VimBindings},
-    key::TerminalKey,
-    keybindings::{EdgeEvent, EdgeRepeat, InputBindings},
-    prelude::*,
-};
+use modalkit::actions::{InsertTextAction, MacroAction, WindowAction};
+use modalkit::env::CommonKeyClass;
+use modalkit::env::vim::VimMode;
+use modalkit::env::vim::keybindings::{InputStep, VimBindings};
+use modalkit::key::TerminalKey;
+use modalkit::keybindings::{EdgeEvent, EdgeRepeat, InputBindings};
+use modalkit::prelude::*;
 
 use crate::base::{IambAction, IambInfo, Keybindings, MATRIX_ID_WORD};
 use crate::config::{ApplicationSettings, Keys, SplitDirection};

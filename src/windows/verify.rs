@@ -9,7 +9,6 @@ use matrix_sdk::encryption::verification::{
 use matrix_sdk::ruma::events::key::verification::VerificationMethod;
 use matrix_sdk_crypto::matrix_sdk_qrcode::qrcode::render::unicode::Dense1x2;
 use matrix_sdk_crypto::{QrVerificationState, SasState, format_emojis};
-
 use modalkit::actions::{PromptAction, Promptable};
 use modalkit::errors::{EditError, EditResult};
 use modalkit::prelude::ViewportContext;

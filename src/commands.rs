@@ -2,22 +2,15 @@
 //!
 //! The command-bar commands are set up here, and iamb-specific commands are defined here. See
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
-use std::{convert::TryFrom, str::FromStr as _};
+use std::convert::TryFrom as _;
+use std::str::FromStr as _;
 
-use matrix_sdk::ruma::{
-    OwnedMxcUri,
-    OwnedRoomOrAliasId,
-    OwnedUserId,
-    RoomVersionId,
-    events::tag::TagName,
-    profile::{ProfileFieldName, ProfileFieldValue},
-};
-
-use modalkit::{
-    commands::{CommandError, CommandResult, CommandStep},
-    env::vim::command::{CommandContext, CommandDescription, OptionType},
-    prelude::{MoveDir1D, OpenTarget},
-};
+use matrix_sdk::ruma::events::tag::TagName;
+use matrix_sdk::ruma::profile::{ProfileFieldName, ProfileFieldValue};
+use matrix_sdk::ruma::{OwnedMxcUri, OwnedRoomOrAliasId, OwnedUserId, RoomVersionId};
+use modalkit::commands::{CommandError, CommandResult, CommandStep};
+use modalkit::env::vim::command::{CommandContext, CommandDescription, OptionType};
+use modalkit::prelude::{MoveDir1D, OpenTarget};
 
 use crate::base::{
     CreateRoomFlags,
@@ -1156,6 +1149,7 @@ pub fn setup_commands() -> ProgramCommands {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use matrix_sdk::ruma::{owned_room_id, user_id};
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;

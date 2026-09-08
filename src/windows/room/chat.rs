@@ -4,56 +4,28 @@ use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use edit::Builder;
 use edit::edit_with_builder as external_edit;
+use matrix_sdk::RoomState;
+use matrix_sdk::attachment::AttachmentConfig;
 use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
+use matrix_sdk::room::Room as MatrixRoom;
 use matrix_sdk::room::reply::{EnforceThread, Reply};
-use modalkit::editing::store::RegisterError;
-use std::process::Command;
-use tokio;
-use url::Url;
-
-use matrix_sdk::{
-    RoomState,
-    attachment::AttachmentConfig,
-    media::{MediaFormat, MediaRequestParameters},
-    room::Room as MatrixRoom,
-    ruma::{
-        OwnedEventId,
-        OwnedRoomId,
-        RoomId,
-        events::reaction::ReactionEventContent,
-        events::relation::{Annotation, Replacement},
-        events::room::message::{
-            AddMentions,
-            ForwardThread,
-            MessageType,
-            OriginalRoomMessageEvent,
-            Relation,
-            ReplyWithinThread,
-        },
-    },
-    send_queue::RoomSendQueueError,
+use matrix_sdk::ruma::events::reaction::ReactionEventContent;
+use matrix_sdk::ruma::events::relation::{Annotation, Replacement};
+use matrix_sdk::ruma::events::room::message::{
+    AddMentions,
+    ForwardThread,
+    MessageType,
+    OriginalRoomMessageEvent,
+    Relation,
+    ReplyWithinThread,
 };
-
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    prelude::Stylize,
-    text::{Line, Span},
-    widgets::{Paragraph, StatefulWidget, Widget},
-};
-
-use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem, PromptYesNo};
-
-use modalkit_ratatui::{
-    PromptActions,
-    TerminalCursor,
-    WindowOps,
-    textbox::{TextBox, TextBoxState},
-};
-
+use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, RoomId};
+use matrix_sdk::send_queue::RoomSendQueueError;
 use modalkit::actions::{
     Action,
     Editable,
@@ -63,14 +35,23 @@ use modalkit::actions::{
     Promptable,
     Scrollable,
 };
-use modalkit::editing::{
-    completion::CompletionList,
-    context::Resolve,
-    history::{self, HistoryList},
-    rope::EditRope,
-};
+use modalkit::editing::completion::CompletionList;
+use modalkit::editing::context::Resolve;
+use modalkit::editing::history::{self, HistoryList};
+use modalkit::editing::rope::EditRope;
+use modalkit::editing::store::RegisterError;
 use modalkit::errors::{EditError, EditResult, UIError};
+use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem, PromptYesNo};
 use modalkit::prelude::*;
+use modalkit_ratatui::textbox::{TextBox, TextBoxState};
+use modalkit_ratatui::{PromptActions, TerminalCursor, WindowOps};
+use ratatui::buffer::Buffer;
+use ratatui::layout::Rect;
+use ratatui::prelude::Stylize;
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, StatefulWidget, Widget};
+use tokio;
+use url::Url;
 
 use crate::base::{
     DownloadFlags,
@@ -88,7 +69,6 @@ use crate::base::{
     RoomInfo,
     SendAction,
 };
-
 use crate::config::{ApplicationSettings, EncryptionIndicatorLocation};
 use crate::message::{
     MessageEvent,
@@ -98,9 +78,8 @@ use crate::message::{
     text_to_message,
     text_to_text_message_event_content,
 };
+use crate::windows::room::scrollback::{Scrollback, ScrollbackState};
 use crate::worker::Requester;
-
-use super::scrollback::{Scrollback, ScrollbackState};
 
 /// State needed for rendering [Chat].
 pub struct ChatState {

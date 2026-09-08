@@ -1,18 +1,5 @@
 //! Message scrollback
-use ratatui_image::sliced::{SignedPosition, SlicedImage};
-use regex::Regex;
-
 use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId};
-
-use modalkit_ratatui::{ScrollActions, TerminalCursor, WindowOps};
-use ratatui::{
-    buffer::Buffer,
-    layout::{Alignment, Rect},
-    style::{Modifier as StyleModifier, Style},
-    text::{Line, Span},
-    widgets::{Paragraph, StatefulWidget, Widget},
-};
-
 use modalkit::actions::{
     Action,
     CursorAction,
@@ -30,33 +17,37 @@ use modalkit::actions::{
     SelectionAction,
     WindowAction,
 };
-use modalkit::editing::{
-    completion::CompletionList,
-    context::Resolve,
-    cursor::{CursorGroup, CursorState},
-    history::HistoryList,
-    rope::EditRope,
-    store::{RegisterCell, RegisterPutFlags},
-};
+use modalkit::editing::completion::CompletionList;
+use modalkit::editing::context::Resolve;
+use modalkit::editing::cursor::{CursorGroup, CursorState};
+use modalkit::editing::history::HistoryList;
+use modalkit::editing::rope::EditRope;
+use modalkit::editing::store::{RegisterCell, RegisterPutFlags};
 use modalkit::errors::{EditError, EditResult, UIError, UIResult};
 use modalkit::prelude::*;
+use modalkit_ratatui::{ScrollActions, TerminalCursor, WindowOps};
+use ratatui::buffer::Buffer;
+use ratatui::layout::{Alignment, Rect};
+use ratatui::style::{Modifier as StyleModifier, Style};
+use ratatui::text::{Line, Span};
+use ratatui::widgets::{Paragraph, StatefulWidget, Widget};
+use ratatui_image::sliced::{SignedPosition, SlicedImage};
+use regex::Regex;
 
-use crate::{
-    base::{
-        IambBufferId,
-        IambId,
-        IambInfo,
-        IambResult,
-        ProgramContext,
-        ProgramStore,
-        RoomFetchStatus,
-        RoomFocus,
-        RoomInfo,
-    },
-    config::ApplicationSettings,
-    message::{Message, MessageCursor, MessageKey, Messages},
-    preview::{PreviewKind, PreviewManager},
+use crate::base::{
+    IambBufferId,
+    IambId,
+    IambInfo,
+    IambResult,
+    ProgramContext,
+    ProgramStore,
+    RoomFetchStatus,
+    RoomFocus,
+    RoomInfo,
 };
+use crate::config::ApplicationSettings;
+use crate::message::{Message, MessageCursor, MessageKey, Messages};
+use crate::preview::{PreviewKind, PreviewManager};
 
 fn no_msgs() -> EditError<IambInfo> {
     let msg = "No messages to select.";
@@ -1535,7 +1526,9 @@ impl StatefulWidget for Scrollback<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{base::Need, tests::*};
+
+    use crate::base::Need;
+    use crate::tests::*;
 
     #[tokio::test]
     async fn test_search_messages() {

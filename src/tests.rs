@@ -1,6 +1,9 @@
+use std::collections::HashMap;
+use std::iter::FromIterator as _;
 use std::path::PathBuf;
-use std::{collections::HashMap, iter::FromIterator as _};
 
+use lazy_static::lazy_static;
+use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::{
     EventId,
     OwnedEventId,
@@ -9,24 +12,19 @@ use matrix_sdk::ruma::{
     RoomId,
     UInt,
     event_id,
-    events::room::message::RoomMessageEventContent,
     server_name,
     user_id,
 };
 use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, assign};
-
-use lazy_static::lazy_static;
 use ratatui::style::{Color, Style};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::unbounded_channel;
 
+use crate::base::{ChatStore, EventLocation, ProgramStore, RoomInfo};
+use crate::config::*;
 use crate::message::MessageTimeStamp;
-use crate::{
-    base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
-    config::*,
-    message::{Message, MessageEvent, MessageKey, Messages},
-    worker::Requester,
-};
+use crate::message::{Message, MessageEvent, MessageKey, Messages};
+use crate::worker::Requester;
 
 const TEST_ROOM1_ALIAS: &str = "#room1:example.com";
 

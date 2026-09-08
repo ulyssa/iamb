@@ -295,6 +295,7 @@ impl<'a> TextPrinter<'a> {
 #[cfg(test)]
 pub mod tests {
     use super::*;
+
     use crate::tests::mock_settings;
 
     #[test]

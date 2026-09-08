@@ -6,7 +6,7 @@ use std::env;
 use std::fmt;
 use std::fs::File;
 use std::hash::{Hash, Hasher};
-use std::io::{BufReader, BufWriter, Write};
+use std::io::{BufReader, BufWriter, Write as _};
 use std::path::{Path, PathBuf};
 use std::process;
 use std::str::FromStr;
@@ -17,20 +17,21 @@ use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, OwnedRoomAliasId, OwnedRoomId, OwnedUserId, UserId};
+use modalkit::env::vim::VimMode;
+use modalkit::key::TerminalKey;
+use modalkit::keybindings::InputKey;
+use modalkit::prelude::Axis;
 use ratatui::layout::Size;
 use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::text::Span;
 use ratatui_image::FilterType;
 use ratatui_image::picker::ProtocolType;
-use serde::{Deserialize, Deserializer, Serialize, de::Error as SerdeError, de::Visitor};
+use serde::de::Error as SerdeError;
+use serde::de::Visitor;
+use serde::{Deserialize, Deserializer, Serialize};
 use url::Url;
 
-use modalkit::env::vim::VimMode;
-use modalkit::key::TerminalKey;
-use modalkit::keybindings::InputKey;
-use modalkit::prelude::Axis;
-
-use super::base::{
+use crate::base::{
     IambError,
     IambId,
     RoomInfo,
@@ -1426,8 +1427,10 @@ impl ApplicationSettings {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use matrix_sdk::ruma::user_id;
+
     use std::convert::TryFrom;
+
+    use matrix_sdk::ruma::user_id;
 
     #[test]
     fn test_profile_name_invalid() {
