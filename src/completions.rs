@@ -502,7 +502,7 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
                         .map(|id| format!("++members={id}"))
                         .collect()
                 } else {
-                    complete_choices(input, &["++members"])
+                    complete_choices(input, &["++members="])
                 }
             },
 
