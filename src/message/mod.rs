@@ -93,12 +93,7 @@ impl Messages {
 
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
         let mut msg = msg.into();
-        if let MessageEvent::Original(ev, edits) = &mut msg.event {
-            strip_reply_fallback(&mut ev.content.msgtype);
-            for edit in edits.values_mut() {
-                strip_reply_fallback(&mut edit.msgtype);
-            }
-        }
+        msg.event.strip_reply_fallback();
 
         self.0.entry(key).or_insert(msg);
     }
@@ -367,7 +362,11 @@ fn redaction_reason_event(ev: SyncRoomRedactionEvent) -> Option<String> {
     ev.content.reason
 }
 
-pub fn strip_reply_fallback(msgtype: &mut MessageType) {
+fn strip_reply_fallback(msgtype: &mut MessageType, is_reply: bool) {
+    if !is_reply {
+        return;
+    }
+
     let MessageType::Text(content) = msgtype else {
         return;
     };
@@ -415,6 +414,15 @@ pub enum MessageEvent {
 }
 
 impl MessageEvent {
+    fn strip_reply_fallback(&mut self) {
+        let MessageEvent::Original(event, _) = self else {
+            return;
+        };
+
+        let is_reply = matches!(event.content.relates_to, Some(Relation::Reply(_)));
+        strip_reply_fallback(&mut event.content.msgtype, is_reply);
+    }
+
     pub fn event_id(&self) -> Option<&EventId> {
         let event_id = match self {
             MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
@@ -1470,10 +1478,6 @@ impl Message {
         if let MessageEvent::Original(orig, edits) = &mut self.event {
             *edits = new_edits;
 
-            for edit in edits.values_mut() {
-                strip_reply_fallback(&mut edit.msgtype);
-            }
-
             if let Some(most_recent) = edits.last_key_value() {
                 self.html = content_html(&most_recent.1.msgtype);
             } else {
@@ -1482,14 +1486,8 @@ impl Message {
         }
     }
 
-    pub fn insert_edit(
-        &mut self,
-        key: MessageKey,
-        mut edit: RoomMessageEventContentWithoutRelation,
-    ) {
+    pub fn insert_edit(&mut self, key: MessageKey, edit: RoomMessageEventContentWithoutRelation) {
         if let MessageEvent::Original(_, edits) = &mut self.event {
-            strip_reply_fallback(&mut edit.msgtype);
-
             let inserted = edits.entry(key).insert_entry(edit);
             self.html = content_html(&inserted.get().msgtype);
         }
@@ -1635,19 +1633,34 @@ impl Display for Message {
 pub mod tests {
     use super::*;
 
-    use matrix_sdk::ruma::events::room::ImageInfo;
-    use matrix_sdk::ruma::events::room::message::{
-        AudioInfo,
-        AudioMessageEventContent,
-        FileInfo,
-        FileMessageEventContent,
-        ImageMessageEventContent,
-        VideoInfo,
-        VideoMessageEventContent,
+    use matrix_sdk::ruma::events::room::{
+        ImageInfo,
+        message::{
+            AudioInfo,
+            AudioMessageEventContent,
+            FileInfo,
+            FileMessageEventContent,
+            ImageMessageEventContent,
+            TextMessageEventContent,
+            VideoInfo,
+            VideoMessageEventContent,
+        },
     };
 
     use crate::base::EventLocation;
     use crate::tests::*;
+
+    #[test]
+    fn test_strip_reply_fallback_requires_reply_relation() {
+        let body = ">quoted text\n>more quoted text";
+        let mut msgtype = MessageType::Text(TextMessageEventContent::plain(body));
+
+        strip_reply_fallback(&mut msgtype, false);
+        assert_eq!(msgtype.body(), body);
+
+        strip_reply_fallback(&mut msgtype, true);
+        assert_eq!(msgtype.body(), "");
+    }
 
     #[test]
     fn test_mc_cmp() {
