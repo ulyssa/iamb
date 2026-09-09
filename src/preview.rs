@@ -1,18 +1,12 @@
-use std::collections::HashMap;
-use std::sync::Arc;
-
 use matrix_sdk::Media;
 use matrix_sdk::media::{MediaFormat, MediaRequestParameters, UniqueKey};
-use matrix_sdk::ruma::events::room::MediaSource;
-use ratatui::layout::Size;
 use ratatui_image::picker::Picker;
 use ratatui_image::sliced::SlicedProtocol;
 use ratatui_image::{FilterType, Resize};
 use tokio::sync::Semaphore;
 
-use crate::base::{AsyncProgramStore, IambError};
-use crate::config::{ApplicationSettings, ImagePreviewValues};
-use crate::worker::Requester;
+use crate::config::ImagePreviewValues;
+use crate::prelude::*;
 
 pub enum ImageStatus {
     Queued(Size),

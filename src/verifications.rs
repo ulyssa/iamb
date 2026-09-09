@@ -1,15 +1,9 @@
-use matrix_sdk::Client;
-use matrix_sdk::encryption::verification::{
-    Verification,
-    VerificationRequest,
-    VerificationRequestState,
-};
+use matrix_sdk::encryption::verification::{Verification, VerificationRequestState};
+use matrix_sdk::ruma::OwnedDeviceId;
 use matrix_sdk::ruma::events::key::verification::VerificationMethod;
-use matrix_sdk::ruma::{OwnedDeviceId, OwnedUserId, UserId};
-use modalkit::errors::UIError;
-use modalkit::prelude::{EditInfo, InfoMessage};
 
-use crate::base::{AsyncProgramStore, IambError, IambResult, ProgramStore, VerifyAction};
+use crate::base::VerifyAction;
+use crate::prelude::*;
 
 const SUPPORTED_METHODS: [VerificationMethod; 3] = [
     // Emoji verification

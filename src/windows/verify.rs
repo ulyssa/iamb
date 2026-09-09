@@ -1,22 +1,10 @@
-use std::cmp::Ordering;
-use std::fmt;
-
-use matrix_sdk::encryption::verification::{
-    Verification,
-    VerificationRequest,
-    VerificationRequestState,
-};
+use matrix_sdk::encryption::verification::{Verification, VerificationRequestState};
 use matrix_sdk::ruma::events::key::verification::VerificationMethod;
 use matrix_sdk_crypto::matrix_sdk_qrcode::qrcode::render::unicode::Dense1x2;
 use matrix_sdk_crypto::{QrVerificationState, SasState, format_emojis};
-use modalkit::actions::{PromptAction, Promptable};
-use modalkit::errors::{EditError, EditResult};
-use modalkit::prelude::ViewportContext;
 use modalkit_ratatui::list::{ListCursor, ListItem};
-use ratatui::style::{Color, Modifier as StyleModifier, Style};
-use ratatui::text::{Line, Span, Text};
 
-use crate::base::{IambInfo, ProgramAction, ProgramContext, ProgramStore};
+use crate::prelude::*;
 
 const BLACK_ON_WHITE: Style = Style::new().fg(Color::Black).bg(Color::White);
 

@@ -1,5 +1,6 @@
 use std::time::SystemTime;
 
+use matrix_sdk::EncryptionState;
 use matrix_sdk::deserialized_responses::RawAnySyncOrStrippedTimelineEvent;
 use matrix_sdk::notification_settings::{
     IsEncrypted,
@@ -7,16 +8,11 @@ use matrix_sdk::notification_settings::{
     NotificationSettings,
     RoomNotificationMode,
 };
-use matrix_sdk::room::Room as MatrixRoom;
-use matrix_sdk::ruma::events::room::message::MessageType;
 use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, AnySyncTimelineEvent};
 use matrix_sdk::ruma::serde::Raw;
-use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, OwnedRoomId, RoomId};
-use matrix_sdk::{Client, EncryptionState};
-use unicode_segmentation::UnicodeSegmentation;
 
-use crate::base::{AsyncProgramStore, IambError, IambResult, ProgramStore};
-use crate::config::{ApplicationSettings, NotifyVia};
+use crate::config::NotifyVia;
+use crate::prelude::*;
 
 const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
     None => "iamb",

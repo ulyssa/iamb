@@ -1,85 +1,37 @@
 //! Window for Matrix rooms
-use std::borrow::Cow;
 use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::{Path, PathBuf};
 use std::process::Command;
 
 use edit::Builder;
 use edit::edit_with_builder as external_edit;
-use matrix_sdk::RoomState;
+use matrix_sdk::RoomState as MatrixRoomState;
 use matrix_sdk::attachment::AttachmentConfig;
 use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
 use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
-use matrix_sdk::room::Room as MatrixRoom;
 use matrix_sdk::room::reply::{EnforceThread, Reply};
 use matrix_sdk::ruma::events::reaction::ReactionEventContent;
 use matrix_sdk::ruma::events::relation::{Annotation, Replacement};
-use matrix_sdk::ruma::events::room::message::{
-    AddMentions,
-    ForwardThread,
-    MessageType,
-    OriginalRoomMessageEvent,
-    Relation,
-    ReplyWithinThread,
-};
-use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId, RoomId};
+use matrix_sdk::ruma::events::room::message::{AddMentions, ForwardThread, ReplyWithinThread};
 use matrix_sdk::send_queue::RoomSendQueueError;
-use modalkit::actions::{
-    Action,
-    Editable,
-    EditorAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
-};
-use modalkit::editing::completion::CompletionList;
-use modalkit::editing::context::Resolve;
 use modalkit::editing::history::{self, HistoryList};
-use modalkit::editing::rope::EditRope;
 use modalkit::editing::store::RegisterError;
-use modalkit::errors::{EditError, EditResult, UIError};
-use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem, PromptYesNo};
-use modalkit::prelude::*;
+use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem};
+use modalkit_ratatui::PromptActions;
 use modalkit_ratatui::textbox::{TextBox, TextBoxState};
-use modalkit_ratatui::{PromptActions, TerminalCursor, WindowOps};
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
 use ratatui::prelude::Stylize;
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, StatefulWidget, Widget};
-use tokio;
-use url::Url;
 
-use crate::base::{
-    DownloadFlags,
-    EchoLocation,
-    IambAction,
-    IambBufferId,
-    IambError,
-    IambInfo,
-    IambResult,
-    MessageAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomFocus,
-    RoomInfo,
-    SendAction,
-};
-use crate::config::{ApplicationSettings, EncryptionIndicatorLocation};
+use crate::base::{DownloadFlags, EchoLocation};
+use crate::config::EncryptionIndicatorLocation;
 use crate::message::{
-    MessageEvent,
     MessageId,
-    MessageKey,
     TreeGenState,
     text_to_message,
     text_to_text_message_event_content,
 };
+use crate::prelude::*;
 use crate::windows::room::scrollback::{Scrollback, ScrollbackState};
-use crate::worker::Requester;
 
 /// State needed for rendering [Chat].
 pub struct ChatState {
@@ -130,7 +82,7 @@ impl ChatState {
             return Err(IambError::NotJoined);
         };
 
-        if room.state() == RoomState::Joined {
+        if room.state() == MatrixRoomState::Joined {
             Ok(room)
         } else {
             Err(IambError::NotJoined)

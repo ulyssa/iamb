@@ -10,8 +10,6 @@
 //!
 //! This isn't as important for iamb, since it isn't a browser environment, but we do still map
 //! input onto an enum of the safe list of tags to keep it easy to understand and process.
-use std::borrow::Cow;
-use std::ops::Deref;
 
 use css_color_parser::Color as CssColor;
 use html5ever::driver::{ParseOpts, parse_fragment};
@@ -19,16 +17,10 @@ use html5ever::interface::{Attribute, QualName};
 use html5ever::tendril::{StrTendril, TendrilSink};
 use html5ever::{local_name, ns};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use matrix_sdk::ruma::{OwnedRoomAliasId, OwnedRoomId, OwnedUserId};
-use ratatui::layout::Alignment;
-use ratatui::style::{Color, Modifier as StyleModifier, Style};
 use ratatui::symbols::line;
-use ratatui::text::{Line, Span, Text};
-use unicode_segmentation::UnicodeSegmentation;
-use url::Url;
 
-use crate::config::ApplicationSettings;
 use crate::message::printer::TextPrinter;
+use crate::prelude::*;
 use crate::util::{join_cell_text, space_text};
 
 const QUOTE_COLOR: Color = Color::Indexed(236);

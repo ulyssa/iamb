@@ -1,22 +1,11 @@
 //! Tab completions for iamb
-use std::borrow::Cow;
-use std::str::FromStr as _;
 
 use modalkit::editing::completion::{Completer, complete_path};
 use modalkit::editing::cursor::Cursor;
-use modalkit::editing::rope::EditRope;
 use modalkit::env::vim::command::CommandDescription;
-use modalkit::prelude::{
-    CommandType,
-    Count,
-    CursorMovements,
-    CursorMovementsContext,
-    MoveDir1D,
-    MoveType,
-    WordStyle,
-};
 
-use crate::base::{ChatStore, IambBufferId, IambInfo, MATRIX_ID_WORD, RoomFocus};
+use crate::base::MATRIX_ID_WORD;
+use crate::prelude::*;
 
 mod parse {
     use nom::branch::alt;

@@ -2,14 +2,9 @@
 //!
 //! The worker thread handles asynchronous work, and can receive messages from the main thread that
 //! block on a reply from the async worker.
-use std::collections::HashMap;
-use std::convert::TryFrom;
+
 use std::fmt::{Debug, Formatter};
-use std::ops::DerefMut;
-use std::str::FromStr;
-use std::sync::Arc;
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
-use std::time::{Duration, Instant};
 
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -18,7 +13,7 @@ use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
-use matrix_sdk::room::{Messages, MessagesOptions, Room as MatrixRoom, RoomMember};
+use matrix_sdk::room::{Messages as MatrixMessages, MessagesOptions, RoomMember};
 use matrix_sdk::ruma::api::client::filter::{
     FilterDefinition,
     LazyLoadOptions,
@@ -31,6 +26,7 @@ use matrix_sdk::ruma::api::client::room::create_room::v3::{
     Request as CreateRoomRequest,
 };
 use matrix_sdk::ruma::api::client::space::get_hierarchy::v1::Request as SpaceHierarchyRequest;
+use matrix_sdk::ruma::assign;
 use matrix_sdk::ruma::events::key::verification::ready::{
     OriginalSyncKeyVerificationReadyEvent,
     ToDeviceKeyVerificationReadyEvent,
@@ -42,21 +38,16 @@ use matrix_sdk::ruma::events::key::verification::start::{
 };
 use matrix_sdk::ruma::events::presence::PresenceEvent;
 use matrix_sdk::ruma::events::reaction::ReactionEventContent;
-use matrix_sdk::ruma::events::receipt::{ReceiptEventContent, ReceiptThread, ReceiptType};
-use matrix_sdk::ruma::events::relation::Thread;
-use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::events::receipt::{ReceiptEventContent, ReceiptType};
 use matrix_sdk::ruma::events::room::encryption::RoomEncryptionEventContent;
 use matrix_sdk::ruma::events::room::member::OriginalSyncRoomMemberEvent;
-use matrix_sdk::ruma::events::room::message::{MessageType, Relation, RoomMessageEventContent};
 use matrix_sdk::ruma::events::room::name::RoomNameEventContent;
 use matrix_sdk::ruma::events::room::redaction::OriginalSyncRoomRedactionEvent;
 use matrix_sdk::ruma::events::sticker::StickerEventContent;
-use matrix_sdk::ruma::events::tag::Tags;
 use matrix_sdk::ruma::events::typing::SyncTypingEvent;
 use matrix_sdk::ruma::events::{
     AnyMessageLikeEvent,
     AnyMessageLikeEventContent,
-    AnySyncStateEvent,
     AnyTimelineEvent,
     InitialStateEvent,
     SyncEphemeralRoomEvent,
@@ -65,18 +56,8 @@ use matrix_sdk::ruma::events::{
 };
 use matrix_sdk::ruma::room::RoomType;
 use matrix_sdk::ruma::serde::Raw;
-use matrix_sdk::ruma::{
-    EventId,
-    OwnedEventId,
-    OwnedRoomId,
-    OwnedRoomOrAliasId,
-    OwnedUserId,
-    RoomId,
-    assign,
-};
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
 use matrix_sdk::{
-    Client,
     ClientBuildError,
     Error as MatrixError,
     RoomDisplayName,
@@ -84,34 +65,17 @@ use matrix_sdk::{
     reqwest,
 };
 use matrix_sdk_base::RoomStateFilter;
-use modalkit::errors::UIError;
-use modalkit::prelude::{EditInfo, InfoMessage};
-use ratatui::layout::Size;
 use ratatui_image::picker::Picker;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, error, warn};
-use url::Url;
 
-use crate::ApplicationSettings;
-use crate::base::{
-    AsyncProgramStore,
-    ChatStore,
-    CreateRoomFlags,
-    CreateRoomType,
-    EchoLocation,
-    IambError,
-    IambResult,
-    MessageNeed,
-    ProgramStore,
-    RoomFetchStatus,
-    RoomInfo,
-};
+use crate::base::{CreateRoomFlags, CreateRoomType, EchoLocation, MessageNeed, RoomFetchStatus};
 use crate::config::ProxyUrl;
-use crate::message::{Message, MessageEvent, MessageId, MessageKey};
+use crate::message::MessageId;
 use crate::notifications::register_notifications;
-use crate::preview::PreviewKind;
+use crate::prelude::*;
 use crate::verifications;
 
 const DEFAULT_ENCRYPTION_SETTINGS: EncryptionSettings = EncryptionSettings {
@@ -266,7 +230,8 @@ async fn load_older_one(
         };
         opts.limit = limit.into();
 
-        let Messages { end, chunk, .. } = room.messages(opts).await.map_err(IambError::from)?;
+        let MatrixMessages { end, chunk, .. } =
+            room.messages(opts).await.map_err(IambError::from)?;
 
         let mut msgs = vec![];
 

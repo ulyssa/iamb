@@ -1,9 +1,8 @@
 //! # Windows for Matrix rooms and spaces
 use std::collections::HashSet;
-use std::convert::TryFrom as _;
 
+use matrix_sdk::RoomDisplayName;
 use matrix_sdk::notification_settings::RoomNotificationMode;
-use matrix_sdk::room::Room as MatrixRoom;
 use matrix_sdk::ruma::api::client::room::upgrade_room::v3::Request as UpgradeRoomRequest;
 use matrix_sdk::ruma::api::error::ErrorKind as ClientApiErrorKind;
 use matrix_sdk::ruma::events::room::canonical_alias::RoomCanonicalAliasEventContent;
@@ -13,48 +12,12 @@ use matrix_sdk::ruma::events::room::history_visibility::{
 };
 use matrix_sdk::ruma::events::room::name::RoomNameEventContent;
 use matrix_sdk::ruma::events::room::topic::RoomTopicEventContent;
-use matrix_sdk::ruma::events::tag::{TagInfo, Tags};
-use matrix_sdk::ruma::room::{AllowRule, JoinRule, Restricted as JoinRestrictions};
-use matrix_sdk::ruma::{OwnedEventId, OwnedRoomAliasId, OwnedUserId, RoomId};
-use matrix_sdk::{RoomDisplayName, RoomState as MatrixRoomState};
-use modalkit::actions::{
-    Action,
-    Editable,
-    EditorAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
-    WindowAction,
-};
-use modalkit::editing::completion::CompletionList;
-use modalkit::errors::{EditResult, UIError};
-use modalkit::keybindings::dialog::PromptYesNo;
-use modalkit::prelude::*;
-use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier as StyleModifier, Style};
-use ratatui::text::{Line, Span, Text};
-use ratatui::widgets::{Paragraph, StatefulWidget, Widget};
+use matrix_sdk::ruma::events::tag::TagInfo;
+use matrix_sdk::ruma::room::{AllowRule, Restricted as JoinRestrictions};
 
-use crate::base::{
-    IambAction,
-    IambError,
-    IambId,
-    IambInfo,
-    IambResult,
-    MemberUpdateAction,
-    MessageAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomAction,
-    RoomField,
-    SendAction,
-    SpaceAction,
-};
+use crate::base::{MemberUpdateAction, RoomField};
 use crate::config::EncryptionIndicatorLocation;
+use crate::prelude::*;
 use crate::windows::room::chat::ChatState;
 use crate::windows::room::space::{Space, SpaceState};
 

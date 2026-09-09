@@ -18,36 +18,15 @@
 #![allow(clippy::bool_assert_comparison)]
 
 use std::collections::VecDeque;
-use std::convert::TryFrom;
-use std::fmt::Display;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Stdout, Write, stdout};
-use std::ops::DerefMut;
 use std::process;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicUsize, Ordering};
-use std::time::{Duration, Instant};
+use std::sync::atomic::AtomicUsize;
 
 use clap::{CommandFactory, Parser};
-use matrix_sdk::ruma::UserId;
 use matrix_sdk::ruma::api::error::ErrorKind;
-use matrix_sdk::ruma::profile::{ProfileFieldName, ProfileFieldValue};
 use matrix_sdk_crypto::encrypt_room_key_export;
-use modalkit::actions::{
-    Action,
-    Commandable,
-    Editable,
-    EditorAction,
-    InsertTextAction,
-    Jumpable,
-    Promptable,
-    Scrollable,
-    TabAction,
-    TabContainer,
-    TabCount,
-    WindowAction,
-    WindowContainer,
-};
+use modalkit::actions::{Commandable, TabAction, TabContainer, TabCount, WindowContainer};
 use modalkit::crossterm::cursor::{SetCursorStyle, Show as CursorShow};
 use modalkit::crossterm::event::{
     DisableBracketedPaste,
@@ -67,50 +46,30 @@ use modalkit::crossterm::event::{
 };
 use modalkit::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle};
 use modalkit::crossterm::{self, execute};
-use modalkit::editing::context::Resolve;
 use modalkit::editing::key::KeyManager;
 use modalkit::editing::store::Store;
-use modalkit::errors::{EditError, UIError};
-use modalkit::key::TerminalKey;
-use modalkit::keybindings::dialog::{Pager, PromptYesNo};
+use modalkit::keybindings::dialog::Pager;
 use modalkit::keybindings::{BindingMachine, InputBindings};
-use modalkit::prelude::*;
 use modalkit::ui::FocusList;
 use modalkit_ratatui::cmdbar::CommandBarState;
 use modalkit_ratatui::screen::{Screen, ScreenState, TabbedLayoutDescription};
 use modalkit_ratatui::windows::{WindowLayoutDescription, WindowLayoutState};
-use modalkit_ratatui::{TerminalCursor, TerminalExtOps, Window};
+use modalkit_ratatui::{TerminalExtOps, Window};
 use rand::RngExt as _;
 use rand::distr::Alphanumeric;
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::Rect;
-use ratatui::style::{Color, Modifier, Style};
-use ratatui::text::Span;
-use ratatui::widgets::Paragraph;
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::Level;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::base::{
-    AsyncProgramStore,
-    ChatStore,
-    HomeserverAction,
-    IambAction,
-    IambError,
-    IambId,
-    IambInfo,
-    IambResult,
-    KeysAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-};
+use crate::base::{HomeserverAction, KeysAction};
 use crate::completions::IambCompleter;
-use crate::config::{ApplicationSettings, Iamb};
+use crate::config::Iamb;
+use crate::prelude::*;
 use crate::windows::IambWindow;
-use crate::worker::{ClientWorker, LoginStyle, Requester, create_room};
+use crate::worker::{ClientWorker, LoginStyle, create_room};
 
 mod base;
 mod commands;
@@ -119,15 +78,16 @@ mod config;
 mod keybindings;
 mod message;
 mod notifications;
+mod prelude;
 mod preview;
 mod sled_export;
 mod util;
+mod verifications;
 mod windows;
 mod worker;
 
 #[cfg(test)]
 mod tests;
-mod verifications;
 
 fn config_tab_to_desc(
     layout: config::WindowLayout,
@@ -317,9 +277,9 @@ impl Application {
                 .show_dialog(dialogstr)
                 .show_mode(modestr)
                 .borders(true)
-                .border_style(Style::default().add_modifier(Modifier::DIM))
-                .tab_style(Style::default().add_modifier(Modifier::DIM))
-                .tab_style_focused(Style::default().remove_modifier(Modifier::DIM))
+                .border_style(Style::default().add_modifier(StyleModifier::DIM))
+                .tab_style(Style::default().add_modifier(StyleModifier::DIM))
+                .tab_style_focused(Style::default().remove_modifier(StyleModifier::DIM))
                 .focus(focused);
             f.render_stateful_widget(screen, area, sstate);
 
@@ -1208,7 +1168,7 @@ fn main() {
         .worker_threads(2)
         .thread_name_fn(|| {
             static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
-            let id = ATOMIC_ID.fetch_add(1, Ordering::SeqCst);
+            let id = ATOMIC_ID.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             format!("iamb-worker-{id}")
         })
         .build()

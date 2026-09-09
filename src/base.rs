@@ -1,31 +1,18 @@
 //! # Common types and utilities
 //!
 //! The types defined here get used throughout iamb.
-use std::borrow::Cow;
+
 use std::collections::hash_map::{Entry, IntoIter};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::convert::TryFrom as _;
-use std::fmt::{self, Display};
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::collections::{BTreeSet, HashSet};
 
 use emojis::Emoji;
 
 use matrix_sdk::Client;
-use matrix_sdk::RoomState as MatrixRoomState;
-use matrix_sdk::encryption::verification::VerificationRequest;
-use matrix_sdk::room::Room as MatrixRoom;
 use matrix_sdk::ruma::events::reaction::ReactionEvent;
-use matrix_sdk::ruma::events::receipt::ReceiptThread;
-use matrix_sdk::ruma::events::relation::{Replacement, Thread};
-use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::events::relation::Replacement;
 use matrix_sdk::ruma::events::room::encrypted::RoomEncryptedEvent;
 use matrix_sdk::ruma::events::room::message::{
-    MessageType,
-    OriginalRoomMessageEvent,
-    Relation,
     RoomMessageEvent,
-    RoomMessageEventContent,
     RoomMessageEventContentWithoutRelation,
 };
 use matrix_sdk::ruma::events::room::redaction::{
@@ -33,26 +20,10 @@ use matrix_sdk::ruma::events::room::redaction::{
     SyncRoomRedactionEvent,
 };
 use matrix_sdk::ruma::events::sticker::{StickerEvent, StickerEventContent};
-use matrix_sdk::ruma::events::tag::{TagName, Tags};
-use matrix_sdk::ruma::events::{AnySyncStateEvent, MessageLikeEvent, OriginalMessageLikeEvent};
+use matrix_sdk::ruma::events::{MessageLikeEvent, OriginalMessageLikeEvent};
 use matrix_sdk::ruma::presence::PresenceState;
-use matrix_sdk::ruma::profile::{ProfileFieldName, ProfileFieldValue};
-use matrix_sdk::ruma::room::JoinRule;
 use matrix_sdk::ruma::room::{AllowRule, Restricted};
-use matrix_sdk::ruma::{
-    EventId,
-    OwnedEventId,
-    OwnedMxcUri,
-    OwnedRoomAliasId,
-    OwnedRoomId,
-    OwnedRoomOrAliasId,
-    OwnedTransactionId,
-    OwnedUserId,
-    RoomId,
-    RoomVersionId,
-    UserId,
-};
-use modalkit::actions::Action;
+use matrix_sdk::ruma::{OwnedMxcUri, OwnedTransactionId, RoomVersionId};
 use modalkit::editing::application::{
     ApplicationAction,
     ApplicationContentId,
@@ -66,26 +37,15 @@ use modalkit::editing::context::EditContext;
 use modalkit::editing::store::Store;
 use modalkit::env::vim::command::{CommandContext, VimCommand, VimCommandMachine};
 use modalkit::env::vim::keybindings::VimMachine;
-use modalkit::errors::{UIError, UIResult};
-use modalkit::key::TerminalKey;
+use modalkit::errors::UIResult;
 use modalkit::keybindings::SequenceStatus;
-use modalkit::prelude::{CommandType, MoveDir1D, WordStyle};
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
-use url::Url;
 
-use crate::config::ApplicationSettings;
-use crate::message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages};
 use crate::notifications::NotificationHandle;
-use crate::preview::PreviewKind;
-use crate::preview::PreviewManager;
-use crate::worker::Requester;
+use crate::prelude::*;
 
 /// The set of characters used in different Matrix IDs.
 pub const MATRIX_ID_WORD: WordStyle = WordStyle::CharSet(is_mxid_char);

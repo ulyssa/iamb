@@ -1,53 +1,23 @@
 //! Message scrollback
-use matrix_sdk::ruma::{OwnedEventId, OwnedRoomId};
 use modalkit::actions::{
-    Action,
     CursorAction,
     EditAction,
-    Editable,
-    EditorAction,
     EditorActions,
     HistoryAction,
-    InsertTextAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
     Searchable,
     SelectionAction,
-    WindowAction,
 };
-use modalkit::editing::completion::CompletionList;
-use modalkit::editing::context::Resolve;
 use modalkit::editing::cursor::{CursorGroup, CursorState};
 use modalkit::editing::history::HistoryList;
-use modalkit::editing::rope::EditRope;
 use modalkit::editing::store::{RegisterCell, RegisterPutFlags};
-use modalkit::errors::{EditError, EditResult, UIError, UIResult};
-use modalkit::prelude::*;
-use modalkit_ratatui::{ScrollActions, TerminalCursor, WindowOps};
-use ratatui::buffer::Buffer;
-use ratatui::layout::{Alignment, Rect};
-use ratatui::style::{Modifier as StyleModifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, StatefulWidget, Widget};
+use modalkit::errors::UIResult;
+use modalkit_ratatui::ScrollActions;
 use ratatui_image::sliced::{SignedPosition, SlicedImage};
 use regex::Regex;
 
-use crate::base::{
-    IambBufferId,
-    IambId,
-    IambInfo,
-    IambResult,
-    ProgramContext,
-    ProgramStore,
-    RoomFetchStatus,
-    RoomFocus,
-    RoomInfo,
-};
-use crate::config::ApplicationSettings;
-use crate::message::{Message, MessageCursor, MessageKey, Messages};
-use crate::preview::{PreviewKind, PreviewManager};
+use crate::base::RoomFetchStatus;
+use crate::message::MessageCursor;
+use crate::prelude::*;
 
 fn no_msgs() -> EditError<IambInfo> {
     let msg = "No messages to select.";

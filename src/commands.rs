@@ -2,35 +2,25 @@
 //!
 //! The command-bar commands are set up here, and iamb-specific commands are defined here. See
 //! [modalkit::env::vim::command] for additional Vim commands we pull in.
-use std::convert::TryFrom as _;
-use std::str::FromStr as _;
 
-use matrix_sdk::ruma::events::tag::TagName;
-use matrix_sdk::ruma::profile::{ProfileFieldName, ProfileFieldValue};
-use matrix_sdk::ruma::{OwnedMxcUri, OwnedRoomOrAliasId, OwnedUserId, RoomVersionId};
+use matrix_sdk::ruma::{OwnedMxcUri, RoomVersionId};
 use modalkit::commands::{CommandError, CommandResult, CommandStep};
 use modalkit::env::vim::command::{CommandContext, CommandDescription, OptionType};
-use modalkit::prelude::{MoveDir1D, OpenTarget};
 
 use crate::base::{
     CreateRoomFlags,
     CreateRoomType,
     DownloadFlags,
     HomeserverAction,
-    IambAction,
-    IambId,
     IambJoinRule,
     KeysAction,
     MemberUpdateAction,
-    MessageAction,
     ProgramCommand,
     ProgramCommands,
-    RoomAction,
     RoomField,
-    SendAction,
-    SpaceAction,
     VerifyAction,
 };
+use crate::prelude::*;
 
 type ProgContext = CommandContext;
 type ProgResult = CommandResult<ProgramCommand>;
