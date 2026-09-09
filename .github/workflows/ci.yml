@@ -37,6 +37,8 @@ jobs:
       uses: mozilla-actions/sccache-action@v0.0.9
     - name: Check formatting
       run: cargo +nightly fmt --all -- --check
+    - name: Check imports formatting
+      run: find src -name '*.rs' | xargs ./.github/workflows/check-imports-format.sh
     - name: Check Clippy
       if: matrix.platform == 'ubuntu-latest'
       uses: giraffate/clippy-action@v1

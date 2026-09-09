@@ -6,7 +6,6 @@ use std::collections::hash_map::{Entry, IntoIter};
 use std::collections::{BTreeSet, HashSet};
 
 use emojis::Emoji;
-
 use matrix_sdk::Client;
 use matrix_sdk::ruma::events::reaction::ReactionEvent;
 use matrix_sdk::ruma::events::relation::Replacement;
