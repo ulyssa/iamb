@@ -10,35 +10,18 @@
 //!
 //! This isn't as important for iamb, since it isn't a browser environment, but we do still map
 //! input onto an enum of the safe list of tags to keep it easy to understand and process.
-use std::borrow::Cow;
-use std::ops::Deref;
 
 use css_color_parser::Color as CssColor;
+use html5ever::driver::{ParseOpts, parse_fragment};
+use html5ever::interface::{Attribute, QualName};
+use html5ever::tendril::{StrTendril, TendrilSink};
+use html5ever::{local_name, ns};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
-use matrix_sdk::ruma::{OwnedRoomAliasId, OwnedRoomId, OwnedUserId};
-use unicode_segmentation::UnicodeSegmentation;
-use url::Url;
+use ratatui::symbols::line;
 
-use html5ever::{
-    driver::{ParseOpts, parse_fragment},
-    interface::{Attribute, QualName},
-    local_name,
-    ns,
-    tendril::{StrTendril, TendrilSink},
-};
-
-use ratatui::{
-    layout::Alignment,
-    style::{Color, Modifier as StyleModifier, Style},
-    symbols::line,
-    text::{Line, Span, Text},
-};
-
-use crate::{
-    config::ApplicationSettings,
-    message::printer::TextPrinter,
-    util::{join_cell_text, space_text},
-};
+use crate::message::printer::TextPrinter;
+use crate::prelude::*;
+use crate::util::{join_cell_text, space_text};
 
 const QUOTE_COLOR: Color = Color::Indexed(236);
 
@@ -844,10 +827,12 @@ pub fn parse_matrix_html(s: &str) -> StyleTree {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::tests::mock_settings;
-    use crate::util::space_span;
+
     use pretty_assertions::assert_eq;
     use unicode_width::UnicodeWidthStr;
+
+    use crate::tests::mock_settings;
+    use crate::util::space_span;
 
     #[test]
     fn test_header() {

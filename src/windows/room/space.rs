@@ -1,43 +1,11 @@
 //! Window for Matrix spaces
-use std::ops::{Deref, DerefMut};
-use std::str::FromStr;
-use std::time::{Duration, Instant};
 
 use matrix_sdk::ruma::OwnedSpaceChildOrder;
 use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
-use matrix_sdk::{
-    room::Room as MatrixRoom,
-    ruma::{OwnedRoomId, RoomId},
-};
+use modalkit_ratatui::list::{List, ListState};
 
-use modalkit::prelude::{EditInfo, InfoMessage};
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    style::{Color, Style},
-    text::{Line, Span, Text},
-    widgets::StatefulWidget,
-};
-
-use modalkit_ratatui::{
-    TermOffset,
-    TerminalCursor,
-    WindowOps,
-    list::{List, ListState},
-};
-
-use crate::base::{
-    IambBufferId,
-    IambError,
-    IambInfo,
-    IambResult,
-    ProgramContext,
-    ProgramStore,
-    RoomFocus,
-    SpaceAction,
-};
-
+use crate::prelude::*;
 use crate::windows::{RoomItem, RoomLikeItem, room_fields_cmp};
 
 const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);

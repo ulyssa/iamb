@@ -1,12 +1,8 @@
 //! # Utility functions
-use std::borrow::Cow;
 
 use regex::{Regex, RegexBuilder};
-use unicode_segmentation::UnicodeSegmentation;
-use unicode_width::UnicodeWidthStr;
 
-use ratatui::style::Style;
-use ratatui::text::{Line, Span, Text};
+use crate::prelude::*;
 
 pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) {
     match cow {

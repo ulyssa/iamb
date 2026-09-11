@@ -1,78 +1,25 @@
 //! # Windows for Matrix rooms and spaces
 use std::collections::HashSet;
 
-use matrix_sdk::{
-    RoomDisplayName,
-    RoomState as MatrixRoomState,
-    notification_settings::RoomNotificationMode,
-    room::Room as MatrixRoom,
-    ruma::{
-        OwnedEventId,
-        OwnedRoomAliasId,
-        OwnedUserId,
-        RoomId,
-        api::{
-            client::room::upgrade_room::v3::Request as UpgradeRoomRequest,
-            error::ErrorKind as ClientApiErrorKind,
-        },
-        events::{
-            room::{
-                canonical_alias::RoomCanonicalAliasEventContent,
-                history_visibility::{HistoryVisibility, RoomHistoryVisibilityEventContent},
-                name::RoomNameEventContent,
-                topic::RoomTopicEventContent,
-            },
-            tag::{TagInfo, Tags},
-        },
-        room::{AllowRule, JoinRule, Restricted as JoinRestrictions},
-    },
+use matrix_sdk::RoomDisplayName;
+use matrix_sdk::notification_settings::RoomNotificationMode;
+use matrix_sdk::ruma::api::client::room::upgrade_room::v3::Request as UpgradeRoomRequest;
+use matrix_sdk::ruma::api::error::ErrorKind as ClientApiErrorKind;
+use matrix_sdk::ruma::events::room::canonical_alias::RoomCanonicalAliasEventContent;
+use matrix_sdk::ruma::events::room::history_visibility::{
+    HistoryVisibility,
+    RoomHistoryVisibilityEventContent,
 };
+use matrix_sdk::ruma::events::room::name::RoomNameEventContent;
+use matrix_sdk::ruma::events::room::topic::RoomTopicEventContent;
+use matrix_sdk::ruma::events::tag::TagInfo;
+use matrix_sdk::ruma::room::{AllowRule, Restricted as JoinRestrictions};
 
-use ratatui::{
-    buffer::Buffer,
-    layout::{Alignment, Rect},
-    style::{Modifier as StyleModifier, Style},
-    text::{Line, Span, Text},
-    widgets::{Paragraph, StatefulWidget, Widget},
-};
-
-use modalkit::actions::{
-    Action,
-    Editable,
-    EditorAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
-    WindowAction,
-};
-use modalkit::errors::{EditResult, UIError};
-use modalkit::prelude::*;
-use modalkit::{editing::completion::CompletionList, keybindings::dialog::PromptYesNo};
-use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps};
-
-use crate::base::{
-    IambAction,
-    IambError,
-    IambId,
-    IambInfo,
-    IambResult,
-    MemberUpdateAction,
-    MessageAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomAction,
-    RoomField,
-    SendAction,
-    SpaceAction,
-};
-
-use self::chat::ChatState;
-use self::space::{Space, SpaceState};
+use crate::base::{MemberUpdateAction, RoomField};
 use crate::config::EncryptionIndicatorLocation;
-
-use std::convert::TryFrom;
+use crate::prelude::*;
+use crate::windows::room::chat::ChatState;
+use crate::windows::room::space::{Space, SpaceState};
 
 mod chat;
 mod scrollback;
@@ -260,6 +207,7 @@ pub async fn room_command(
             let Some(room) = store.application.worker.client.get_room(id) else {
                 return Err(IambError::NotJoined.into());
             };
+            let rule = rule.into_join_rule(&store.application.worker.client).await?;
             room.privacy_settings()
                 .update_join_rule(rule)
                 .await

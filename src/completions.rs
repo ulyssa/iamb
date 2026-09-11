@@ -1,39 +1,19 @@
 //! Tab completions for iamb
-use std::borrow::Cow;
-use std::str::FromStr;
 
-use modalkit::{
-    editing::{
-        completion::{Completer, complete_path},
-        cursor::Cursor,
-        rope::EditRope,
-    },
-    env::vim::command::CommandDescription,
-    prelude::{
-        CommandType,
-        Count,
-        CursorMovements,
-        CursorMovementsContext,
-        MoveDir1D,
-        MoveType,
-        WordStyle,
-    },
-};
+use modalkit::editing::completion::{Completer, complete_path};
+use modalkit::editing::cursor::Cursor;
+use modalkit::env::vim::command::CommandDescription;
 
-use crate::base::{ChatStore, IambBufferId, IambInfo, MATRIX_ID_WORD, RoomFocus};
+use crate::base::MATRIX_ID_WORD;
+use crate::prelude::*;
 
 mod parse {
-    use nom::{
-        IResult,
-        Input,
-        OutputMode,
-        Parser,
-        branch::alt,
-        bytes::complete::{escaped_transform, is_not, tag},
-        character::complete::{char, space0, space1},
-        combinator::{cut, eof, opt, value},
-        error::{ErrorKind, ParseError},
-    };
+    use nom::branch::alt;
+    use nom::bytes::complete::{escaped_transform, is_not, tag};
+    use nom::character::complete::{char, space0, space1};
+    use nom::combinator::{cut, eof, opt, value};
+    use nom::error::{ErrorKind, ParseError};
+    use nom::{IResult, Input, OutputMode, Parser};
 
     fn parse_text(input: &str) -> IResult<&str, String> {
         if input.is_empty() {
@@ -383,7 +363,14 @@ fn complete_iamb_keys(
 
 /// Tab completion for `:verify`
 fn complete_iamb_verify(args: Vec<String>, store: &ChatStore) -> Vec<String> {
-    let subcmds = ["request", "accept", "confirm", "cancel", "missmatch"];
+    let subcmds = [
+        "request",
+        "accept",
+        "confirm",
+        "cancel",
+        "missmatch",
+        "emoji",
+    ];
     match args.len() {
         1 => complete_choices(&args[0], &subcmds),
         2 if args[0] == "request" => complete_users(&args[1], store),
@@ -486,8 +473,18 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
         }
     } else {
         let input = args.last().unwrap();
-        match (args[0].as_str(), args[1].as_str()) {
-            ("version", "upgrade") => complete_users(input, store),
+        match (args[0].as_str(), args[1].as_str(), args[2].as_str()) {
+            ("version", "upgrade", _) => complete_users(input, store),
+            ("access", "set", "restricted") | ("access", "set", "knock-restricted") => {
+                if let Some(remaining) = input.strip_prefix("++members=") {
+                    complete_room_alias_or_id(remaining, store)
+                        .into_iter()
+                        .map(|id| format!("++members={id}"))
+                        .collect()
+                } else {
+                    complete_choices(input, &["++members="])
+                }
+            },
 
             _ => vec![],
         }
@@ -765,13 +762,14 @@ impl Completer<IambInfo> for IambCompleter {
 #[cfg(test)]
 pub mod tests {
     use super::*;
-    use crate::{
-        base::{ProgramCommand, ProgramCommands},
-        commands::add_iamb_commands,
-        tests::*,
-    };
-    use modalkit::{commands::CommandResult, env::vim::command::CommandContext};
+
+    use modalkit::commands::CommandResult;
+    use modalkit::env::vim::command::CommandContext;
     use pretty_assertions::assert_eq;
+
+    use crate::base::{ProgramCommand, ProgramCommands};
+    use crate::commands::add_iamb_commands;
+    use crate::tests::*;
 
     #[tokio::test]
     async fn test_complete_msgbar() {

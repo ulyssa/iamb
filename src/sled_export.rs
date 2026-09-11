@@ -10,11 +10,11 @@
 //! time to upgrade off of pre-0.0.9 versions.
 //!
 //! [sled]: https://docs.rs/sled/0.34.7/sled/index.html
-use sled::{Config, IVec};
-use std::path::Path;
 
-use crate::base::IambError;
 use matrix_sdk_crypto::olm::{ExportedRoomKey, InboundGroupSession, PickledInboundGroupSession};
+use sled::{Config, IVec};
+
+use crate::prelude::*;
 
 #[derive(Debug, thiserror::Error)]
 pub enum SledMigrationError {

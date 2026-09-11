@@ -1,75 +1,41 @@
 //! # Room Messages
-use std::borrow::Cow;
-use std::cmp::{Ord, Ordering, PartialOrd};
-use std::collections::BTreeMap;
+
+use std::cmp::{Ord, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
-use std::convert::{TryFrom, TryInto};
-use std::fmt::{self, Display};
+use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
-use std::ops::{Deref, DerefMut};
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{DECIMAL, format_size};
 use matrix_sdk::ruma::OwnedTransactionId;
-use matrix_sdk::ruma::events::receipt::ReceiptThread;
-use matrix_sdk::ruma::events::room::MediaSource;
+use matrix_sdk::ruma::UInt;
+use matrix_sdk::ruma::events::RedactedUnsigned;
+use matrix_sdk::ruma::events::room::encrypted::{
+    OriginalRoomEncryptedEvent,
+    RedactedRoomEncryptedEvent,
+    RoomEncryptedEvent,
+};
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation;
+use matrix_sdk::ruma::events::room::message::{
+    FormattedBody,
+    MessageFormat,
+    RedactedRoomMessageEvent,
+    RoomMessageEvent,
+};
+use matrix_sdk::ruma::events::room::redaction::SyncRoomRedactionEvent;
 use matrix_sdk::ruma::events::sticker::{OriginalStickerEvent, RedactedStickerEvent, StickerEvent};
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
 use matrix_sdk::send_queue::SendHandle;
-use ratatui::style::Color;
-use unicode_width::UnicodeWidthStr;
-
-use matrix_sdk::ruma::{
-    EventId,
-    MilliSecondsSinceUnixEpoch,
-    OwnedEventId,
-    OwnedUserId,
-    UInt,
-    events::{
-        AnySyncStateEvent,
-        RedactedUnsigned,
-        relation::Thread,
-        room::{
-            encrypted::{
-                OriginalRoomEncryptedEvent,
-                RedactedRoomEncryptedEvent,
-                RoomEncryptedEvent,
-            },
-            message::{
-                FormattedBody,
-                MessageFormat,
-                MessageType,
-                OriginalRoomMessageEvent,
-                RedactedRoomMessageEvent,
-                Relation,
-                RoomMessageEvent,
-                RoomMessageEventContent,
-            },
-            redaction::SyncRoomRedactionEvent,
-        },
-    },
-};
-
-use ratatui::{
-    style::{Modifier as StyleModifier, Style},
-    symbols::line::THICK_VERTICAL,
-    text::{Line, Span, Text},
-};
-
 use modalkit::editing::cursor::Cursor;
-use modalkit::prelude::*;
-use ratatui_image::protocol::Protocol;
+use ratatui::symbols::line::THICK_VERTICAL;
+use ratatui_image::sliced::SlicedProtocol;
 
 use crate::base::MessageEdits;
-use crate::config::ImagePreviewSize;
-use crate::preview::{ImageStatus, PreviewKind, PreviewManager};
-use crate::{
-    base::RoomInfo,
-    config::ApplicationSettings,
-    message::html::{StyleTree, parse_matrix_html},
-    util::{replace_emojis_in_str, space, space_span, take_width, wrapped_text},
-};
+use crate::message::html::{StyleTree, parse_matrix_html};
+use crate::message::state::{body_cow_state, html_state};
+use crate::prelude::*;
+use crate::preview::ImageStatus;
+use crate::util::{replace_emojis_in_str, space, space_span, take_width, wrapped_text};
 
 mod compose;
 mod html;
@@ -77,10 +43,9 @@ mod printer;
 mod state;
 
 pub use self::compose::{text_to_message, text_to_text_message_event_content};
-use self::state::{body_cow_state, html_state};
-pub use html::TreeGenState;
+pub use self::html::TreeGenState;
 
-type ProtocolPreview<'a> = (&'a Protocol, u16, u16);
+type ProtocolPreview<'a> = (&'a SlicedProtocol, u16, u16);
 
 /// The key used for uniquely identifying messages within a room and its threads.
 ///
@@ -184,17 +149,17 @@ fn hash_message_id(id: &MessageId) -> Option<usize> {
 fn placeholder_frame(
     text: Option<&str>,
     outer_width: usize,
-    image_preview_size: &ImagePreviewSize,
+    image_preview_size: &Size,
 ) -> Option<String> {
-    let ImagePreviewSize { width, height } = image_preview_size;
-    let width = usize::min(*width, outer_width);
+    let Size { width, height } = image_preview_size;
+    let width = usize::min(*width as usize, outer_width);
     if width < 2 || *height < 2 {
         return None;
     }
     let mut placeholder = "\u{230c}".to_string();
     placeholder.push_str(&" ".repeat(width - 2));
     placeholder.push('\u{230d}');
-    placeholder.push_str(&"\n".repeat((height - 1) / 2));
+    placeholder.push_str(&"\n".repeat((*height as usize - 1) / 2));
 
     if *height > 2 &&
         let Some(text) = text &&
@@ -204,7 +169,7 @@ fn placeholder_frame(
         placeholder.push_str(text);
     }
 
-    placeholder.push_str(&"\n".repeat(height / 2));
+    placeholder.push_str(&"\n".repeat(*height as usize / 2));
     placeholder.push('\u{230e}');
     placeholder.push_str(&" ".repeat(width - 2));
     placeholder.push_str("\u{230f}\n");
@@ -656,7 +621,7 @@ enum MessageColumns {
 impl MessageColumns {
     fn user_gutter_width(&self, settings: &ApplicationSettings) -> u16 {
         if let MessageColumns::One = self {
-            0
+            2
         } else {
             settings.tunables.user_gutter_width as u16
         }
@@ -1053,6 +1018,25 @@ impl Message {
 
         !prev.timestamp.same_day(self.timestamp)
     }
+    pub fn message_column_width(
+        viewctx: &ViewportContext<MessageCursor>,
+        settings: &ApplicationSettings,
+    ) -> usize {
+        let width = viewctx.get_width();
+        let user_gutter = settings.tunables.user_gutter_width;
+
+        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
+            settings.tunables.read_receipt_display
+        {
+            width - user_gutter - TIME_GUTTER - READ_GUTTER
+        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
+            width - user_gutter - TIME_GUTTER
+        } else if user_gutter + MIN_MSG_LEN <= width {
+            width - user_gutter
+        } else {
+            width.saturating_sub(2)
+        }
+    }
 
     fn get_render_format<'a>(
         &'a self,
@@ -1215,7 +1199,7 @@ impl Message {
         style: Style,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-    ) -> (Text<'a>, Option<&'a Protocol>) {
+    ) -> (Text<'a>, Option<&'a SlicedProtocol>) {
         let mut proto = None;
         let placeholder = match self
             .image_preview()
@@ -1230,7 +1214,7 @@ impl Message {
             },
             Some(ImageStatus::Loaded(backend)) => {
                 proto = Some(backend);
-                placeholder_frame(Some("No Space..."), width, &backend.size().into())
+                placeholder_frame(None, width, &backend.size())
             },
             Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
         };
@@ -1454,20 +1438,19 @@ impl Display for Message {
 
 #[cfg(test)]
 pub mod tests {
-    use matrix_sdk::ruma::events::room::{
-        ImageInfo,
-        message::{
-            AudioInfo,
-            AudioMessageEventContent,
-            FileInfo,
-            FileMessageEventContent,
-            ImageMessageEventContent,
-            VideoInfo,
-            VideoMessageEventContent,
-        },
+    use super::*;
+
+    use matrix_sdk::ruma::events::room::ImageInfo;
+    use matrix_sdk::ruma::events::room::message::{
+        AudioInfo,
+        AudioMessageEventContent,
+        FileInfo,
+        FileMessageEventContent,
+        ImageMessageEventContent,
+        VideoInfo,
+        VideoMessageEventContent,
     };
 
-    use super::*;
     use crate::tests::*;
 
     #[test]
@@ -1582,7 +1565,7 @@ pub mod tests {
         }
 
         assert_eq!(
-            placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(None, 4, &Size { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1594,7 +1577,7 @@ pub mod tests {
         );
 
         assert_eq!(
-            placeholder_frame(None, 2, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(None, 2, &Size { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌⌍
@@ -1604,12 +1587,12 @@ pub mod tests {
 "#
             )
         );
-        assert_eq!(placeholder_frame(None, 4, &ImagePreviewSize { width: 1, height: 4 }), None);
+        assert_eq!(placeholder_frame(None, 4, &Size { width: 1, height: 4 }), None);
 
-        assert_eq!(placeholder_frame(None, 4, &ImagePreviewSize { width: 4, height: 1 }), None);
+        assert_eq!(placeholder_frame(None, 4, &Size { width: 4, height: 1 }), None);
 
         assert_eq!(
-            placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(Some("OK"), 4, &Size { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1620,7 +1603,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("OK"), 6, &ImagePreviewSize { width: 6, height: 6 }),
+            placeholder_frame(Some("OK"), 6, &Size { width: 6, height: 6 }),
             pretty_frame_test(
                 r#"
 ⌌    ⌍
@@ -1633,7 +1616,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("OK"), 6, &ImagePreviewSize { width: 6, height: 7 }),
+            placeholder_frame(Some("OK"), 6, &Size { width: 6, height: 7 }),
             pretty_frame_test(
                 r#"
 ⌌    ⌍
@@ -1647,7 +1630,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("idontfit"), 4, &ImagePreviewSize { width: 4, height: 4 }),
+            placeholder_frame(Some("idontfit"), 4, &Size { width: 4, height: 4 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1658,7 +1641,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 4, height: 2 }),
+            placeholder_frame(Some("OK"), 4, &Size { width: 4, height: 2 }),
             pretty_frame_test(
                 r#"
 ⌌  ⌍
@@ -1667,7 +1650,7 @@ pub mod tests {
             )
         );
         assert_eq!(
-            placeholder_frame(Some("OK"), 4, &ImagePreviewSize { width: 2, height: 3 }),
+            placeholder_frame(Some("OK"), 4, &Size { width: 2, height: 3 }),
             pretty_frame_test(
                 r#"
 ⌌⌍

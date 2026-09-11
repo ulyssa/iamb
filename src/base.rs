@@ -1,110 +1,50 @@
 //! # Common types and utilities
 //!
 //! The types defined here get used throughout iamb.
-use std::borrow::Cow;
+
 use std::collections::hash_map::{Entry, IntoIter};
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::convert::TryFrom;
-use std::fmt::{self, Display};
-use std::hash::Hash;
-use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::collections::{BTreeSet, HashSet};
 
 use emojis::Emoji;
-
-use ratatui::{
-    buffer::Buffer,
-    layout::{Alignment, Rect},
-    text::{Line, Span},
-    widgets::{Paragraph, Widget},
+use matrix_sdk::Client;
+use matrix_sdk::ruma::events::reaction::ReactionEvent;
+use matrix_sdk::ruma::events::relation::Replacement;
+use matrix_sdk::ruma::events::room::encrypted::RoomEncryptedEvent;
+use matrix_sdk::ruma::events::room::message::{
+    RoomMessageEvent,
+    RoomMessageEventContentWithoutRelation,
 };
-use serde::{
-    Deserialize,
-    Deserializer,
-    Serialize,
-    Serializer,
-    de::Error as SerdeError,
-    de::Visitor,
+use matrix_sdk::ruma::events::room::redaction::{
+    OriginalSyncRoomRedactionEvent,
+    SyncRoomRedactionEvent,
 };
+use matrix_sdk::ruma::events::sticker::{StickerEvent, StickerEventContent};
+use matrix_sdk::ruma::events::{MessageLikeEvent, OriginalMessageLikeEvent};
+use matrix_sdk::ruma::presence::PresenceState;
+use matrix_sdk::ruma::room::{AllowRule, Restricted};
+use matrix_sdk::ruma::{OwnedMxcUri, OwnedTransactionId, RoomVersionId};
+use modalkit::editing::application::{
+    ApplicationAction,
+    ApplicationContentId,
+    ApplicationError,
+    ApplicationInfo,
+    ApplicationStore,
+    ApplicationWindowId,
+};
+use modalkit::editing::completion::CompletionMap;
+use modalkit::editing::context::EditContext;
+use modalkit::editing::store::Store;
+use modalkit::env::vim::command::{CommandContext, VimCommand, VimCommandMachine};
+use modalkit::env::vim::keybindings::VimMachine;
+use modalkit::errors::UIResult;
+use modalkit::keybindings::SequenceStatus;
+use serde::de::Error as SerdeError;
+use serde::de::Visitor;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
-use url::Url;
 
-use matrix_sdk::{
-    RoomState as MatrixRoomState,
-    encryption::verification::SasVerification,
-    room::Room as MatrixRoom,
-    ruma::{
-        EventId,
-        OwnedEventId,
-        OwnedMxcUri,
-        OwnedRoomAliasId,
-        OwnedRoomId,
-        OwnedRoomOrAliasId,
-        OwnedTransactionId,
-        OwnedUserId,
-        RoomId,
-        RoomVersionId,
-        UserId,
-        events::{
-            AnySyncStateEvent,
-            MessageLikeEvent,
-            OriginalMessageLikeEvent,
-            reaction::ReactionEvent,
-            receipt::ReceiptThread,
-            relation::{Replacement, Thread},
-            room::MediaSource,
-            room::encrypted::RoomEncryptedEvent,
-            room::message::{
-                MessageType,
-                OriginalRoomMessageEvent,
-                Relation,
-                RoomMessageEvent,
-                RoomMessageEventContent,
-                RoomMessageEventContentWithoutRelation,
-            },
-            room::redaction::{OriginalSyncRoomRedactionEvent, SyncRoomRedactionEvent},
-            sticker::{StickerEvent, StickerEventContent},
-            tag::{TagName, Tags},
-        },
-        presence::PresenceState,
-        profile::{ProfileFieldName, ProfileFieldValue},
-        room::JoinRule,
-    },
-};
-
-use modalkit::{
-    actions::Action,
-    editing::{
-        application::{
-            ApplicationAction,
-            ApplicationContentId,
-            ApplicationError,
-            ApplicationInfo,
-            ApplicationStore,
-            ApplicationWindowId,
-        },
-        completion::CompletionMap,
-        context::EditContext,
-        store::Store,
-    },
-    env::vim::{
-        command::{CommandContext, VimCommand, VimCommandMachine},
-        keybindings::VimMachine,
-    },
-    errors::{UIError, UIResult},
-    key::TerminalKey,
-    keybindings::SequenceStatus,
-    prelude::{CommandType, MoveDir1D, WordStyle},
-};
-
-use crate::preview::PreviewKind;
-use crate::{
-    config::ApplicationSettings,
-    message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages},
-    notifications::NotificationHandle,
-    preview::PreviewManager,
-    worker::Requester,
-};
+use crate::notifications::NotificationHandle;
+use crate::prelude::*;
 
 /// The set of characters used in different Matrix IDs.
 pub const MATRIX_ID_WORD: WordStyle = WordStyle::CharSet(is_mxid_char);
@@ -141,6 +81,9 @@ pub enum VerifyAction {
 
     /// Reject an in-progress verification due to mismatched Emoji.
     Mismatch,
+
+    /// Start an interactive (SAS) emoji verification
+    Emoji,
 }
 
 /// An action taken against the currently selected message.
@@ -466,6 +409,52 @@ impl Display for MemberUpdateAction {
     }
 }
 
+/// An internal version of [`JoinRule`]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum IambJoinRule {
+    Public,
+    Restricted(Vec<OwnedRoomOrAliasId>),
+    Knock,
+    KnockRestricted(Vec<OwnedRoomOrAliasId>),
+    Invite,
+}
+
+impl IambJoinRule {
+    pub async fn into_join_rule(self, client: &Client) -> Result<JoinRule, IambError> {
+        async fn resolve_aliases(
+            rooms: Vec<OwnedRoomOrAliasId>,
+            client: &Client,
+        ) -> Result<Restricted, IambError> {
+            let mut allow = vec![];
+            for room in rooms {
+                let alias = match OwnedRoomId::try_from(room) {
+                    Ok(room_id) => {
+                        allow.push(AllowRule::room_membership(room_id));
+                        continue;
+                    },
+                    Err(alias) => alias,
+                };
+
+                let resp = client.resolve_room_alias(&alias).await?;
+
+                allow.push(AllowRule::room_membership(resp.room_id));
+            }
+
+            Ok(Restricted::new(allow))
+        }
+
+        Ok(match self {
+            Self::Public => JoinRule::Public,
+            Self::Invite => JoinRule::Invite,
+            Self::Knock => JoinRule::Knock,
+            Self::Restricted(rooms) => JoinRule::Restricted(resolve_aliases(rooms, client).await?),
+            Self::KnockRestricted(rooms) => {
+                JoinRule::KnockRestricted(resolve_aliases(rooms, client).await?)
+            },
+        })
+    }
+}
+
 /// An action that operates on a focused room.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomAction {
@@ -504,7 +493,7 @@ pub enum RoomAction {
     SetDirect(bool),
 
     /// Set the join rules for a room to control who can access it and how.
-    SetAccess(JoinRule),
+    SetAccess(IambJoinRule),
 
     /// Set a room property.
     Set(RoomField, String),
@@ -1847,7 +1836,8 @@ pub struct ChatStore {
     pub presences: CompletionMap<OwnedUserId, PresenceState>,
 
     /// In-progress and completed verifications.
-    pub verifications: CompletionMap<String, SasVerification>,
+    /// The map key is the `flow_id`.
+    pub verifications: CompletionMap<String, VerificationRequest>,
 
     /// Settings for the current profile loaded from config file.
     pub settings: ApplicationSettings,
@@ -1939,13 +1929,6 @@ impl ChatStore {
     /// Set the name for a room.
     pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
         self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
-    }
-
-    /// Insert a new E2EE verification.
-    pub fn insert_sas(&mut self, sas: SasVerification) {
-        let key = format!("{}/{}", sas.other_user_id(), sas.other_device().device_id());
-
-        self.verifications.insert(key, sas);
     }
 }
 
@@ -2262,19 +2245,19 @@ impl ApplicationInfo for IambInfo {
 
 #[cfg(test)]
 pub mod tests {
+    use super::*;
+
     use std::iter::FromIterator as _;
 
-    use super::*;
-    use crate::config::user_style_from_color;
-    use crate::tests::*;
-    use matrix_sdk::ruma::{
-        MilliSecondsSinceUnixEpoch,
-        events::{reaction::ReactionEventContent, relation::Annotation},
-        owned_event_id,
-    };
+    use matrix_sdk::ruma::events::reaction::ReactionEventContent;
+    use matrix_sdk::ruma::events::relation::Annotation;
+    use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, owned_event_id};
     use pretty_assertions::assert_eq;
     use ratatui::style::Color;
     use serde_json::{Map, Value};
+
+    use crate::config::user_style_from_color;
+    use crate::tests::*;
 
     fn create_reaction_event(
         content: &ReactionEventContent,

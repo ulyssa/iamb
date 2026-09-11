@@ -1,32 +1,14 @@
-use std::path::PathBuf;
-use std::{collections::HashMap, iter::FromIterator as _};
-
-use matrix_sdk::ruma::{
-    EventId,
-    OwnedEventId,
-    OwnedRoomId,
-    OwnedUserId,
-    RoomId,
-    UInt,
-    event_id,
-    events::room::message::RoomMessageEventContent,
-    server_name,
-    user_id,
-};
-use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, assign};
+use std::iter::FromIterator as _;
 
 use lazy_static::lazy_static;
-use ratatui::style::{Color, Style};
+use matrix_sdk::ruma::assign;
+use matrix_sdk::ruma::{UInt, event_id, server_name, user_id};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::unbounded_channel;
 
-use crate::message::MessageTimeStamp;
-use crate::{
-    base::{ChatStore, EventLocation, ProgramStore, RoomInfo},
-    config::*,
-    message::{Message, MessageEvent, MessageKey, Messages},
-    worker::Requester,
-};
+use crate::base::EventLocation;
+use crate::config::*;
+use crate::prelude::*;
 
 const TEST_ROOM1_ALIAS: &str = "#room1:example.com";
 
@@ -170,6 +152,7 @@ pub fn mock_tunables() -> TunableValues {
         ignorecase: false,
         default_room: None,
         encryption: Encryption::default().values(),
+        input_prompt: None,
         log_level: "warn".into(),
         max_log_files: 7,
         message_shortcode_display: false,

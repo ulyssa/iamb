@@ -1,106 +1,37 @@
 //! Window for Matrix rooms
-use std::borrow::Cow;
 use std::convert::TryInto;
 use std::ffi::{OsStr, OsString};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::process::Command;
 
 use edit::Builder;
 use edit::edit_with_builder as external_edit;
+use matrix_sdk::RoomState as MatrixRoomState;
+use matrix_sdk::attachment::AttachmentConfig;
 use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::room::reply::{EnforceThread, Reply};
+use matrix_sdk::ruma::events::reaction::ReactionEventContent;
+use matrix_sdk::ruma::events::relation::{Annotation, Replacement};
+use matrix_sdk::ruma::events::room::message::{AddMentions, ForwardThread, ReplyWithinThread};
+use matrix_sdk::send_queue::RoomSendQueueError;
+use modalkit::editing::history::{self, HistoryList};
 use modalkit::editing::store::RegisterError;
-use std::process::Command;
-use tokio;
-use url::Url;
+use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem};
+use modalkit_ratatui::PromptActions;
+use modalkit_ratatui::textbox::{TextBox, TextBoxState};
+use ratatui::prelude::Stylize;
 
-use matrix_sdk::{
-    RoomState,
-    attachment::AttachmentConfig,
-    media::{MediaFormat, MediaRequestParameters},
-    room::Room as MatrixRoom,
-    ruma::{
-        OwnedEventId,
-        OwnedRoomId,
-        RoomId,
-        events::reaction::ReactionEventContent,
-        events::relation::{Annotation, Replacement},
-        events::room::message::{
-            AddMentions,
-            ForwardThread,
-            MessageType,
-            OriginalRoomMessageEvent,
-            Relation,
-            ReplyWithinThread,
-        },
-    },
-    send_queue::RoomSendQueueError,
-};
-
-use ratatui::{
-    buffer::Buffer,
-    layout::Rect,
-    prelude::Stylize,
-    text::{Line, Span},
-    widgets::{Paragraph, StatefulWidget, Widget},
-};
-
-use modalkit::keybindings::dialog::{Dialog, MultiChoice, MultiChoiceItem, PromptYesNo};
-
-use modalkit_ratatui::{
-    PromptActions,
-    TerminalCursor,
-    WindowOps,
-    textbox::{TextBox, TextBoxState},
-};
-
-use modalkit::actions::{
-    Action,
-    Editable,
-    EditorAction,
-    Jumpable,
-    PromptAction,
-    Promptable,
-    Scrollable,
-};
-use modalkit::editing::{
-    completion::CompletionList,
-    context::Resolve,
-    history::{self, HistoryList},
-    rope::EditRope,
-};
-use modalkit::errors::{EditError, EditResult, UIError};
-use modalkit::prelude::*;
-
-use crate::base::{
-    DownloadFlags,
-    EchoLocation,
-    IambAction,
-    IambBufferId,
-    IambError,
-    IambInfo,
-    IambResult,
-    MessageAction,
-    ProgramAction,
-    ProgramContext,
-    ProgramStore,
-    RoomFocus,
-    RoomInfo,
-    SendAction,
-};
-
-use crate::config::{ApplicationSettings, EncryptionIndicatorLocation};
+use crate::base::{DownloadFlags, EchoLocation};
+use crate::config::EncryptionIndicatorLocation;
 use crate::message::{
-    MessageEvent,
     MessageId,
-    MessageKey,
     TreeGenState,
     text_to_message,
     text_to_text_message_event_content,
 };
-use crate::worker::Requester;
-
-use super::scrollback::{Scrollback, ScrollbackState};
+use crate::prelude::*;
+use crate::windows::room::scrollback::{Scrollback, ScrollbackState};
 
 /// State needed for rendering [Chat].
 pub struct ChatState {
@@ -151,7 +82,7 @@ impl ChatState {
             return Err(IambError::NotJoined);
         };
 
-        if room.state() == RoomState::Joined {
+        if room.state() == MatrixRoomState::Joined {
             Ok(room)
         } else {
             Err(IambError::NotJoined)
@@ -640,6 +571,7 @@ impl ChatState {
                             .trim_end()
                             .to_string();
                     if edited_msg.is_empty() {
+                        self.tbox.reset();
                         return Ok(None);
                     }
                     edited_msg
@@ -1177,10 +1109,12 @@ impl StatefulWidget for Chat<'_> {
         let encryption_settings = &settings.tunables.encryption;
         let encryption_indicator = encryption_settings
             .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
-        let prompt = match (self.focused, encryption_indicator) {
-            (false, _) => Span::raw("  "),
-            (true, Some(i)) => i,
-            (true, None) => Span::raw("> "),
+        let input_prompt = settings.tunables.input_prompt.as_deref();
+        let prompt = match (self.focused, encryption_indicator, input_prompt) {
+            (false, _, _) => Span::raw("  "),
+            (true, Some(i), _) => i,
+            (true, None, None) => Span::raw("> "),
+            (true, None, Some(s)) => Span::raw(s),
         };
 
         let tbox = TextBox::new().prompt(prompt);

@@ -1,14 +1,8 @@
 //! Welcome Window
-use std::ops::{Deref, DerefMut};
 
-use ratatui::{buffer::Buffer, layout::Rect};
+use modalkit_ratatui::textbox::TextBoxState;
 
-use modalkit_ratatui::{TermOffset, TerminalCursor, WindowOps, textbox::TextBoxState};
-
-use modalkit::editing::completion::CompletionList;
-use modalkit::prelude::*;
-
-use crate::base::{IambBufferId, IambInfo, IambResult, ProgramStore};
+use crate::prelude::*;
 
 const WELCOME_TEXT: &str = include_str!("welcome.md");
 
