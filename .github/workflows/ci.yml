@@ -46,6 +46,67 @@ jobs:
     - name: Run tests
       run: cargo test --locked
 
+  voip:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-latest
+            target-dir: target
+          - platform: macos-latest
+            target-dir: target
+          # Keep the target directory short: the prebuilt libwebrtc tree
+          # unpacks deeply and blows past MAX_PATH under D:\a\iamb\iamb.
+          - platform: windows-latest
+            target-dir: C:/t
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
+    env:
+      CARGO_TARGET_DIR: ${{ matrix.target-dir }}
+      SCCACHE_GHA_ENABLED: "true"
+      RUSTC_WRAPPER: "sccache"
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      with:
+        submodules: true
+    - name: Install Rust (1.93 w/ clippy)
+      uses: dtolnay/rust-toolchain@1.93
+      with:
+          components: clippy
+    # webrtc-sys unwraps pkg_config for glib-2.0/gobject-2.0/gio-2.0, so the
+    # headers are a hard build dependency. X11/drm/gbm/VA-API are not: they are
+    # dlopened through stubs shipped in the crate.
+    - name: Install system dependencies (Linux)
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y libglib2.0-dev
+    - name: Enable long paths (Windows)
+      if: runner.os == 'Windows'
+      run: git config --system core.longpaths true
+    - name: Cache cargo registry
+      uses: actions/cache@v4
+      with:
+        path: ~/.cargo/registry
+        key: ${{ runner.os }}-cargo-registry-${{ hashFiles('**/Cargo.lock') }}
+    # A cold build downloads and unpacks ~1.4GB of prebuilt libwebrtc into the
+    # `scratch` crate's directory under CARGO_TARGET_DIR. Cache it separately
+    # from the rest of target/, which we let cargo rebuild.
+    - name: Cache prebuilt libwebrtc
+      uses: actions/cache@v4
+      with:
+        path: ${{ matrix.target-dir }}/*/build/scratch-*/out/livekit_webrtc
+        key: ${{ runner.os }}-libwebrtc-${{ hashFiles('**/Cargo.lock') }}
+    - name: Run sccache-cache
+      uses: mozilla-actions/sccache-action@v0.0.9
+    - name: Check Clippy
+      run: cargo clippy --locked --features voip --all-targets -- --deny warnings
+    - name: Build
+      run: cargo build --locked --features voip
+    - name: Run tests
+      run: cargo test --locked --features voip
+
   nix-flake-test:
     name: Flake checks ❄️
     strategy:

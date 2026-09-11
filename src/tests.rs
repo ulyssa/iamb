@@ -217,6 +217,8 @@ pub fn mock_tunables() -> TunableValues {
 pub fn mock_settings() -> ApplicationSettings {
     ApplicationSettings {
         layout_json: PathBuf::new(),
+        #[cfg(feature = "voip")]
+        voip_json: PathBuf::new(),
         session_json: PathBuf::new(),
         session_json_old: PathBuf::new(),
         sled_dir: PathBuf::new(),
@@ -248,7 +250,12 @@ pub async fn mock_store() -> ProgramStore {
         .build()
         .await
         .unwrap();
-    let worker = Requester { tx, client };
+    let worker = Requester {
+        tx,
+        client,
+        #[cfg(feature = "voip")]
+        call_status: Default::default(),
+    };
 
     let mut store = ChatStore::new(worker, mock_settings());
 

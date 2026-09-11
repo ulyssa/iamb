@@ -128,6 +128,9 @@
             cargo-tarpaulin
             cargo-watch
             sqlite
+            # Needed to build `--features voip`.
+            pkg-config
+            glib
           ];
 
           shellHook = ''

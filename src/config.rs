@@ -1188,6 +1188,14 @@ impl IambConfig {
 #[derive(Clone)]
 pub struct ApplicationSettings {
     pub layout_json: PathBuf,
+
+    /// Where the remembered call audio devices are stored.
+    #[cfg(feature = "voip")]
+    pub voip_json: PathBuf,
+
+    /// The remembered call audio devices, read from `voip_json` once at startup.
+    #[cfg(feature = "voip")]
+    pub voip_devices: crate::voip::devices::DevicePreferences,
     pub session_json: PathBuf,
     pub session_json_old: PathBuf,
     pub sled_dir: PathBuf,
@@ -1325,9 +1333,23 @@ impl ApplicationSettings {
         let mut layout_json = cache_dir.clone();
         layout_json.push("layout.json");
 
+        #[cfg(feature = "voip")]
+        let voip_json = {
+            let mut path = cache_dir.clone();
+            path.push("voip.json");
+            path
+        };
+
+        #[cfg(feature = "voip")]
+        let voip_devices = Self::read_voip_devices(&voip_json);
+
         let settings = ApplicationSettings {
             sled_dir,
             layout_json,
+            #[cfg(feature = "voip")]
+            voip_json,
+            #[cfg(feature = "voip")]
+            voip_devices,
             session_json,
             session_json_old,
             sqlite_dir,
@@ -1347,6 +1369,41 @@ impl ApplicationSettings {
         let reader = BufReader::new(file);
         let session = serde_json::from_reader(reader).map_err(IambError::from)?;
         Ok(session)
+    }
+
+    /// Read the remembered call audio devices.
+    /// A missing or unreadable file just means no devices have been chosen yet.
+    #[cfg(feature = "voip")]
+    fn read_voip_devices(path: &Path) -> crate::voip::devices::DevicePreferences {
+        let Ok(file) = File::open(path) else {
+            return Default::default();
+        };
+
+        serde_json::from_reader(BufReader::new(file)).unwrap_or_default()
+    }
+
+    /// Remember a chosen call audio device, now and for the next run.
+    ///
+    /// The in-memory preference is updated even if the write fails, since the
+    /// device has already been switched to for this session.
+    #[cfg(feature = "voip")]
+    pub fn set_voip_device(
+        &mut self,
+        kind: crate::voip::devices::DeviceKind,
+        name: String,
+    ) -> Result<(), IambError> {
+        self.voip_devices.set(kind, name);
+
+        if let Some(dir) = self.voip_json.parent() {
+            std::fs::create_dir_all(dir)?;
+        }
+
+        let file = File::create(self.voip_json.as_path())?;
+        let writer = BufWriter::new(file);
+
+        serde_json::to_writer(writer, &self.voip_devices).map_err(IambError::from)?;
+
+        Ok(())
     }
 
     pub fn write_session(&self, session: MatrixSession) -> Result<(), IambError> {

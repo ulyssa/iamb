@@ -38,6 +38,7 @@ use rand::distr::Alphanumeric;
 use temp_dir::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::Level;
+use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use modalkit::crossterm::{
@@ -88,6 +89,8 @@ mod worker;
 #[cfg(test)]
 mod tests;
 mod verifications;
+#[cfg(feature = "voip")]
+mod voip;
 
 use crate::{
     base::{
@@ -269,6 +272,14 @@ struct Application {
 
     /// Whether we need to do a full redraw (e.g., after running a subprocess).
     dirty: bool,
+
+    /// The window the last frame was drawn for, so that switching between them
+    /// can be noticed. See [`Application::resync_on_view_change`].
+    last_focus: Option<IambId>,
+
+    /// Whether the last frame was drawn with a call banner, for the same reason.
+    #[cfg(feature = "voip")]
+    last_call_banner: bool,
 }
 
 impl Application {
@@ -302,7 +313,40 @@ impl Application {
             focused: true,
             last_layout: None,
             dirty: true,
+            last_focus: None,
+            #[cfg(feature = "voip")]
+            last_call_banner: false,
         })
+    }
+
+    /// Ask for one full-clear redraw when the view is replaced wholesale.
+    ///
+    /// Switching rooms, and starting or ending a call, replace everything below
+    /// the border. The new view draws over the old one rather than replacing it,
+    /// leaving ghost text, so the screen has to be redrawn from scratch to
+    /// resync the terminal with ratatui's buffer.
+    ///
+    /// Setting [`Application::dirty`] gives exactly one cleared frame per
+    /// transition. Clearing for a *window of time* instead
+    fn resync_on_view_change(&mut self, _store: &ProgramStore) {
+        let focus = self.screen.current_window().map(|win| win.id());
+
+        if self.last_focus != focus {
+            self.last_focus = focus;
+            self.dirty = true;
+        }
+
+        #[cfg(feature = "voip")]
+        {
+            // Only whether the banner is drawn matters: its content changing
+            // does not move anything else on the screen.
+            let banner = _store.application.worker.call_status.get().is_some();
+
+            if self.last_call_banner != banner {
+                self.last_call_banner = banner;
+                self.dirty = true;
+            }
+        }
     }
 
     fn redraw(&mut self, full: bool, store: &mut ProgramStore) -> Result<(), std::io::Error> {
@@ -364,7 +408,13 @@ impl Application {
 
     async fn step(&mut self) -> Result<TerminalKey, std::io::Error> {
         loop {
-            self.redraw(self.dirty, self.store.clone().lock().await.deref_mut())?;
+            {
+                let store = self.store.clone();
+                let mut locked = store.lock().await;
+
+                self.resync_on_view_change(&locked);
+                self.redraw(self.dirty, locked.deref_mut())?;
+            }
             self.dirty = false;
 
             if !poll(Duration::from_secs(1))? {
@@ -600,6 +650,10 @@ impl Application {
             },
             IambAction::Space(act) => {
                 self.screen.current_window_mut()?.space_command(act, ctx, store).await?
+            },
+            #[cfg(feature = "voip")]
+            IambAction::Call(act) => {
+                self.screen.current_window_mut()?.call_command(act, ctx, store).await?
             },
             IambAction::Room(act) => {
                 let acts = self.screen.current_window_mut()?.room_command(act, ctx, store).await?;
@@ -1154,12 +1208,23 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
 
     // And finally, start running the terminal UI.
     let mut application = Application::new(settings, store).await?;
-    application.run().await?;
+    let res = application.run().await;
+
+    // Leave any call still in progress before the worker goes away with the
+    // process. Dropping the runtime tears the SFU connection down, but nothing
+    // takes our `m.call.member` event back out of the room, so quitting mid-call
+    // would leave us in the room's participant list until the membership
+    // expires - which is up to `MEMBERSHIP_LIFETIME` of everyone else seeing a
+    // participant who is not there.
+    #[cfg(feature = "voip")]
+    if let Some(call) = worker.call_status.get() {
+        worker.call_hangup_on_exit(call.room_id);
+    }
 
     // Clean up the terminal on exit.
     restore_tty(enable_enhanced_keys, enable_mouse);
 
-    Ok(())
+    res.map_err(UIError::from)
 }
 
 fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocking::WorkerGuard {
@@ -1195,12 +1260,18 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
         .with_env_filter(filter)
         .finish();
 
-    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+    subscriber.init();
 
     guard
 }
 
 fn main() {
+    // Both `ring` and `aws-lc-rs` are in the build, so rustls will not choose a
+    // CryptoProvider on its own and LiveKit's first TLS connection panics.
+    // No-op if one is already installed.
+    #[cfg(feature = "voip")]
+    let _ = rustls::crypto::ring::default_provider().install_default();
+
     // Parse command-line flags.
     let iamb = Iamb::parse();
 

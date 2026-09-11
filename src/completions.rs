@@ -419,6 +419,23 @@ fn complete_iamb_unreads(args: Vec<String>) -> Vec<String> {
     }
 }
 
+/// Tab completion for `:call`
+#[cfg(feature = "voip")]
+fn complete_iamb_call(args: Vec<String>) -> Vec<String> {
+    let subcmds = [
+        "join", "hangup", "decline", "mute", "unmute", "devices", "device",
+    ];
+
+    match args.len() {
+        1 => complete_choices(&args[0], &subcmds),
+        2 if args[0] == "device" => {
+            complete_choices(&args[1], &["mic", "microphone", "speaker", "output"])
+        },
+        // The device name is free text taken from the rest of the line.
+        _ => vec![],
+    }
+}
+
 /// Tab completion for `:create`
 fn complete_iamb_create(args: Vec<String>) -> Vec<String> {
     let options = ["++alias=", "++public", "++space", "++encrypted"];
@@ -583,6 +600,9 @@ fn complete_cmdarg(
     *cursor = new_cursor;
 
     let mut completions = match cmd.name.as_str() {
+        #[cfg(feature = "voip")]
+        "call" => complete_iamb_call(args),
+
         "create" => complete_iamb_create(args),
 
         "follow" => complete_choices(&args[0], &["next", "previous"]),

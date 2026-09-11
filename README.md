@@ -86,11 +86,56 @@ system's SQLite instead of using a bundled SQLite.
 
 - `bundled`: use bundled SQLite instead of system library (default)
 - `desktop`: enable desktop notifications and clipboard support (default)
+- `voip`: enable MatrixRTC voice calls over a LiveKit SFU (see [Voice calls](#voice-calls))
 - `max_level_warn`: disable support for more verbose logging than the default `warn` level
 - `max_level_error`: disable support for more verbose logging than the `error` level
 - `max_level_off`: disable all logs at compile time
 - `chafa-dyn`: use [chafa](https://hpjansson.org/chafa/) as a dynamic library for halfblock rendering
 - `chafa-static`: use [chafa](https://hpjansson.org/chafa/) as a static library for halfblock rendering
+
+### Voice calls
+
+The `voip` feature is off by default. Build it with:
+
+```
+cargo install --locked --features voip --path .
+```
+
+The first build downloads a prebuilt libwebrtc (about 1.4GB unpacked), so it
+takes a while.
+
+**Build dependencies.** On Linux, `webrtc-sys` compiles C++20 bindings, so it
+needs a C++ compiler. It also needs the GLib development headers, which it
+finds through `pkg-config` (`glib-2.0`, `gobject-2.0`, and `gio-2.0`). The
+build fails without either:
+
+- Debian/Ubuntu: `apt install g++ pkg-config libglib2.0-dev`
+- Fedora: `dnf install gcc-c++ pkgconf-pkg-config glib2-devel`
+- Arch Linux: `pacman -S gcc pkgconf glib2`
+
+The headers are only needed to compile. The finished binary does not link
+against GLib, and X11, DRM, GBM, and VA-API are loaded at runtime only if
+they are present. macOS and Windows need no extra packages.
+
+**Server requirements.** Calls use [MatrixRTC], with media relayed through a
+[LiveKit] SFU. Calling needs:
+
+- a reachable LiveKit SFU
+- a lk-jwt-service`endpoint, which exchanges your Matrix
+  OpenID token for a LiveKit access token
+- a homeserver whose `/.well-known/matrix/client` lists that service under
+  `org.matrix.msc4143.rtc_foci`, for example:
+
+  ```json
+  "org.matrix.msc4143.rtc_foci": [
+    { "type": "livekit", "livekit_service_url": "https://livekit-jwt.example.com" }
+  ]
+  ```
+
+When you join a call that has already started, iamb uses the SFU chosen by the
+people already in it, so the `.well-known` entry is only read when you start
+a call. This is the same setup Element Call uses; see its
+[Self Hosting Guide](https://element.io/blog/end-to-end-encrypted-voice-and-video-for-self-hosted-community-users/)
 
 ## Installation (via `crates.io`)
 
@@ -195,3 +240,7 @@ iamb is released under the [Apache License, Version 2.0].
 [iamb.chat]: https://iamb.chat
 [well_known_entry]: https://spec.matrix.org/latest/client-server-api/#getwell-knownmatrixclient
 [rustup]: https://rustup.rs/
+[MatrixRTC]: https://github.com/matrix-org/matrix-spec-proposals/pull/4143
+[LiveKit]: https://github.com/livekit/livekit
+[lk-jwt-service]: https://github.com/element-hq/lk-jwt-service
+[element-call-self-hosting]: https://github.com/element-hq/element-call/blob/livekit/docs/self-hosting.md

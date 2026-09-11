@@ -108,6 +108,9 @@ use crate::{
     worker::Requester,
 };
 
+#[cfg(feature = "voip")]
+use crate::voip::{IncomingCall, devices::DeviceKind};
+
 /// The set of characters used in different Matrix IDs.
 pub const MATRIX_ID_WORD: WordStyle = WordStyle::CharSet(is_mxid_char);
 
@@ -628,6 +631,30 @@ pub enum KeysAction {
     Import(String, String),
 }
 
+/// An action performed against the current room's call.
+#[cfg(feature = "voip")]
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum CallAction {
+    /// Join the call in the currently focused room.
+    ///
+    /// Media encryption follows the room: an encrypted room gets encrypted
+    /// media, an unencrypted one sends in the clear. That is what Element Call
+    /// does, and matching it matters because LiveKit only installs a decryptor
+    /// when encryption is on, so a peer on the other setting is inaudible in
+    /// *both* directions.
+    Join,
+    /// Leave the call in the currently focused room.
+    Hangup,
+    /// Decline a call we have been rung about, without joining it.
+    Decline,
+    /// Set the local microphone mute state (`true` = muted).
+    Mute(bool),
+    /// Show the available audio devices.
+    Devices,
+    /// Choose an audio device, by index or by name.
+    SetDevice(DeviceKind, String),
+}
+
 /// An action that the main program loop should.
 ///
 /// See [the commands module][super::commands] for where these are usually created.
@@ -644,6 +671,10 @@ pub enum IambAction {
 
     /// Perform an action on the current space.
     Space(SpaceAction),
+
+    /// Perform an action on the current room's call.
+    #[cfg(feature = "voip")]
+    Call(CallAction),
 
     /// Open a URL.
     OpenLink(String),
@@ -680,6 +711,13 @@ impl From<HomeserverAction> for IambAction {
     }
 }
 
+#[cfg(feature = "voip")]
+impl From<CallAction> for IambAction {
+    fn from(act: CallAction) -> Self {
+        IambAction::Call(act)
+    }
+}
+
 impl From<MessageAction> for IambAction {
     fn from(act: MessageAction) -> Self {
         IambAction::Message(act)
@@ -712,6 +750,8 @@ impl ApplicationAction for IambAction {
             IambAction::Keys(..) => SequenceStatus::Break,
             IambAction::Message(..) => SequenceStatus::Break,
             IambAction::Space(..) => SequenceStatus::Break,
+            #[cfg(feature = "voip")]
+            IambAction::Call(..) => SequenceStatus::Break,
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
@@ -728,6 +768,8 @@ impl ApplicationAction for IambAction {
             IambAction::Keys(..) => SequenceStatus::Atom,
             IambAction::Message(..) => SequenceStatus::Atom,
             IambAction::Space(..) => SequenceStatus::Atom,
+            #[cfg(feature = "voip")]
+            IambAction::Call(..) => SequenceStatus::Atom,
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
@@ -744,6 +786,8 @@ impl ApplicationAction for IambAction {
             IambAction::Keys(..) => SequenceStatus::Ignore,
             IambAction::Message(..) => SequenceStatus::Ignore,
             IambAction::Space(..) => SequenceStatus::Ignore,
+            #[cfg(feature = "voip")]
+            IambAction::Call(..) => SequenceStatus::Ignore,
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
@@ -759,6 +803,8 @@ impl ApplicationAction for IambAction {
             IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
             IambAction::Space(..) => false,
+            #[cfg(feature = "voip")]
+            IambAction::Call(..) => false,
             IambAction::Room(..) => false,
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
@@ -945,6 +991,11 @@ pub enum IambError {
     /// A generic error that doesn't need a specific error type.
     #[error("{0}")]
     Custom(String),
+
+    /// A failure while setting up or tearing down a voice call.
+    #[cfg(feature = "voip")]
+    #[error("Call error: {0}")]
+    Call(String),
 }
 
 impl From<IambError> for UIError<IambInfo> {
@@ -1172,6 +1223,35 @@ pub struct RoomInfo {
 
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
+
+    /// Whether this room had a call in progress the last time an
+    /// `m.call.member` event arrived.
+    ///
+    /// Only used to spot the nobody-to-somebody transition worth notifying on.
+    /// The participants themselves are not tracked here - the SDK already keeps
+    /// that state, and [`crate::windows::call_participants`] reads it from
+    /// there.
+    #[cfg(feature = "voip")]
+    pub had_active_call: bool,
+
+    /// A call we have been rung about and have not yet answered or declined.
+    ///
+    /// Set from `m.rtc.notification`, and cleared when we join, when we decline,
+    /// or when the call it announced ends. Reads must also check
+    /// [`IncomingCall::is_live`], since a ring that simply timed out has nothing
+    /// to clear it.
+    #[cfg(feature = "voip")]
+    pub incoming_call: Option<IncomingCall>,
+
+    /// Whether this room's current call has already been announced to the user.
+    ///
+    /// A call generates *two* independent reasons to notify - the explicit
+    /// `m.rtc.notification` and the `m.call.member` state going from empty to
+    /// occupied - and clients that send both would otherwise pop two
+    /// notifications for one call. First one through wins; cleared when the call
+    /// ends, so the next call announces again.
+    #[cfg(feature = "voip")]
+    pub call_announced: bool,
 }
 
 impl Default for RoomInfo {
@@ -1194,6 +1274,12 @@ impl Default for RoomInfo {
             display_names: Default::default(),
             draw_last: Default::default(),
             unloaded_edits: Default::default(),
+            #[cfg(feature = "voip")]
+            had_active_call: false,
+            #[cfg(feature = "voip")]
+            incoming_call: None,
+            #[cfg(feature = "voip")]
+            call_announced: false,
         }
     }
 }
