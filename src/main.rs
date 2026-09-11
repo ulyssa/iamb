@@ -1051,6 +1051,11 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     let mut store = Store::new(store);
     store.completer = Box::new(IambCompleter);
 
+    if let Some(r) = store.application.settings.tunables.default_register.as_ref() {
+        // Set the RegisterStore to use the user's default register:
+        store.registers.set_default_register(r.clone());
+    }
+
     let store = Arc::new(AsyncMutex::new(store));
     worker.init(store.clone());
 

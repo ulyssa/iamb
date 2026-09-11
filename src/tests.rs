@@ -150,6 +150,7 @@ pub fn mock_tunables() -> TunableValues {
     TunableValues {
         default_markup: Default::default(),
         ignorecase: false,
+        default_register: None,
         default_room: None,
         encryption: Encryption::default().values(),
         input_prompt: None,

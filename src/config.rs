@@ -137,6 +137,35 @@ where
         .transpose()
 }
 
+fn deserialize_register<'de, D>(deserializer: D) -> Result<Option<Register>, D::Error>
+where
+    D: serde::de::Deserializer<'de>,
+{
+    let r = <&'de str>::deserialize(deserializer)?;
+
+    if r.len() > 1 {
+        return Err(D::Error::custom("expected a single character to specify a register"));
+    }
+
+    let r = match r.chars().next() {
+        Some(c @ 'a'..='z') => Register::Named(c),
+        Some('_') => Register::Blackhole,
+        Some('*') => Register::SelectionPrimary,
+        Some('+') => Register::SelectionClipboard,
+        Some('"') => Register::Unnamed,
+        Some(c) => {
+            return Err(D::Error::custom(format!(
+                "expected one of a-z, \", _, *, or + for the register, not {c:?}"
+            )));
+        },
+        None => {
+            return Err(D::Error::custom("expected a single character to specify a register"));
+        },
+    };
+
+    Ok(Some(r))
+}
+
 const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
     None => env!("CARGO_PKG_VERSION"),
     Some(_) => concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")"),
@@ -807,6 +836,7 @@ pub struct TunableValues {
     pub users: UserOverrides,
     pub username_display: UserDisplayStyle,
     pub message_user_color: bool,
+    pub default_register: Option<Register>,
     pub default_room: Option<String>,
     pub open_command: Option<Vec<String>>,
     pub mouse: Mouse,
@@ -860,6 +890,8 @@ pub struct Tunables {
     pub typing_notice_display: Option<bool>,
     pub username_display: Option<UserDisplayStyle>,
     pub message_user_color: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_register")]
+    pub default_register: Option<Register>,
     pub default_room: Option<String>,
     pub open_command: Option<Vec<String>>,
     pub mouse: Option<Mouse>,
@@ -909,6 +941,7 @@ impl Tunables {
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
             username_display: self.username_display.or(other.username_display),
             message_user_color: self.message_user_color.or(other.message_user_color),
+            default_register: self.default_register.or(other.default_register),
             default_room: self.default_room.or(other.default_room),
             open_command: self.open_command.or(other.open_command),
             mouse: self.mouse.or(other.mouse),
@@ -952,6 +985,7 @@ impl Tunables {
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
             username_display: self.username_display.unwrap_or_default(),
             message_user_color: self.message_user_color.unwrap_or(false),
+            default_register: self.default_register,
             default_room: self.default_room,
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
@@ -1632,6 +1666,24 @@ mod tests {
         assert_eq!(url.authority(), "localhost:1080");
         assert_eq!(merged.proxy.auth, None);
         assert_eq!(merged.proxy.headers.is_empty(), true);
+    }
+
+    #[test]
+    fn test_parse_tunables_default_register() {
+        let reg_a: Tunables = serde_json::from_str(r#"{"default_register": "a"}"#).unwrap();
+        assert_eq!(reg_a.default_register, Some(Register::Named('a')));
+
+        let reg_z: Tunables = serde_json::from_str(r#"{"default_register": "z"}"#).unwrap();
+        assert_eq!(reg_z.default_register, Some(Register::Named('z')));
+
+        let reg_blackhole: Tunables = serde_json::from_str(r#"{"default_register": "_"}"#).unwrap();
+        assert_eq!(reg_blackhole.default_register, Some(Register::Blackhole));
+
+        let res: Result<Tunables, _> = serde_json::from_str(r#"{"default_register": "A"}"#);
+        assert!(res.is_err());
+
+        let res: Result<Tunables, _> = serde_json::from_str(r#"{"default_register": "0"}"#);
+        assert!(res.is_err());
     }
 
     #[test]

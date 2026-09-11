@@ -81,15 +81,15 @@ version = "4.12"
 optional = true
 
 [dependencies.modalkit]
-version = "0.0.26"
+version = "0.0.27"
 default-features = false
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "ad12b9ba54dd1f022f54986931b5b1b358a6676d"
+#rev = "9386f6f75f6984a1cdbd7dddbb0c0bb3e7a37c5d"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.26"
+version = "0.0.27"
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "ad12b9ba54dd1f022f54986931b5b1b358a6676d"
+#rev = "9386f6f75f6984a1cdbd7dddbb0c0bb3e7a37c5d"
 
 [dependencies.matrix-sdk-base]
 version = "0.18.0"

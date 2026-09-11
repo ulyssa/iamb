@@ -1651,9 +1651,9 @@ dependencies = [
 
 [[package]]
 name = "editor-types"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "47b92e9f52720323ec57f764607c7ee72cc6e15a346ad7ad82bfcec3c6dfd610"
+checksum = "4f43aac4281b3b2127f017a09550a0133d11f5b51e0678d87a1a086767096182"
 dependencies = [
  "bitflags 2.13.0",
  "editor-types-macros",
@@ -1663,9 +1663,9 @@ dependencies = [
 
 [[package]]
 name = "editor-types-macros"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "096cf10a3cc9646686e5b715222b919f55b133e9264359a491048946b5ecde74"
+checksum = "786e57be6adb4b06cfbdfa2680b864382ba1d040e7e20e065b0850239565a477"
 dependencies = [
  "editor-types-parser",
  "nom 8.0.0",
@@ -1676,9 +1676,9 @@ dependencies = [
 
 [[package]]
 name = "editor-types-parser"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d6d295ca162dafc88ce70da46d7378ee0f932b7a793f82a50df28933cf1d1854"
+checksum = "9821f63ec0570a7b063cfd5a8882595e412f25de56f940ec9218ddd35d39f7d7"
 dependencies = [
  "nom 8.0.0",
  "thiserror 2.0.18",
@@ -3024,9 +3024,9 @@ dependencies = [
 
 [[package]]
 name = "keybindings"
-version = "0.0.3"
+version = "0.0.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b0d60ff7a359bb81377b51a05068e04194dc4b7981fd95eea6c15201168e6bea"
+checksum = "f5564033f75e66cfccdf9c33a8a409749d630b8cb3f7fe4c2991999229a0b64d"
 dependencies = [
  "textwrap",
  "unicode-segmentation",
@@ -3713,9 +3713,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.26"
+version = "0.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38edb029efaf2412b88180f6b94025989c40c532ab304c0c5f868d350413832c"
+checksum = "de93aca188fc0e518c7c89782c3cb62ae4e14552398f2baaed9c5168b3ca1b3d"
 dependencies = [
  "anymap2",
  "arboard",
@@ -3737,9 +3737,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit-ratatui"
-version = "0.0.26"
+version = "0.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9070725ef25a76d7dd3431c5ee4d108780dfc42d097d194d397721843b8ac30"
+checksum = "cf64561c3f42a3a587d564fde9274fdbcf95287281efd56fc0db6a1c12459730"
 dependencies = [
  "crossterm 0.29.0",
  "intervaltree",
