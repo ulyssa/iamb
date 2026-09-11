@@ -977,6 +977,16 @@ impl UnreadInfo {
     }
 }
 
+/// The [`OwnedUserId`]s for users with the given displayname in [`DisplayNameStore`].
+#[derive(Default)]
+struct DisplayNameUsers {
+    /// Joined or invited users. Count towards username disambiguation.
+    active: HashSet<OwnedUserId>,
+
+    /// Left and knocking users. Are always disambiguated.
+    inactive: HashSet<OwnedUserId>,
+}
+
 /// Track the display names for users and render any needed disambiguation for
 /// those with overlapping names.
 #[derive(Default)]
@@ -984,9 +994,7 @@ pub struct DisplayNameStore {
     /// The boolean is the same `is_active` field as the argument to [`Self::set`].
     by_ids: HashMap<OwnedUserId, (String, bool)>,
 
-    /// The first `HashSet` contains active members (invited or joined) and the second `HashSet`
-    /// contains all other memebers.
-    by_names: HashMap<String, (HashSet<OwnedUserId>, HashSet<OwnedUserId>)>,
+    by_names: HashMap<String, DisplayNameUsers>,
 }
 
 impl DisplayNameStore {
@@ -998,16 +1006,17 @@ impl DisplayNameStore {
     fn set_by_name(&mut self, user_id: OwnedUserId, name: &str, is_active: bool) {
         if let Some(existing) = self.by_names.get_mut(name) {
             if is_active {
-                existing.0.insert(user_id);
+                existing.active.insert(user_id);
             } else {
-                existing.1.insert(user_id);
+                existing.inactive.insert(user_id);
             }
         } else {
-            let value = if is_active {
-                (HashSet::from([user_id]), HashSet::new())
+            let mut value = DisplayNameUsers::default();
+            if is_active {
+                value.active.insert(user_id);
             } else {
-                (HashSet::new(), HashSet::from([user_id]))
-            };
+                value.inactive.insert(user_id);
+            }
             self.by_names.insert(name.to_owned(), value);
         }
     }
@@ -1052,12 +1061,12 @@ impl DisplayNameStore {
         };
 
         if previous.1 {
-            users.0.remove(&user_id);
+            users.active.remove(&user_id);
         } else {
-            users.1.remove(&user_id);
+            users.inactive.remove(&user_id);
         }
 
-        if users.0.is_empty() && users.1.is_empty() {
+        if users.active.is_empty() && users.inactive.is_empty() {
             self.by_names.remove(&previous.0);
         }
     }
@@ -1066,13 +1075,13 @@ impl DisplayNameStore {
         let (displayname, is_active) = self.by_ids.get(user_id)?;
         let users = self.by_names.get(displayname)?;
 
-        if !users.0.contains(user_id) && !users.1.contains(user_id) {
+        if !users.active.contains(user_id) && !users.inactive.contains(user_id) {
             // Internal consistency error? Assume no display name:
             return None;
         }
 
         // Inactive members are always assumed to be ambiguous.
-        if *is_active && users.0.len() == 1 {
+        if *is_active && users.active.len() == 1 {
             // Unambiguous!
             return Some(Cow::Borrowed(displayname.as_str()));
         }
