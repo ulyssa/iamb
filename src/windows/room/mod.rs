@@ -808,6 +808,14 @@ impl RoomState {
         let style = Style::default().add_modifier(StyleModifier::BOLD);
         let mut spans = vec![];
 
+        if let Some(room) = room {
+            let encryption_settings = &store.application.settings.tunables.encryption;
+            let encryption_indicator = encryption_settings
+                .get_indicator(EncryptionIndicatorLocation::TITLE, room.encryption_state());
+            spans.extend(encryption_indicator);
+            spans.push(Span::raw(" "));
+        }
+
         if let RoomState::Chat(chat) = self &&
             chat.thread().is_some()
         {
@@ -815,13 +823,6 @@ impl RoomState {
         }
 
         spans.push(Span::styled(title, style));
-
-        if let Some(room) = room {
-            let encryption_settings = &store.application.settings.tunables.encryption;
-            let encryption_indicator = encryption_settings
-                .get_indicator(EncryptionIndicatorLocation::TITLE, room.encryption_state());
-            spans.extend(encryption_indicator);
-        }
 
         match self.room().topic() {
             Some(desc) if !desc.is_empty() => {

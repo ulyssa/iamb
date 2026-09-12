@@ -49,8 +49,12 @@ const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
 ];
 
 const DEFAULT_ENABLE_TITLE: bool = true;
-const DEFAULT_ENC_INDICATOR_LOC: EncryptionIndicatorLocation = EncryptionIndicatorLocation::PROMPT;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
+
+const DEFAULT_ENC_INDICATOR_LOC: EncryptionIndicatorLocation = EncryptionIndicatorLocation::PROMPT;
+const DEFAULT_ICON_ENC: Cow<'static, str> = Cow::Borrowed("[E] ");
+const DEFAULT_ICON_UNENC: Cow<'static, str> = Cow::Borrowed("[U] ");
+const DEFAULT_ICON_UNKNOWN: Cow<'static, str> = Cow::Borrowed("[?] ");
 
 const DEFAULT_LOG_LEVEL: &str = if cfg!(feature = "max_level_error") {
     "error"
@@ -558,6 +562,9 @@ impl Visitor<'_> for NotifyViaVisitor {
 pub struct Encryption {
     indicator: Option<EncryptionIndicator>,
     indicator_location: Option<EncryptionIndicatorLocation>,
+    icon_encrypted: Option<String>,
+    icon_unencrypted: Option<String>,
+    icon_unknown: Option<String>,
 }
 
 impl Encryption {
@@ -565,6 +572,9 @@ impl Encryption {
         Encryption {
             indicator: profile.indicator.or(global.indicator),
             indicator_location: profile.indicator_location.or(global.indicator_location),
+            icon_encrypted: profile.icon_encrypted.or(global.icon_encrypted),
+            icon_unencrypted: profile.icon_unencrypted.or(global.icon_unencrypted),
+            icon_unknown: profile.icon_unknown.or(global.icon_unknown),
         }
     }
 
@@ -572,6 +582,9 @@ impl Encryption {
         EncryptionValues {
             indicator: self.indicator.unwrap_or_default(),
             indicator_location: self.indicator_location.unwrap_or(DEFAULT_ENC_INDICATOR_LOC),
+            icon_encrypted: self.icon_encrypted.map(Cow::Owned).unwrap_or(DEFAULT_ICON_ENC),
+            icon_unencrypted: self.icon_unencrypted.map(Cow::Owned).unwrap_or(DEFAULT_ICON_UNENC),
+            icon_unknown: self.icon_unknown.map(Cow::Owned).unwrap_or(DEFAULT_ICON_UNKNOWN),
         }
     }
 }
@@ -580,6 +593,9 @@ impl Encryption {
 pub struct EncryptionValues {
     pub indicator: EncryptionIndicator,
     pub indicator_location: EncryptionIndicatorLocation,
+    pub icon_encrypted: Cow<'static, str>,
+    pub icon_unencrypted: Cow<'static, str>,
+    pub icon_unknown: Cow<'static, str>,
 }
 
 impl EncryptionValues {
@@ -603,20 +619,20 @@ impl EncryptionValues {
                 EncryptionIndicator::Enabled | EncryptionIndicator::OnlyEncrypted,
                 EncryptionState::Encrypted,
             ) => {
-                // Green lock:
-                Span::styled("\u{1F512}\u{FE0E} ", Style::new().fg(Color::LightGreen))
+                // Green encrypted icon:
+                Span::styled(self.icon_encrypted.clone(), Style::new().fg(Color::LightGreen))
             },
             (
                 EncryptionIndicator::Enabled | EncryptionIndicator::OnlyUnencrypted,
                 EncryptionState::NotEncrypted,
             ) => {
-                // Red unlocked lock:
-                Span::styled("\u{1F513}\u{FE0E} ", Style::new().fg(Color::Red))
+                // Red unencrypted icon:
+                Span::styled(self.icon_unencrypted.clone(), Style::new().fg(Color::Red))
             },
 
             (_, EncryptionState::Unknown) => {
-                // Yellow question mark:
-                Span::styled("? ", Style::new().fg(Color::Yellow))
+                // Yellow unknown icon:
+                Span::styled(self.icon_unknown.clone(), Style::new().fg(Color::Yellow))
             },
         };
 
@@ -1832,10 +1848,12 @@ mod tests {
     fn test_encryption_indicator_enabled() {
         use EncryptionState::*;
 
-        let enc = EncryptionValues {
-            indicator: EncryptionIndicator::Enabled,
-            indicator_location: EncryptionIndicatorLocation::TITLE,
+        let enc = Encryption {
+            indicator: Some(EncryptionIndicator::Enabled),
+            indicator_location: Some(EncryptionIndicatorLocation::TITLE),
+            ..Default::default()
         };
+        let enc = enc.values();
 
         // Always shows in the title:
         assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_some());
@@ -1858,10 +1876,12 @@ mod tests {
     fn test_encryption_indicator_disabled() {
         use EncryptionState::*;
 
-        let enc = EncryptionValues {
-            indicator: EncryptionIndicator::Disabled,
-            indicator_location: EncryptionIndicatorLocation::TITLE,
+        let enc = Encryption {
+            indicator: Some(EncryptionIndicator::Disabled),
+            indicator_location: Some(EncryptionIndicatorLocation::TITLE),
+            ..Default::default()
         };
+        let enc = enc.values();
 
         // Never shows in the title or the prompt:
         assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
@@ -1882,10 +1902,12 @@ mod tests {
     fn test_encryption_indicator_only_encrypted() {
         use EncryptionState::*;
 
-        let enc = EncryptionValues {
-            indicator: EncryptionIndicator::OnlyEncrypted,
-            indicator_location: EncryptionIndicatorLocation::PROMPT,
+        let enc = Encryption {
+            indicator: Some(EncryptionIndicator::OnlyEncrypted),
+            indicator_location: Some(EncryptionIndicatorLocation::PROMPT),
+            ..Default::default()
         };
+        let enc = enc.values();
 
         // Shows in the prompt when encrypted or unknown:
         assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_some());
@@ -1909,10 +1931,12 @@ mod tests {
     fn test_encryption_indicator_only_unencrypted() {
         use EncryptionState::*;
 
-        let enc = EncryptionValues {
-            indicator: EncryptionIndicator::OnlyUnencrypted,
-            indicator_location: EncryptionIndicatorLocation::all(),
+        let enc = Encryption {
+            indicator: Some(EncryptionIndicator::OnlyUnencrypted),
+            indicator_location: Some(EncryptionIndicatorLocation::all()),
+            ..Default::default()
         };
+        let enc = enc.values();
 
         // Shows in both the prompt and title when unencrypted or unknown:
         assert!(

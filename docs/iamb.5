@@ -316,6 +316,18 @@ subsection allows controlling how encrypted rooms are presented.
 .Pp
 The available fields in this subsection are:
 .Bl -tag -width Ds
+.It Sy icon_encrypted
+Override the encrypted room icon used in the message bar prompt or title.
+Defaults to a green
+.Sy [E] .
+.It Sy icon_unencrypted
+Override the unencrypted room icon used in the message bar prompt or title.
+Defaults to a red
+.Sy [U] .
+.It Sy icon_unknown
+Override the unknown encryption status icon used in the message bar prompt or title.
+Defaults to a yellow
+.Sy [?] .
 .It Sy indicator
 Defines when an encryption status indicator is shown.
 Possible values are:

@@ -1111,10 +1111,21 @@ impl StatefulWidget for Chat<'_> {
             .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
         let input_prompt = settings.tunables.input_prompt.as_deref();
         let prompt = match (self.focused, encryption_indicator, input_prompt) {
-            (false, _, _) => Span::raw("  "),
-            (true, Some(i), _) => i,
-            (true, None, None) => Span::raw("> "),
-            (true, None, Some(s)) => Span::raw(s),
+            // User has both encryption indicator and custom prompt, combine them:
+            (false, Some(i), Some(p)) => Line::from(crate::util::space(i.width() + p.width())),
+            (true, Some(i), Some(p)) => Line::from(vec![i, Span::from(p)]),
+
+            // User has custom prompt, use that:
+            (false, None, Some(p)) => Line::from(crate::util::space(p.width())),
+            (true, None, Some(p)) => Line::from(p),
+
+            // User has encryption indicator, use that as prompt:
+            (false, Some(i), None) => Line::from(crate::util::space(i.width())),
+            (true, Some(i), None) => Line::from(i),
+
+            // User has no encryption indicator, no custom prompt, so show "> ":
+            (false, None, None) => Line::from(crate::util::space(2)),
+            (true, None, None) => Line::from("> "),
         };
 
         let tbox = TextBox::new().prompt(prompt);
