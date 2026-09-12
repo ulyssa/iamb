@@ -725,7 +725,6 @@ pub struct Notifications {
 #[derive(Clone)]
 pub struct ImagePreviewValues {
     pub enabled: bool,
-    pub lazy_load: bool,
     pub size: Size,
     pub protocol: ImagePreviewProtocolValues,
 }
@@ -733,7 +732,6 @@ pub struct ImagePreviewValues {
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct ImagePreview {
     pub enabled: Option<bool>,
-    pub lazy_load: Option<bool>,
     pub size: Option<Size>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
@@ -742,7 +740,6 @@ impl ImagePreview {
     pub fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
             enabled: self.enabled.unwrap_or(true),
-            lazy_load: self.lazy_load.unwrap_or(true),
             size: self.size.unwrap_or(Size { width: 66, height: 10 }),
             protocol: self.protocol.unwrap_or_default(),
         }

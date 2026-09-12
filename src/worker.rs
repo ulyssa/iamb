@@ -268,7 +268,7 @@ fn load_insert(
     locked: &mut ProgramStore,
     message_needs: Vec<MessageNeed>,
 ) {
-    let ChatStore { presences, rooms, previews, settings, worker, .. } = &mut locked.application;
+    let ChatStore { presences, rooms, previews, settings, .. } = &mut locked.application;
     let info = rooms.get_or_default(room_id.clone());
     info.fetching = false;
 
@@ -287,13 +287,13 @@ fn load_insert(
                         info.insert_encrypted(msg);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
-                        info.insert_with_preview(msg, settings, previews, worker);
+                        info.insert_with_preview(msg, settings, previews);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
-                        info.insert_reaction_with_preview(ev, settings, previews, worker);
+                        info.insert_reaction_with_preview(ev, settings, previews);
                     },
                     AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
-                        info.insert_sticker_with_preview(ev, settings, previews, worker);
+                        info.insert_sticker_with_preview(ev, settings, previews);
                     },
                     AnyTimelineEvent::MessageLike(_) => {
                         continue;
@@ -1131,14 +1131,13 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let ChatStore { rooms, previews, settings, worker, .. } =
-                        &mut locked.application;
+                    let ChatStore { rooms, previews, settings, .. } = &mut locked.application;
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     update_event_receipts(info, &room, ev.event_id()).await;
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_with_preview(full_ev, settings, previews, worker);
+                    info.insert_with_preview(full_ev, settings, previews);
                 }
             },
         );
@@ -1155,8 +1154,7 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let ChatStore { rooms, previews, settings, worker, .. } =
-                        &mut locked.application;
+                    let ChatStore { rooms, previews, settings, .. } = &mut locked.application;
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     update_event_receipts(info, &room, ev.event_id()).await;
@@ -1165,7 +1163,6 @@ impl ClientWorker {
                         ev.into_full_event(room_id.to_owned()),
                         settings,
                         previews,
-                        worker,
                     );
                 }
             },
@@ -1183,15 +1180,14 @@ impl ClientWorker {
                     let sender = ev.sender().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let ChatStore { rooms, settings, previews, worker, .. } =
-                        &mut locked.application;
+                    let ChatStore { rooms, settings, previews, .. } = &mut locked.application;
 
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     update_event_receipts(info, &room, ev.event_id()).await;
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_sticker_with_preview(full_ev, settings, previews, worker);
+                    info.insert_sticker_with_preview(full_ev, settings, previews);
                 }
             },
         );

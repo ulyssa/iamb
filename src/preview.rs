@@ -85,7 +85,6 @@ impl PreviewManager {
         settings: &ApplicationSettings,
         source: &MediaSource,
         kind: PreviewKind,
-        worker: &Requester,
     ) {
         let key = (source.unique_key(), kind);
         if self.previews.contains_key(&key) {
@@ -94,10 +93,6 @@ impl PreviewManager {
 
         let size = kind.image_size(&settings.tunables.image_preview);
         self.previews.insert(key, ImageStatus::Queued(size));
-
-        if settings.tunables.image_preview.enabled && !settings.tunables.image_preview.lazy_load {
-            self.load(source, kind, worker);
-        }
     }
 }
 
