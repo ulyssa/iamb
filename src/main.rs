@@ -1025,20 +1025,20 @@ async fn run(mut settings: ApplicationSettings) -> IambResult<()> {
     setup_tty(&settings)?;
 
     let orig_hook = std::panic::take_hook();
-    let hook_settings = settings.clone();
+    let enable_enhanced_keys = settings.enable_enhanced_keys;
+    let enable_mouse = settings.tunables.mouse.enabled;
     std::panic::set_hook(Box::new(move |panic_info| {
-        restore_tty(&hook_settings);
+        restore_tty(enable_enhanced_keys, enable_mouse);
         orig_hook(panic_info);
         process::exit(1);
     }));
 
     // And finally, start running the terminal UI.
-    let tty_settings = settings.clone();
     let mut application = Application::new(settings, store).await?;
     application.run().await?;
 
     // Clean up the terminal on exit.
-    restore_tty(&tty_settings);
+    restore_tty(enable_enhanced_keys, enable_mouse);
 
     Ok(())
 }

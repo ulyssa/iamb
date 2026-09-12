@@ -236,15 +236,15 @@ pub fn setup_tty(settings: &ApplicationSettings) -> std::io::Result<()> {
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
-pub fn restore_tty(settings: &ApplicationSettings) {
+pub fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
     // The keyboard enhancement flags were pushed onto the alternate screen's
     // stack, which the terminal keeps separate from the main screen's, so they
     // have to be popped before LeaveAlternateScreen below.
-    if settings.enable_enhanced_keys {
+    if enable_enhanced_keys {
         let _ = crossterm::queue!(stdout(), PopKeyboardEnhancementFlags);
     }
 
-    if settings.tunables.mouse.enabled {
+    if enable_mouse {
         let _ = crossterm::queue!(stdout(), DisableMouseCapture);
     }
 
@@ -273,7 +273,7 @@ pub struct SuspendedTty<'a> {
 
 impl<'a> SuspendedTty<'a> {
     pub fn new(settings: &'a ApplicationSettings) -> Self {
-        restore_tty(settings);
+        restore_tty(settings.enable_enhanced_keys, settings.tunables.mouse.enabled);
 
         SuspendedTty { settings }
     }
