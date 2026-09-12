@@ -260,6 +260,33 @@ pub fn restore_tty(settings: &ApplicationSettings) {
     let _ = crossterm::terminal::disable_raw_mode();
 }
 
+/// Hands the terminal back to an external program, and sets it up for the TUI
+/// again when dropped.
+///
+/// Programs that use the alternate screen themselves (editors, pagers) leave it
+/// on exit, which drops us back to the main screen without iamb knowing, and the
+/// TUI then draws over the user's scrollback. Suspending around the child keeps
+/// the alternate screen entries and exits balanced.
+pub struct SuspendedTty<'a> {
+    settings: &'a ApplicationSettings,
+}
+
+impl<'a> SuspendedTty<'a> {
+    pub fn new(settings: &'a ApplicationSettings) -> Self {
+        restore_tty(settings);
+
+        SuspendedTty { settings }
+    }
+}
+
+impl Drop for SuspendedTty<'_> {
+    fn drop(&mut self) {
+        if let Err(e) = setup_tty(self.settings) {
+            tracing::error!(err = %e, "Failed to set the terminal back up after an external program");
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod tests {
     use super::*;
