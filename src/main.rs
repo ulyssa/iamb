@@ -27,6 +27,7 @@ use clap::{CommandFactory, Parser};
 use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::actions::{Commandable, TabAction, TabContainer, TabCount, WindowContainer};
+use modalkit::crossterm;
 use modalkit::crossterm::cursor::{SetCursorStyle, Show as CursorShow};
 use modalkit::crossterm::event::{
     DisableBracketedPaste,
@@ -45,7 +46,6 @@ use modalkit::crossterm::event::{
     read,
 };
 use modalkit::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle};
-use modalkit::crossterm::{self, execute};
 use modalkit::editing::key::KeyManager;
 use modalkit::editing::store::Store;
 use modalkit::keybindings::dialog::Pager;
@@ -787,10 +787,6 @@ impl Application {
             }
         }
 
-        crossterm::terminal::disable_raw_mode()?;
-        execute!(self.terminal.backend_mut(), LeaveAlternateScreen)?;
-        self.terminal.show_cursor()?;
-
         return Ok(());
     }
 }
@@ -1026,6 +1022,9 @@ fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std:
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
 fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
+    // The keyboard enhancement flags were pushed onto the alternate screen's
+    // stack, which the terminal keeps separate from the main screen's, so they
+    // have to be popped before LeaveAlternateScreen below.
     if enable_enhanced_keys {
         let _ = crossterm::queue!(stdout(), PopKeyboardEnhancementFlags);
     }
