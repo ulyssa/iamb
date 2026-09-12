@@ -13,6 +13,7 @@ use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::OwnedDeviceId;
+use modalkit::crossterm;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
 use ratatui_image::FilterType;
@@ -1237,6 +1238,11 @@ pub struct ApplicationSettings {
     pub dirs: DirectoryValues,
     pub layout: Layout,
     pub macros: Macros,
+
+    /// Whether to use the Kitty keyboard protocol. Resolved by
+    /// [`ApplicationSettings::probe_enhanced_keys`] once the TUI starts, since
+    /// it may require querying the terminal.
+    pub enable_enhanced_keys: bool,
 }
 
 impl ApplicationSettings {
@@ -1380,9 +1386,29 @@ impl ApplicationSettings {
             dirs,
             layout,
             macros,
+            enable_enhanced_keys: false,
         };
 
         Ok(settings)
+    }
+
+    /// Work out whether to use the Kitty keyboard protocol, asking the terminal
+    /// when the user has not configured it explicitly.
+    ///
+    /// This queries the terminal, so it must only be called once, before the
+    /// TUI starts reading input.
+    pub fn probe_enhanced_keys(&mut self) {
+        self.enable_enhanced_keys =
+            self.tunables.terminal.enable_extended_keys.unwrap_or_else(|| {
+                crossterm::terminal::supports_keyboard_enhancement()
+                .inspect_err(|e| {
+                    tracing::warn!(
+                        err = %e,
+                        "Failed to determine whether the terminal supports keyboard enhancements"
+                    )
+                })
+                .unwrap_or_default()
+            });
     }
 
     pub fn read_session(&self, path: impl AsRef<Path>) -> Result<Session, IambError> {

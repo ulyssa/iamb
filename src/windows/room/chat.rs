@@ -31,6 +31,7 @@ use crate::message::{
     text_to_text_message_event_content,
 };
 use crate::prelude::*;
+use crate::util::SuspendedTty;
 use crate::windows::room::scrollback::{Scrollback, ScrollbackState};
 
 /// State needed for rendering [Chat].
@@ -566,6 +567,9 @@ impl ChatState {
                 let msg = if let SendAction::SubmitFromEditor = act {
                     let suffix =
                         store.application.settings.tunables.external_edit_file_suffix.as_str();
+                    // Give the terminal back to the editor, and take it again
+                    // however we leave this block.
+                    let _tty = SuspendedTty::new(&store.application.settings);
                     let edited_msg =
                         external_edit(msg.trim_end().to_string(), Builder::new().suffix(suffix))?
                             .trim_end()

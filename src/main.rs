@@ -28,24 +28,8 @@ use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::actions::{Commandable, TabAction, TabContainer, TabCount, WindowContainer};
 use modalkit::crossterm;
-use modalkit::crossterm::cursor::{SetCursorStyle, Show as CursorShow};
-use modalkit::crossterm::event::{
-    DisableBracketedPaste,
-    DisableFocusChange,
-    DisableMouseCapture,
-    EnableBracketedPaste,
-    EnableFocusChange,
-    EnableMouseCapture,
-    Event,
-    KeyEventKind,
-    KeyboardEnhancementFlags,
-    MouseEventKind,
-    PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
-    poll,
-    read,
-};
-use modalkit::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle};
+use modalkit::crossterm::cursor::SetCursorStyle;
+use modalkit::crossterm::event::{Event, KeyEventKind, MouseEventKind, poll, read};
 use modalkit::editing::key::KeyManager;
 use modalkit::editing::store::Store;
 use modalkit::keybindings::dialog::Pager;
@@ -68,6 +52,7 @@ use crate::base::{HomeserverAction, KeysAction};
 use crate::completions::IambCompleter;
 use crate::config::{CursorShape, Iamb};
 use crate::prelude::*;
+use crate::util::{restore_tty, setup_tty};
 use crate::windows::IambWindow;
 use crate::worker::{ClientWorker, LoginStyle, create_room};
 
@@ -992,60 +977,12 @@ async fn login_normal(
     Ok(())
 }
 
-/// Set up the terminal for drawing the TUI, and getting additional info.
-fn setup_tty(settings: &ApplicationSettings, enable_enhanced_keys: bool) -> std::io::Result<()> {
-    // Enable raw mode and enter the alternate screen.
-    crossterm::terminal::enable_raw_mode()?;
-    crossterm::execute!(stdout(), EnterAlternateScreen)?;
+async fn run(mut settings: ApplicationSettings) -> IambResult<()> {
+    // Work out whether to use the Kitty keyboard protocol before anything
+    // clones the settings, so that every copy agrees with the flags we push in
+    // setup_tty() and pop in restore_tty().
+    settings.probe_enhanced_keys();
 
-    if enable_enhanced_keys {
-        // Enable the Kitty keyboard enhancement protocol for improved keypresses.
-        crossterm::queue!(
-            stdout(),
-            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-        )?;
-    }
-
-    if settings.tunables.mouse.enabled {
-        crossterm::execute!(stdout(), EnableMouseCapture)?;
-    }
-
-    if settings.tunables.terminal.enable_title {
-        let title = format!("iamb ({})", settings.profile.user_id.as_str());
-        crossterm::execute!(stdout(), SetTitle(title))?;
-    }
-
-    let cursor_shape = SetCursorStyle::from(settings.tunables.terminal.cursor_shape);
-
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, cursor_shape)
-}
-
-// Do our best to reverse what we did in setup_tty() when we exit or crash.
-fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
-    // The keyboard enhancement flags were pushed onto the alternate screen's
-    // stack, which the terminal keeps separate from the main screen's, so they
-    // have to be popped before LeaveAlternateScreen below.
-    if enable_enhanced_keys {
-        let _ = crossterm::queue!(stdout(), PopKeyboardEnhancementFlags);
-    }
-
-    if enable_mouse {
-        let _ = crossterm::queue!(stdout(), DisableMouseCapture);
-    }
-
-    let _ = crossterm::execute!(
-        stdout(),
-        DisableBracketedPaste,
-        DisableFocusChange,
-        SetCursorStyle::DefaultUserShape,
-        LeaveAlternateScreen,
-        CursorShow,
-    );
-
-    let _ = crossterm::terminal::disable_raw_mode();
-}
-
-async fn run(settings: ApplicationSettings) -> IambResult<()> {
     // Get old keys the first time we run w/ the upgraded SDK.
     let import_keys = check_import_keys(&settings).await?;
 
@@ -1089,18 +1026,10 @@ async fn run(settings: ApplicationSettings) -> IambResult<()> {
     }
 
     // Set up the terminal for drawing, and cleanup properly on panics.
-    let enable_enhanced_keys =
-        settings.tunables.terminal.enable_extended_keys.unwrap_or_else(|| {
-            crossterm::terminal::supports_keyboard_enhancement()
-                .inspect_err(|e| tracing::warn!(
-                        err = %e,
-                       "Failed to determine whether the terminal supports keyboard enhancements"
-               ))
-                .unwrap_or_default()
-        });
-    setup_tty(&settings, enable_enhanced_keys)?;
+    setup_tty(&settings)?;
 
     let orig_hook = std::panic::take_hook();
+    let enable_enhanced_keys = settings.enable_enhanced_keys;
     let enable_mouse = settings.tunables.mouse.enabled;
     std::panic::set_hook(Box::new(move |panic_info| {
         restore_tty(enable_enhanced_keys, enable_mouse);
