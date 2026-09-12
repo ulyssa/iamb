@@ -978,6 +978,11 @@ async fn login_normal(
 }
 
 async fn run(mut settings: ApplicationSettings) -> IambResult<()> {
+    // Work out whether to use the Kitty keyboard protocol before anything
+    // clones the settings, so that every copy agrees with the flags we push in
+    // setup_tty() and pop in restore_tty().
+    settings.probe_enhanced_keys();
+
     // Get old keys the first time we run w/ the upgraded SDK.
     let import_keys = check_import_keys(&settings).await?;
 
@@ -1021,7 +1026,6 @@ async fn run(mut settings: ApplicationSettings) -> IambResult<()> {
     }
 
     // Set up the terminal for drawing, and cleanup properly on panics.
-    settings.probe_enhanced_keys();
     setup_tty(&settings)?;
 
     let orig_hook = std::panic::take_hook();
