@@ -220,6 +220,7 @@ pub fn mock_settings() -> ApplicationSettings {
         dirs: mock_dirs(),
         layout: Default::default(),
         macros: HashMap::default(),
+        enable_enhanced_keys: false,
     }
 }
 
