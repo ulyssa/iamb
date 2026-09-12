@@ -2,8 +2,8 @@
 //!
 //! The iamb client loops over user input and commands, and turns them into actions, [some of
 //! which][IambAction] are specific to iamb, and [some of which][Action] come from [modalkit]. When
-//! adding new functionality, you will usually want to extend [IambAction] or one of its variants
-//! (like [RoomAction][base::RoomAction]), and then add an appropriate [command][commands] or
+//! adding new functionality, you will usually want to extend [`IambAction`] or one of its variants
+//! (like [`RoomAction`]), and then add an appropriate [command][commands] or
 //! [keybinding][keybindings].
 //!
 //! For more complicated changes, you may need to update [the async worker thread][worker], which
