@@ -28,24 +28,8 @@ use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::actions::{Commandable, TabAction, TabContainer, TabCount, WindowContainer};
 use modalkit::crossterm;
-use modalkit::crossterm::cursor::{SetCursorStyle, Show as CursorShow};
-use modalkit::crossterm::event::{
-    DisableBracketedPaste,
-    DisableFocusChange,
-    DisableMouseCapture,
-    EnableBracketedPaste,
-    EnableFocusChange,
-    EnableMouseCapture,
-    Event,
-    KeyEventKind,
-    KeyboardEnhancementFlags,
-    MouseEventKind,
-    PopKeyboardEnhancementFlags,
-    PushKeyboardEnhancementFlags,
-    poll,
-    read,
-};
-use modalkit::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle};
+use modalkit::crossterm::cursor::SetCursorStyle;
+use modalkit::crossterm::event::{Event, KeyEventKind, MouseEventKind, poll, read};
 use modalkit::editing::key::KeyManager;
 use modalkit::editing::store::Store;
 use modalkit::keybindings::dialog::Pager;
@@ -68,6 +52,7 @@ use crate::base::{HomeserverAction, KeysAction};
 use crate::completions::IambCompleter;
 use crate::config::{CursorShape, Iamb};
 use crate::prelude::*;
+use crate::util::{restore_tty, setup_tty};
 use crate::windows::IambWindow;
 use crate::worker::{ClientWorker, LoginStyle, create_room};
 
@@ -990,59 +975,6 @@ async fn login_normal(
         .await
         .map_err(IambError::from)?;
     Ok(())
-}
-
-/// Set up the terminal for drawing the TUI, and getting additional info.
-fn setup_tty(settings: &ApplicationSettings) -> std::io::Result<()> {
-    // Enable raw mode and enter the alternate screen.
-    crossterm::terminal::enable_raw_mode()?;
-    crossterm::execute!(stdout(), EnterAlternateScreen)?;
-
-    if settings.enable_enhanced_keys {
-        // Enable the Kitty keyboard enhancement protocol for improved keypresses.
-        crossterm::queue!(
-            stdout(),
-            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
-        )?;
-    }
-
-    if settings.tunables.mouse.enabled {
-        crossterm::execute!(stdout(), EnableMouseCapture)?;
-    }
-
-    if settings.tunables.terminal.enable_title {
-        let title = format!("iamb ({})", settings.profile.user_id.as_str());
-        crossterm::execute!(stdout(), SetTitle(title))?;
-    }
-
-    let cursor_shape = SetCursorStyle::from(settings.tunables.terminal.cursor_shape);
-
-    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, cursor_shape)
-}
-
-// Do our best to reverse what we did in setup_tty() when we exit or crash.
-fn restore_tty(settings: &ApplicationSettings) {
-    // The keyboard enhancement flags were pushed onto the alternate screen's
-    // stack, which the terminal keeps separate from the main screen's, so they
-    // have to be popped before LeaveAlternateScreen below.
-    if settings.enable_enhanced_keys {
-        let _ = crossterm::queue!(stdout(), PopKeyboardEnhancementFlags);
-    }
-
-    if settings.tunables.mouse.enabled {
-        let _ = crossterm::queue!(stdout(), DisableMouseCapture);
-    }
-
-    let _ = crossterm::execute!(
-        stdout(),
-        DisableBracketedPaste,
-        DisableFocusChange,
-        SetCursorStyle::DefaultUserShape,
-        LeaveAlternateScreen,
-        CursorShow,
-    );
-
-    let _ = crossterm::terminal::disable_raw_mode();
 }
 
 async fn run(mut settings: ApplicationSettings) -> IambResult<()> {

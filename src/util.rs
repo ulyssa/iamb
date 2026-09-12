@@ -1,5 +1,21 @@
 //! # Utility functions
 
+use std::io::stdout;
+
+use modalkit::crossterm;
+use modalkit::crossterm::cursor::{SetCursorStyle, Show as CursorShow};
+use modalkit::crossterm::event::{
+    DisableBracketedPaste,
+    DisableFocusChange,
+    DisableMouseCapture,
+    EnableBracketedPaste,
+    EnableFocusChange,
+    EnableMouseCapture,
+    KeyboardEnhancementFlags,
+    PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
+};
+use modalkit::crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, SetTitle};
 use regex::{Regex, RegexBuilder};
 
 use crate::prelude::*;
@@ -189,6 +205,59 @@ pub fn replace_emojis_in_line(line: &mut Line) {
 /// Compile a search pattern, optionally ignoring case.
 pub fn compile_search(pattern: &str, case_insensitive: bool) -> Result<Regex, regex::Error> {
     RegexBuilder::new(pattern).case_insensitive(case_insensitive).build()
+}
+
+/// Set up the terminal for drawing the TUI, and getting additional info.
+pub fn setup_tty(settings: &ApplicationSettings) -> std::io::Result<()> {
+    // Enable raw mode and enter the alternate screen.
+    crossterm::terminal::enable_raw_mode()?;
+    crossterm::execute!(stdout(), EnterAlternateScreen)?;
+
+    if settings.enable_enhanced_keys {
+        // Enable the Kitty keyboard enhancement protocol for improved keypresses.
+        crossterm::queue!(
+            stdout(),
+            PushKeyboardEnhancementFlags(KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES)
+        )?;
+    }
+
+    if settings.tunables.mouse.enabled {
+        crossterm::execute!(stdout(), EnableMouseCapture)?;
+    }
+
+    if settings.tunables.terminal.enable_title {
+        let title = format!("iamb ({})", settings.profile.user_id.as_str());
+        crossterm::execute!(stdout(), SetTitle(title))?;
+    }
+
+    let cursor_shape = SetCursorStyle::from(settings.tunables.terminal.cursor_shape);
+
+    crossterm::execute!(stdout(), EnableBracketedPaste, EnableFocusChange, cursor_shape)
+}
+
+// Do our best to reverse what we did in setup_tty() when we exit or crash.
+pub fn restore_tty(settings: &ApplicationSettings) {
+    // The keyboard enhancement flags were pushed onto the alternate screen's
+    // stack, which the terminal keeps separate from the main screen's, so they
+    // have to be popped before LeaveAlternateScreen below.
+    if settings.enable_enhanced_keys {
+        let _ = crossterm::queue!(stdout(), PopKeyboardEnhancementFlags);
+    }
+
+    if settings.tunables.mouse.enabled {
+        let _ = crossterm::queue!(stdout(), DisableMouseCapture);
+    }
+
+    let _ = crossterm::execute!(
+        stdout(),
+        DisableBracketedPaste,
+        DisableFocusChange,
+        SetCursorStyle::DefaultUserShape,
+        LeaveAlternateScreen,
+        CursorShow,
+    );
+
+    let _ = crossterm::terminal::disable_raw_mode();
 }
 
 #[cfg(test)]
