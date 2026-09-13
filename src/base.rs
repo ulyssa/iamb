@@ -110,6 +110,9 @@ pub enum MessageAction {
     /// when it is `true`.
     React(String, bool),
 
+    /// Pin a message to the room.
+    Pin,
+
     /// Redact a message, with an optional reason.
     ///
     /// The [bool] argument indicates whether to skip confirmation.
@@ -130,6 +133,9 @@ pub enum MessageAction {
     /// and error when it doesn't recognize it. The second [bool] argument forces it to be
     /// interpreted literally when it is `true`.
     Unreact(Option<String>, bool),
+
+    /// Unpin a message from the room.
+    Unpin,
 }
 
 /// An action taken in the currently selected space.
@@ -1139,6 +1145,9 @@ pub struct RoomInfo {
 
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
+
+    /// The room's pinned events, mirrored from the SDK's room state for rendering.
+    pub pinned_events: Vec<OwnedEventId>,
 }
 
 impl Default for RoomInfo {
@@ -1160,6 +1169,7 @@ impl Default for RoomInfo {
             users_typing: Default::default(),
             display_names: Default::default(),
             draw_last: Default::default(),
+            pinned_events: Default::default(),
             unloaded_edits: Default::default(),
         }
     }
@@ -1210,6 +1220,11 @@ impl RoomInfo {
         } else {
             None
         }
+    }
+
+    /// Whether a message is pinned to the room.
+    pub fn is_pinned(&self, event_id: &EventId) -> bool {
+        self.pinned_events.iter().any(|id| id == event_id)
     }
 
     /// Get the reactions and their counts for a message.

@@ -42,6 +42,7 @@ use matrix_sdk::ruma::events::receipt::{ReceiptEventContent, ReceiptType};
 use matrix_sdk::ruma::events::room::encryption::RoomEncryptionEventContent;
 use matrix_sdk::ruma::events::room::member::{MembershipState, OriginalSyncRoomMemberEvent};
 use matrix_sdk::ruma::events::room::name::RoomNameEventContent;
+use matrix_sdk::ruma::events::room::pinned_events::SyncRoomPinnedEventsEvent;
 use matrix_sdk::ruma::events::room::redaction::OriginalSyncRoomRedactionEvent;
 use matrix_sdk::ruma::events::sticker::StickerEventContent;
 use matrix_sdk::ruma::events::typing::SyncTypingEvent;
@@ -396,6 +397,7 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: bool) {
     let mut names = vec![];
+    let mut pinned = vec![];
 
     let mut spaces = vec![];
     let mut rooms = vec![];
@@ -421,6 +423,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
         let tags = room.tags().await.unwrap_or_default();
 
         names.push((room.room_id().to_owned(), name));
+        pinned.push((room.room_id().to_owned(), room.pinned_event_ids().unwrap_or_default()));
 
         if room.is_direct().await.unwrap_or_default() {
             dms.push(Arc::new((room, tags)));
@@ -438,6 +441,10 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
 
     for (room_id, name) in names {
         locked.application.set_room_name(&room_id, &name);
+    }
+
+    for (room_id, pinned_events) in pinned {
+        locked.application.get_room_info(room_id).pinned_events = pinned_events;
     }
 }
 
@@ -1242,6 +1249,20 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
                     info.redact(ev);
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |_: SyncRoomPinnedEventsEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
+                async move {
+                    // The SDK has already applied the event to its room state by the time
+                    // handlers run, and it also copes with redacted pin lists.
+                    let pinned = room.pinned_event_ids().unwrap_or_default();
+
+                    let mut locked = store.lock().await;
+                    let info = locked.application.get_room_info(room.room_id().to_owned());
+                    info.pinned_events = pinned;
                 }
             },
         );

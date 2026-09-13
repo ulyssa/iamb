@@ -11,9 +11,11 @@ use matrix_sdk::attachment::AttachmentConfig;
 use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
 use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::room::reply::{EnforceThread, Reply};
+use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::ruma::events::reaction::ReactionEventContent;
 use matrix_sdk::ruma::events::relation::{Annotation, Replacement};
 use matrix_sdk::ruma::events::room::message::{AddMentions, ForwardThread, ReplyWithinThread};
+use matrix_sdk::ruma::events::room::pinned_events::RoomPinnedEventsEventContent;
 use matrix_sdk::send_queue::RoomSendQueueError;
 use modalkit::editing::history::{self, HistoryList};
 use modalkit::editing::store::RegisterError;
@@ -355,6 +357,63 @@ impl ChatState {
                 let msg = ReactionEventContent::new(reaction);
 
                 room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
+
+                Ok(None)
+            },
+            MessageAction::Pin | MessageAction::Unpin => {
+                let pin = act == MessageAction::Pin;
+
+                let event_id = match &msg.event {
+                    MessageEvent::Local(..) => {
+                        let msg = "Cannot pin a message that hasn't been sent yet";
+                        return Err(UIError::Failure(msg.into()));
+                    },
+                    MessageEvent::Redacted(..) | MessageEvent::EncryptedRedacted(_) if pin => {
+                        let msg = "Cannot pin a redacted message";
+                        return Err(UIError::Failure(msg.into()));
+                    },
+                    event => event.event_id().map(ToOwned::to_owned),
+                }
+                .ok_or(IambError::NoSelectedMessage)?;
+
+                let room = self.get_joined(&store.application.worker)?;
+
+                let can_pin = room
+                    .power_levels()
+                    .await
+                    .map_err(matrix_sdk::Error::from)
+                    .map_err(IambError::from)?
+                    .user_can_send_state(
+                        &settings.profile.user_id,
+                        StateEventType::RoomPinnedEvents,
+                    );
+
+                if !can_pin {
+                    return Err(IambError::InsufficientPermission.into());
+                }
+
+                // The state event holds the whole list, so rebuild it from the SDK's latest copy.
+                let mut pinned = room.pinned_event_ids().unwrap_or_default();
+                let position = pinned.iter().position(|id| *id == event_id);
+
+                match (pin, position) {
+                    (true, Some(_)) => {
+                        let msg = "This message is already pinned";
+                        return Err(UIError::Failure(msg.into()));
+                    },
+                    (false, None) => {
+                        let msg = "This message is not pinned";
+                        return Err(UIError::Failure(msg.into()));
+                    },
+                    (true, None) => pinned.push(event_id),
+                    (false, Some(idx)) => {
+                        pinned.remove(idx);
+                    },
+                }
+
+                room.send_state_event(RoomPinnedEventsEventContent::new(pinned))
+                    .await
+                    .map_err(IambError::from)?;
 
                 Ok(None)
             },

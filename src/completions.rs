@@ -578,6 +578,8 @@ fn complete_cmdarg(
 
         "logout" => complete_iamb_logout(args, store),
 
+        "pin" | "unpin" => vec![],
+
         "react" if args.len() == 1 => complete_emoji(&args[0], store),
         "react" => vec![],
 
