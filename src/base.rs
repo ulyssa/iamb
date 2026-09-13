@@ -1127,6 +1127,8 @@ pub struct RoomInfo {
     /// however not every user has an entry. If a user's most recent receipt is
     /// older than the oldest loaded event, that user will not be included.
     pub user_receipts: HashMap<ReceiptThread, HashMap<OwnedUserId, OwnedEventId>>,
+    /// The current user's read markers used when synchronizing receipts to the server.
+    active_receipts: HashMap<ReceiptThread, OwnedEventId>,
     /// A map of message identifiers to a map of reaction events.
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
     /// A map of message identifiers to a list of edit events for message that are not yet cached.
@@ -1165,6 +1167,7 @@ impl Default for RoomInfo {
             echo_keys: Default::default(),
             event_receipts: Default::default(),
             user_receipts: Default::default(),
+            active_receipts: Default::default(),
             reactions: Default::default(),
             threads: Default::default(),
             fetching: Default::default(),
@@ -1366,6 +1369,7 @@ impl RoomInfo {
         previews: &mut PreviewManager,
     ) {
         let event_id = sticker.event_id().to_owned();
+        let sender = sticker.sender().to_owned();
         let key = MessageKey {
             ts: sticker.origin_server_ts().into(),
             id: event_id.clone().into(),
@@ -1394,10 +1398,11 @@ impl RoomInfo {
         }
 
         let loc = EventLocation::Message(thread_root.clone(), key.clone());
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.clone(), loc);
 
         let thread = self.get_thread_mut(thread_root);
         thread.insert_message(key, sticker);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert a reaction to a message.
@@ -1459,14 +1464,16 @@ impl RoomInfo {
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
         let event_id = msg.event_id().to_owned();
+        let sender = msg.sender().to_owned();
         let key = MessageKey {
             ts: msg.origin_server_ts().into(),
             id: event_id.clone().into(),
         };
 
         let loc = EventLocation::State(key.clone());
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.clone(), loc);
         self.messages.insert_message(key, msg);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Indicates whether this room has unread messages.
@@ -1489,13 +1496,16 @@ impl RoomInfo {
     /// Inserts events that couldn't be decrypted into the scrollback.
     pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
         let event_id = msg.event_id().to_owned();
+        let sender = msg.sender().to_owned();
         let key = MessageKey {
             ts: msg.origin_server_ts().into(),
             id: event_id.clone().into(),
         };
 
-        self.keys.insert(event_id, EventLocation::Message(None, key.clone()));
+        self.keys
+            .insert(event_id.clone(), EventLocation::Message(None, key.clone()));
         self.messages.insert(key, msg.into());
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert a new message.
@@ -1566,6 +1576,9 @@ impl RoomInfo {
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
     ) {
+        let sender = ev.sender().to_owned();
+        let event_id = ev.event_id().to_owned();
+
         if let MessageLikeEvent::Original(OriginalMessageLikeEvent {
             content: RoomMessageEventContent { msgtype: MessageType::Image(c), .. },
             ..
@@ -1576,6 +1589,7 @@ impl RoomInfo {
         }
 
         self.insert(ev);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Indicates whether we've recently fetched scrollback for this room.
@@ -1616,6 +1630,91 @@ impl RoomInfo {
         self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
     }
 
+    fn receipt_key(&self, event_id: &EventId) -> Option<&MessageKey> {
+        match self.keys.get(event_id)? {
+            EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    fn receipt_is_newer(&self, event_id: &EventId, old_event_id: &EventId) -> bool {
+        let Some(event_key) = self.receipt_key(event_id) else {
+            return false;
+        };
+        let Some(old_event_key) = self.receipt_key(old_event_id) else {
+            return false;
+        };
+
+        event_key > old_event_key
+    }
+
+    fn active_receipt_can_advance(
+        &self,
+        thread: &ReceiptThread,
+        user_id: &UserId,
+        event_id: &EventId,
+    ) -> bool {
+        if let Some(old_event_id) = self.active_receipts.get(thread) &&
+            !self.receipt_is_newer(event_id, old_event_id)
+        {
+            return false;
+        }
+
+        let received_receipt = |thread: &ReceiptThread| {
+            self.user_receipts.get(thread).and_then(|receipts| receipts.get(user_id))
+        };
+
+        match thread {
+            ReceiptThread::Main => {
+                for old_event_id in [
+                    received_receipt(&ReceiptThread::Main),
+                    received_receipt(&ReceiptThread::Unthreaded),
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    if !self.receipt_is_newer(event_id, old_event_id) {
+                        return false;
+                    }
+                }
+            },
+            _ => {
+                if let Some(old_event_id) = received_receipt(thread) &&
+                    !self.receipt_is_newer(event_id, old_event_id)
+                {
+                    return false;
+                }
+            },
+        }
+
+        true
+    }
+
+    fn set_implicit_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
+        let (thread, event_key) = match self.keys.get(&event_id) {
+            Some(EventLocation::Message(None, key)) | Some(EventLocation::State(key)) => {
+                (ReceiptThread::Main, key.clone())
+            },
+            Some(EventLocation::Message(Some(root), key)) => {
+                (ReceiptThread::Thread(root.clone()), key.clone())
+            },
+            _ => return,
+        };
+
+        if let Some(old_event_id) =
+            self.user_receipts.get(&thread).and_then(|receipts| receipts.get(&user_id))
+        {
+            let Some(old_key) = self.receipt_key(old_event_id) else {
+                return;
+            };
+            if event_key <= *old_key {
+                return;
+            }
+        }
+
+        self.set_receipt(thread, user_id, event_id);
+    }
+
     pub fn fully_read(&mut self, user_id: OwnedUserId, thread: ReceiptThread) {
         let messages = match &thread {
             ReceiptThread::Main => self.get_thread(None),
@@ -1643,7 +1742,10 @@ impl RoomInfo {
             .next_back();
 
         if let Some(event_id) = event_id {
-            self.set_receipt(thread, user_id, event_id.to_owned());
+            let event_id = event_id.to_owned();
+            if self.active_receipt_can_advance(&thread, &user_id, &event_id) {
+                self.active_receipts.insert(thread, event_id);
+            }
         }
     }
 
@@ -1659,11 +1761,9 @@ impl RoomInfo {
 
     pub fn receipts<'a>(
         &'a self,
-        user_id: &'a UserId,
+        _user_id: &'a UserId,
     ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
-        self.user_receipts
-            .iter()
-            .filter_map(move |(t, rs)| rs.get(user_id).map(|r| (t, r)))
+        self.active_receipts.iter()
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {
@@ -2298,6 +2398,19 @@ pub mod tests {
     use crate::config::user_style_from_color;
     use crate::tests::*;
 
+    fn mock_room_message_event(
+        content: RoomMessageEventContent,
+        sender: OwnedUserId,
+        key: MessageKey,
+    ) -> RoomMessageEvent {
+        let message = mock_room1_message(content, sender, key);
+        let MessageEvent::Original(event, _) = message.event else {
+            unreachable!("mock_room1_message always returns an original room message")
+        };
+
+        MessageLikeEvent::Original(*event)
+    }
+
     fn create_reaction_event(
         content: &ReactionEventContent,
         event_id: &str,
@@ -2355,6 +2468,109 @@ pub mod tests {
             .map(|(key, count, _)| (key, count))
             .collect();
         assert_eq!(reacts, vec![("🏠", 1), ("🙂", 2)]);
+    }
+
+    #[test]
+    fn implicit_receipt_tracks_message_sender_for_display() {
+        let mut info = RoomInfo::default();
+        let settings = mock_settings();
+        let mut previews = PreviewManager::new(&settings);
+        let event = mock_room_message_event(
+            RoomMessageEventContent::text_plain("sent by another user"),
+            TEST_USER2.clone(),
+            MSG5_KEY.clone(),
+        );
+
+        info.insert_with_preview(event, &settings, &mut previews);
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+        assert!(
+            info.event_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*MSG5_EVID))
+                .is_some_and(|users| users.contains(&*TEST_USER2))
+        );
+        assert!(info.active_receipts.is_empty());
+    }
+
+    #[test]
+    fn implicit_receipts_do_not_move_backwards_during_backpagination() {
+        let mut info = RoomInfo::default();
+        let settings = mock_settings();
+        let mut previews = PreviewManager::new(&settings);
+        let newer = mock_room_message_event(
+            RoomMessageEventContent::text_plain("newer"),
+            TEST_USER2.clone(),
+            MSG5_KEY.clone(),
+        );
+        let older = mock_room_message_event(
+            RoomMessageEventContent::text_plain("older"),
+            TEST_USER2.clone(),
+            MSG2_KEY.clone(),
+        );
+
+        info.insert_with_preview(newer, &settings, &mut previews);
+        info.insert_with_preview(older, &settings, &mut previews);
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+    }
+
+    #[test]
+    fn implicit_receipt_preserves_thread_context() {
+        let mut info = RoomInfo::default();
+        let root = owned_event_id!("$thread_root");
+        let reply = owned_event_id!("$thread_reply");
+        let thread = ReceiptThread::Thread(root.clone());
+
+        info.keys
+            .insert(reply.clone(), EventLocation::Message(Some(root), MSG5_KEY.clone()));
+        info.set_implicit_receipt(TEST_USER1.clone(), reply.clone());
+
+        assert_eq!(
+            info.user_receipts
+                .get(&thread)
+                .and_then(|receipts| receipts.get(&*TEST_USER1)),
+            Some(&reply),
+        );
+    }
+
+    #[test]
+    fn implicit_receipt_supports_state_events() {
+        let mut info = RoomInfo::default();
+        info.keys.insert(MSG5_EVID.clone(), EventLocation::State(MSG5_KEY.clone()));
+
+        info.set_implicit_receipt(TEST_USER2.clone(), MSG5_EVID.clone());
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+    }
+
+    #[test]
+    fn received_receipts_do_not_become_outgoing_receipts() {
+        let mut info = RoomInfo::default();
+        info.set_receipt(ReceiptThread::Main, TEST_USER1.clone(), MSG3_EVID.clone());
+
+        assert!(info.receipts(&TEST_USER1).next().is_none());
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER1)),
+            Some(&*MSG3_EVID),
+        );
     }
 
     #[test]
