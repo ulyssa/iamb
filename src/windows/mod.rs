@@ -905,14 +905,15 @@ impl Window<IambInfo> for IambWindow {
     }
 
     fn find(name: String, store: &mut ProgramStore) -> IambResult<Self> {
-        let ChatStore { names, worker, .. } = &mut store.application;
+        let ChatStore { names, worker, settings, .. } = &mut store.application;
 
         if let Some(room) = names.get_mut(&name) {
             let id = IambId::Room(room.clone(), None);
 
             IambWindow::open(id, store)
         } else {
-            let room_id = worker.join_room(name.clone(), vec![])?;
+            let via = settings.tunables.default_via.clone();
+            let room_id = worker.join_room(name.clone(), via)?;
 
             if let Ok(alias) = OwnedRoomAliasId::from_str(&name) {
                 names.insert(alias, room_id.clone());
