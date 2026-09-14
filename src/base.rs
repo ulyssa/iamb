@@ -1511,6 +1511,7 @@ impl RoomInfo {
     /// Insert a new message.
     pub fn insert_message(&mut self, msg: RoomMessageEvent) {
         let event_id = msg.event_id().to_owned();
+        let sender = msg.sender().to_owned();
         let key = MessageKey {
             ts: msg.origin_server_ts().into(),
             id: event_id.clone().into(),
@@ -1521,12 +1522,14 @@ impl RoomInfo {
         if let Some(edits) = self.unloaded_edits.remove(&event_id) {
             message.set_edits(edits);
         }
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.clone(), loc);
         self.messages.insert_message(key, message);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
         let event_id = msg.event_id().to_owned();
+        let sender = msg.sender().to_owned();
         let key = MessageKey {
             ts: msg.origin_server_ts().into(),
             id: event_id.clone().into(),
@@ -1541,8 +1544,9 @@ impl RoomInfo {
         if let Some(edits) = self.unloaded_edits.remove(&event_id) {
             message.set_edits(edits);
         }
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.clone(), loc);
         replies.insert_message(key, message);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert a new message event.
@@ -1576,9 +1580,6 @@ impl RoomInfo {
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
     ) {
-        let sender = ev.sender().to_owned();
-        let event_id = ev.event_id().to_owned();
-
         if let MessageLikeEvent::Original(OriginalMessageLikeEvent {
             content: RoomMessageEventContent { msgtype: MessageType::Image(c), .. },
             ..
@@ -1589,7 +1590,6 @@ impl RoomInfo {
         }
 
         self.insert(ev);
-        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Indicates whether we've recently fetched scrollback for this room.
@@ -1620,6 +1620,15 @@ impl RoomInfo {
         user_id: OwnedUserId,
         event_id: OwnedEventId,
     ) {
+        if let Some(old_event_id) =
+            self.user_receipts.get(&thread).and_then(|receipts| receipts.get(&user_id)) &&
+            let (Some(old_key), Some(new_key)) =
+                (self.receipt_key(old_event_id), self.receipt_key(&event_id)) &&
+            new_key <= old_key
+        {
+            return;
+        }
+
         self.clear_receipt(&thread, &user_id);
         self.event_receipts
             .entry(thread.clone())
@@ -1638,25 +1647,24 @@ impl RoomInfo {
     }
 
     fn set_implicit_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
-        let (thread, event_key) = match self.keys.get(&event_id) {
-            Some(EventLocation::Message(None, key)) | Some(EventLocation::State(key)) => {
-                (ReceiptThread::Main, key.clone())
+        let thread = match self.keys.get(&event_id) {
+            Some(EventLocation::Message(None, _)) | Some(EventLocation::State(_)) => {
+                ReceiptThread::Main
             },
-            Some(EventLocation::Message(Some(root), key)) => {
-                (ReceiptThread::Thread(root.clone()), key.clone())
-            },
+            Some(EventLocation::Message(Some(root), _)) => ReceiptThread::Thread(root.clone()),
             _ => return,
         };
 
-        if let Some(old_event_id) =
-            self.user_receipts.get(&thread).and_then(|receipts| receipts.get(&user_id))
+        if self
+            .user_receipts
+            .get(&thread)
+            .and_then(|receipts| receipts.get(&user_id))
+            .is_some_and(|old_event_id| self.receipt_key(old_event_id).is_none())
         {
-            let Some(old_key) = self.receipt_key(old_event_id) else {
-                return;
-            };
-            if event_key <= *old_key {
-                return;
-            }
+            // An explicit receipt can arrive before its event. Without that event's key, we cannot
+            // prove that this implicit receipt is newer, so keep the explicit position until its
+            // event is loaded and the normal ordering check can compare them.
+            return;
         }
 
         self.set_receipt(thread, user_id, event_id);
@@ -2495,6 +2503,52 @@ pub mod tests {
         info.keys.insert(MSG5_EVID.clone(), EventLocation::State(MSG5_KEY.clone()));
 
         info.set_implicit_receipt(TEST_USER2.clone(), MSG5_EVID.clone());
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+    }
+
+    #[test]
+    fn explicit_receipt_does_not_move_implicit_receipt_backwards() {
+        let mut info = RoomInfo::default();
+        let older = mock_room_message_event(
+            RoomMessageEventContent::text_plain("older"),
+            TEST_USER2.clone(),
+            MSG2_KEY.clone(),
+        );
+        let newer = mock_room_message_event(
+            RoomMessageEventContent::text_plain("newer"),
+            TEST_USER2.clone(),
+            MSG5_KEY.clone(),
+        );
+
+        info.insert_message(older);
+        info.insert_message(newer);
+        info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG2_EVID.clone());
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+    }
+
+    #[test]
+    fn implicit_receipt_waits_for_unloaded_explicit_receipt() {
+        let mut info = RoomInfo::default();
+        info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG5_EVID.clone());
+        let older = mock_room_message_event(
+            RoomMessageEventContent::text_plain("older"),
+            TEST_USER2.clone(),
+            MSG2_KEY.clone(),
+        );
+
+        info.insert_message(older);
 
         assert_eq!(
             info.user_receipts
