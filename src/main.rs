@@ -208,7 +208,7 @@ fn setup_screen(
                         Some(_) | None => continue,
                     }
                 };
-                setup_tty(&settings, false)?;
+                setup_tty(&settings)?;
 
                 if join_or_create && let Ok(id) = resolve_mxid(store, id, &via, true)? {
                     return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
