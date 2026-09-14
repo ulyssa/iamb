@@ -796,7 +796,11 @@ impl Application {
         match action {
             SettingsAction::Set(tunables_updates) => {
                 for update in tunables_updates {
-                    store.application.settings.update(update, &mut store.application.previews);
+                    store.application.settings.update(
+                        update,
+                        &mut store.application.previews,
+                        &mut store.registers,
+                    );
                 }
                 Ok(())
             },
@@ -810,7 +814,7 @@ impl Application {
                 Ok(store
                     .application
                     .settings
-                    .reload(path, &mut store.application.previews)
+                    .reload(path, &mut store.application.previews, &mut store.registers)
                     .map_err(IambError::from)?)
             },
         }

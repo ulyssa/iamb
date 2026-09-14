@@ -15,6 +15,7 @@ use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, owned_server_name};
 use modalkit::crossterm;
+use modalkit::editing::store::RegisterStore;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
 use ratatui::crossterm::cursor::SetCursorStyle;
@@ -22,6 +23,7 @@ use ratatui_image::FilterType;
 use ratatui_image::picker::ProtocolType;
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
+use serde::de::value::StringDeserializer;
 use serde::{Deserialize, Deserializer, Serialize};
 use strum::{
     EnumDiscriminants,
@@ -1124,6 +1126,9 @@ impl ImagePreviewUpdate {
 pub enum EncryptionUpdate {
     Indicator(EncryptionIndicator),
     IndicatorLocation(EncryptionIndicatorLocation),
+    IconEncrypted(String),
+    IconUnencrypted(String),
+    IconUnknown(String),
 }
 
 impl EncryptionUpdate {
@@ -1135,6 +1140,9 @@ impl EncryptionUpdate {
                     EncryptionIndicatorLocationVisitor.visit_str::<TunablesUpdateError>(value)?;
                 Self::IndicatorLocation(via)
             },
+            "iconencrypted" => Self::IconEncrypted(value.to_string()),
+            "iconunencrypted" => Self::IconUnencrypted(value.to_string()),
+            "iconunknown" => Self::IconUnknown(value.to_string()),
 
             _ => return Err(TunablesUpdateError::UnknownOption),
         };
@@ -1187,7 +1195,9 @@ pub enum TunablesUpdate {
 
     // value options
     DefaultMarkup(MarkupFormat),
+    DefaultRegister(Register),
     DefaultSplit(SplitDirection),
+    DefaultVia(Vec<OwnedServerName>),
     InputPrompt(Option<String>),
     LogLevel(Box<LogLevelUpdate>),
     MembersSplit(Option<SplitDirection>),
@@ -1289,6 +1299,31 @@ impl TunablesUpdate {
             "defaultsplit" => {
                 if let Some(value) = value {
                     Self::DefaultSplit(SplitDirection::from_str(value)?)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "defaultregister" => {
+                if let Some(value) = value {
+                    let deserializer: StringDeserializer<serde::de::value::Error> =
+                        StringDeserializer::new(value.to_string());
+
+                    let Some(reg) = deserialize_register(deserializer)
+                        .map_err(|e| TunablesUpdateError::Custom(e.to_string()))?
+                    else {
+                        return Err(TunablesUpdateError::InvalidArgument);
+                    };
+
+                    Self::DefaultRegister(reg)
+                } else {
+                    return Err(TunablesUpdateError::NoArguments);
+                }
+            },
+            "defaultvia" => {
+                if let Some(value) = value {
+                    let via: Result<_, _> =
+                        value.split(",").map(OwnedServerName::try_from).collect();
+                    Self::DefaultVia(via?)
                 } else {
                     return Err(TunablesUpdateError::NoArguments);
                 }
@@ -2031,6 +2066,7 @@ impl ApplicationSettings {
         &mut self,
         path: Option<SettingsFile>,
         previews: &mut PreviewManager,
+        registers: &mut RegisterStore,
     ) -> Result<(), ReloadError> {
         let load_file = path.unwrap_or_else(|| self.load_file.clone());
 
@@ -2073,10 +2109,19 @@ impl ApplicationSettings {
         self.update(
             TunablesUpdate::LogLevel(LogLevelUpdate::parse(self.tunables.log_level.to_owned())?),
             previews,
+            registers,
         );
 
         if image_preview_changed {
-            self.update(TunablesUpdate::ImagePreview(ImagePreviewUpdate::Reload), previews);
+            self.update(
+                TunablesUpdate::ImagePreview(ImagePreviewUpdate::Reload),
+                previews,
+                registers,
+            );
+        }
+
+        if let Some(reg) = &self.tunables.default_register {
+            self.update(TunablesUpdate::DefaultRegister(reg.to_owned()), previews, registers);
         }
 
         Ok(())
@@ -2102,7 +2147,12 @@ impl ApplicationSettings {
     }
     /// Update [`self.tunables`](`Self::tunables`) with `new`.
     /// This will make sure that the updated value is applied.
-    pub fn update(&mut self, update: TunablesUpdate, previews: &mut PreviewManager) {
+    pub fn update(
+        &mut self,
+        update: TunablesUpdate,
+        previews: &mut PreviewManager,
+        registers: &mut RegisterStore,
+    ) {
         match update {
             TunablesUpdate::LogLevel(update) => {
                 if let Some(handle) = &mut self.log_level_handle {
@@ -2175,11 +2225,24 @@ impl ApplicationSettings {
                     self.tunables.open_command = Some(open_command);
                 }
             },
+            TunablesUpdate::DefaultRegister(reg) => {
+                self.tunables.default_register = Some(reg.clone());
+                registers.set_default_register(reg);
+            },
+            TunablesUpdate::Terminal(TerminalUpdate::CursorShape(shape)) => {
+                self.tunables.terminal.cursor_shape = shape;
+
+                let cursor_shape = SetCursorStyle::from(shape);
+                let _ = modalkit::crossterm::execute!(std::io::stdout(), cursor_shape);
+            },
             TunablesUpdate::DefaultMarkup(format) => {
                 self.tunables.default_markup = format;
             },
             TunablesUpdate::DefaultSplit(direction) => {
                 self.tunables.default_split = direction;
+            },
+            TunablesUpdate::DefaultVia(via) => {
+                self.tunables.default_via = via;
             },
             TunablesUpdate::MembersSplit(direction) => {
                 self.tunables.members_split = direction;
@@ -2193,11 +2256,14 @@ impl ApplicationSettings {
             TunablesUpdate::Encryption(EncryptionUpdate::IndicatorLocation(indicator_location)) => {
                 self.tunables.encryption.indicator_location = indicator_location;
             },
-            TunablesUpdate::Terminal(TerminalUpdate::CursorShape(shape)) => {
-                self.tunables.terminal.cursor_shape = shape;
-
-                let cursor_shape = SetCursorStyle::from(shape);
-                let _ = modalkit::crossterm::execute!(std::io::stdout(), cursor_shape);
+            TunablesUpdate::Encryption(EncryptionUpdate::IconEncrypted(icon)) => {
+                self.tunables.encryption.icon_encrypted = icon.into();
+            },
+            TunablesUpdate::Encryption(EncryptionUpdate::IconUnencrypted(icon)) => {
+                self.tunables.encryption.icon_unencrypted = icon.into();
+            },
+            TunablesUpdate::Encryption(EncryptionUpdate::IconUnknown(icon)) => {
+                self.tunables.encryption.icon_unknown = icon.into();
             },
             TunablesUpdate::UsernameDisplay(username_display) => {
                 self.tunables.username_display = username_display
