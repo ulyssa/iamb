@@ -1988,6 +1988,9 @@ pub enum IambId {
     /// The `:rooms` window.
     RoomList,
 
+    /// The `:scratch` window.
+    Scratch,
+
     /// The `:spaces` window.
     SpaceList,
 
@@ -2021,6 +2024,7 @@ impl Display for IambId {
             },
             IambId::DirectList => f.write_str("iamb://dms"),
             IambId::RoomList => f.write_str("iamb://rooms"),
+            IambId::Scratch => f.write_str("iamb://scratch"),
             IambId::SpaceList => f.write_str("iamb://spaces"),
             IambId::VerifyList => f.write_str("iamb://verify"),
             IambId::Welcome => f.write_str("iamb://welcome"),
@@ -2130,6 +2134,13 @@ impl Visitor<'_> for IambIdVisitor {
 
                 Ok(IambId::RoomList)
             },
+            Some("scratch") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://scratch takes no path"));
+                }
+
+                Ok(IambId::Scratch)
+            },
             Some("spaces") => {
                 if url.path() != "" {
                     return Err(E::custom("iamb://spaces takes no path"));
@@ -2228,6 +2239,9 @@ pub enum IambBufferId {
     /// The `:rooms` window.
     RoomList,
 
+    /// The `:scratch` window.
+    Scratch,
+
     /// The `:spaces` window.
     SpaceList,
 
@@ -2256,6 +2270,7 @@ impl IambBufferId {
             IambBufferId::DirectList => IambId::DirectList,
             IambBufferId::MemberList(room) => IambId::MemberList(room.clone()),
             IambBufferId::RoomList => IambId::RoomList,
+            IambBufferId::Scratch => IambId::Scratch,
             IambBufferId::SpaceList => IambId::SpaceList,
             IambBufferId::VerifyList => IambId::VerifyList,
             IambBufferId::Welcome => IambId::Welcome,
