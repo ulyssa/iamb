@@ -1369,7 +1369,6 @@ impl RoomInfo {
         sticker: StickerEvent,
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
-        worker: &Requester,
     ) {
         let event_id = sticker.event_id().to_owned();
         let key = MessageKey {
@@ -1396,7 +1395,7 @@ impl RoomInfo {
             settings.tunables.image_preview.enabled
         {
             let source = source.clone().into();
-            previews.register_preview(settings, &source, PreviewKind::Message, worker);
+            previews.register_preview(settings, &source, PreviewKind::Message);
         }
 
         let loc = EventLocation::Message(thread_root.clone(), key.clone());
@@ -1412,7 +1411,6 @@ impl RoomInfo {
         react: ReactionEvent,
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
-        worker: &Requester,
     ) {
         let MessageLikeEvent::Original(ref orig_react) = react else {
             return;
@@ -1427,7 +1425,7 @@ impl RoomInfo {
         if settings.tunables.image_preview.enabled &&
             let Some(source) = source.as_ref()
         {
-            previews.register_preview(settings, source, PreviewKind::Reaction, worker);
+            previews.register_preview(settings, source, PreviewKind::Reaction);
         }
 
         self.insert_reaction(react, source);
@@ -1572,7 +1570,6 @@ impl RoomInfo {
         ev: RoomMessageEvent,
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
-        worker: &Requester,
     ) {
         if let MessageLikeEvent::Original(OriginalMessageLikeEvent {
             content: RoomMessageEventContent { msgtype: MessageType::Image(c), .. },
@@ -1580,7 +1577,7 @@ impl RoomInfo {
         }) = &ev &&
             settings.tunables.image_preview.enabled
         {
-            previews.register_preview(settings, &c.source, PreviewKind::Message, worker)
+            previews.register_preview(settings, &c.source, PreviewKind::Message)
         }
 
         self.insert(ev);
