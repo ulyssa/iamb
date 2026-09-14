@@ -12,6 +12,7 @@ use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
 use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::room::reply::{EnforceThread, Reply};
 use matrix_sdk::ruma::events::Mentions;
+use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::ruma::events::reaction::ReactionEventContent;
 use matrix_sdk::ruma::events::relation::Annotation;
 use matrix_sdk::ruma::events::room::message::{
