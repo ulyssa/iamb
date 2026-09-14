@@ -1087,22 +1087,17 @@ impl DisplayNameStore {
             .into_iter()
             .flat_map(|name| {
                 let users = self.by_names.get(&name).unwrap();
-                users
-                    .active
-                    .iter()
-                    .map(move |id| format!("[{name}]({})", id.matrix_to_uri()))
+                users.active.iter().map(move |id| format!("[{name}][{}]", id))
             })
             .collect();
 
         users.extend(self.by_ids.complete(prefix).into_iter().map(|id| {
-            format!(
-                "[{}]({})",
-                self.by_ids
-                    .get(&id)
-                    .and_then(|(name, _)| name.as_deref())
-                    .unwrap_or(id.as_str()),
-                id.matrix_to_uri()
-            )
+            let name = self
+                .by_ids
+                .get(&id)
+                .and_then(|(name, _)| name.as_deref())
+                .unwrap_or(id.as_str());
+            format!("[{}][{}]", name, id)
         }));
 
         users.into_iter().collect()
