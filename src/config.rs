@@ -188,6 +188,9 @@ pub struct Iamb {
 
     #[clap(short = 'C', long, value_parser)]
     pub config_directory: Option<PathBuf>,
+
+    /// `matrix:` uri or `https://matrix.to` link to open
+    pub uri: Option<String>,
 }
 
 #[derive(thiserror::Error, Debug)]
@@ -1496,6 +1499,18 @@ mod tests {
     use std::convert::TryFrom;
 
     use matrix_sdk::ruma::user_id;
+
+    use crate::tests::{TEST_USER1, mock_room, mock_settings};
+
+    #[test]
+    fn test_get_user_span_borrowed() {
+        // fix `StyleTreeNode::print` for `StyleTreeNode::UserId` if this breaks
+        let info = mock_room();
+        let settings = mock_settings();
+        let span = settings.get_user_span(&TEST_USER1, &info);
+
+        assert!(matches!(span.content, Cow::Borrowed(_)));
+    }
 
     #[test]
     fn test_profile_name_invalid() {

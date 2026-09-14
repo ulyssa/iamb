@@ -2,7 +2,7 @@
 //!
 //! The types defined here get used throughout iamb.
 
-use std::collections::hash_map::{Entry, IntoIter};
+use std::collections::hash_map::IntoIter;
 use std::collections::{BTreeSet, HashSet};
 
 use emojis::Emoji;
@@ -578,7 +578,7 @@ pub enum KeysAction {
     Import(String, String),
 }
 
-/// An action that the main program loop should.
+/// An action that the main program loop should execute.
 ///
 /// See [the commands module][super::commands] for where these are usually created.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -595,8 +595,8 @@ pub enum IambAction {
     /// Perform an action on the current space.
     Space(SpaceAction),
 
-    /// Open a URL.
-    OpenLink(String),
+    /// Open a URL (and specify whether to join linked matrix rooms).
+    OpenLink(String, bool),
 
     /// Perform an action on the currently focused room.
     Room(RoomAction),
@@ -1004,9 +1004,9 @@ struct DisplayNameUsers {
 #[derive(Default)]
 pub struct DisplayNameStore {
     /// The boolean is the same `is_active` field as the argument to [`Self::set`].
-    by_ids: HashMap<OwnedUserId, (String, bool)>,
+    by_ids: CompletionMap<OwnedUserId, (Option<String>, bool)>,
 
-    by_names: HashMap<String, DisplayNameUsers>,
+    by_names: CompletionMap<String, DisplayNameUsers>,
 }
 
 impl DisplayNameStore {
@@ -1040,51 +1040,40 @@ impl DisplayNameStore {
             self.set_by_name(user_id.clone(), name, is_active);
         }
 
-        let previous = match (self.by_ids.entry(user_id), name) {
-            // Nothing to do!
-            (Entry::Vacant(_), None) => None,
+        if self
+            .by_ids
+            .get(&user_id)
+            .is_some_and(|(n, a)| *n == name && *a == is_active)
+        {
+            // nothing to do
+            return;
+        }
 
-            // Setting initial display name for user:
-            (Entry::Vacant(v), Some(name)) => {
-                v.insert((name, is_active));
-                None
-            },
+        let previous = self.by_ids.insert(user_id.to_owned(), (name, is_active));
 
-            // Unsetting display name:
-            (Entry::Occupied(o), None) => Some(o.remove_entry()),
-
-            // Replacing existing name:
-            (Entry::Occupied(mut o), Some(name)) => {
-                let key = (name, is_active);
-                if o.get() == &key {
-                    None
-                } else {
-                    Some((o.key().clone(), o.insert(key)))
-                }
-            },
-        };
-
-        let Some((user_id, previous)) = previous else {
+        let Some((Some(name), was_active)) = previous else {
+            // no previous entry in `self.by_names` to remove
             return;
         };
 
-        let Some(users) = self.by_names.get_mut(&previous.0) else {
+        let Some(users) = self.by_names.get_mut(&name) else {
             return;
         };
 
-        if previous.1 {
+        if was_active {
             users.active.remove(&user_id);
         } else {
             users.inactive.remove(&user_id);
         }
 
         if users.active.is_empty() && users.inactive.is_empty() {
-            self.by_names.remove(&previous.0);
+            self.by_names.remove(&name);
         }
     }
 
     pub fn get<'a>(&'a self, user_id: &UserId) -> Option<Cow<'a, str>> {
         let (displayname, is_active) = self.by_ids.get(user_id)?;
+        let displayname = displayname.as_ref()?;
         let users = self.by_names.get(displayname)?;
 
         if !users.active.contains(user_id) && !users.inactive.contains(user_id) {
@@ -1100,6 +1089,35 @@ impl DisplayNameStore {
 
         // Ambiguous username, so include unique user ID:
         Some(Cow::Owned(format!("{displayname} ({user_id})")))
+    }
+
+    pub fn complete_mention(&self, prefix: &str) -> Vec<String> {
+        // spec says to mention with display name in anchor text
+        let mut users: BTreeSet<_> = self
+            .by_names
+            .complete(prefix.strip_prefix('@').unwrap_or(prefix))
+            .into_iter()
+            .flat_map(|name| {
+                let users = self.by_names.get(&name).unwrap();
+                users
+                    .active
+                    .iter()
+                    .map(move |id| format!("[{name}]({})", id.matrix_to_uri()))
+            })
+            .collect();
+
+        users.extend(self.by_ids.complete(prefix).into_iter().map(|id| {
+            format!(
+                "[{}]({})",
+                self.by_ids
+                    .get(&id)
+                    .and_then(|(name, _)| name.as_deref())
+                    .unwrap_or(id.as_str()),
+                id.matrix_to_uri()
+            )
+        }));
+
+        users.into_iter().collect()
     }
 }
 
@@ -1939,7 +1957,7 @@ pub struct ChatStore {
     pub rooms: CompletionMap<OwnedRoomId, RoomInfo>,
 
     /// Map of room names.
-    pub names: CompletionMap<String, OwnedRoomId>,
+    pub names: CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
 
     /// Presence information for other users.
     pub presences: CompletionMap<OwnedUserId, PresenceState>,

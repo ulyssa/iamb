@@ -25,6 +25,7 @@ use std::sync::atomic::AtomicUsize;
 
 use clap::{CommandFactory, Parser};
 use matrix_sdk::ruma::api::error::ErrorKind;
+use matrix_sdk::{OwnedServerName, RoomState};
 use matrix_sdk_crypto::encrypt_room_key_export;
 use modalkit::actions::{Commandable, TabAction, TabContainer, TabCount, WindowContainer};
 use modalkit::crossterm;
@@ -84,16 +85,13 @@ fn config_tab_to_desc(
 
             let window = match window {
                 config::WindowPath::UserId(user_id) => {
-                    let name = user_id.to_string();
-                    let room_id = worker.join_room(name.clone())?;
-                    names.insert(name, room_id.clone());
+                    let room_id = worker.join_room(user_id.to_string(), vec![])?;
                     IambId::Room(room_id, None)
                 },
                 config::WindowPath::RoomId(room_id) => IambId::Room(room_id, None),
                 config::WindowPath::AliasId(alias) => {
-                    let name = alias.to_string();
-                    let room_id = worker.join_room(name.clone())?;
-                    names.insert(name, room_id.clone());
+                    let room_id = worker.join_room(alias.to_string(), vec![])?;
+                    names.insert(alias, room_id.clone());
                     IambId::Room(room_id, None)
                 },
                 config::WindowPath::Window(id) => id,
@@ -125,13 +123,99 @@ fn restore_layout(
     tabs.to_layout(area.into(), store)
 }
 
+/// Returns the `IambId` for the new window or a string to query the user. If they answer `y` this
+/// function should be rerun with `join_or_create` set to `true`.
+fn resolve_mxid(
+    store: &mut ProgramStore,
+    id: MatrixId,
+    via: &[OwnedServerName],
+    join_or_create: bool,
+) -> IambResult<Result<IambId, String>> {
+    let room_name;
+    let room_id = match id {
+        MatrixId::Room(id) => {
+            room_name = id.to_string();
+            id
+        },
+        MatrixId::RoomAlias(alias_id) => {
+            room_name = alias_id.to_string();
+            store.application.worker.resolve_alias(alias_id)?
+        },
+        MatrixId::User(user_id) => {
+            let id = match store.application.worker.client.get_dm_room(&user_id) {
+                Some(room) => room.room_id().to_owned(),
+                None if join_or_create => {
+                    store.application.worker.join_room(user_id.to_string(), via.to_owned())?
+                },
+                None => return Ok(Err(format!("No dm with {user_id} found. Create new DM?"))),
+            };
+            room_name = id.to_string();
+            id
+        },
+        MatrixId::Event(owned_room_or_alias_id, _event_id) => {
+            // ignore event id for now
+            room_name = owned_room_or_alias_id.to_string();
+            let room_or_alias_id: &matrix_sdk::ruma::RoomOrAliasId = &owned_room_or_alias_id;
+            if let Ok(alias_id) = <&matrix_sdk::ruma::RoomAliasId>::try_from(room_or_alias_id) {
+                store.application.worker.resolve_alias(alias_id.to_owned())?
+            } else {
+                matrix_sdk::ruma::OwnedRoomId::try_from(owned_room_or_alias_id).unwrap()
+            }
+        },
+        _ => {
+            tracing::error!("encountered unrecoginsed matrix id: {id:?}");
+            return Ok(Err("Matrix link cannot be opened. Press 'n' to continue.".to_owned()));
+        },
+    };
+
+    if store
+        .application
+        .worker
+        .client
+        .get_room(&room_id)
+        .is_none_or(|room| room.state() != RoomState::Joined)
+    {
+        if join_or_create {
+            store.application.worker.join_room(room_name, via.to_owned())?;
+        } else {
+            return Ok(Err(format!("Join room {room_name:?}?")));
+        }
+    }
+
+    Ok(Ok(IambId::Room(room_id, None)))
+}
+
 fn setup_screen(
     settings: ApplicationSettings,
     store: &mut ProgramStore,
+    initial_room: Option<(MatrixId, Vec<OwnedServerName>)>,
 ) -> IambResult<ScreenState<IambWindow, IambInfo>> {
     let cmd = CommandBarState::new(store);
     let dims = crossterm::terminal::size()?;
     let area = Rect::new(0, 0, dims.0, dims.1);
+
+    if let Some((id, via)) = initial_room {
+        match resolve_mxid(store, id.clone(), &via, false)? {
+            Ok(id) => {
+                return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
+            },
+            Err(question) => {
+                restore_tty(false, settings.tunables.mouse.enabled);
+                let join_or_create = loop {
+                    match read_yesno(&format!("{question} [y]es/[n]o")) {
+                        Some('y') => break true,
+                        Some('n') => break false,
+                        Some(_) | None => continue,
+                    }
+                };
+                setup_tty(&settings)?;
+
+                if join_or_create && let Ok(id) = resolve_mxid(store, id, &via, true)? {
+                    return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
+                }
+            },
+        }
+    }
 
     match settings.layout {
         config::Layout::Restore => {
@@ -203,6 +287,7 @@ impl Application {
     pub async fn new(
         settings: ApplicationSettings,
         store: AsyncProgramStore,
+        initial_room: Option<(MatrixId, Vec<OwnedServerName>)>,
     ) -> IambResult<Application> {
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend)?;
@@ -212,7 +297,7 @@ impl Application {
         let bindings = KeyManager::new(bindings);
 
         let mut locked = store.lock().await;
-        let screen = setup_screen(settings, locked.deref_mut())?;
+        let screen = setup_screen(settings, locked.deref_mut(), initial_room)?;
 
         let worker = locked.application.worker.clone();
 
@@ -555,12 +640,36 @@ impl Application {
                 self.screen.current_window_mut()?.send_command(act, ctx, store).await?
             },
 
-            IambAction::OpenLink(url) => {
-                tokio::task::spawn_blocking(move || {
-                    return open::that(url);
-                });
+            IambAction::OpenLink(url, join_or_create) => {
+                let matrix_uri = MatrixUri::parse(&url).ok();
+                let matrix_to_uri = MatrixToUri::parse(&url).ok();
 
-                None
+                let matrix_id = matrix_uri
+                    .as_ref()
+                    .map(|uri| (uri.id(), uri.via()))
+                    .or(matrix_to_uri.as_ref().map(|uri| (uri.id(), uri.via())));
+
+                if let Some((id, via)) = matrix_id {
+                    match resolve_mxid(store, id.clone(), via, join_or_create)? {
+                        Ok(room) => {
+                            let target = OpenTarget::Application(room);
+                            let action = WindowAction::Switch(target);
+
+                            self.action_prepend(vec![(action.into(), ctx)]);
+                            None
+                        },
+                        Err(prompt) => {
+                            let act = IambAction::OpenLink(url, true).into();
+                            let dialog = PromptYesNo::new(prompt, vec![act]);
+                            let err = UIError::NeedConfirm(Box::new(dialog));
+                            return Err(err);
+                        },
+                    }
+                } else {
+                    tokio::task::spawn_blocking(move || open::that(url));
+
+                    None
+                }
             },
 
             IambAction::Verify(act, flow_id) => {
@@ -981,7 +1090,10 @@ async fn login_normal(
     Ok(())
 }
 
-async fn run(mut settings: ApplicationSettings) -> IambResult<()> {
+async fn run(
+    mut settings: ApplicationSettings,
+    initial_room: Option<(MatrixId, Vec<OwnedServerName>)>,
+) -> IambResult<()> {
     // Work out whether to use the Kitty keyboard protocol before anything
     // clones the settings, so that every copy agrees with the flags we push in
     // setup_tty() and pop in restore_tty().
@@ -1042,8 +1154,13 @@ async fn run(mut settings: ApplicationSettings) -> IambResult<()> {
     }));
 
     // And finally, start running the terminal UI.
-    let mut application = Application::new(settings, store).await?;
-    application.run().await?;
+    let mut application = Application::new(settings, store, initial_room)
+        .await
+        .inspect_err(|_| restore_tty(enable_enhanced_keys, enable_mouse))?;
+    application
+        .run()
+        .await
+        .inspect_err(|_| restore_tty(enable_enhanced_keys, enable_mouse))?;
 
     // Clean up the terminal on exit.
     restore_tty(enable_enhanced_keys, enable_mouse);
@@ -1098,6 +1215,17 @@ fn main() {
         return;
     }
 
+    let initial_room = if let Some(uri) = &iamb.uri {
+        MatrixUri::parse(uri)
+            .map(|uri| (uri.id().clone(), uri.via().to_owned()))
+            .or_else(|_| {
+                MatrixToUri::parse(uri).map(|uri| (uri.id().clone(), uri.via().to_owned()))
+            })
+            .ok()
+    } else {
+        None
+    };
+
     // Load configuration and set up the Matrix SDK.
     let settings = ApplicationSettings::load(iamb).unwrap_or_else(print_exit);
 
@@ -1120,7 +1248,7 @@ fn main() {
         .build()
         .unwrap();
 
-    if let Err(err) = rt.block_on(async move { run(settings).await }) {
+    if let Err(err) = rt.block_on(async move { run(settings, initial_room).await }) {
         eprintln!("\n{err}\n");
         process::exit(2);
     }

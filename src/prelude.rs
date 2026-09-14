@@ -20,8 +20,11 @@ pub use matrix_sdk::ruma::events::room::message::{
     RoomMessageEventContent,
 };
 pub use matrix_sdk::ruma::events::tag::{TagName, Tags};
+pub use matrix_sdk::ruma::matrix_uri::MatrixId;
 pub use matrix_sdk::ruma::{
     EventId,
+    MatrixToUri,
+    MatrixUri,
     MilliSecondsSinceUnixEpoch,
     OwnedEventId,
     OwnedRoomAliasId,
