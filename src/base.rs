@@ -110,6 +110,9 @@ pub enum MessageAction {
     /// when it is `true`.
     React(String, bool),
 
+    /// Jump to a loaded message in the scrollback.
+    Jump(OwnedEventId),
+
     /// Pin a message to the room.
     Pin,
 
@@ -494,6 +497,9 @@ pub enum RoomAction {
 
     /// Open the members window.
     Members(Box<CommandContext>),
+
+    /// Open the pinned messages window.
+    Pinned(Box<CommandContext>),
 
     /// Set whether a room is a direct message.
     SetDirect(bool),
@@ -1148,6 +1154,9 @@ pub struct RoomInfo {
 
     /// The room's pinned events, mirrored from the SDK's room state for rendering.
     pub pinned_events: Vec<OwnedEventId>,
+
+    /// Pinned events fetched for the `:pinned` window that aren't in the loaded scrollback.
+    pub pinned_previews: HashMap<OwnedEventId, Message>,
 }
 
 impl Default for RoomInfo {
@@ -1170,6 +1179,7 @@ impl Default for RoomInfo {
             display_names: Default::default(),
             draw_last: Default::default(),
             pinned_events: Default::default(),
+            pinned_previews: Default::default(),
             unloaded_edits: Default::default(),
         }
     }
@@ -1225,6 +1235,30 @@ impl RoomInfo {
     /// Whether a message is pinned to the room.
     pub fn is_pinned(&self, event_id: &EventId) -> bool {
         self.pinned_events.iter().any(|id| id == event_id)
+    }
+
+    /// Get a pinned message, from the scrollback if it's loaded or else from the fetched previews.
+    pub fn get_pinned(&self, event_id: &EventId) -> Option<&Message> {
+        self.get_event(event_id).or_else(|| self.pinned_previews.get(event_id))
+    }
+
+    /// Pinned events that still need to be fetched for the `:pinned` window.
+    pub fn missing_pinned(&self) -> Vec<OwnedEventId> {
+        self.pinned_events
+            .iter()
+            .filter(|id| self.get_pinned(id).is_none())
+            .cloned()
+            .collect()
+    }
+
+    /// Get where a loaded message lives, as its thread root and key.
+    pub fn get_message_location(
+        &self,
+        event_id: &EventId,
+    ) -> Option<(Option<&EventId>, &MessageKey)> {
+        let loc = self.keys.get(event_id)?;
+
+        Some((loc.to_thread_root(), loc.to_message_key()?))
     }
 
     /// Get the reactions and their counts for a message.
@@ -1808,6 +1842,7 @@ pub struct MessageNeed {
 #[derive(Default, Debug, PartialEq)]
 pub struct Need {
     pub members: bool,
+    pub pinned: bool,
     pub messages: Option<Vec<MessageNeed>>,
 }
 
@@ -1821,6 +1856,11 @@ impl RoomNeeds {
     /// Mark a room for needing to load members.
     pub fn need_members(&mut self, room_id: OwnedRoomId) {
         self.needs.entry(room_id).or_default().members = true;
+    }
+
+    /// Mark a room for needing to fetch its pinned events.
+    pub fn need_pinned(&mut self, room_id: OwnedRoomId) {
+        self.needs.entry(room_id).or_default().pinned = true;
     }
 
     /// Mark a room for needing to load messages.
@@ -1987,6 +2027,9 @@ pub enum IambId {
     /// The `:members` window for a given Matrix room.
     MemberList(OwnedRoomId),
 
+    /// The `:pinned` window for a given Matrix room.
+    PinnedList(OwnedRoomId),
+
     /// The `:rooms` window.
     RoomList,
 
@@ -2020,6 +2063,9 @@ impl Display for IambId {
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
+            },
+            IambId::PinnedList(room_id) => {
+                write!(f, "iamb://pinned/{room_id}")
             },
             IambId::DirectList => f.write_str("iamb://dms"),
             IambId::RoomList => f.write_str("iamb://rooms"),
@@ -2117,6 +2163,21 @@ impl Visitor<'_> for IambIdVisitor {
                 };
 
                 Ok(IambId::MemberList(room_id))
+            },
+            Some("pinned") => {
+                let Some(path) = url.path_segments() else {
+                    return Err(E::custom("Invalid pinned window URL"));
+                };
+
+                let &[room_id] = path.collect::<Vec<_>>().as_slice() else {
+                    return Err(E::custom("Invalid pinned window URL"));
+                };
+
+                let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
+                    return Err(E::custom("Invalid room identifier"));
+                };
+
+                Ok(IambId::PinnedList(room_id))
             },
             Some("dms") => {
                 if url.path() != "" {
@@ -2227,6 +2288,9 @@ pub enum IambBufferId {
     /// The `:members` window for a room.
     MemberList(OwnedRoomId),
 
+    /// The `:pinned` window for a room.
+    PinnedList(OwnedRoomId),
+
     /// The `:rooms` window.
     RoomList,
 
@@ -2257,6 +2321,7 @@ impl IambBufferId {
             IambBufferId::Room(room, thread, _) => IambId::Room(room.clone(), thread.clone()),
             IambBufferId::DirectList => IambId::DirectList,
             IambBufferId::MemberList(room) => IambId::MemberList(room.clone()),
+            IambBufferId::PinnedList(room) => IambId::PinnedList(room.clone()),
             IambBufferId::RoomList => IambId::RoomList,
             IambBufferId::SpaceList => IambId::SpaceList,
             IambBufferId::VerifyList => IambId::VerifyList,
@@ -2447,8 +2512,48 @@ pub mod tests {
 
         assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
             room_id,
-            Need { members: true, messages: Some(Vec::new()) }
+            Need {
+                members: true,
+                messages: Some(Vec::new()),
+                pinned: false
+            }
         )],);
+    }
+
+    #[test]
+    fn test_pinned_lookup() {
+        let mut info = mock_room();
+        let unloaded = owned_event_id!("$unloaded");
+
+        info.pinned_events = vec![MSG3_EVID.clone(), unloaded.clone()];
+
+        assert!(info.is_pinned(&MSG3_EVID));
+        assert!(!info.is_pinned(&MSG4_EVID));
+
+        // Loaded messages come from the scrollback, so only the unloaded one needs fetching.
+        assert!(info.get_pinned(&MSG3_EVID).is_some());
+        assert_eq!(info.missing_pinned(), vec![unloaded.clone()]);
+
+        info.pinned_previews.insert(unloaded.clone(), mock_message1());
+        assert!(info.get_pinned(&unloaded).is_some());
+        assert!(info.missing_pinned().is_empty());
+
+        let (thread, key) = info.get_message_location(&MSG3_EVID).unwrap();
+        assert_eq!(thread, None);
+        assert_eq!(key, &*MSG3_KEY);
+        assert!(info.get_message_location(&unloaded).is_none());
+    }
+
+    #[test]
+    fn test_pinned_window_id() {
+        let room_id = TEST_ROOM1_ID.clone();
+        let id = IambId::PinnedList(room_id.clone());
+        let url = format!("iamb://pinned/{room_id}");
+
+        assert_eq!(id.to_string(), url);
+
+        let parsed: IambId = serde_json::from_str(&format!("{url:?}")).unwrap();
+        assert_eq!(parsed, id);
     }
 
     #[test]

@@ -331,6 +331,17 @@ fn iamb_unreact(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_pinned(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = IambAction::Room(RoomAction::Pinned(ctx.clone().into()));
+    let step = CommandStep::Continue(open.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_pin(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -1080,6 +1091,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand { name: "pin".into(), aliases: vec![], f: iamb_pin });
     cmds.add_command(ProgramCommand {
+        name: "pinned".into(),
+        aliases: vec![],
+        f: iamb_pinned,
+    });
+    cmds.add_command(ProgramCommand {
         name: "redact".into(),
         aliases: vec![],
         f: iamb_redact,
@@ -1749,6 +1765,9 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("pin foo", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd("pinned foo", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
         let res = cmds.input_cmd("unpin foo", ctx.clone());

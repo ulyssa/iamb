@@ -163,6 +163,7 @@ async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id:
 enum Plan {
     Messages(OwnedRoomId, Option<String>, Vec<MessageNeed>),
     Members(OwnedRoomId),
+    Pinned(OwnedRoomId, Vec<OwnedEventId>),
 }
 
 async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
@@ -171,6 +172,13 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
     let mut plan = Vec::with_capacity(need_load.rooms() * 2);
 
     for (room_id, need) in std::mem::take(need_load).into_iter() {
+        if need.pinned {
+            let missing = rooms.get_or_default(room_id.clone()).missing_pinned();
+
+            if !missing.is_empty() {
+                plan.push(Plan::Pinned(room_id.to_owned(), missing));
+            }
+        }
         if let Some(message_need) = need.messages {
             let info = rooms.get_or_default(room_id.clone());
 
@@ -211,8 +219,52 @@ async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permit
             let mut locked = store.lock().await;
             members_insert(room_id, res, locked.deref_mut());
         },
+        Plan::Pinned(room_id, event_ids) => {
+            let msgs = pinned_load(client, &room_id, event_ids).await;
+            let mut locked = store.lock().await;
+            let info = locked.application.get_room_info(room_id);
+            info.pinned_previews.extend(msgs);
+        },
     }
     drop(permit);
+}
+
+async fn pinned_load(
+    client: &Client,
+    room_id: &RoomId,
+    event_ids: Vec<OwnedEventId>,
+) -> Vec<(OwnedEventId, Message)> {
+    let Some(room) = client.get_room(room_id) else {
+        return vec![];
+    };
+
+    let mut msgs = vec![];
+
+    for event_id in event_ids {
+        let ev = match room.load_or_fetch_event(&event_id, None).await {
+            Ok(ev) => ev,
+            Err(e) => {
+                warn!(?event_id, "failed to fetch pinned event: {e}");
+                continue;
+            },
+        };
+
+        let Ok(ev) = ev.into_raw().deserialize() else {
+            continue;
+        };
+
+        let msg = match ev.into_full_event(room_id.to_owned()) {
+            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(ev)) => ev.into(),
+            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(ev)) => ev.into(),
+            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => ev.into(),
+            AnyTimelineEvent::MessageLike(_) => continue,
+            AnyTimelineEvent::State(ev) => Message::from(AnySyncStateEvent::from(ev)),
+        };
+
+        msgs.push((event_id, msg));
+    }
+
+    msgs
 }
 
 async fn load_older_one(

@@ -229,6 +229,11 @@ impl MessageTimeStamp {
         Span::styled(time, BOLD_STYLE)
     }
 
+    /// A compact date and time, for places without a date separator line.
+    pub fn show_datetime(self) -> String {
+        self.as_datetime().format("%Y-%m-%d %H:%M").to_string()
+    }
+
     fn show_time(self) -> Span<'static> {
         let time = self.as_datetime().format("%T");
         let time = format!("  [{time}]");
