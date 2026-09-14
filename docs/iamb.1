@@ -5,7 +5,7 @@
 .\"
 .\" You can preview this file with:
 .\"     $ man ./docs/iamb.1
-.Dd Mar 24, 2024
+.Dd Sep 11, 2025
 .Dt IAMB 1
 .Os
 .Sh NAME
@@ -16,6 +16,7 @@
 .Op Fl hV
 .Op Fl P Ar profile
 .Op Fl C Ar dir
+.Op Ar URI
 .Sh DESCRIPTION
 .Nm
 is a client for the Matrix communication protocol.
@@ -46,6 +47,9 @@ Show the help text and quit.
 Show the current
 .Nm
 version and quit.
+.It Ar URI
+A matrix uri or matrix.to link to open on startup. Specified at
+.Lk https://spec.matrix.org/latest/appendices/#uris
 .El
 
 .Sh "GENERAL COMMANDS"

@@ -9,11 +9,13 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use gethostname::gethostname;
+use matrix_sdk::OwnedServerName;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::room::{Messages as MatrixMessages, MessagesOptions, RoomMember};
+use matrix_sdk::ruma::OwnedRoomAliasId;
 use matrix_sdk::ruma::api::client::filter::{
     FilterDefinition,
     LazyLoadOptions,
@@ -705,7 +707,8 @@ pub enum WorkerTask {
     Logout(String, ClientReply<IambResult<EditInfo>>),
     GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
     GetRoom(OwnedRoomId, ClientReply<IambResult<FetchedRoom>>),
-    JoinRoom(String, ClientReply<IambResult<OwnedRoomId>>),
+    ResolveAlias(OwnedRoomAliasId, ClientReply<IambResult<OwnedRoomId>>),
+    JoinRoom(String, Vec<OwnedServerName>, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     TypingNotice(OwnedRoomId),
@@ -739,9 +742,16 @@ impl Debug for WorkerTask {
                     .field(&format_args!("_"))
                     .finish()
             },
-            WorkerTask::JoinRoom(s, _) => {
+            WorkerTask::ResolveAlias(s, _) => {
+                f.debug_tuple("WorkerTask::ResolveAlias")
+                    .field(s)
+                    .field(&format_args!("_"))
+                    .finish()
+            },
+            WorkerTask::JoinRoom(s, via, _) => {
                 f.debug_tuple("WorkerTask::JoinRoom")
                     .field(s)
+                    .field(via)
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -915,10 +925,18 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn join_room(&self, name: String) -> IambResult<OwnedRoomId> {
+    pub fn resolve_alias(&self, alias_id: OwnedRoomAliasId) -> IambResult<OwnedRoomId> {
         let (reply, response) = oneshot();
 
-        self.tx.send(WorkerTask::JoinRoom(name, reply)).unwrap();
+        self.tx.send(WorkerTask::ResolveAlias(alias_id, reply)).unwrap();
+
+        return response.recv();
+    }
+
+    pub fn join_room(&self, name: String, via: Vec<OwnedServerName>) -> IambResult<OwnedRoomId> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::JoinRoom(name, via, reply)).unwrap();
 
         return response.recv();
     }
@@ -1012,9 +1030,13 @@ impl ClientWorker {
                 self.init(store).await;
                 reply.send(());
             },
-            WorkerTask::JoinRoom(room_id, reply) => {
+            WorkerTask::ResolveAlias(alias_id, reply) => {
                 assert!(self.initialized);
-                reply.send(self.join_room(room_id).await);
+                reply.send(self.resolve_alias(alias_id).await);
+            },
+            WorkerTask::JoinRoom(name, via, reply) => {
+                assert!(self.initialized);
+                reply.send(self.join_room(name, via).await);
             },
             WorkerTask::GetInviter(invited, reply) => {
                 assert!(self.initialized);
@@ -1483,7 +1505,11 @@ impl ClientWorker {
 
     async fn get_room(&mut self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
         if let Some(room) = self.client.get_room(&room_id) {
-            let name = room.cached_display_name().ok_or_else(|| IambError::UnknownRoom(room_id))?;
+            let name = if let Some(name) = room.cached_display_name() {
+                name
+            } else {
+                room.display_name().await.map_err(IambError::from)?
+            };
             let tags = room.tags().await.map_err(IambError::from)?;
 
             Ok((room, name, tags))
@@ -1492,9 +1518,25 @@ impl ClientWorker {
         }
     }
 
-    async fn join_room(&mut self, name: String) -> IambResult<OwnedRoomId> {
+    async fn resolve_alias(&mut self, alias_id: OwnedRoomAliasId) -> IambResult<OwnedRoomId> {
+        match self.client.resolve_room_alias(&alias_id).await {
+            Ok(resp) => Ok(resp.room_id),
+            Err(e) => {
+                let msg = e.to_string();
+                let err = UIError::Failure(msg);
+
+                return Err(err);
+            },
+        }
+    }
+
+    async fn join_room(
+        &mut self,
+        name: String,
+        via: Vec<OwnedServerName>,
+    ) -> IambResult<OwnedRoomId> {
         if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
-            match self.client.join_room_by_id_or_alias(&alias_id, &[]).await {
+            match self.client.join_room_by_id_or_alias(&alias_id, &via).await {
                 Ok(resp) => Ok(resp.room_id().to_owned()),
                 Err(e) => {
                     let msg = e.to_string();

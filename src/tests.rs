@@ -1,8 +1,9 @@
 use std::iter::FromIterator as _;
 
 use lazy_static::lazy_static;
-use matrix_sdk::ruma::assign;
+use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
 use matrix_sdk::ruma::{UInt, event_id, server_name, user_id};
+use matrix_sdk::ruma::{assign, owned_room_alias_id};
 use serde_json::{Map, Value};
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -10,9 +11,8 @@ use crate::base::EventLocation;
 use crate::config::*;
 use crate::prelude::*;
 
-const TEST_ROOM1_ALIAS: &str = "#room1:example.com";
-
 lazy_static! {
+    pub static ref TEST_ROOM1_ALIAS: OwnedRoomAliasId = owned_room_alias_id!("#room1:example.com");
     pub static ref TEST_ROOM1_ID: OwnedRoomId =
         RoomId::new_v1(server_name!("example.com")).to_owned();
     pub static ref TEST_USER1: OwnedUserId = user_id!("@user1:example.com").to_owned();
@@ -134,6 +134,11 @@ pub fn mock_room() -> RoomInfo {
     room.name = Some("Watercooler Discussion".into());
     room.keys = mock_keys();
     *room.get_thread_mut(None) = mock_messages();
+
+    let user_id = TEST_USER2.clone();
+    let name = "User 2";
+    room.display_names.set(user_id.clone(), Some(name.to_string()), true);
+
     room
 }
 
@@ -248,7 +253,7 @@ pub async fn mock_store() -> ProgramStore {
     let info = mock_room();
 
     store.rooms.insert(room_id.clone(), info);
-    store.names.insert(TEST_ROOM1_ALIAS.to_string(), room_id);
+    store.names.insert(TEST_ROOM1_ALIAS.clone(), room_id);
 
     ProgramStore::new(store)
 }

@@ -67,7 +67,7 @@ impl SlashCommand {
                 MessageType::Text(msg)
             },
             SlashCommand::Markdown => {
-                let msg = text_to_message_content(input.to_string());
+                let msg = text_to_message_content(input.into());
                 MessageType::Text(msg)
             },
             SlashCommand::Confetti => {
@@ -170,17 +170,21 @@ fn text_to_html(input: &str) -> Option<String> {
     markdown_to_html(input, &options).into()
 }
 
-fn text_to_message_content(input: String) -> TextMessageEventContent {
-    if let Some(html) = text_to_html(input.as_str()) {
+fn text_to_message_content(input: Cow<'_, str>) -> TextMessageEventContent {
+    if let Some(html) = text_to_html(&input) {
         TextMessageEventContent::html(input, html)
     } else {
         TextMessageEventContent::plain(input)
     }
 }
 
-pub fn text_to_message(input: String, default_markup: MarkupFormat) -> RoomMessageEventContent {
-    let (rest, slash) = parse_slash_command(input.as_str())
+pub fn text_to_message(
+    input: Cow<'_, str>,
+    default_markup: MarkupFormat,
+) -> RoomMessageEventContent {
+    let (rest, slash) = parse_slash_command(&input)
         .unwrap_or_else(|_| (&input, SlashCommand::from(default_markup)));
+
     let msg = slash
         .to_message(rest)
         .unwrap_or_else(|_| MessageType::Text(text_to_message_content(input)));
@@ -193,19 +197,13 @@ pub fn text_to_text_message_event_content(
     input: String,
     default_markup: MarkupFormat,
 ) -> Option<TextMessageEventContent> {
-    let (body, cmd) = parse_slash_command(&input)
+    let (rest, slash) = parse_slash_command(&input)
         .unwrap_or_else(|_| (&input, SlashCommand::from(default_markup)));
 
-    let content = match cmd {
-        SlashCommand::Html => TextMessageEventContent::html(body, body),
-        SlashCommand::Plaintext => TextMessageEventContent::plain(body),
-        SlashCommand::Markdown => {
-            if let Some(html) = text_to_html(body) {
-                TextMessageEventContent::html(body, html)
-            } else {
-                TextMessageEventContent::plain(body)
-            }
-        },
+    let content = match slash {
+        SlashCommand::Html => TextMessageEventContent::html(rest, rest),
+        SlashCommand::Plaintext => TextMessageEventContent::plain(rest),
+        SlashCommand::Markdown => text_to_message_content(rest.into()),
         _ => return None,
     };
 
