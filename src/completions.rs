@@ -697,26 +697,39 @@ fn complete_msgbar(
         .unwrap_or_else(EditRope::empty);
     let id = Cow::from(&id);
 
+    let mut bracket_cursor = cursor.clone();
+    bracket_cursor.left(1);
+    let bracket = text.get_char_at_cursor(&bracket_cursor);
+    let has_bracket = bracket.is_some_and(|c| c == '[');
+
     let info = store.rooms.get_or_default(room_id.to_owned());
 
     match id.chars().next() {
         // Complete room aliases.
         Some('#') => {
+            if has_bracket {
+                *cursor = bracket_cursor;
+            }
+
             store
                 .names
                 .complete(id.as_ref())
                 .into_iter()
-                .map(|i| format!("[{}]({})", i, i.matrix_to_uri()))
+                .map(|i| format!("[{}]", i))
                 .collect()
         },
 
         // Complete room identifiers.
         Some('!') => {
+            if has_bracket {
+                *cursor = bracket_cursor;
+            }
+
             store
                 .rooms
                 .complete(id.as_ref())
                 .into_iter()
-                .map(|i| format!("[{}]({})", i, i.matrix_to_uri()))
+                .map(|i| format!("[{}]", i))
                 .collect()
         },
 
@@ -729,7 +742,13 @@ fn complete_msgbar(
         },
 
         // Complete usernames for @ and empty strings.
-        Some('@') | None => info.display_names.complete_mention(&id),
+        Some('@') | None => {
+            if has_bracket {
+                *cursor = bracket_cursor;
+            }
+
+            info.display_names.complete_mention(&id)
+        },
 
         // Unknown sigil.
         Some(_) => return vec![],
@@ -785,22 +804,32 @@ pub mod tests {
         let mut store = store.application;
         let room_id = TEST_ROOM1_ID.clone();
 
+        // Complete Emoji shorthand:
         let text = EditRope::from("going for a walk :walk ");
         let mut cursor = Cursor::new(0, 22);
         let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
         assert_eq!(res, vec![":walking:", ":walking_man:", ":walking_woman:"]);
         assert_eq!(cursor, Cursor::new(0, 17));
 
+        // Complete user identifier:
         let text = EditRope::from("hello @user2 ");
         let mut cursor = Cursor::new(0, 12);
         let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
-        assert_eq!(res, vec!["[User 2](https://matrix.to/#/@user2:example.com)"]);
+        assert_eq!(res, vec!["[User 2][@user2:example.com]"]);
         assert_eq!(cursor, Cursor::new(0, 6));
 
+        // Complete room identifier:
         let text = EditRope::from("see #room ");
         let mut cursor = Cursor::new(0, 9);
         let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
-        assert_eq!(res, vec!["[#room1:example.com](https://matrix.to/#/%23room1:example.com)"]);
+        assert_eq!(res, vec!["[#room1:example.com]"]);
+        assert_eq!(cursor, Cursor::new(0, 4));
+
+        // Complete room identifier with bracket before `#`:
+        let text = EditRope::from("see [#room ");
+        let mut cursor = Cursor::new(0, 10);
+        let res = complete_msgbar(&text, &mut cursor, &mut store, &room_id);
+        assert_eq!(res, vec!["[#room1:example.com]"]);
         assert_eq!(cursor, Cursor::new(0, 4));
     }
 

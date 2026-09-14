@@ -1,7 +1,8 @@
 //! Code for converting composed messages into content to send to the homeserver.
+use std::sync::Arc;
 
-use comrak::markdown_to_html;
-use comrak::options::Options;
+use comrak::options::{BrokenLinkReference, Options};
+use comrak::{ResolvedReference, markdown_to_html};
 use matrix_sdk::ruma::events::room::message::{EmoteMessageEventContent, TextMessageEventContent};
 use nom::branch::alt;
 use nom::bytes::complete::tag;
@@ -11,6 +12,23 @@ use nom::{IResult, Parser as _};
 
 use crate::config::MarkupFormat;
 use crate::prelude::*;
+
+fn broken_link_handler(link: BrokenLinkReference<'_>) -> Option<ResolvedReference> {
+    let uri = if let Ok(user_id) = OwnedUserId::from_str(link.normalized) {
+        user_id.matrix_to_uri()
+    } else if let Ok(room_id) = OwnedRoomAliasId::from_str(link.normalized) {
+        room_id.matrix_to_uri()
+    } else if let Ok(room_id) = OwnedRoomId::from_str(link.normalized) {
+        room_id.matrix_to_uri()
+    } else {
+        return None;
+    };
+
+    Some(ResolvedReference {
+        url: uri.to_string(),
+        title: link.normalized.to_string(),
+    })
+}
 
 #[derive(Clone, Debug, Default)]
 enum SlashCommand {
@@ -166,6 +184,7 @@ fn text_to_html(input: &str) -> Option<String> {
     options.extension.autolink = true;
     options.extension.shortcodes = true;
     options.extension.strikethrough = true;
+    options.parse.broken_link_callback = Some(Arc::new(broken_link_handler));
     options.render.hardbreaks = true;
     markdown_to_html(input, &options).into()
 }
@@ -238,6 +257,63 @@ pub mod tests {
         assert_eq!(
             content.formatted.unwrap().body,
             "<p>See docs (they're at <a href=\"https://iamb.chat\">https://iamb.chat</a>)</p>\n"
+        );
+    }
+
+    #[test]
+    fn test_markdown_link_alias() {
+        let input = "[#room1:example.com]\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p><a href=\"https://matrix.to/#/%23room1:example.com\" title=\"#room1:example.com\">#room1:example.com</a></p>\n"
+        );
+
+        let input = "See [other room][#room1:example.com]\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p>See <a href=\"https://matrix.to/#/%23room1:example.com\" title=\"#room1:example.com\">other room</a></p>\n"
+        );
+    }
+
+    #[test]
+    fn test_markdown_link_room() {
+        let input = "[!room1:example.com]\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p><a href=\"https://matrix.to/#/!room1:example.com\" title=\"!room1:example.com\">!room1:example.com</a></p>\n"
+        );
+
+        let input = "See [other room][!room1:example.com]\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p>See <a href=\"https://matrix.to/#/!room1:example.com\" title=\"!room1:example.com\">other room</a></p>\n"
+        );
+    }
+
+    #[test]
+    fn test_markdown_link_user() {
+        let input = "[@user1:example.com]\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p><a href=\"https://matrix.to/#/@user1:example.com\" title=\"@user1:example.com\">@user1:example.com</a></p>\n"
+        );
+
+        let input = "Talk to [Jane][@user1:example.com]\n";
+        let content = text_to_message_content(input.into());
+        assert_eq!(content.body, input);
+        assert_eq!(
+            content.formatted.unwrap().body,
+            "<p>Talk to <a href=\"https://matrix.to/#/@user1:example.com\" title=\"@user1:example.com\">Jane</a></p>\n"
         );
     }
 
