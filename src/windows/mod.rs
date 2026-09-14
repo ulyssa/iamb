@@ -1619,7 +1619,13 @@ impl ListItem<IambInfo> for PinnedItem {
         };
 
         let Some(msg) = info.get_pinned(&self.event_id) else {
-            return Span::styled("Loading pinned message...", style.fg(Color::Gray)).into();
+            let text = if info.pinned_unavailable(&self.event_id) {
+                "Unable to load message"
+            } else {
+                "Loading pinned message..."
+            };
+
+            return Span::styled(text, style.fg(Color::Gray)).into();
         };
 
         let sender = settings.get_user_span(&msg.sender, info);

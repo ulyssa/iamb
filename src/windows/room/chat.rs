@@ -179,6 +179,9 @@ impl ChatState {
         {
             // The whole history is loaded without it, or it's too far back to find.
             self.pending_jump = None;
+
+            let msg = "Unable to jump to message: it's too far back in the room's history";
+            store.application.draw_error = Some(msg.into());
         }
     }
 

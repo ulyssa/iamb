@@ -1157,6 +1157,9 @@ pub struct RoomInfo {
 
     /// Pinned events fetched for the `:pinned` window that aren't in the loaded scrollback.
     pub pinned_previews: HashMap<OwnedEventId, Message>,
+
+    /// How many times fetching each pinned event for the `:pinned` window has failed.
+    pub pinned_failures: HashMap<OwnedEventId, u8>,
 }
 
 impl Default for RoomInfo {
@@ -1180,6 +1183,7 @@ impl Default for RoomInfo {
             draw_last: Default::default(),
             pinned_events: Default::default(),
             pinned_previews: Default::default(),
+            pinned_failures: Default::default(),
             unloaded_edits: Default::default(),
         }
     }
@@ -1242,11 +1246,32 @@ impl RoomInfo {
         self.get_event(event_id).or_else(|| self.pinned_previews.get(event_id))
     }
 
+    /// Whether fetching a pinned event has failed too many times to keep retrying.
+    pub fn pinned_unavailable(&self, event_id: &EventId) -> bool {
+        self.pinned_failures
+            .get(event_id)
+            .is_some_and(|failures| *failures >= PINNED_FETCH_ATTEMPTS)
+    }
+
+    /// Record the result of fetching a pinned event for the `:pinned` window.
+    pub fn insert_pinned(&mut self, event_id: OwnedEventId, msg: Option<Message>) {
+        match msg {
+            Some(msg) => {
+                self.pinned_failures.remove(&event_id);
+                self.pinned_previews.insert(event_id, msg);
+            },
+            None => {
+                let failures = self.pinned_failures.entry(event_id).or_default();
+                *failures = failures.saturating_add(1);
+            },
+        }
+    }
+
     /// Pinned events that still need to be fetched for the `:pinned` window.
     pub fn missing_pinned(&self) -> Vec<OwnedEventId> {
         self.pinned_events
             .iter()
-            .filter(|id| self.get_pinned(id).is_none())
+            .filter(|id| self.get_pinned(id).is_none() && !self.pinned_unavailable(id))
             .cloned()
             .collect()
     }
@@ -1832,6 +1857,9 @@ impl SyncInfo {
 
 static MESSAGE_NEED_TTL: u8 = 30;
 
+/// How many failed fetches of a pinned event before the `:pinned` window stops retrying.
+const PINNED_FETCH_ATTEMPTS: u8 = 10;
+
 #[derive(Debug, PartialEq)]
 /// Load messages until the event is loaded or `ttl` loads are exceeded
 pub struct MessageNeed {
@@ -1941,6 +1969,9 @@ pub struct ChatStore {
     /// Whether to ring the terminal bell on the next redraw.
     pub ring_bell: bool,
 
+    /// An error raised while drawing, shown in the message bar on the next redraw.
+    pub draw_error: Option<String>,
+
     /// Whether the application is currently focused
     pub focused: bool,
 
@@ -1972,6 +2003,7 @@ impl ChatStore {
             sync_info: Default::default(),
             draw_curr: None,
             ring_bell: false,
+            draw_error: None,
             focused: true,
             open_notifications: Default::default(),
         }
@@ -2534,8 +2566,22 @@ pub mod tests {
         assert!(info.get_pinned(&MSG3_EVID).is_some());
         assert_eq!(info.missing_pinned(), vec![unloaded.clone()]);
 
-        info.pinned_previews.insert(unloaded.clone(), mock_message1());
+        info.insert_pinned(unloaded.clone(), mock_message1().into());
         assert!(info.get_pinned(&unloaded).is_some());
+        assert!(info.missing_pinned().is_empty());
+
+        // Failed fetches are retried until they hit the limit.
+        let broken = owned_event_id!("$broken");
+        info.pinned_events.push(broken.clone());
+
+        for _ in 1..PINNED_FETCH_ATTEMPTS {
+            info.insert_pinned(broken.clone(), None);
+        }
+        assert!(!info.pinned_unavailable(&broken));
+        assert_eq!(info.missing_pinned(), vec![broken.clone()]);
+
+        info.insert_pinned(broken.clone(), None);
+        assert!(info.pinned_unavailable(&broken));
         assert!(info.missing_pinned().is_empty());
 
         let (thread, key) = info.get_message_location(&MSG3_EVID).unwrap();

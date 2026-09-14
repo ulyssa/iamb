@@ -223,7 +223,10 @@ async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permit
             let msgs = pinned_load(client, &room_id, event_ids).await;
             let mut locked = store.lock().await;
             let info = locked.application.get_room_info(room_id);
-            info.pinned_previews.extend(msgs);
+
+            for (event_id, msg) in msgs {
+                info.insert_pinned(event_id, msg);
+            }
         },
     }
     drop(permit);
@@ -233,7 +236,7 @@ async fn pinned_load(
     client: &Client,
     room_id: &RoomId,
     event_ids: Vec<OwnedEventId>,
-) -> Vec<(OwnedEventId, Message)> {
+) -> Vec<(OwnedEventId, Option<Message>)> {
     let Some(room) = client.get_room(room_id) else {
         return vec![];
     };
@@ -241,30 +244,35 @@ async fn pinned_load(
     let mut msgs = vec![];
 
     for event_id in event_ids {
-        let ev = match room.load_or_fetch_event(&event_id, None).await {
-            Ok(ev) => ev,
-            Err(e) => {
-                warn!(?event_id, "failed to fetch pinned event: {e}");
-                continue;
-            },
-        };
-
-        let Ok(ev) = ev.into_raw().deserialize() else {
-            continue;
-        };
-
-        let msg = match ev.into_full_event(room_id.to_owned()) {
-            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(ev)) => ev.into(),
-            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(ev)) => ev.into(),
-            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => ev.into(),
-            AnyTimelineEvent::MessageLike(_) => continue,
-            AnyTimelineEvent::State(ev) => Message::from(AnySyncStateEvent::from(ev)),
-        };
-
+        let msg = pinned_load_one(&room, room_id, &event_id).await;
         msgs.push((event_id, msg));
     }
 
     msgs
+}
+
+async fn pinned_load_one(
+    room: &MatrixRoom,
+    room_id: &RoomId,
+    event_id: &EventId,
+) -> Option<Message> {
+    let ev = match room.load_or_fetch_event(event_id, None).await {
+        Ok(ev) => ev,
+        Err(e) => {
+            warn!(?event_id, "failed to fetch pinned event: {e}");
+            return None;
+        },
+    };
+
+    let msg = match ev.into_raw().deserialize().ok()?.into_full_event(room_id.to_owned()) {
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(ev)) => ev.into(),
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(ev)) => ev.into(),
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => ev.into(),
+        AnyTimelineEvent::MessageLike(_) => return None,
+        AnyTimelineEvent::State(ev) => Message::from(AnySyncStateEvent::from(ev)),
+    };
+
+    Some(msg)
 }
 
 async fn load_older_one(
