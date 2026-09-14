@@ -30,6 +30,7 @@ pub use matrix_sdk::ruma::{
     OwnedRoomAliasId,
     OwnedRoomId,
     OwnedRoomOrAliasId,
+    OwnedServerName,
     OwnedUserId,
     RoomId,
     UserId,

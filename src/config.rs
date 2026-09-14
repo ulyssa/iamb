@@ -8,11 +8,12 @@ use std::io::{BufReader, BufWriter, Write as _};
 use std::process;
 
 use clap::Parser;
+use lazy_static::lazy_static;
 use matrix_sdk::EncryptionState;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
-use matrix_sdk::ruma::OwnedDeviceId;
+use matrix_sdk::ruma::{OwnedDeviceId, owned_server_name};
 use modalkit::crossterm;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
@@ -32,6 +33,10 @@ macro_rules! usage {
         println!($($args)*);
         process::exit(2);
     }
+}
+
+lazy_static! {
+    pub static ref DEFAULT_VIA_SERVER: OwnedServerName = owned_server_name!("matrix.org");
 }
 
 const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
@@ -855,6 +860,7 @@ pub struct TunableValues {
     pub message_user_color: bool,
     pub default_register: Option<Register>,
     pub default_room: Option<String>,
+    pub default_via: Vec<OwnedServerName>,
     pub open_command: Option<Vec<String>>,
     pub mouse: Mouse,
     pub notifications: Notifications,
@@ -910,6 +916,7 @@ pub struct Tunables {
     #[serde(default, deserialize_with = "deserialize_register")]
     pub default_register: Option<Register>,
     pub default_room: Option<String>,
+    pub default_via: Option<Vec<OwnedServerName>>,
     pub open_command: Option<Vec<String>>,
     pub mouse: Option<Mouse>,
     pub notifications: Option<Notifications>,
@@ -960,6 +967,7 @@ impl Tunables {
             message_user_color: self.message_user_color.or(other.message_user_color),
             default_register: self.default_register.or(other.default_register),
             default_room: self.default_room.or(other.default_room),
+            default_via: self.default_via.or(other.default_via),
             open_command: self.open_command.or(other.open_command),
             mouse: self.mouse.or(other.mouse),
             notifications: self.notifications.or(other.notifications),
@@ -1004,6 +1012,7 @@ impl Tunables {
             message_user_color: self.message_user_color.unwrap_or(false),
             default_register: self.default_register,
             default_room: self.default_room,
+            default_via: self.default_via.unwrap_or_else(|| vec![DEFAULT_VIA_SERVER.clone()]),
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),

@@ -81,16 +81,17 @@ fn config_tab_to_desc(
 ) -> IambResult<WindowLayoutDescription<IambInfo>> {
     let desc = match layout {
         config::WindowLayout::Window { window } => {
-            let ChatStore { names, worker, .. } = &mut store.application;
+            let ChatStore { names, worker, settings, .. } = &mut store.application;
+            let via = settings.tunables.default_via.clone();
 
             let window = match window {
                 config::WindowPath::UserId(user_id) => {
-                    let room_id = worker.join_room(user_id.to_string(), vec![])?;
+                    let room_id = worker.join_room(user_id.to_string(), via)?;
                     IambId::Room(room_id, None)
                 },
                 config::WindowPath::RoomId(room_id) => IambId::Room(room_id, None),
                 config::WindowPath::AliasId(alias) => {
-                    let room_id = worker.join_room(alias.to_string(), vec![])?;
+                    let room_id = worker.join_room(alias.to_string(), via)?;
                     names.insert(alias, room_id.clone());
                     IambId::Room(room_id, None)
                 },
