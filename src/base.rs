@@ -1637,59 +1637,6 @@ impl RoomInfo {
         }
     }
 
-    fn receipt_is_newer(&self, event_id: &EventId, old_event_id: &EventId) -> bool {
-        let Some(event_key) = self.receipt_key(event_id) else {
-            return false;
-        };
-        let Some(old_event_key) = self.receipt_key(old_event_id) else {
-            return false;
-        };
-
-        event_key > old_event_key
-    }
-
-    fn active_receipt_can_advance(
-        &self,
-        thread: &ReceiptThread,
-        user_id: &UserId,
-        event_id: &EventId,
-    ) -> bool {
-        if let Some(old_event_id) = self.active_receipts.get(thread) &&
-            !self.receipt_is_newer(event_id, old_event_id)
-        {
-            return false;
-        }
-
-        let received_receipt = |thread: &ReceiptThread| {
-            self.user_receipts.get(thread).and_then(|receipts| receipts.get(user_id))
-        };
-
-        match thread {
-            ReceiptThread::Main => {
-                for old_event_id in [
-                    received_receipt(&ReceiptThread::Main),
-                    received_receipt(&ReceiptThread::Unthreaded),
-                ]
-                .into_iter()
-                .flatten()
-                {
-                    if !self.receipt_is_newer(event_id, old_event_id) {
-                        return false;
-                    }
-                }
-            },
-            _ => {
-                if let Some(old_event_id) = received_receipt(thread) &&
-                    !self.receipt_is_newer(event_id, old_event_id)
-                {
-                    return false;
-                }
-            },
-        }
-
-        true
-    }
-
     fn set_implicit_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
         let (thread, event_key) = match self.keys.get(&event_id) {
             Some(EventLocation::Message(None, key)) | Some(EventLocation::State(key)) => {
@@ -1713,6 +1660,10 @@ impl RoomInfo {
         }
 
         self.set_receipt(thread, user_id, event_id);
+    }
+
+    pub fn set_active_receipt(&mut self, thread: ReceiptThread, event_id: OwnedEventId) {
+        self.active_receipts.insert(thread, event_id);
     }
 
     pub fn fully_read(&mut self, user_id: OwnedUserId, thread: ReceiptThread) {
@@ -1742,10 +1693,7 @@ impl RoomInfo {
             .next_back();
 
         if let Some(event_id) = event_id {
-            let event_id = event_id.to_owned();
-            if self.active_receipt_can_advance(&thread, &user_id, &event_id) {
-                self.active_receipts.insert(thread, event_id);
-            }
+            self.set_active_receipt(thread, event_id.to_owned());
         }
     }
 
@@ -1759,10 +1707,7 @@ impl RoomInfo {
         }
     }
 
-    pub fn receipts<'a>(
-        &'a self,
-        _user_id: &'a UserId,
-    ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
+    pub fn own_receipts(&self) -> impl Iterator<Item = (&ReceiptThread, &OwnedEventId)> {
         self.active_receipts.iter()
     }
 
@@ -2564,7 +2509,7 @@ pub mod tests {
         let mut info = RoomInfo::default();
         info.set_receipt(ReceiptThread::Main, TEST_USER1.clone(), MSG3_EVID.clone());
 
-        assert!(info.receipts(&TEST_USER1).next().is_none());
+        assert!(info.own_receipts().next().is_none());
         assert_eq!(
             info.user_receipts
                 .get(&ReceiptThread::Main)
