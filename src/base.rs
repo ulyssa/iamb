@@ -1646,6 +1646,24 @@ impl RoomInfo {
         }
     }
 
+    fn latest_implicit_receipt(
+        &self,
+        thread: &ReceiptThread,
+        user_id: &UserId,
+    ) -> Option<OwnedEventId> {
+        let messages = match thread {
+            ReceiptThread::Main => &self.messages,
+            ReceiptThread::Thread(root) => self.threads.get(root)?,
+            _ => return None,
+        };
+
+        messages.iter().rev().find_map(|(_, message)| {
+            (message.sender == user_id)
+                .then(|| message.event.event_id().map(ToOwned::to_owned))
+                .flatten()
+        })
+    }
+
     fn set_implicit_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
         let thread = match self.keys.get(&event_id) {
             Some(EventLocation::Message(None, _)) | Some(EventLocation::State(_)) => {
@@ -1654,6 +1672,21 @@ impl RoomInfo {
             Some(EventLocation::Message(Some(root), _)) => ReceiptThread::Thread(root.clone()),
             _ => return,
         };
+
+        let resolved_users: Vec<_> = self
+            .user_receipts
+            .get(&thread)
+            .into_iter()
+            .flat_map(HashMap::iter)
+            .filter(|(_, receipt_event_id)| *receipt_event_id == &event_id)
+            .map(|(receipt_user, _)| receipt_user.clone())
+            .collect();
+
+        for receipt_user in resolved_users {
+            if let Some(latest_event_id) = self.latest_implicit_receipt(&thread, &receipt_user) {
+                self.set_receipt(thread.clone(), receipt_user, latest_event_id);
+            }
+        }
 
         if self
             .user_receipts
@@ -2548,6 +2581,32 @@ pub mod tests {
             MSG2_KEY.clone(),
         );
 
+        info.insert_message(older);
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+    }
+
+    #[test]
+    fn implicit_receipt_advances_after_explicit_event_loads() {
+        let mut info = RoomInfo::default();
+        info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG2_EVID.clone());
+        let newer = mock_room_message_event(
+            RoomMessageEventContent::text_plain("newer"),
+            TEST_USER2.clone(),
+            MSG5_KEY.clone(),
+        );
+        let older = mock_room_message_event(
+            RoomMessageEventContent::text_plain("older"),
+            TEST_USER2.clone(),
+            MSG2_KEY.clone(),
+        );
+
+        info.insert_message(newer);
         info.insert_message(older);
 
         assert_eq!(
