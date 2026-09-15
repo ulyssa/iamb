@@ -106,6 +106,9 @@ Request a new verification with the specified user.
 Download an attachment from the selected message and save it to the optional path.
 .It Sy ":open [path]"
 Download and then open an attachment, or open a link in a message.
+Location messages are instead handed to the system handler for their
+.Dq geo:
+URI, since they have no attachment that can be downloaded.
 .It Sy ":edit"
 Edit the selected message.
 .It Sy ":editor"
