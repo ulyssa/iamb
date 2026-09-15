@@ -46,6 +46,7 @@ html5ever = "0.39.0"
 http-serde = "2.1.1"
 humansize = "2.0.0"
 image = {version = "0.25.6", features = ["serde"], default-features = false}
+indexmap = "2.14.2"
 lazy_static = "1.4.0"
 libc = "0.2"
 linkify = "0.11.0"
