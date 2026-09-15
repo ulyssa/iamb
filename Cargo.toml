@@ -36,10 +36,10 @@ chrono = "0.4"
 clap = {version = "^4.6", features = ["derive"]}
 clap_complete = "^4.6"
 css-color-parser = "0.1.2"
-dirs = "6.0"
+dirs = "7.0"
 edit = "0.1.4"
-emojis = "0.8"
-feruca = "0.11"
+emojis = "0.9"
+feruca = "0.12"
 futures = "0.3"
 gethostname = "1.1"
 html5ever = "0.39.0"
@@ -73,7 +73,7 @@ unicode-width = "0.2"
 url = {version = "2.2.2", features = ["serde"]}
 
 [dependencies.comrak]
-version = "0.52.0"
+version = "0.55.0"
 default-features = false
 features = ["shortcodes"]
 
