@@ -2569,6 +2569,7 @@ dependencies = [
  "temp-dir",
  "thiserror 2.0.20",
  "tokio",
+ "tokio-stream",
  "toml",
  "tracing",
  "tracing-appender",
