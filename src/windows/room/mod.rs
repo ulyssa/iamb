@@ -233,15 +233,13 @@ pub async fn room_command(
             room.set_unread_flag(is_unread).await.map_err(IambError::from)?;
 
             if !is_unread {
-                let user_id = store.application.settings.profile.user_id.clone();
                 let info = store.application.get_room_info(id.to_owned());
                 let messages = info.get_thread(None).expect("room main timeline doesn't exist");
                 if let Some((key, _)) = messages.last_key_value() &&
                     let Some(event_id) = key.id.as_origin()
                 {
-                    info.set_receipt(
+                    info.set_active_receipt(
                         matrix_sdk::ruma::events::receipt::ReceiptThread::Main,
-                        user_id,
                         event_id.to_owned(),
                     );
                 }
