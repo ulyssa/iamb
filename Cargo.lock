@@ -2566,6 +2566,8 @@ dependencies = [
  "serde_json",
  "shellexpand",
  "sled",
+ "strum",
+ "strum_macros",
  "temp-dir",
  "thiserror 2.0.20",
  "tokio",
