@@ -936,7 +936,11 @@ fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let sact = SendAction::Upload(args.remove(0), None);
+    let path = args.remove(0);
+    let expanded_path =
+        shellexpand::full(&path).map_err(|e| CommandError::ParseFailed(e.to_string()))?;
+
+    let sact = SendAction::Upload(expanded_path.into_owned(), None);
     let iact = IambAction::from(sact);
     let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
