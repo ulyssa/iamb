@@ -435,6 +435,17 @@ fn iamb_mentions(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult 
     return Ok(step);
 }
 
+fn iamb_invites(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = ctx.switch(OpenTarget::Application(IambId::InvitesList));
+    let step = CommandStep::Continue(open, ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_self(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut iter = desc.arg.strings()?.into_iter();
     let field = iter.next().ok_or(CommandError::InvalidArgument)?;
@@ -1096,6 +1107,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "mentions".into(),
         aliases: vec![],
         f: iamb_mentions,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "invites".into(),
+        aliases: vec![],
+        f: iamb_invites,
     });
     cmds.add_command(ProgramCommand { name: "self".into(), aliases: vec![], f: iamb_self });
     cmds.add_command(ProgramCommand {
