@@ -579,6 +579,8 @@ fn complete_cmdarg(
 
         "logout" => complete_iamb_logout(args, store),
 
+        "pin" | "pinned" | "unpin" => vec![],
+
         "react" if args.len() == 1 => complete_emoji(&args[0], store),
         "react" => vec![],
 
@@ -775,6 +777,7 @@ impl Completer<IambInfo> for IambCompleter {
 
             IambBufferId::DirectList => vec![],
             IambBufferId::MemberList(_) => vec![],
+            IambBufferId::PinnedList(_) => vec![],
             IambBufferId::RoomList => vec![],
             IambBufferId::SpaceList => vec![],
             IambBufferId::VerifyList => vec![],

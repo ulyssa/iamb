@@ -119,6 +119,10 @@ Remove your reaction from the selected message.
 When no arguments are given, remove all of your reactions from the message.
 .It Sy ":redact [reason]"
 Redact the selected message with the optional reason.
+.It Sy ":pin"
+Pin the selected message to the room.
+.It Sy ":unpin"
+Unpin the selected message from the room.
 .It Sy ":reply"
 Reply to the selected message.
 .It Sy ":cancel"
@@ -162,6 +166,9 @@ Send an invitation to a user to join the currently focused room with an optional
 Leave the currently focused room.
 .It Sy ":members"
 View a list of members of the currently focused room.
+.It Sy ":pinned"
+View a list of pinned messages in the currently focused room.
+Select a message to jump to it in the room.
 .It Sy ":room access set [rule]"
 Set the join rules for the room to control who can access it.
 Possible values for the
