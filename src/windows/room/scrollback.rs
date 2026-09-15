@@ -1481,7 +1481,13 @@ impl StatefulWidget for Scrollback<'_> {
             .read_receipt_trigger
             .on_render(state.cursor.timestamp.is_none(), self.room_focused)
         {
-            info.fully_read(settings.profile.user_id.clone(), thread.1.clone());
+            info.fully_read(
+                state.room_id.clone(),
+                thread.1.clone(),
+                &self.store.application.worker,
+                settings,
+                &mut self.store.application.open_notifications,
+            );
         }
 
         // Check whether we should load older messages for this room.
