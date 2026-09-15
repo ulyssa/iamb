@@ -5,6 +5,7 @@ use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use modalkit_ratatui::list::{List, ListState};
 
+use crate::base::RoomView;
 use crate::prelude::*;
 use crate::windows::{RoomItem, RoomLikeItem, room_fields_cmp};
 
@@ -21,7 +22,7 @@ pub struct SpaceState {
 impl SpaceState {
     pub fn new(room: MatrixRoom) -> Self {
         let room_id = room.room_id().to_owned();
-        let content = IambBufferId::Room(room_id.clone(), None, RoomFocus::Scrollback);
+        let content = IambBufferId::Room(room_id.clone(), RoomView::Main, RoomFocus::Scrollback);
         let list = ListState::new(content, vec![]);
         let last_fetch = None;
 

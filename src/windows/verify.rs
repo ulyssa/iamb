@@ -294,7 +294,11 @@ impl ListItem<IambInfo> for VerifyItem {
                 )]
             }
         } else {
-            let color = store.application.settings.get_user_color(self.request.other_user_id());
+            let color = store
+                .application
+                .settings
+                .tunables
+                .get_user_color(self.request.other_user_id());
             vec![
                 Span::styled("User verification with ", selected),
                 Span::styled(self.request.other_user_id().as_str(), selected_bold.patch(color)),

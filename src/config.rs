@@ -850,6 +850,7 @@ pub struct TunableValues {
     pub read_receipt_send: bool,
     pub read_receipt_trigger: ReadReceiptTrigger,
     pub read_receipt_display: bool,
+    pub message_time_display: bool,
     pub request_timeout: u64,
     pub sort: SortValues,
     pub state_event_display: bool,
@@ -874,6 +875,70 @@ pub struct TunableValues {
     pub default_split: SplitDirection,
     pub ssl_verify: bool,
     pub cache_policy: MediaRetentionPolicy,
+}
+
+impl TunableValues {
+    pub fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
+        let (color, c) = self
+            .users
+            .get(user_id)
+            .map(|user| {
+                (
+                    user.color.as_ref().map(|c| c.0),
+                    user.name.as_ref().and_then(|s| s.chars().next()),
+                )
+            })
+            .unwrap_or_default();
+
+        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
+        let style = user_style_from_color(color);
+
+        let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
+
+        Span::styled(String::from(c), style)
+    }
+
+    pub fn get_user_overrides(
+        &self,
+        user_id: &UserId,
+    ) -> (Option<Color>, Option<Cow<'static, str>>) {
+        self.users
+            .get(user_id)
+            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
+            .unwrap_or_default()
+    }
+
+    pub fn get_user_color(&self, user_id: &UserId) -> Color {
+        self.users
+            .get(user_id)
+            .and_then(|user| user.color.as_ref().map(|c| c.0))
+            .unwrap_or_else(|| user_color(user_id.as_str()))
+    }
+
+    pub fn get_user_style(&self, user_id: &UserId) -> Style {
+        user_style_from_color(self.get_user_color(user_id))
+    }
+
+    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
+        let (color, name) = self.get_user_overrides(user_id);
+
+        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
+        let style = user_style_from_color(color);
+        let name = match (name, &self.username_display) {
+            (Some(name), _) => name,
+            (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
+            (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
+            (None, UserDisplayStyle::DisplayName) => {
+                if let Some(name) = info.display_names.get(user_id) {
+                    name
+                } else {
+                    Cow::Borrowed(user_id.as_str())
+                }
+            },
+        };
+
+        Span::styled(name, style)
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -911,6 +976,7 @@ pub struct Tunables {
     pub state_event_display: Option<bool>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
+    pub message_time_display: Option<bool>,
     pub username_display: Option<UserDisplayStyle>,
     pub message_user_color: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_register")]
@@ -959,6 +1025,7 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_trigger: self.read_receipt_trigger.or(other.read_receipt_trigger),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
+            message_time_display: self.message_time_display.or(other.message_time_display),
             request_timeout: self.request_timeout.or(other.request_timeout),
             state_event_display: self.state_event_display.or(other.state_event_display),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
@@ -985,7 +1052,7 @@ impl Tunables {
         }
     }
 
-    fn values(self) -> TunableValues {
+    pub fn values(self) -> TunableValues {
         TunableValues {
             encryption: self.encryption.values(),
             proxy: self.proxy.unwrap_or_default().values(),
@@ -1004,6 +1071,7 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_trigger: self.read_receipt_trigger.unwrap_or_default(),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
+            message_time_display: self.message_time_display.unwrap_or(true),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             state_event_display: self.state_event_display.unwrap_or(true),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
@@ -1434,71 +1502,6 @@ impl ApplicationSettings {
         serde_json::to_writer(writer, &session).map_err(IambError::from)?;
         Ok(())
     }
-
-    pub fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
-        let (color, c) = self
-            .tunables
-            .users
-            .get(user_id)
-            .map(|user| {
-                (
-                    user.color.as_ref().map(|c| c.0),
-                    user.name.as_ref().and_then(|s| s.chars().next()),
-                )
-            })
-            .unwrap_or_default();
-
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
-
-        let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
-
-        Span::styled(String::from(c), style)
-    }
-
-    pub fn get_user_overrides(
-        &self,
-        user_id: &UserId,
-    ) -> (Option<Color>, Option<Cow<'static, str>>) {
-        self.tunables
-            .users
-            .get(user_id)
-            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
-            .unwrap_or_default()
-    }
-
-    pub fn get_user_color(&self, user_id: &UserId) -> Color {
-        self.tunables
-            .users
-            .get(user_id)
-            .and_then(|user| user.color.as_ref().map(|c| c.0))
-            .unwrap_or_else(|| user_color(user_id.as_str()))
-    }
-
-    pub fn get_user_style(&self, user_id: &UserId) -> Style {
-        user_style_from_color(self.get_user_color(user_id))
-    }
-
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
-        let (color, name) = self.get_user_overrides(user_id);
-
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
-        let name = match (name, &self.tunables.username_display) {
-            (Some(name), _) => name,
-            (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
-            (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
-            (None, UserDisplayStyle::DisplayName) => {
-                if let Some(name) = info.display_names.get(user_id) {
-                    name
-                } else {
-                    Cow::Borrowed(user_id.as_str())
-                }
-            },
-        };
-
-        Span::styled(name, style)
-    }
 }
 
 #[cfg(test)]
@@ -1509,14 +1512,14 @@ mod tests {
 
     use matrix_sdk::ruma::user_id;
 
-    use crate::tests::{TEST_USER1, mock_room, mock_settings};
+    use crate::tests::{TEST_USER1, mock_room, mock_tunables};
 
     #[test]
     fn test_get_user_span_borrowed() {
         // fix `StyleTreeNode::print` for `StyleTreeNode::UserId` if this breaks
         let info = mock_room();
-        let settings = mock_settings();
-        let span = settings.get_user_span(&TEST_USER1, &info);
+        let tunables = mock_tunables();
+        let span = tunables.get_user_span(&TEST_USER1, &info);
 
         assert!(matches!(span.content, Cow::Borrowed(_)));
     }

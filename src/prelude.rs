@@ -88,7 +88,7 @@ pub use crate::base::{
     SendAction,
     SpaceAction,
 };
-pub use crate::config::ApplicationSettings;
+pub use crate::config::{ApplicationSettings, TunableValues};
 pub use crate::message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages};
 pub use crate::preview::{PreviewKind, PreviewManager};
 pub use crate::worker::Requester;
