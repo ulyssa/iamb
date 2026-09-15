@@ -612,7 +612,7 @@ fn complete_cmdarg(
 
         // These have no arguments
         "cancel" | "chats" | "dms" | "editor" | "edit" | "forget" | "leave" | "members" |
-        "mentions" | "replied" | "reply" | "rooms" | "spaces" | "welcome" => vec![],
+        "mentions" | "replied" | "reply" | "rooms" | "scratch" | "spaces" | "welcome" => vec![],
 
         "abo" | "aboveleft" | "bel" | "belowright" | "hor" | "horizontal" | "lefta" |
         "leftabove" | "rightb" | "rightbelow" | "tab" | "vert" | "vertical" => {
@@ -773,6 +773,7 @@ impl Completer<IambInfo> for IambCompleter {
             },
             IambBufferId::Room(_, _, RoomFocus::Scrollback) => vec![],
 
+            IambBufferId::Scratch => vec![],
             IambBufferId::DirectList => vec![],
             IambBufferId::MemberList(_) => vec![],
             IambBufferId::RoomList => vec![],
