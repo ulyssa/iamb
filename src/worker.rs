@@ -12,9 +12,10 @@ use gethostname::gethostname;
 use matrix_sdk::OwnedServerName;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::config::{RequestConfig, SyncSettings};
+use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
-use matrix_sdk::room::{Messages as MatrixMessages, MessagesOptions, RoomMember};
+use matrix_sdk::room::RoomMember;
 use matrix_sdk::ruma::OwnedRoomAliasId;
 use matrix_sdk::ruma::api::client::filter::{
     FilterDefinition,
@@ -56,6 +57,7 @@ use matrix_sdk::ruma::events::{
     SyncMessageLikeEvent,
     SyncStateEvent,
 };
+use matrix_sdk::ruma::presence::PresenceState;
 use matrix_sdk::ruma::room::RoomType;
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
@@ -67,17 +69,19 @@ use matrix_sdk::{
     reqwest,
 };
 use matrix_sdk_base::RoomStateFilter;
+use modalkit::editing::completion::CompletionMap;
 use ratatui_image::picker::Picker;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
 use tracing::{Instrument as _, error, warn};
 
-use crate::base::{CreateRoomFlags, CreateRoomType, EchoLocation, MessageNeed, RoomFetchStatus};
+use crate::base::{CreateRoomFlags, CreateRoomType, EchoLocation, MessageNeed};
 use crate::config::ProxyUrl;
 use crate::message::MessageId;
 use crate::notifications::register_notifications;
 use crate::prelude::*;
+use crate::preview::{PreviewKind, PreviewManager};
 use crate::verifications;
 
 const DEFAULT_ENCRYPTION_SETTINGS: EncryptionSettings = EncryptionSettings {
@@ -88,9 +92,9 @@ const DEFAULT_ENCRYPTION_SETTINGS: EncryptionSettings = EncryptionSettings {
 
 const IAMB_DEVICE_NAME: &str = "iamb";
 const IAMB_USER_AGENT: &str = "iamb";
-const MIN_MSG_LOAD: u32 = 50;
+const MIN_MSG_LOAD: u16 = 50;
 
-type MessageFetchResult = IambResult<(Option<String>, Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>)>;
+type MessageFetchResult = IambResult<(bool, Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>)>;
 
 fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
@@ -162,7 +166,7 @@ async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id:
 
 #[derive(Debug)]
 enum Plan {
-    Messages(OwnedRoomId, Option<String>, Vec<MessageNeed>),
+    Messages(OwnedRoomId, Vec<MessageNeed>),
     Members(OwnedRoomId),
 }
 
@@ -179,13 +183,11 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
                 info.fetch_last = Instant::now().into();
                 info.fetching = true;
 
-                let fetch_id = match &info.fetch_id {
-                    RoomFetchStatus::Done => continue,
-                    RoomFetchStatus::HaveMore(fetch_id) => Some(fetch_id.clone()),
-                    RoomFetchStatus::NotStarted => None,
-                };
+                if info.reached_timeline_start {
+                    continue;
+                }
 
-                plan.push(Plan::Messages(room_id.to_owned(), fetch_id, message_need));
+                plan.push(Plan::Messages(room_id.to_owned(), message_need));
             }
         }
         if need.members {
@@ -196,14 +198,21 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
     return plan;
 }
 
-async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permits: &Semaphore) {
-    let permit = permits.acquire().await;
+async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan) {
     match plan {
-        Plan::Messages(room_id, fetch_id, message_need) => {
-            let limit = MIN_MSG_LOAD;
-            let client = client.clone();
+        Plan::Messages(room_id, message_need) => {
+            let Some(room) = client.get_room(&room_id) else {
+                warn!(room_id = room_id.as_str(), "Room not found in cache");
+                store
+                    .lock()
+                    .await
+                    .application
+                    .need_load
+                    .need_messages_all(room_id, message_need);
+                return;
+            };
 
-            let res = load_older_one(&client, &room_id, fetch_id, limit).await;
+            let res = load_older_one(&room).await;
             let mut locked = store.lock().await;
             load_insert(room_id, res, locked.deref_mut(), message_need);
         },
@@ -213,54 +222,137 @@ async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permit
             members_insert(room_id, res, locked.deref_mut());
         },
     }
-    drop(permit);
 }
 
-async fn load_older_one(
-    client: &Client,
-    room_id: &RoomId,
-    fetch_id: Option<String>,
-    limit: u32,
-) -> MessageFetchResult {
-    if let Some(room) = client.get_room(room_id) {
-        // Update cached encryption state. This is a noop if the state is already cached.
-        let _ = room.request_encryption_state().await;
+async fn get_receipts_for_timeline_events(
+    room: &MatrixRoom,
+    events: Vec<TimelineEvent>,
+) -> Vec<(AnyTimelineEvent, Vec<OwnedUserId>)> {
+    let mut msgs = vec![];
 
-        let mut opts = match &fetch_id {
-            Some(id) => MessagesOptions::backward().from(id.as_str()),
-            None => MessagesOptions::backward(),
-        };
-        opts.limit = limit.into();
-
-        let MatrixMessages { end, chunk, .. } =
-            room.messages(opts).await.map_err(IambError::from)?;
-
-        let mut msgs = vec![];
-
-        for ev in chunk.into_iter() {
-            let Ok(msg) = ev.into_raw().deserialize() else {
+    for ev in events.into_iter() {
+        let event_id = ev.event_id();
+        let msg = match ev.kind {
+            TimelineEventKind::Decrypted(event) => {
+                match event.event.deserialize() {
+                    Ok(event) => event,
+                    Err(err) => {
+                        warn!(
+                            err = %err,
+                            room_id = room.room_id().as_str(),
+                            ?event_id,
+                            "Failed to deserialize event"
+                        );
+                        continue;
+                    },
+                }
+            },
+            TimelineEventKind::UnableToDecrypt { utd_info, .. } => {
+                warn!(
+                    ?utd_info,
+                    room_id = room.room_id().as_str(),
+                    ?event_id,
+                    "Failed to decrypt event"
+                );
                 continue;
-            };
+            },
+            TimelineEventKind::PlainText { event } => {
+                let event = match event.deserialize() {
+                    Ok(event) => event,
+                    Err(err) => {
+                        warn!(
+                            err = %err,
+                            room_id = room.room_id().as_str(),
+                            ?event_id,
+                            "Failed to deserialize event"
+                        );
+                        continue;
+                    },
+                };
+                event.into_full_event(room.room_id().to_owned())
+            },
+        };
 
-            let event_id = msg.event_id();
-            let receipts = match room
-                .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
-                .await
-            {
-                Ok(receipts) => receipts.into_iter().map(|(u, _)| u).collect(),
-                Err(e) => {
-                    tracing::warn!(?event_id, "failed to get event receipts: {e}");
-                    vec![]
-                },
-            };
+        let event_id = msg.event_id();
+        let receipts = match room
+            .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
+            .await
+        {
+            Ok(receipts) => receipts.into_iter().map(|(u, _)| u).collect(),
+            Err(e) => {
+                tracing::warn!(?event_id, "failed to get event receipts: {e}");
+                vec![]
+            },
+        };
 
-            let msg = msg.into_full_event(room_id.to_owned());
-            msgs.push((msg, receipts));
+        msgs.push((msg, receipts));
+    }
+
+    msgs
+}
+
+async fn load_older_one(room: &MatrixRoom) -> MessageFetchResult {
+    // Update cached encryption state. This is a noop if the state is already cached.
+    let _ = room.request_encryption_state().await;
+
+    let (cache, _drop_handle) = room.event_cache().await.map_err(IambError::from)?;
+
+    let outcome = cache
+        .pagination()
+        .run_backwards_until(MIN_MSG_LOAD)
+        .await
+        .map_err(IambError::from)?;
+
+    let msgs = get_receipts_for_timeline_events(room, outcome.events).await;
+
+    Ok((outcome.reached_start, msgs))
+}
+
+fn insert_msgs_and_receipts(
+    msgs: Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>,
+    info: &mut RoomInfo,
+    presences: &mut CompletionMap<OwnedUserId, PresenceState>,
+    previews: &mut PreviewManager,
+    settings: &ApplicationSettings,
+) {
+    for (msg, receipts) in msgs {
+        let sender = msg.sender().to_owned();
+        let _ = presences.get_or_default(sender);
+
+        for user_id in receipts {
+            info.set_receipt(ReceiptThread::Main, user_id, msg.event_id().to_owned());
         }
 
-        Ok((end, msgs))
-    } else {
-        Err(IambError::UnknownRoom(room_id.to_owned()).into())
+        match msg {
+            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
+                info.insert_encrypted(msg);
+            },
+            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
+                info.insert_with_preview(msg, settings, previews);
+            },
+            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
+                info.insert_reaction_with_preview(ev, settings, previews);
+            },
+            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
+                info.insert_sticker_with_preview(ev, settings, previews);
+            },
+            AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomRedaction(..)) => {
+                // ignoring redaction events because we get them bundled with the redacted event
+            },
+            AnyTimelineEvent::MessageLike(ev) => {
+                tracing::trace!(
+                    event_id = ev.event_id().as_str(),
+                    "Ignoring unimplemented event type {}",
+                    ev.event_type()
+                );
+                continue;
+            },
+            AnyTimelineEvent::State(msg) => {
+                if settings.tunables.state_event_display {
+                    info.insert_any_state(msg.into());
+                }
+            },
+        }
     }
 }
 
@@ -275,40 +367,10 @@ fn load_insert(
     info.fetching = false;
 
     match res {
-        Ok((fetch_id, msgs)) => {
-            for (msg, receipts) in msgs.into_iter() {
-                let sender = msg.sender().to_owned();
-                let _ = presences.get_or_default(sender);
+        Ok((reached_start, msgs)) => {
+            insert_msgs_and_receipts(msgs, info, presences, previews, settings);
 
-                for user_id in receipts {
-                    info.set_receipt(ReceiptThread::Main, user_id, msg.event_id().to_owned());
-                }
-
-                match msg {
-                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
-                        info.insert_encrypted(msg);
-                    },
-                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
-                        info.insert_with_preview(msg, settings, previews);
-                    },
-                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
-                        info.insert_reaction_with_preview(ev, settings, previews);
-                    },
-                    AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
-                        info.insert_sticker_with_preview(ev, settings, previews);
-                    },
-                    AnyTimelineEvent::MessageLike(_) => {
-                        continue;
-                    },
-                    AnyTimelineEvent::State(msg) => {
-                        if settings.tunables.state_event_display {
-                            info.insert_any_state(msg.into());
-                        }
-                    },
-                }
-            }
-
-            info.fetch_id = fetch_id.map_or(RoomFetchStatus::Done, RoomFetchStatus::HaveMore);
+            info.reached_timeline_start = reached_start;
 
             // check if more are needed
             let needs: Vec<_> = message_needs
@@ -333,19 +395,11 @@ fn load_insert(
 }
 
 async fn load_older(client: &Client, store: &AsyncProgramStore) -> usize {
-    // This is an arbitrary limit on how much work we do in parallel to avoid
-    // spawning too many tasks at startup and overwhelming the client. We
-    // should normally only surpass this limit at startup when doing an initial.
-    // fetch for each room.
-    const LIMIT: usize = 15;
-
-    // Plans are run in parallel. Any room *may* have several plans.
     let plans = load_plans(store).await;
-    let permits = Semaphore::new(LIMIT);
 
     plans
         .into_iter()
-        .map(|plan| run_plan(client, store, plan, &permits))
+        .map(|plan| run_plan(client, store, plan))
         .collect::<FuturesUnordered<_>>()
         .count()
         .await
@@ -384,6 +438,73 @@ fn members_insert(
         }
     }
     // else ???
+}
+
+async fn load_initial_messages(client: Client, store: AsyncProgramStore) {
+    let rooms = client.joined_rooms();
+    let mut need_load = vec![];
+
+    // load initial cache
+    for room in rooms.iter().filter(|room| !room.is_space()) {
+        // we got the room id from the client and have subscribed to the event cache, so this should
+        // only error on IO errors.
+        let (cache, _) = room.event_cache().await.expect("failed to get room cache");
+
+        let events = match cache.events().await {
+            Ok(events) => events,
+            Err(e) => {
+                tracing::warn!(room_id = ?room.room_id(), "failed to load cached events: {e}");
+                continue;
+            },
+        };
+
+        if events.len() < MIN_MSG_LOAD as usize {
+            need_load.push(room);
+        }
+
+        let msgs = get_receipts_for_timeline_events(room, events).await;
+
+        let mut locked = store.lock().await;
+        let ChatStore { presences, rooms, previews, settings, .. } = &mut locked.application;
+        let info = rooms.get_or_default(room.room_id().to_owned());
+        insert_msgs_and_receipts(msgs, info, presences, previews, settings);
+    }
+
+    // This is an arbitrary limit on how much work we do in parallel to avoid
+    // spawning too many tasks at startup and overwhelming the client. We
+    // should normally only surpass this limit at startup when doing an initial.
+    // fetch for each room.
+    // const LIMIT: usize = 15;
+    const LIMIT: usize = 15;
+    let permits = Semaphore::new(LIMIT);
+
+    // paginate backwards to get more events in the rooms
+    need_load
+        .into_iter()
+        .map(|room| {
+            async {
+                let permit = permits.acquire().await;
+
+                let (reached_start, msgs) = match load_older_one(room).await {
+                    Ok(v) => v,
+                    Err(e) => {
+                        tracing::warn!(room_id = ?room.room_id(), "failed to paginate cached events: {e}");
+                        return;
+                    },
+                };
+
+                let mut locked = store.lock().await;
+                let ChatStore { presences, rooms, previews, settings, .. } =
+                    &mut locked.application;
+                let info = rooms.get_or_default(room.room_id().to_owned());
+                info.reached_timeline_start = reached_start;
+                insert_msgs_and_receipts(msgs, info, presences, previews, settings);
+                drop(permit);
+            }
+        })
+        .collect::<FuturesUnordered<_>>()
+        .count()
+        .await;
 }
 
 async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
@@ -652,19 +773,7 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
     // Populate sync_info with our initial set of rooms/dms/spaces.
     refresh_rooms(client, store, true).await;
 
-    // Insert Need::Messages to fetch accurate recent timestamps in the background.
-    let mut locked = store.lock().await;
-    let ChatStore { sync_info, need_load, .. } = &mut locked.application;
-
-    for room in sync_info.rooms.iter() {
-        let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.need_messages(room_id);
-    }
-
-    for room in sync_info.dms.iter() {
-        let room_id = room.as_ref().0.room_id().to_owned();
-        need_load.need_messages(room_id);
-    }
+    tokio::spawn(load_initial_messages(client.clone(), store.clone()));
 
     Ok(())
 }

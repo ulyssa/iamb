@@ -15,7 +15,6 @@ use modalkit_ratatui::ScrollActions;
 use ratatui_image::sliced::{SignedPosition, SlicedImage};
 use regex::Regex;
 
-use crate::base::RoomFetchStatus;
 use crate::message::MessageCursor;
 use crate::prelude::*;
 
@@ -198,12 +197,8 @@ impl ScrollbackState {
     }
 
     fn need_more_messages(&self, info: &RoomInfo) -> bool {
-        match info.fetch_id {
-            // Don't fetch if we've already hit the end of history.
-            RoomFetchStatus::Done => return false,
-            // Fetch at least once if we're viewing a room.
-            RoomFetchStatus::NotStarted => return true,
-            _ => {},
+        if info.reached_timeline_start {
+            return false;
         }
 
         let first_key = self.get_thread(info).and_then(|t| t.first_key_value()).map(|(k, _)| k);
