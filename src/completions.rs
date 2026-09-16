@@ -371,10 +371,12 @@ fn complete_iamb_verify(args: Vec<String>, store: &ChatStore) -> Vec<String> {
         "cancel",
         "missmatch",
         "emoji",
+        "recover",
     ];
     match args.len() {
         1 => complete_choices(&args[0], &subcmds),
         2 if args[0] == "request" => complete_users(&args[1], store),
+        2 if args[0] == "recover" => vec![],
         2 if subcmds.contains(&args[0].as_str()) => complete_verification(&args[1], store),
         _ => vec![],
     }

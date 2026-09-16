@@ -179,6 +179,19 @@ fn iamb_knock(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut args = desc.arg.strings()?;
 
+    // Recovery keys are displayed in space-separated groups, so rejoin any
+    // arguments that follow the subcommand to reconstruct the key.
+    if args.first().is_some_and(|arg| arg == "recover") {
+        if args.len() < 2 {
+            return Result::Err(CommandError::InvalidArgument);
+        }
+
+        let iact = IambAction::Recover(args[1..].join(" "));
+        let step = CommandStep::Continue(iact.into(), ctx.context.clone());
+
+        return Ok(step);
+    }
+
     match args.len() {
         0 => {
             let open = ctx.switch(OpenTarget::Application(IambId::VerifyList));
@@ -1202,6 +1215,17 @@ mod tests {
             .input_cmd(":verify confirm @user4:example.com/GOODDEV", ctx.clone())
             .unwrap();
         let act = IambAction::Verify(VerifyAction::Confirm, "@user4:example.com/GOODDEV".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":verify recover", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd(":verify recover SOMESINGLEKEY", ctx.clone()).unwrap();
+        let act = IambAction::Recover("SOMESINGLEKEY".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":verify recover AAAA BBBB CCCC", ctx.clone()).unwrap();
+        let act = IambAction::Recover("AAAA BBBB CCCC".into());
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd(":verify confirm", ctx.clone());
