@@ -2005,6 +2005,9 @@ pub enum IambId {
 
     /// The `:mentions` window.
     MentionsList,
+
+    /// The `:invites` window.
+    InvitesList,
 }
 
 impl Display for IambId {
@@ -2027,6 +2030,7 @@ impl Display for IambId {
             IambId::ChatList => f.write_str("iamb://chats"),
             IambId::UnreadList => f.write_str("iamb://unreads"),
             IambId::MentionsList => f.write_str("iamb://mentions"),
+            IambId::InvitesList => f.write_str("iamb://invites"),
         }
     }
 }
@@ -2172,6 +2176,13 @@ impl Visitor<'_> for IambIdVisitor {
 
                 Ok(IambId::MentionsList)
             },
+            Some("invites") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://invites takes no path"));
+                }
+
+                Ok(IambId::InvitesList)
+            },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
         }
@@ -2245,6 +2256,9 @@ pub enum IambBufferId {
 
     /// The `:mentions` window.
     MentionsList,
+
+    /// The `:invites` window.
+    InvitesList,
 }
 
 impl IambBufferId {
@@ -2262,6 +2276,7 @@ impl IambBufferId {
             IambBufferId::ChatList => IambId::ChatList,
             IambBufferId::UnreadList => IambId::UnreadList,
             IambBufferId::MentionsList => IambId::MentionsList,
+            IambBufferId::InvitesList => IambId::InvitesList,
         };
 
         Some(id)
