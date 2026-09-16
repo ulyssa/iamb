@@ -519,6 +519,17 @@ fn iamb_self(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_scratch(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = ctx.switch(OpenTarget::Application(IambId::Scratch));
+    let step = CommandStep::Continue(open, ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -1102,6 +1113,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_mentions,
     });
     cmds.add_command(ProgramCommand { name: "self".into(), aliases: vec![], f: iamb_self });
+    cmds.add_command(ProgramCommand {
+        name: "scratch".into(),
+        aliases: vec![],
+        f: iamb_scratch,
+    });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),
         aliases: vec![],

@@ -16,6 +16,7 @@ use matrix_sdk::ruma::RoomAliasId;
 use matrix_sdk::ruma::events::room::member::MembershipState;
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
+use modalkit_ratatui::textbox::TextBoxState;
 
 use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder, UnreadInfo};
 use crate::prelude::*;
@@ -301,6 +302,7 @@ macro_rules! delegate {
             IambWindow::DirectList($id) => $e,
             IambWindow::MemberList($id, _, _) => $e,
             IambWindow::RoomList($id) => $e,
+            IambWindow::Scratch($id) => $e,
             IambWindow::SpaceList($id) => $e,
             IambWindow::VerifyList($id) => $e,
             IambWindow::Welcome($id) => $e,
@@ -317,6 +319,7 @@ pub enum IambWindow {
     Room(RoomState),
     VerifyList(VerifyListState),
     RoomList(RoomListState),
+    Scratch(TextBoxState<IambInfo>),
     SpaceList(SpaceListState),
     Welcome(WelcomeState),
     ChatList(ChatListState),
@@ -579,6 +582,9 @@ impl WindowOps<IambInfo> for IambWindow {
                     .focus(focused)
                     .render(area, buf, state);
             },
+            IambWindow::Scratch(state) => {
+                state.draw(area, buf, focused, store);
+            },
             IambWindow::ChatList(state) => {
                 let mut items = store
                     .application
@@ -740,6 +746,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 IambWindow::MemberList(w.dup(store), room_id.clone(), *last_fetch)
             },
             IambWindow::RoomList(w) => w.dup(store).into(),
+            IambWindow::Scratch(w) => IambWindow::Scratch(w.dup(store)),
             IambWindow::SpaceList(w) => w.dup(store).into(),
             IambWindow::VerifyList(w) => w.dup(store).into(),
             IambWindow::Welcome(w) => w.dup(store).into(),
@@ -782,6 +789,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::DirectList(_) => IambId::DirectList,
             IambWindow::MemberList(_, room_id, _) => IambId::MemberList(room_id.clone()),
             IambWindow::RoomList(_) => IambId::RoomList,
+            IambWindow::Scratch(_) => IambId::Scratch,
             IambWindow::SpaceList(_) => IambId::SpaceList,
             IambWindow::VerifyList(_) => IambId::VerifyList,
             IambWindow::Welcome(_) => IambId::Welcome,
@@ -795,6 +803,7 @@ impl Window<IambInfo> for IambWindow {
         match self {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
+            IambWindow::Scratch(_) => bold_spans("Scratch Buffer"),
             IambWindow::SpaceList(_) => bold_spans("Spaces"),
             IambWindow::VerifyList(_) => bold_spans("Verifications"),
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
@@ -824,6 +833,7 @@ impl Window<IambInfo> for IambWindow {
         match self {
             IambWindow::DirectList(_) => bold_spans("Direct Messages"),
             IambWindow::RoomList(_) => bold_spans("Rooms"),
+            IambWindow::Scratch(_) => bold_spans("Scratch Buffer"),
             IambWindow::SpaceList(_) => bold_spans("Spaces"),
             IambWindow::VerifyList(_) => bold_spans("Verifications"),
             IambWindow::Welcome(_) => bold_spans("Welcome to iamb"),
@@ -870,6 +880,12 @@ impl Window<IambInfo> for IambWindow {
                 let list = RoomListState::new(IambBufferId::RoomList, vec![]);
 
                 return Ok(list.into());
+            },
+            IambId::Scratch => {
+                let buf = store.buffers.load(IambBufferId::Scratch);
+                let tbox = TextBoxState::new(buf);
+                let scratch = IambWindow::Scratch(tbox);
+                return Ok(scratch);
             },
             IambId::SpaceList => {
                 let list = SpaceListState::new(IambBufferId::SpaceList, vec![]);
