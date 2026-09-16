@@ -488,7 +488,7 @@ async fn send_single_receipt(
 }
 
 async fn send_receipts_forever(
-    client: Client,
+    client: &Client,
     stream: UnboundedReceiver<(OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId)>,
 ) {
     let stream = UnboundedReceiverStream::new(stream);
@@ -503,7 +503,7 @@ async fn send_receipts_forever(
             } else {
                 sent.insert(key, event_id.clone());
                 futures::future::Either::Right(send_single_receipt(
-                    &client,
+                    client,
                     room_id,
                     thread,
                     receipt_type,
@@ -1396,13 +1396,10 @@ impl ClientWorker {
 
         self.store = Some(store.clone());
 
-        tokio::spawn(send_receipts_forever(
-            self.client.clone(),
-            self.unspawned_receipt_stream
-                .take()
-                .expect("client was started multiple times"),
-        ));
-
+        let unspawned_receipt_stream = self
+            .unspawned_receipt_stream
+            .take()
+            .expect("client was started multiple times");
         self.load_handle = tokio::spawn({
             let client = self.client.clone();
             let settings = self.settings.clone();
@@ -1413,10 +1410,11 @@ impl ClientWorker {
                 }
 
                 let load = load_older_forever(&client, &store);
+                let rcpt = send_receipts_forever(&client, unspawned_receipt_stream);
                 let room = refresh_rooms_forever(&client, &store);
                 let notifications = register_notifications(&client, &settings, &store);
                 let sendqueue = subscribe_sendqueue_forever(&client, &store);
-                let ((), (), (), ()) = tokio::join!(load, room, notifications, sendqueue);
+                let ((), (), (), (), ()) = tokio::join!(load, room, rcpt, notifications, sendqueue);
             }
         })
         .into();
