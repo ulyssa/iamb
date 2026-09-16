@@ -598,6 +598,9 @@ pub enum IambAction {
     /// Request a new verification with the specified user.
     VerifyRequest(String),
 
+    /// Recover the encryption secrets for this session with the given recovery key.
+    Recover(String),
+
     /// Toggle the focus within the focused room.
     ToggleScrollbackFocus,
 
@@ -656,6 +659,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
+            IambAction::Recover(..) => SequenceStatus::Break,
         }
     }
 
@@ -672,6 +676,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
+            IambAction::Recover(..) => SequenceStatus::Atom,
         }
     }
 
@@ -688,6 +693,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
+            IambAction::Recover(..) => SequenceStatus::Ignore,
         }
     }
 
@@ -704,6 +710,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
+            IambAction::Recover(..) => false,
         }
     }
 }
@@ -860,6 +867,10 @@ pub enum IambError {
     /// A failure occurred during verification.
     #[error("Verification request error: {0}")]
     VerificationRequestError(#[from] matrix_sdk::encryption::identities::RequestVerificationError),
+
+    /// A failure occurred while recovering the encryption secrets.
+    #[error("Recovery error: {0}")]
+    RecoveryError(#[from] matrix_sdk::encryption::recovery::RecoveryError),
 
     #[error("Notification setting error: {0}")]
     NotificationSettingError(#[from] matrix_sdk::NotificationSettingsError),
