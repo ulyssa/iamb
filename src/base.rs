@@ -1782,22 +1782,22 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
 #[derive(Default)]
 pub struct SyncInfo {
     /// Spaces that the user is a member of.
-    pub spaces: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub spaces: Vec<MatrixRoom>,
 
     /// Rooms that the user is a member of.
-    pub rooms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub rooms: Vec<MatrixRoom>,
 
     /// DMs that the user is a member of.
-    pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub dms: Vec<MatrixRoom>,
 }
 
 impl SyncInfo {
     pub fn rooms(&self) -> impl Iterator<Item = &RoomId> {
-        self.rooms.iter().map(|r| r.0.room_id())
+        self.rooms.iter().map(|r| r.room_id())
     }
 
     pub fn dms(&self) -> impl Iterator<Item = &RoomId> {
-        self.dms.iter().map(|r| r.0.room_id())
+        self.dms.iter().map(|r| r.room_id())
     }
 
     pub fn chats(&self) -> impl Iterator<Item = &RoomId> {
@@ -1976,9 +1976,11 @@ impl ChatStore {
         self.rooms.get_or_default(room_id)
     }
 
-    /// Set the name for a room.
-    pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
-        self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
+    /// Set the name and tags for a room.
+    pub fn set_room_info(&mut self, room_id: OwnedRoomId, name: String, tags: Option<Tags>) {
+        let info = self.rooms.get_or_default(room_id);
+        info.name = name.into();
+        info.tags = tags;
     }
 }
 
