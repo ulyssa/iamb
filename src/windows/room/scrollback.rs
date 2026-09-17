@@ -1384,6 +1384,7 @@ impl StatefulWidget for Scrollback<'_> {
             let incomplete_ok = !full || !sel;
 
             let includes_date_line = item.show_date(prev);
+            let includes_trackbar = item.show_trackbar(prev, info, settings);
 
             for (row, line) in txt.lines.into_iter().enumerate() {
                 if sawit && lines.len() >= height && incomplete_ok {
@@ -1407,7 +1408,7 @@ impl StatefulWidget for Scrollback<'_> {
                 let line_preview: Vec<_> =
                     msg_previews.extract_if(.., |(_, _, y)| *y as usize == row).collect();
 
-                lines.push((key, row, line, line_preview, includes_date_line));
+                lines.push((key, row, line, line_preview, includes_date_line, includes_trackbar));
                 sawit |= sel;
             }
 
@@ -1416,19 +1417,17 @@ impl StatefulWidget for Scrollback<'_> {
 
         if lines.len() > height {
             let n = lines.len() - height;
-            let previews =
-                lines
-                    .drain(..n)
-                    .zip(-(n as i16)..)
-                    .flat_map(|((_, _, _, line_previews, _), y)| {
-                        line_previews.into_iter().map(move |(backend, msg_x, _)| {
-                            (area.left() + msg_x, area.top() as i16 + y, backend)
-                        })
-                    });
+            let previews = lines.drain(..n).zip(-(n as i16)..).flat_map(
+                |((_, _, _, line_previews, _, _), y)| {
+                    line_previews.into_iter().map(move |(backend, msg_x, _)| {
+                        (area.left() + msg_x, area.top() as i16 + y, backend)
+                    })
+                },
+            );
             image_previews.extend(previews);
         }
 
-        if let Some((key, row, _, _, _)) = lines.first() {
+        if let Some((key, row, _, _, _, _)) = lines.first() {
             state.viewctx.corner.timestamp = Some((*key).clone());
             state.viewctx.corner.text_row = *row;
         }
@@ -1436,7 +1435,9 @@ impl StatefulWidget for Scrollback<'_> {
         let mut y = area.top();
         let x = area.left();
 
-        for (key, row, txt, line_preview, includes_date_line) in lines.into_iter() {
+        for (key, row, txt, line_preview, includes_date_line, includes_trackbar) in
+            lines.into_iter()
+        {
             let _ = buf.set_line(x, y, &txt, area.width);
             image_previews.extend(
                 line_preview
@@ -1444,7 +1445,9 @@ impl StatefulWidget for Scrollback<'_> {
                     .map(|(backend, msg_x, _)| (x + msg_x, y as i16, backend)),
             );
 
-            if key == cursor_key && row == usize::from(includes_date_line) {
+            if key == cursor_key &&
+                row == usize::from(includes_date_line) + usize::from(includes_trackbar)
+            {
                 state.term_cursor = (x, y);
             }
 
@@ -1497,6 +1500,8 @@ impl StatefulWidget for Scrollback<'_> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    use ratatui::symbols::line::HORIZONTAL;
 
     use crate::base::Need;
     use crate::tests::*;
@@ -1795,5 +1800,33 @@ mod tests {
             .unwrap();
         assert_eq!(scrollback.cursor, MSG4_KEY.clone().into());
         assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG3_KEY.clone(), 4));
+    }
+
+    #[tokio::test]
+    async fn test_draw_trackbar() {
+        let mut store = mock_store().await;
+        store.application.settings.tunables.typing_notice_display = false;
+
+        let user_id = store.application.settings.profile.user_id.clone();
+        store.application.get_room_info(TEST_ROOM1_ID.clone()).set_receipt(
+            ReceiptThread::Main,
+            user_id,
+            MSG3_EVID.clone(),
+        );
+
+        let mut scrollback = ScrollbackState::new(TEST_ROOM1_ID.clone(), None);
+        let area = Rect::new(0, 0, 60, 6);
+        let mut buffer = Buffer::empty(area);
+        scrollback.draw(area, &mut buffer, true, &mut store);
+
+        // The trackbar takes a row of its own, so the view is scrolled up an
+        // extra line compared to the same messages without a marker.
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG4_KEY.clone(), 0));
+
+        // It's drawn between the marker's message and the first unread one.
+        assert_eq!(buffer.cell((0, 0)).unwrap().symbol(), HORIZONTAL);
+
+        // The terminal cursor still lands on the selected message's first line.
+        assert_eq!(scrollback.term_cursor, (0, 4));
     }
 }
