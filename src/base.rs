@@ -42,6 +42,7 @@ use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
+use url::form_urlencoded;
 
 use crate::notifications::NotificationHandle;
 use crate::prelude::*;
@@ -1990,6 +1991,12 @@ pub enum IambId {
     /// A Matrix room, with an optional thread to show.
     Room(OwnedRoomId, Option<OwnedEventId>),
 
+    /// A Matrix room that we're currently in the middle of joining.
+    Joining(String),
+
+    /// A Matrix room that we haven't joined, and aren't currently joining.
+    NotJoined(String),
+
     /// The `:dms` window.
     DirectList,
 
@@ -2021,6 +2028,24 @@ pub enum IambId {
     InvitesList,
 }
 
+/// Encode the room name for a [IambId::Joining] or [IambId::NotJoined] window URL.
+///
+/// Note that since these names come straight from the user's argument to `:join`,
+/// they are likely room aliases containing characters like `#` that we should
+/// escape before putting them into the URL, so we can later reparse it. They can
+/// technically contain anything that the user tried to pass to `:join`.
+fn room_query(room: &str) -> String {
+    form_urlencoded::Serializer::new(String::new())
+        .append_pair("room", room)
+        .finish()
+}
+
+/// Pull the room name back out of the query parameter for `iamb://joining` or
+/// `iamb://not-joined`.
+fn query_room(url: &Url) -> Option<String> {
+    url.query_pairs().find_map(|(k, v)| (k == "room").then(|| v.into_owned()))
+}
+
 impl Display for IambId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -2029,6 +2054,12 @@ impl Display for IambId {
             },
             IambId::Room(room_id, Some(thread)) => {
                 write!(f, "iamb://room/{room_id}/threads/{thread}")
+            },
+            IambId::Joining(room) => {
+                write!(f, "iamb://joining?{}", room_query(room))
+            },
+            IambId::NotJoined(room) => {
+                write!(f, "iamb://not-joined?{}", room_query(room))
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -2115,6 +2146,20 @@ impl Visitor<'_> for IambIdVisitor {
                     },
                     _ => return Err(E::custom("Invalid members window URL")),
                 }
+            },
+            Some("joining") => {
+                let Some(room) = query_room(&url) else {
+                    return Err(E::custom("iamb://joining requires a room parameter"));
+                };
+
+                Ok(IambId::Joining(room))
+            },
+            Some("not-joined") => {
+                let Some(room) = query_room(&url) else {
+                    return Err(E::custom("iamb://not-joined requires a room parameter"));
+                };
+
+                Ok(IambId::NotJoined(room))
             },
             Some("members") => {
                 let Some(path) = url.path_segments() else {
@@ -2458,6 +2503,35 @@ pub mod tests {
                 Span::from(" is typing...")
             ])
         );
+    }
+
+    #[test]
+    fn test_unjoined_window_ids() {
+        // Room names come from the user can contain characters that need escaping:
+        for name in [
+            "#foo:example.com",
+            "!abc123:example.com",
+            "@user:example.com",
+            "a b&c=d?e#f",
+        ] {
+            for id in [IambId::Joining(name.into()), IambId::NotJoined(name.into())] {
+                let json = serde_json::to_string(&id).unwrap();
+                assert_eq!(serde_json::from_str::<IambId>(&json).unwrap(), id);
+            }
+        }
+
+        assert_eq!(
+            IambId::Joining("#foo:example.com".into()).to_string(),
+            "iamb://joining?room=%23foo%3Aexample.com"
+        );
+        assert_eq!(
+            IambId::NotJoined("#foo:example.com".into()).to_string(),
+            "iamb://not-joined?room=%23foo%3Aexample.com"
+        );
+
+        // A window URL without a room name isn't valid and wasn't written by us:
+        assert!(serde_json::from_str::<IambId>("\"iamb://joining\"").is_err());
+        assert!(serde_json::from_str::<IambId>("\"iamb://not-joined\"").is_err());
     }
 
     #[test]
