@@ -224,9 +224,19 @@ See
 .Sx NOTIFICATIONS
 for more details.
 .It Sy open_command
-Defines a custom  command and its arguments to run when opening downloads instead of the default.
+Defines a custom  command and its arguments to run when handling
+.Sy :open
+instead of the default system behaviour.
 (For example,
 .Sy ["my-open",\ "--file"] . )
+Keep in mind that
+.Sy :open
+can be used for more than just opening downloads:
+this command may also be passed
+.Sy http[s]://
+and
+.Sy geo:
+URLs for relevant messages.
 .It Sy proxy
 When this subsection is present, you can configure how requests are proxied to the homeserver.
 See
