@@ -44,6 +44,7 @@ use matrix_sdk::ruma::events::receipt::{ReceiptEventContent, ReceiptType};
 use matrix_sdk::ruma::events::room::encryption::RoomEncryptionEventContent;
 use matrix_sdk::ruma::events::room::member::{MembershipState, OriginalSyncRoomMemberEvent};
 use matrix_sdk::ruma::events::room::name::RoomNameEventContent;
+use matrix_sdk::ruma::events::room::pinned_events::SyncRoomPinnedEventsEvent;
 use matrix_sdk::ruma::events::room::redaction::OriginalSyncRoomRedactionEvent;
 use matrix_sdk::ruma::events::sticker::StickerEventContent;
 use matrix_sdk::ruma::events::typing::SyncTypingEvent;
@@ -164,6 +165,7 @@ async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id:
 enum Plan {
     Messages(OwnedRoomId, Option<String>, Vec<MessageNeed>),
     Members(OwnedRoomId),
+    Pinned(OwnedRoomId, Vec<OwnedEventId>),
 }
 
 async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
@@ -172,6 +174,13 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
     let mut plan = Vec::with_capacity(need_load.rooms() * 2);
 
     for (room_id, need) in std::mem::take(need_load).into_iter() {
+        if need.pinned {
+            let missing = rooms.get_or_default(room_id.clone()).missing_pinned();
+
+            if !missing.is_empty() {
+                plan.push(Plan::Pinned(room_id.to_owned(), missing));
+            }
+        }
         if let Some(message_need) = need.messages {
             let info = rooms.get_or_default(room_id.clone());
 
@@ -212,8 +221,60 @@ async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan, permit
             let mut locked = store.lock().await;
             members_insert(room_id, res, locked.deref_mut());
         },
+        Plan::Pinned(room_id, event_ids) => {
+            let msgs = pinned_load(client, &room_id, event_ids).await;
+            let mut locked = store.lock().await;
+            let info = locked.application.get_room_info(room_id);
+
+            for (event_id, msg) in msgs {
+                info.insert_pinned(event_id, msg);
+            }
+        },
     }
     drop(permit);
+}
+
+async fn pinned_load(
+    client: &Client,
+    room_id: &RoomId,
+    event_ids: Vec<OwnedEventId>,
+) -> Vec<(OwnedEventId, Option<Message>)> {
+    let Some(room) = client.get_room(room_id) else {
+        return vec![];
+    };
+
+    let mut msgs = vec![];
+
+    for event_id in event_ids {
+        let msg = pinned_load_one(&room, room_id, &event_id).await;
+        msgs.push((event_id, msg));
+    }
+
+    msgs
+}
+
+async fn pinned_load_one(
+    room: &MatrixRoom,
+    room_id: &RoomId,
+    event_id: &EventId,
+) -> Option<Message> {
+    let ev = match room.load_or_fetch_event(event_id, None).await {
+        Ok(ev) => ev,
+        Err(e) => {
+            warn!(?event_id, "failed to fetch pinned event: {e}");
+            return None;
+        },
+    };
+
+    let msg = match ev.into_raw().deserialize().ok()?.into_full_event(room_id.to_owned()) {
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(ev)) => ev.into(),
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(ev)) => ev.into(),
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => ev.into(),
+        AnyTimelineEvent::MessageLike(_) => return None,
+        AnyTimelineEvent::State(ev) => Message::from(AnySyncStateEvent::from(ev)),
+    };
+
+    Some(msg)
 }
 
 async fn load_older_one(
@@ -398,6 +459,7 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: bool) {
     let mut names = vec![];
+    let mut pinned = vec![];
 
     let mut spaces = vec![];
     let mut rooms = vec![];
@@ -423,6 +485,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
         let tags = room.tags().await.unwrap_or_default();
 
         names.push((room.room_id().to_owned(), name));
+        pinned.push((room.room_id().to_owned(), room.pinned_event_ids().unwrap_or_default()));
 
         if room.is_direct().await.unwrap_or_default() {
             dms.push(Arc::new((room, tags)));
@@ -440,6 +503,10 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
 
     for (room_id, name) in names {
         locked.application.set_room_name(&room_id, &name);
+    }
+
+    for (room_id, pinned_events) in pinned {
+        locked.application.get_room_info(room_id).pinned_events = pinned_events;
     }
 }
 
@@ -1264,6 +1331,20 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
                     let info = locked.application.get_room_info(room_id.to_owned());
                     info.redact(ev);
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
+            |_: SyncRoomPinnedEventsEvent, room: MatrixRoom, store: Ctx<AsyncProgramStore>| {
+                async move {
+                    // The SDK has already applied the event to its room state by the time
+                    // handlers run, and it also copes with redacted pin lists.
+                    let pinned = room.pinned_event_ids().unwrap_or_default();
+
+                    let mut locked = store.lock().await;
+                    let info = locked.application.get_room_info(room.room_id().to_owned());
+                    info.pinned_events = pinned;
                 }
             },
         );

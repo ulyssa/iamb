@@ -203,6 +203,18 @@ pub async fn room_command(
 
             Ok(vec![(act, cmd.context.clone())])
         },
+        RoomAction::Pinned(mut cmd) => {
+            let id = IambId::PinnedList(id.to_owned());
+            let target = OpenTarget::Application(id);
+            let cmd = cmd.default_relation(MoveDir1D::Next);
+
+            let act = match store.application.settings.tunables.members_split {
+                Some(dir) => cmd.default_axis(dir.to_axis()).window(target, None),
+                None => cmd.switch(target),
+            };
+
+            Ok(vec![(act, cmd.context.clone())])
+        },
         RoomAction::SetAccess(rule) => {
             let Some(room) = store.application.worker.client.get_room(id) else {
                 return Err(IambError::NotJoined.into());
