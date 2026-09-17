@@ -160,6 +160,25 @@ impl ChatState {
                 }
 
                 if let Some(msgtype) = msg.event.msgtype() {
+                    // A location message has no attachment to download, so `:open`
+                    // hands its `geo:` URI over to the system handler, which will
+                    // let the desktop open it with an application of its choosing.
+                    if let Some(geo_uri) = location_geo_uri(msgtype) {
+                        if !flags.contains(DownloadFlags::OPEN) {
+                            return Err(IambError::NoAttachment.into());
+                        }
+
+                        let target = OsString::from(geo_uri.to_owned());
+
+                        return match open_command(
+                            store.application.settings.tunables.open_command.as_ref(),
+                            target,
+                        ) {
+                            Ok(_) => Ok(InfoMessage::from(format!("Opened {geo_uri}")).into()),
+                            Err(err) => Err(err),
+                        };
+                    }
+
                     let media = client.media();
                     let mut filename = match (filename, &settings.dirs.downloads) {
                         (Some(f), _) => PathBuf::from(f),
@@ -1175,6 +1194,14 @@ impl StatefulWidget for Chat<'_> {
     }
 }
 
+/// Returns the `geo:` URI that a location message refers to.
+fn location_geo_uri(msgtype: &MessageType) -> Option<&str> {
+    match msgtype {
+        MessageType::Location(content) => Some(content.geo_uri()),
+        _ => None,
+    }
+}
+
 fn open_command(open_command: Option<&Vec<String>>, target: OsString) -> IambResult<()> {
     if let Some(mut cmd) = open_command.and_then(cmd) {
         cmd.arg(target);
@@ -1305,6 +1332,23 @@ mod tests {
     use modalkit::actions::{EditAction, InsertTextAction};
 
     use crate::tests::{TEST_ROOM1_ID, mock_store};
+
+    #[test]
+    fn test_location_geo_uri() {
+        use matrix_sdk::ruma::events::room::message::{
+            LocationMessageEventContent,
+            TextMessageEventContent,
+        };
+
+        let location = MessageType::Location(LocationMessageEventContent::new(
+            "geo test".into(),
+            "geo:51.5072,-0.1276".into(),
+        ));
+        assert_eq!(location_geo_uri(&location), Some("geo:51.5072,-0.1276"));
+
+        let text = MessageType::Text(TextMessageEventContent::plain("not a location"));
+        assert_eq!(location_geo_uri(&text), None);
+    }
 
     macro_rules! move_line {
         ($dir: expr, $count: expr) => {
