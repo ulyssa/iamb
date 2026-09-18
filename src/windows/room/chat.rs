@@ -1224,18 +1224,21 @@ fn extract_mentions(content: &TextMessageEventContent) -> Mentions {
     if !matches!(formatted.format, MessageFormat::Html) {
         return Mentions::new();
     }
-    let html = formatted.body.as_str();
+    extract_mentions_str(formatted.body.as_str())
+}
 
+fn extract_mentions_str(html: &str) -> Mentions {
     let re = Regex::new(r#"<a href="(https://matrix.to/#/@[^"]*:[^"]*)">"#).unwrap();
 
-    let user_ids = re.captures_iter(html).map(|capture| {
-        let link = capture.get(1).unwrap().as_str();
-        let uri = MatrixToUri::parse(link).unwrap();
-        let MatrixId::User(user_id) = uri.id() else {
-            // we only matched user links (starting with `@`)
-            unreachable!()
-        };
-        user_id.to_owned()
+    let user_ids = re.captures_iter(html).filter_map(|capture| {
+        let link = capture.get(1)?.as_str();
+        let uri = MatrixToUri::parse(link).ok()?;
+
+        if let MatrixId::User(user_id) = uri.id() {
+            Some(user_id.to_owned())
+        } else {
+            None
+        }
     });
 
     Mentions::with_user_ids(user_ids)
@@ -1333,6 +1336,14 @@ mod tests {
 
     use crate::tests::{TEST_ROOM1_ID, mock_store};
 
+    fn mentions_in(html: &str) -> Vec<String> {
+        extract_mentions_str(&html)
+            .user_ids
+            .iter()
+            .map(|u| u.to_string())
+            .collect()
+    }
+
     #[test]
     fn test_location_geo_uri() {
         use matrix_sdk::ruma::events::room::message::{
@@ -1348,6 +1359,67 @@ mod tests {
 
         let text = MessageType::Text(TextMessageEventContent::plain("not a location"));
         assert_eq!(location_geo_uri(&text), None);
+    }
+
+    #[test]
+    fn test_extract_mentions_normal() {
+        let res = mentions_in(r#"<a href="https://matrix.to/#/@user:example.com">user</a>"#);
+        assert_eq!(res, vec!["@user:example.com"]);
+    }
+
+    #[test]
+    fn test_extract_mentions_ignore_parameters() {
+        let res =
+            mentions_in(r#"<a href="https://matrix.to/#/@user:example.com?via=example.com">u</a>"#);
+        assert_eq!(res, vec!["@user:example.com"]);
+    }
+
+    #[test]
+    fn test_extract_mentions_multiple_dedupe() {
+        let res = mentions_in(
+            r#"<a href="https://matrix.to/#/@a:example.com">a</a> and
+                   <a href="https://matrix.to/#/@b:example.com">b</a> and
+                   <a href="https://matrix.to/#/@a:example.com">a again</a>"#,
+        );
+        assert_eq!(res, vec!["@a:example.com", "@b:example.com"]);
+    }
+
+    #[test]
+    fn test_extract_mentions_skips_invalid_links() {
+        let empty = vec![
+            r#"<a href="https://matrix.to/#/@user:example.com/$eventid">e</a>"#,
+            r#"<a href="https://matrix.to/#/@bob:">bob</a>"#,
+            r#"<a href="https://matrix.to/#/@user:%E4%BE%8B.com">x</a>"#,
+        ];
+
+        for html in empty {
+            assert!(mentions_in(html).is_empty());
+        }
+
+        // An invalid link is ignored, but a valid one is still extracted:
+        assert_eq!(
+            mentions_in(
+                r#"<a href="https://matrix.to/#/@bob:">bob</a>
+                   <a href="https://matrix.to/#/@user:example.com">user</a>"#
+            ),
+            vec!["@user:example.com"]
+        );
+    }
+
+    #[test]
+    fn test_extract_mentions_ignores_unformatted() {
+        // URIs in plain text messages don't count as mentions:
+        let plain = TextMessageEventContent::plain(
+            r#"<a href="https://matrix.to/#/@user:example.com">user</a>"#,
+        );
+        assert!(extract_mentions(&plain).user_ids.is_empty());
+
+        // Links to things other than users aren't mentions:
+        let room = r#"<a href="https://matrix.to/#/#room:example.com">room</a>"#;
+        assert!(mentions_in(room).is_empty());
+
+        let nonmx = r#"<a href="https://example.com/@user:example.com">nope</a>"#;
+        assert!(mentions_in(nonmx).is_empty());
     }
 
     macro_rules! move_line {
