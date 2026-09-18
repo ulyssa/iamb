@@ -22,6 +22,7 @@ use matrix_sdk::ruma::api::client::filter::{
     RoomEventFilter,
     RoomFilter,
 };
+use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType as CreateReceiptType;
 use matrix_sdk::ruma::api::client::room::Visibility;
 use matrix_sdk::ruma::api::client::room::create_room::v3::{
     CreationContent,
@@ -71,6 +72,7 @@ use ratatui_image::picker::Picker;
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
+use tokio_stream::wrappers::UnboundedReceiverStream;
 use tracing::{Instrument as _, error, warn};
 
 use crate::base::{CreateRoomFlags, CreateRoomType, EchoLocation, MessageNeed, RoomFetchStatus};
@@ -452,68 +454,64 @@ async fn refresh_rooms_forever(client: &Client, store: &AsyncProgramStore) {
     }
 }
 
-async fn send_receipts_forever(client: &Client, store: &AsyncProgramStore) {
-    use matrix_sdk::ruma::api::client::receipt::create_receipt::v3::ReceiptType;
-
-    let mut interval = tokio::time::interval(Duration::from_secs(2));
-    let mut sent: HashMap<OwnedRoomId, HashMap<ReceiptThread, OwnedEventId>> = Default::default();
-
-    loop {
-        interval.tick().await;
-
-        let mut locked = store.lock().await;
-        let ChatStore { settings, open_notifications, rooms, .. } = &mut locked.application;
-        let user_id = &settings.profile.user_id;
-
-        let mut updates = Vec::new();
-        for room in client.joined_rooms() {
-            let room_id = room.room_id();
-            let Some(info) = rooms.get(room_id) else {
-                continue;
-            };
-
-            let changed = info.receipts(user_id).filter_map(|(thread, new_receipt)| {
-                let old_receipt = sent.get(room_id).and_then(|ts| ts.get(thread));
-                let changed = Some(new_receipt) != old_receipt;
-                if changed {
-                    open_notifications.remove(room_id);
-                }
-                changed.then(|| (room_id.to_owned(), thread.to_owned(), new_receipt.to_owned()))
-            });
-
-            updates.extend(changed);
-        }
-
-        let receipt_type = if locked.application.settings.tunables.read_receipt_send {
-            ReceiptType::Read
-        } else {
-            ReceiptType::ReadPrivate
-        };
-        drop(locked);
-
-        for (room_id, thread, new_receipt) in updates {
-            let Some(room) = client.get_room(&room_id) else {
-                continue;
-            };
-
-            if ReceiptThread::Main == thread || ReceiptThread::Unthreaded == thread {
-                let _ = room
-                    .set_unread_flag(false)
-                    .await
-                    .inspect_err(|e| tracing::warn!(?room_id, "Failed to clear unread flag: {e}"));
-            }
-
-            match room
-                .send_single_receipt(receipt_type.clone(), thread.to_owned(), new_receipt.clone())
-                .await
-            {
-                Ok(()) => {
-                    sent.entry(room_id).or_default().insert(thread, new_receipt);
-                },
-                Err(e) => tracing::warn!(?room_id, "Failed to set read receipt: {e}"),
-            }
-        }
+fn convert_receipt_type(value: ReceiptType) -> CreateReceiptType {
+    match value {
+        ReceiptType::Read => CreateReceiptType::Read,
+        ReceiptType::ReadPrivate => CreateReceiptType::ReadPrivate,
+        _ => CreateReceiptType::from(value.as_str()),
     }
+}
+
+async fn send_single_receipt(
+    client: &Client,
+    room_id: OwnedRoomId,
+    thread: ReceiptThread,
+    receipt_type: ReceiptType,
+    event_id: OwnedEventId,
+) {
+    let Some(room) = client.get_room(&room_id) else {
+        tracing::warn!(?room_id, "trying to send receipt to unknown room");
+        return;
+    };
+
+    if ReceiptThread::Main == thread || ReceiptThread::Unthreaded == thread {
+        let _ = room
+            .set_unread_flag(false)
+            .await
+            .inspect_err(|e| tracing::warn!(?room_id, "Failed to clear unread flag: {e}"));
+    }
+
+    let _ = room
+        .send_single_receipt(convert_receipt_type(receipt_type), thread, event_id)
+        .await
+        .inspect_err(|e| tracing::warn!(?room_id, "Failed to send read receipt: {e}"));
+}
+
+async fn send_receipts_forever(
+    client: &Client,
+    stream: UnboundedReceiver<(OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId)>,
+) {
+    let stream = UnboundedReceiverStream::new(stream);
+    let mut sent: HashMap<(OwnedRoomId, ReceiptThread, ReceiptType), OwnedEventId> =
+        Default::default();
+
+    stream
+        .for_each_concurrent(None, |(room_id, thread, receipt_type, event_id)| {
+            let key = (room_id.clone(), thread.clone(), receipt_type.clone());
+            if sent.get(&key).is_some_and(|receipt| *receipt == event_id) {
+                futures::future::Either::Left(futures::future::ready(()))
+            } else {
+                sent.insert(key, event_id.clone());
+                futures::future::Either::Right(send_single_receipt(
+                    client,
+                    room_id,
+                    thread,
+                    receipt_type,
+                    event_id,
+                ))
+            }
+        })
+        .await;
 }
 
 fn insert_local_echo(
@@ -930,6 +928,7 @@ async fn join_room(
 pub struct Requester {
     pub client: Client,
     pub tx: UnboundedSender<WorkerTask>,
+    pub receipts: UnboundedSender<(OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId)>,
 }
 
 impl Requester {
@@ -939,6 +938,22 @@ impl Requester {
         self.tx.send(WorkerTask::Init(store, reply)).unwrap();
 
         return response.recv();
+    }
+
+    pub fn send_receipt(
+        &self,
+        room: OwnedRoomId,
+        thread: ReceiptThread,
+        event: OwnedEventId,
+        settings: &ApplicationSettings,
+    ) {
+        let receipt_type = if settings.tunables.read_receipt_send {
+            ReceiptType::Read
+        } else {
+            ReceiptType::ReadPrivate
+        };
+
+        self.receipts.send((room, thread, receipt_type, event)).unwrap();
     }
 
     pub fn login(&self, style: LoginStyle) -> IambResult<EditInfo> {
@@ -1036,6 +1051,10 @@ pub struct ClientWorker {
     load_handle: Option<JoinHandle<()>>,
     sync_handle: Option<JoinHandle<()>>,
 
+    /// this will be removed after login
+    unspawned_receipt_stream:
+        Option<UnboundedReceiver<(OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId)>>,
+
     /// Take care when locking since worker commands are sent with the lock already held
     store: Option<AsyncProgramStore>,
 }
@@ -1043,6 +1062,7 @@ pub struct ClientWorker {
 impl ClientWorker {
     pub async fn spawn(client: Client, settings: ApplicationSettings) -> Requester {
         let (tx, rx) = unbounded_channel();
+        let (receipt_tx, receipt_rx) = unbounded_channel();
 
         let mut worker = ClientWorker {
             initialized: false,
@@ -1050,6 +1070,7 @@ impl ClientWorker {
             client: client.clone(),
             load_handle: None,
             sync_handle: None,
+            unspawned_receipt_stream: Some(receipt_rx),
             store: None,
         };
 
@@ -1057,7 +1078,7 @@ impl ClientWorker {
             worker.work(rx).await;
         });
 
-        return Requester { client, tx };
+        return Requester { client, tx, receipts: receipt_tx };
     }
 
     async fn work(&mut self, mut rx: UnboundedReceiver<WorkerTask>) {
@@ -1430,6 +1451,10 @@ impl ClientWorker {
 
         self.store = Some(store.clone());
 
+        let unspawned_receipt_stream = self
+            .unspawned_receipt_stream
+            .take()
+            .expect("client was started multiple times");
         self.load_handle = tokio::spawn({
             let client = self.client.clone();
             let settings = self.settings.clone();
@@ -1440,11 +1465,11 @@ impl ClientWorker {
                 }
 
                 let load = load_older_forever(&client, &store);
-                let rcpt = send_receipts_forever(&client, &store);
+                let rcpt = send_receipts_forever(&client, unspawned_receipt_stream);
                 let room = refresh_rooms_forever(&client, &store);
                 let notifications = register_notifications(&client, &settings, &store);
                 let sendqueue = subscribe_sendqueue_forever(&client, &store);
-                let ((), (), (), (), ()) = tokio::join!(load, rcpt, room, notifications, sendqueue);
+                let ((), (), (), (), ()) = tokio::join!(load, room, rcpt, notifications, sendqueue);
             }
         })
         .into();

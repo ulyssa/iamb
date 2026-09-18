@@ -232,6 +232,7 @@ pub fn mock_settings() -> ApplicationSettings {
 
 pub async fn mock_store() -> ProgramStore {
     let (tx, _) = unbounded_channel();
+    let (receipts, _) = unbounded_channel();
     let client = matrix_sdk::Client::builder()
         .homeserver_url("https://localhost")
         // don't panic if no certs are available like in a nix build sandbox
@@ -239,7 +240,7 @@ pub async fn mock_store() -> ProgramStore {
         .build()
         .await
         .unwrap();
-    let worker = Requester { tx, client };
+    let worker = Requester { tx, receipts, client };
 
     let mut store = ChatStore::new(worker, mock_settings());
 

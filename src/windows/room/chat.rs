@@ -744,7 +744,13 @@ impl ChatState {
         if tunables.read_receipt_trigger.on_message() &&
             let Some(thread) = self.scrollback.get_thread(info)
         {
-            info.fully_read(settings.profile.user_id.clone(), thread.1.clone());
+            info.fully_read(
+                self.room_id.clone(),
+                thread.1.clone(),
+                &store.application.worker,
+                settings,
+                &mut store.application.open_notifications,
+            );
         }
 
         Ok(None)

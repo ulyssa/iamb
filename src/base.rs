@@ -1628,7 +1628,16 @@ impl RoomInfo {
         self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
     }
 
-    pub fn fully_read(&mut self, user_id: OwnedUserId, thread: ReceiptThread) {
+    pub fn fully_read(
+        &mut self,
+        room_id: OwnedRoomId,
+        thread: ReceiptThread,
+        worker: &Requester,
+        settings: &ApplicationSettings,
+        open_notifications: &mut HashMap<OwnedRoomId, Vec<NotificationHandle>>,
+    ) {
+        let user_id = &settings.profile.user_id;
+
         let messages = match &thread {
             ReceiptThread::Main => self.get_thread(None),
             ReceiptThread::Thread(root) => self.get_thread(Some(root)),
@@ -1641,7 +1650,7 @@ impl RoomInfo {
 
         let event_id = messages
             .iter()
-            .filter(|(_, msg)| msg.sender != user_id)
+            .filter(|(_, msg)| msg.sender != *user_id)
             .filter(|(_, msg)| {
                 matches!(
                     msg.event,
@@ -1655,18 +1664,31 @@ impl RoomInfo {
             .next_back();
 
         if let Some(event_id) = event_id {
-            self.set_receipt(thread, user_id, event_id.to_owned());
+            open_notifications.remove(&room_id);
+            worker.send_receipt(room_id, thread.clone(), event_id.to_owned(), settings);
         }
     }
 
-    pub fn fully_read_all(&mut self, user_id: &UserId) {
-        self.fully_read(user_id.to_owned(), ReceiptThread::Main);
-
+    pub fn fully_read_all(
+        &mut self,
+        room_id: OwnedRoomId,
+        worker: &Requester,
+        settings: &ApplicationSettings,
+        open_notifications: &mut HashMap<OwnedRoomId, Vec<NotificationHandle>>,
+    ) {
         let threads: Vec<_> = self.threads.keys().map(|root| root.to_owned()).collect();
 
         for thread in threads {
-            self.fully_read(user_id.to_owned(), ReceiptThread::Thread(thread));
+            self.fully_read(
+                room_id.to_owned(),
+                ReceiptThread::Thread(thread),
+                worker,
+                settings,
+                open_notifications,
+            );
         }
+
+        self.fully_read(room_id, ReceiptThread::Main, worker, settings, open_notifications);
     }
 
     pub fn receipts<'a>(
