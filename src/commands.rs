@@ -965,17 +965,14 @@ fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 }
 
 fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    let mut args = desc.arg.strings()?;
+    let mut args = desc.arg.paths()?;
 
     if args.len() != 1 {
         return Result::Err(CommandError::InvalidArgument);
     }
 
     let path = args.remove(0);
-    let expanded_path =
-        shellexpand::full(&path).map_err(|e| CommandError::ParseFailed(e.to_string()))?;
-
-    let sact = SendAction::Upload(expanded_path.into_owned(), None);
+    let sact = SendAction::Upload(path, None);
     let iact = IambAction::from(sact);
     let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
@@ -983,7 +980,7 @@ fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 }
 
 fn iamb_download(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    let mut args = desc.arg.strings()?;
+    let mut args = desc.arg.paths()?;
 
     if args.len() > 1 {
         return Result::Err(CommandError::InvalidArgument);
@@ -1001,7 +998,7 @@ fn iamb_download(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult 
 }
 
 fn iamb_open(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    let mut args = desc.arg.strings()?;
+    let mut args = desc.arg.paths()?;
 
     if args.len() > 1 {
         return Result::Err(CommandError::InvalidArgument);

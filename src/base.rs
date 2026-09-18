@@ -99,7 +99,7 @@ pub enum MessageAction {
     ///
     /// The second argument controls whether to overwrite any already existing file at the
     /// destination path, or to open the attachment after downloading.
-    Download(Option<String>, DownloadFlags),
+    Download(Option<PathBuf>, DownloadFlags),
 
     /// Edit a sent message.
     Edit,
@@ -525,7 +525,7 @@ pub enum SendAction {
     ///
     /// The second argument indicates whether to use the messagebar as a caption, don't use it or
     /// ask the user.
-    Upload(String, Option<bool>),
+    Upload(PathBuf, Option<bool>),
 
     /// Upload the image data.
     ///
