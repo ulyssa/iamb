@@ -368,7 +368,7 @@ impl IambWindow {
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         let id = match self {
-            IambWindow::Room(state) => Some(state.id()),
+            IambWindow::Room(state) => state.id(),
             IambWindow::MemberList(_, room_id, _) => Some(&**room_id),
 
             IambWindow::DirectList(state) => state.get().map(|state| state.room_id()),
@@ -817,7 +817,7 @@ impl WindowOps<IambInfo> for IambWindow {
 impl Window<IambInfo> for IambWindow {
     fn id(&self) -> IambId {
         match self {
-            IambWindow::Room(room) => IambId::Room(room.id().to_owned(), room.thread().cloned()),
+            IambWindow::Room(room) => room.window_id(),
             IambWindow::DirectList(_) => IambId::DirectList,
             IambWindow::MemberList(_, room_id, _) => IambId::MemberList(room_id.clone()),
             IambWindow::RoomList(_) => IambId::RoomList,
@@ -843,11 +843,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::MentionsList(_) => bold_spans("Unread Mentions"),
             IambWindow::InvitesList(_) => bold_spans("Open Invites"),
 
-            IambWindow::Room(w) => {
-                let title = store.application.get_room_title(w.id());
-
-                Line::from(title)
-            },
+            IambWindow::Room(w) => w.get_tab_title(store),
             IambWindow::MemberList(state, room_id, _) => {
                 let title = store.application.get_room_title(room_id.as_ref());
                 let n = state.len();
@@ -893,8 +889,17 @@ impl Window<IambInfo> for IambWindow {
                 let (room, name, tags) = store.application.worker.get_room(room_id)?;
                 let room = RoomState::new(room, thread, name, tags, store);
 
-                store.application.need_load.need_members(room.id().to_owned());
+                if let Some(room_id) = room.id() {
+                    store.application.need_load.need_members(room_id.to_owned());
+                }
+
                 return Ok(room.into());
+            },
+            IambId::Joining(name) => {
+                return Ok(RoomState::join(name, store).into());
+            },
+            IambId::NotJoined(name) => {
+                return Ok(RoomState::not_joined(name).into());
             },
             IambId::DirectList => {
                 let list = DirectListState::new(IambBufferId::DirectList, vec![]);
@@ -952,24 +957,11 @@ impl Window<IambInfo> for IambWindow {
     }
 
     fn find(name: String, store: &mut ProgramStore) -> IambResult<Self> {
-        let ChatStore { names, worker, settings, .. } = &mut store.application;
-
-        if let Some(room) = names.get_mut(&name) {
+        if let Some(room) = store.application.names.get(&name) {
             let id = IambId::Room(room.clone(), None);
-
             IambWindow::open(id, store)
         } else {
-            let via = settings.tunables.default_via.clone();
-            let room_id = worker.join_room(name.clone(), via)?;
-
-            if let Ok(alias) = OwnedRoomAliasId::from_str(&name) {
-                names.insert(alias, room_id.clone());
-            }
-
-            let (room, name, tags) = store.application.worker.get_room(room_id)?;
-            let room = RoomState::new(room, None, name, tags, store);
-
-            store.application.need_load.need_members(room.id().to_owned());
+            let room = RoomState::join(name, store);
             Ok(room.into())
         }
     }
