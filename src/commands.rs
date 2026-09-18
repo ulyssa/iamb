@@ -1175,12 +1175,16 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
 }
 
 /// Initialize the default command state.
-pub fn setup_commands() -> ProgramCommands {
+pub fn setup_commands(aliases: &HashMap<String, String>) -> Result<ProgramCommands, CommandError> {
     let mut cmds = ProgramCommands::default();
 
     add_iamb_commands(&mut cmds);
 
-    return cmds;
+    for (alias, cmd) in aliases {
+        cmds.add_alias(alias, cmd)?;
+    }
+
+    Ok(cmds)
 }
 
 #[cfg(test)]
@@ -1191,9 +1195,13 @@ mod tests {
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
 
+    fn setup_test_commands() -> ProgramCommands {
+        setup_commands(&HashMap::new()).unwrap()
+    }
+
     #[test]
     fn test_cmd_verify() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd(":verify", ctx.clone()).unwrap();
@@ -1251,7 +1259,7 @@ mod tests {
 
     #[test]
     fn test_cmd_join() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("join #foobar:example.com", ctx.clone()).unwrap();
@@ -1271,7 +1279,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_invalid() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room", ctx.clone());
@@ -1286,7 +1294,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_topic_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds
@@ -1317,7 +1325,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_name_invalid() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room name", ctx.clone());
@@ -1329,7 +1337,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_name_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room name set Development", ctx.clone()).unwrap();
@@ -1348,7 +1356,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_name_unset() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room name unset", ctx.clone()).unwrap();
@@ -1361,7 +1369,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_dm_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room dm set", ctx.clone()).unwrap();
@@ -1374,7 +1382,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_dm_unset() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room dm unset", ctx.clone()).unwrap();
@@ -1387,7 +1395,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_tag_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room tag set favourite", ctx.clone()).unwrap();
@@ -1456,7 +1464,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_tag_unset() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room tag unset favourite", ctx.clone()).unwrap();
@@ -1521,7 +1529,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_notification_mode_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let cmd = "room notify set mute";
@@ -1542,7 +1550,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_id_show() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room id show", ctx.clone()).unwrap();
@@ -1555,7 +1563,7 @@ mod tests {
 
     #[test]
     fn test_cmd_space_child() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let cmd = "space";
@@ -1573,7 +1581,7 @@ mod tests {
 
     #[test]
     fn test_cmd_space_child_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let cmd = "space child set !roomid:example.org";
@@ -1624,7 +1632,7 @@ mod tests {
 
     #[test]
     fn test_cmd_space_child_remove() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let cmd = "space child remove";
@@ -1639,7 +1647,7 @@ mod tests {
 
     #[test]
     fn test_cmd_invite() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("invite accept", ctx.clone()).unwrap();
@@ -1676,7 +1684,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_kick() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room kick @user:example.com", ctx.clone()).unwrap();
@@ -1711,7 +1719,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_ban_unban() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds
@@ -1739,7 +1747,7 @@ mod tests {
 
     #[test]
     fn test_cmd_redact() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("redact", ctx.clone()).unwrap();
@@ -1764,7 +1772,7 @@ mod tests {
 
     #[test]
     fn test_cmd_keys() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("keys import /a/b/c pword", ctx.clone()).unwrap();
@@ -1791,7 +1799,7 @@ mod tests {
 
     #[test]
     fn test_cmd_multiple_trailing() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         // Trailing arguments disallowed on commands that don't take any:
@@ -1838,7 +1846,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_access() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room access set knock", ctx.clone()).unwrap();

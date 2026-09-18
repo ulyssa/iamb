@@ -221,11 +221,13 @@ pub fn mock_settings() -> ApplicationSettings {
             dirs: None,
             layout: None,
             macros: None,
+            aliases: None,
         },
         tunables: mock_tunables(),
         dirs: mock_dirs(),
         layout: Default::default(),
         macros: HashMap::default(),
+        aliases: HashMap::default(),
         enable_enhanced_keys: false,
     }
 }
@@ -242,7 +244,7 @@ pub async fn mock_store() -> ProgramStore {
         .unwrap();
     let worker = Requester { tx, receipts, client };
 
-    let mut store = ChatStore::new(worker, mock_settings());
+    let mut store = ChatStore::new(worker, mock_settings()).unwrap();
 
     // Add presence information.
     store.presences.get_or_default(TEST_USER1.clone());
