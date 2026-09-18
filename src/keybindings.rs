@@ -23,7 +23,7 @@ pub fn setup_keybindings() -> Keybindings {
     let mut ism = Keybindings::empty();
 
     let vim = VimBindings::default()
-        .submit_on_enter()
+        .submit_on_enter(false)
         .cursor_open(MATRIX_ID_WORD.clone());
 
     vim.setup(&mut ism);

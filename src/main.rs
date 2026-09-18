@@ -1111,7 +1111,7 @@ async fn run(
 
     // Set up the async worker thread and global store.
     let worker = ClientWorker::spawn(client.clone(), settings.clone()).await;
-    let store = ChatStore::new(worker.clone(), settings.clone());
+    let store = ChatStore::new(worker.clone(), settings.clone())?;
     let mut store = Store::new(store);
     store.completer = Box::new(IambCompleter);
 

@@ -26,6 +26,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 use crate::prelude::*;
 
+type Aliases = HashMap<String, String>;
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
 
 macro_rules! usage {
@@ -1205,6 +1206,7 @@ pub struct ProfileConfig {
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
+    pub aliases: Option<Aliases>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -1215,6 +1217,7 @@ pub struct IambConfig {
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
+    pub aliases: Option<Aliases>,
 }
 
 impl IambConfig {
@@ -1247,6 +1250,7 @@ pub struct ApplicationSettings {
     pub dirs: DirectoryValues,
     pub layout: Layout,
     pub macros: Macros,
+    pub aliases: Aliases,
 
     /// Whether to use the Kitty keyboard protocol. Resolved by
     /// [`ApplicationSettings::probe_enhanced_keys`] once the TUI starts, since
@@ -1295,6 +1299,7 @@ impl ApplicationSettings {
             settings: global,
             layout,
             macros,
+            aliases,
         } = config;
 
         validate_profile_names(&profiles);
@@ -1336,6 +1341,7 @@ impl ApplicationSettings {
             }
         };
 
+        let aliases = merge_maps(profile.aliases.take(), aliases).unwrap_or_default();
         let macros = merge_maps(profile.macros.take(), macros).unwrap_or_default();
         let layout = profile.layout.take().or(layout).unwrap_or_default();
 
@@ -1395,6 +1401,7 @@ impl ApplicationSettings {
             dirs,
             layout,
             macros,
+            aliases,
             enable_enhanced_keys: false,
         };
 
@@ -1817,6 +1824,15 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_aliases() {
+        let res: Aliases = serde_json::from_str("{\"c\":\"chats\"}").unwrap();
+        assert_eq!(res.len(), 1);
+
+        let aliased = res.get("c").unwrap();
+        assert_eq!(aliased, "chats");
+    }
+
+    #[test]
     fn test_parse_macros() {
         let res: Macros = serde_json::from_str("{\"i|c\":{\"jj\":\"<Esc>\"}}").unwrap();
         assert_eq!(res.len(), 1);
@@ -1880,6 +1896,7 @@ mod tests {
             dirs,
             layout,
             macros,
+            aliases,
         } = &config;
 
         // There should be an example object for each top-level field.
@@ -1889,6 +1906,7 @@ mod tests {
         assert!(dirs.is_some());
         assert!(layout.is_some());
         assert!(macros.is_some());
+        assert!(aliases.is_some());
     }
 
     #[test]

@@ -1945,14 +1945,15 @@ pub struct ChatStore {
 
 impl ChatStore {
     /// Create a new [ChatStore].
-    pub fn new(worker: Requester, settings: ApplicationSettings) -> Self {
+    pub fn new(worker: Requester, settings: ApplicationSettings) -> IambResult<Self> {
         let previews = PreviewManager::new(&settings);
+        let cmds = crate::commands::setup_commands(&settings.aliases)?;
 
-        ChatStore {
+        let store = ChatStore {
             worker,
             settings,
             previews,
-            cmds: crate::commands::setup_commands(),
+            cmds,
             emojis: emoji_map(),
 
             collator: Default::default(),
@@ -1966,7 +1967,9 @@ impl ChatStore {
             ring_bell: false,
             focused: true,
             open_notifications: Default::default(),
-        }
+        };
+
+        Ok(store)
     }
 
     /// Get a joined room.
