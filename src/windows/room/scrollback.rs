@@ -259,8 +259,18 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = selidx == key;
                     let prev = prevmsg(key, thread);
-                    let len =
-                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
+                    let len = item
+                        .show(
+                            prev,
+                            self.thread.is_none(),
+                            sel,
+                            &self.viewctx,
+                            info,
+                            settings,
+                            previews,
+                        )
+                        .lines
+                        .len();
 
                     if key == &idx {
                         lines += len / 2;
@@ -283,8 +293,18 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = key == selidx;
                     let prev = prevmsg(key, thread);
-                    let len =
-                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
+                    let len = item
+                        .show(
+                            prev,
+                            self.thread.is_none(),
+                            sel,
+                            &self.viewctx,
+                            info,
+                            settings,
+                            previews,
+                        )
+                        .lines
+                        .len();
 
                     lines += len;
 
@@ -343,7 +363,7 @@ impl ScrollbackState {
             }
 
             lines += item
-                .show(prev, false, &self.viewctx, info, settings, previews)
+                .show(prev, self.thread.is_none(), false, &self.viewctx, info, settings, previews)
                 .height()
                 .max(1);
 
@@ -1080,7 +1100,15 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 for (key, item) in thread.range(..=&corner_key).rev() {
                     let sel = key == cursor_key;
                     let prev = prevmsg(key, thread);
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
+                    let txt = item.show(
+                        prev,
+                        self.thread.is_none(),
+                        sel,
+                        &self.viewctx,
+                        info,
+                        settings,
+                        previews,
+                    );
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1108,7 +1136,15 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in thread.range(&corner_key..) {
                     let sel = key == cursor_key;
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
+                    let txt = item.show(
+                        prev,
+                        self.thread.is_none(),
+                        sel,
+                        &self.viewctx,
+                        info,
+                        settings,
+                        previews,
+                    );
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1378,8 +1414,15 @@ impl StatefulWidget for Scrollback<'_> {
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
 
-            let (txt, mut msg_previews) =
-                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings, previews);
+            let (txt, mut msg_previews) = item.show_with_preview(
+                prev,
+                state.thread.is_none(),
+                foc && sel,
+                &state.viewctx,
+                info,
+                settings,
+                previews,
+            );
 
             let incomplete_ok = !full || !sel;
 
@@ -1610,6 +1653,7 @@ mod tests {
         // Set a terminal width of 60, and height of 4, rendering in scrollback as:
         //
         //       |------------------------------------------------------------|
+        //       |  Loading older messages...                                 |
         // MSG2: |                Wednesday, December 31 1969                 |
         //       |           @user2:example.com  helium                       |
         // MSG3: |           @user2:example.com  this                         |
@@ -1659,6 +1703,11 @@ mod tests {
         scrollback
             .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 2));
+
+        scrollback
+            .dirscroll(prev, ScrollSize::Cell, &1.into(), &ctx, &mut store)
+            .unwrap();
         assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 1));
 
         scrollback
@@ -1677,6 +1726,11 @@ mod tests {
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
             .unwrap();
         assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 1));
+
+        scrollback
+            .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)
+            .unwrap();
+        assert_eq!(scrollback.viewctx.corner, MessageCursor::new(MSG2_KEY.clone(), 2));
 
         scrollback
             .dirscroll(next, ScrollSize::Cell, &1.into(), &ctx, &mut store)

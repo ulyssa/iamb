@@ -30,7 +30,7 @@ use modalkit::editing::cursor::Cursor;
 use ratatui::symbols::line::THICK_VERTICAL;
 use ratatui_image::sliced::SlicedProtocol;
 
-use crate::base::MessageEdits;
+use crate::base::{MessageEdits, RoomFetchStatus};
 use crate::message::html::{StyleTree, parse_matrix_html};
 use crate::message::state::{body_cow_state, html_state};
 use crate::prelude::*;
@@ -921,6 +921,16 @@ pub struct Message {
     pub html: Option<StyleTree>,
 }
 
+const LOADING_OLDER_MESSAGES: &str = "Loading older messages...";
+
+/// Whether a message should show that older messages are being fetched.
+///
+/// The room's fetch status only describes its main timeline, so callers need to
+/// decide separately whether it applies to the view being rendered.
+fn shows_loading_indicator(prev: Option<&Message>, fetch: &RoomFetchStatus) -> bool {
+    prev.is_none() && !matches!(fetch, RoomFetchStatus::Done)
+}
+
 impl Message {
     pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
         let html = event.html();
@@ -1136,9 +1146,14 @@ impl Message {
     /// Render the message as a [Text] object for the terminal.
     ///
     /// This will also get the image preview Protocol with an x/y offset.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "rendering needs the message, view, room, and preview state"
+    )]
     pub fn show_with_preview<'a>(
         &'a self,
         prev: Option<&Message>,
+        main_scrollback: bool,
         selected: bool,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
@@ -1151,6 +1166,16 @@ impl Message {
         let mut fmt = self.get_render_format(prev, width, info, settings);
         let mut text = Text::default();
         let width = fmt.width();
+
+        // Only the main scrollback maps onto the room's fetch status; a thread view's
+        // oldest message can be unrelated to what the room is currently fetching.
+        if main_scrollback && shows_loading_indicator(prev, &info.fetch_id) {
+            let padding = vwctx.get_width().saturating_sub(LOADING_OLDER_MESSAGES.len());
+            text.lines.push(Line::from(vec![
+                Span::styled(LOADING_OLDER_MESSAGES, style.fg(Color::Gray)),
+                space_span(padding, style),
+            ]));
+        }
 
         let mut protos = Vec::new();
 
@@ -1222,16 +1247,22 @@ impl Message {
         (text, protos)
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "rendering needs the message, view, room, and preview state"
+    )]
     pub fn show<'a>(
         &'a self,
         prev: Option<&Message>,
+        main_scrollback: bool,
         selected: bool,
         vwctx: &ViewportContext<MessageCursor>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
     ) -> Text<'a> {
-        self.show_with_preview(prev, selected, vwctx, info, settings, previews).0
+        self.show_with_preview(prev, main_scrollback, selected, vwctx, info, settings, previews)
+            .0
     }
 
     fn show_msg<'a>(
@@ -1780,5 +1811,60 @@ pub mod tests {
             )),
             "[Attached Video: Alt text (44 kB)]".to_string().into()
         );
+    }
+
+    #[test]
+    fn test_shows_loading_indicator() {
+        let msg = mock_message1();
+
+        assert!(shows_loading_indicator(None, &RoomFetchStatus::NotStarted));
+        assert!(shows_loading_indicator(None, &RoomFetchStatus::HaveMore("id".into())));
+        assert!(!shows_loading_indicator(None, &RoomFetchStatus::Done));
+
+        // Having a predecessor means the scrollback isn't showing its top.
+        assert!(!shows_loading_indicator(Some(&msg), &RoomFetchStatus::NotStarted));
+        assert!(!shows_loading_indicator(Some(&msg), &RoomFetchStatus::HaveMore("id".into())));
+        assert!(!shows_loading_indicator(Some(&msg), &RoomFetchStatus::Done));
+    }
+
+    #[test]
+    fn test_show_loading_indicator() {
+        let settings = mock_settings();
+        let previews = PreviewManager::new(&settings);
+        let mut info = mock_room();
+        let vwctx = ViewportContext { dimensions: (60, 5), ..Default::default() };
+
+        fn showed(text: &Text<'_>) -> bool {
+            text.lines.iter().any(|line| {
+                line.spans
+                    .iter()
+                    .any(|span| span.content.as_ref() == LOADING_OLDER_MESSAGES)
+            })
+        }
+
+        let msg = mock_message2();
+        let prev = mock_message1();
+
+        // The oldest message in the main scrollback shows the indicator on top.
+        let text = msg.show(None, true, true, &vwctx, &info, &settings, &previews);
+        assert!(text.lines.first().is_some_and(|line| {
+            line.spans
+                .iter()
+                .any(|span| span.content.as_ref() == LOADING_OLDER_MESSAGES)
+        }));
+
+        // Thread views don't.
+        let text = msg.show(None, false, true, &vwctx, &info, &settings, &previews);
+        assert!(!showed(&text));
+
+        // Rooms done fetching don't, even in the main scrollback.
+        info.fetch_id = RoomFetchStatus::Done;
+        let text = msg.show(None, true, true, &vwctx, &info, &settings, &previews);
+        assert!(!showed(&text));
+
+        // Neither do messages with an older neighbor.
+        info.fetch_id = RoomFetchStatus::NotStarted;
+        let text = msg.show(Some(&prev), true, true, &vwctx, &info, &settings, &previews);
+        assert!(!showed(&text));
     }
 }
