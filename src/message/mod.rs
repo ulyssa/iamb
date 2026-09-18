@@ -27,10 +27,10 @@ use matrix_sdk::ruma::events::sticker::{OriginalStickerEvent, RedactedStickerEve
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
 use matrix_sdk::send_queue::SendHandle;
 use modalkit::editing::cursor::Cursor;
-use ratatui::symbols::line::THICK_VERTICAL;
+use ratatui::symbols::line::{HORIZONTAL, THICK_VERTICAL};
 use ratatui_image::sliced::SlicedProtocol;
 
-use crate::base::MessageEdits;
+use crate::base::{EventLocation, MessageEdits};
 use crate::message::html::{StyleTree, parse_matrix_html};
 use crate::message::state::{body_cow_state, html_state};
 use crate::prelude::*;
@@ -664,6 +664,9 @@ struct MessageFormatter<'a> {
     /// The date the message was sent.
     date: Option<Span<'a>>,
 
+    /// Whether to draw the read marker's trackbar above this message.
+    trackbar: bool,
+
     /// The users who have read up to this message.
     read: Vec<OwnedUserId>,
 }
@@ -680,6 +683,10 @@ impl<'a> MessageFormatter<'a> {
             line += 1;
         }
 
+        if self.trackbar {
+            line += 1;
+        }
+
         if let SenderSpan::Line(_) = self.user {
             line += 1;
         }
@@ -689,6 +696,12 @@ impl<'a> MessageFormatter<'a> {
 
     #[inline]
     fn push_spans(&mut self, prev_line: Line<'a>, style: Style, text: &mut Text<'a>) {
+        if std::mem::take(&mut self.trackbar) {
+            let trackbar_style = Style::default().add_modifier(StyleModifier::DIM);
+            text.lines
+                .push(Line::from(Span::styled(HORIZONTAL.repeat(self.orig), trackbar_style)));
+        }
+
         if let Some(date) = self.date.take() {
             let len = date.content.as_ref().len();
             let padding = self.orig.saturating_sub(len);
@@ -921,6 +934,18 @@ pub struct Message {
     pub html: Option<StyleTree>,
 }
 
+/// Whether the read marker sits between the previous message and this one.
+///
+/// The marker's event is the last one the user has read, so the first message
+/// after it is the first unread one. A missing marker, or one whose message
+/// isn't among the loaded ones, leaves nothing to mark.
+fn is_after_read_marker(prev: Option<&Message>, marker: Option<&OwnedEventId>) -> bool {
+    match (prev.and_then(|msg| msg.event.event_id()), marker) {
+        (Some(prev), Some(marker)) => prev == marker,
+        _ => false,
+    }
+}
+
 impl Message {
     pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
         let html = event.html();
@@ -1019,6 +1044,35 @@ impl Message {
 
         !prev.timestamp.same_day(self.timestamp)
     }
+
+    /// Whether the current user's read marker sits right before this message.
+    ///
+    /// Each thread keeps its own marker, so the rule only shows up in the view
+    /// whose messages the marker belongs to.
+    pub fn show_trackbar(
+        &self,
+        prev: Option<&Message>,
+        info: &RoomInfo,
+        settings: &ApplicationSettings,
+    ) -> bool {
+        let marker = info
+            .user_receipts
+            .get(&self.receipt_thread(info))
+            .and_then(|receipts| receipts.get(&settings.profile.user_id));
+
+        is_after_read_marker(prev, marker)
+    }
+
+    /// The read receipt thread that this message was inserted into.
+    fn receipt_thread(&self, info: &RoomInfo) -> ReceiptThread {
+        match self.event.event_id().and_then(|event_id| info.keys.get(event_id)) {
+            Some(EventLocation::Message(Some(thread_root), _)) => {
+                ReceiptThread::Thread(thread_root.clone())
+            },
+            _ => ReceiptThread::Main,
+        }
+    }
+
     pub fn message_column_width(
         viewctx: &ViewportContext<MessageCursor>,
         settings: &ApplicationSettings,
@@ -1048,6 +1102,7 @@ impl Message {
     ) -> MessageFormatter<'a> {
         let orig = width;
         let date = self.show_date(prev).then(|| self.timestamp.show_date());
+        let trackbar = self.show_trackbar(prev, info, settings);
         let user_gutter = settings.tunables.user_gutter_width;
 
         if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
@@ -1072,6 +1127,7 @@ impl Message {
                 fill,
                 user,
                 date,
+                trackbar,
                 time,
                 read,
                 info,
@@ -1090,6 +1146,7 @@ impl Message {
                 fill,
                 user,
                 date,
+                trackbar,
                 time,
                 read,
                 info,
@@ -1108,6 +1165,7 @@ impl Message {
                 fill,
                 user,
                 date,
+                trackbar,
                 time,
                 read,
                 info,
@@ -1126,6 +1184,7 @@ impl Message {
                 fill,
                 user,
                 date,
+                trackbar,
                 time,
                 read,
                 info,
@@ -1780,5 +1839,92 @@ pub mod tests {
             )),
             "[Attached Video: Alt text (44 kB)]".to_string().into()
         );
+    }
+
+    #[test]
+    fn test_is_after_read_marker() {
+        let first = mock_message1();
+        let second = mock_message2();
+
+        // Without a marker there's nothing to mark.
+        assert!(!is_after_read_marker(Some(&first), None));
+        assert!(!is_after_read_marker(None, None));
+
+        // The marker names the last read message, so the message immediately
+        // after it draws the trackbar.
+        assert!(is_after_read_marker(Some(&first), Some(&MSG1_EVID)));
+        assert!(is_after_read_marker(Some(&second), Some(&MSG2_EVID)));
+
+        // A marker on the rendered message belongs to the next message instead,
+        // so the last loaded message never draws a trackbar when it's the
+        // marker itself.
+        assert!(!is_after_read_marker(Some(&first), Some(&MSG2_EVID)));
+
+        // The first loaded message has no predecessor to prove the marker is
+        // its neighbor, and markers for unloaded messages aren't neighbors.
+        assert!(!is_after_read_marker(None, Some(&MSG1_EVID)));
+        assert!(!is_after_read_marker(Some(&second), Some(&MSG5_EVID)));
+    }
+
+    fn has_trackbar(text: &Text<'_>, width: usize) -> bool {
+        text.lines.iter().any(|line| {
+            line.spans
+                .iter()
+                .any(|span| span.content.as_ref() == HORIZONTAL.repeat(width))
+        })
+    }
+
+    #[test]
+    fn test_show_trackbar() {
+        let settings = mock_settings();
+        let previews = PreviewManager::new(&settings);
+        let mut info = mock_room();
+        let vwctx = ViewportContext { dimensions: (60, 5), ..Default::default() };
+
+        let prev = mock_message1();
+        let msg = mock_message2();
+        let user_id = settings.profile.user_id.clone();
+
+        // Without a marker, no trackbar is drawn.
+        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        assert!(!has_trackbar(&text, 60));
+
+        // When the marker names the previous message, the rule leads the message.
+        info.set_receipt(ReceiptThread::Main, user_id.clone(), MSG1_EVID.clone());
+        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        assert!(has_trackbar(&text, 60));
+        assert_eq!(text.lines[0].spans[0].content.as_ref(), HORIZONTAL.repeat(60));
+
+        // A marker on the message itself means the trackbar belongs to the next one.
+        info.set_receipt(ReceiptThread::Main, user_id.clone(), MSG2_EVID.clone());
+        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        assert!(!has_trackbar(&text, 60));
+        let text = prev.show(Some(&msg), false, &vwctx, &info, &settings, &previews);
+        assert!(has_trackbar(&text, 60));
+    }
+
+    #[test]
+    fn test_show_trackbar_thread() {
+        let settings = mock_settings();
+        let mut info = mock_room();
+        let user_id = settings.profile.user_id.clone();
+
+        let prev = mock_message1();
+        let msg = mock_message2();
+
+        let root = MSG5_EVID.clone();
+        info.keys.insert(
+            MSG2_EVID.clone(),
+            EventLocation::Message(Some(root.clone()), MSG2_KEY.clone()),
+        );
+
+        // A marker for the thread that this message belongs to is shown.
+        info.set_receipt(ReceiptThread::Thread(root.clone()), user_id.clone(), MSG1_EVID.clone());
+        assert!(msg.show_trackbar(Some(&prev), &info, &settings));
+
+        // The main timeline's marker doesn't apply to a thread's messages.
+        info.user_receipts.remove(&ReceiptThread::Thread(root));
+        info.set_receipt(ReceiptThread::Main, user_id, MSG1_EVID.clone());
+        assert!(!msg.show_trackbar(Some(&prev), &info, &settings));
     }
 }
