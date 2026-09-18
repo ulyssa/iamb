@@ -139,10 +139,10 @@ Possible values are
 .Dq Sy markdown
 (the default) and
 .Dq Sy plaintext .
-.It default_register
+.It Sy default_register
 The default register to read and write to when one isn't specified.
 This defaults to the unnamed register,
-.Sy " ,
+.Sy \(dq ,
 but you can set it to something like
 .Sy +
 if you want to read and write from the system clipboard by default.
@@ -224,9 +224,19 @@ See
 .Sx NOTIFICATIONS
 for more details.
 .It Sy open_command
-Defines a custom  command and its arguments to run when opening downloads instead of the default.
+Defines a custom  command and its arguments to run when handling
+.Sy :open
+instead of the default system behaviour.
 (For example,
 .Sy ["my-open",\ "--file"] . )
+Keep in mind that
+.Sy :open
+can be used for more than just opening downloads:
+this command may also be passed
+.Sy http[s]://
+and
+.Sy geo:
+URLs for relevant messages.
 .It Sy proxy
 When this subsection is present, you can configure how requests are proxied to the homeserver.
 See
@@ -617,7 +627,6 @@ Whether to set the title of the terminal window to
 .Dq Sy iamb (<user_id>) .
 Defaults to true.
 .El
-.It Sy indicator
 .Sh "USER OVERRIDES"
 The
 .Sy settings.users

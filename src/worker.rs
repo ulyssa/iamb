@@ -399,7 +399,7 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
 }
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: bool) {
-    let mut names = vec![];
+    let mut names_and_tags = vec![];
 
     let mut spaces = vec![];
     let mut rooms = vec![];
@@ -424,14 +424,14 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
         let name = display.to_string();
         let tags = room.tags().await.unwrap_or_default();
 
-        names.push((room.room_id().to_owned(), name));
+        names_and_tags.push((room.room_id().to_owned(), name, tags));
 
         if room.is_direct().await.unwrap_or_default() {
-            dms.push(Arc::new((room, tags)));
+            dms.push(room);
         } else if room.is_space() {
-            spaces.push(Arc::new((room, tags)));
+            spaces.push(room);
         } else {
-            rooms.push(Arc::new((room, tags)));
+            rooms.push(room);
         }
     }
 
@@ -440,8 +440,8 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     locked.application.sync_info.rooms = rooms;
     locked.application.sync_info.dms = dms;
 
-    for (room_id, name) in names {
-        locked.application.set_room_name(&room_id, &name);
+    for (room_id, name, tags) in names_and_tags {
+        locked.application.set_room_info(room_id, name, tags);
     }
 }
 
@@ -655,12 +655,12 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
     let ChatStore { sync_info, need_load, .. } = &mut locked.application;
 
     for room in sync_info.rooms.iter() {
-        let room_id = room.as_ref().0.room_id().to_owned();
+        let room_id = room.room_id().to_owned();
         need_load.need_messages(room_id);
     }
 
     for room in sync_info.dms.iter() {
-        let room_id = room.as_ref().0.room_id().to_owned();
+        let room_id = room.room_id().to_owned();
         need_load.need_messages(room_id);
     }
 
@@ -681,11 +681,15 @@ impl<T> ClientResponse<T> {
     fn recv(self) -> T {
         self.0.recv().expect("failed to receive response from client thread")
     }
+
+    pub fn try_recv(&self) -> Option<T> {
+        self.0.try_recv().ok()
+    }
 }
 
 impl<T> ClientReply<T> {
     fn send(self, t: T) {
-        self.0.send(t).unwrap();
+        let _ = self.0.send(t);
     }
 }
 
@@ -876,6 +880,50 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
     client
 }
 
+async fn direct_message(user: OwnedUserId, client: Client) -> IambResult<OwnedRoomId> {
+    if let Some(room) = client.get_dm_room(&user) {
+        return Ok(room.room_id().to_owned());
+    }
+
+    client
+        .create_dm(&user)
+        .await
+        .map(|room| room.room_id().to_owned())
+        .map_err(|err| {
+            error!(
+                user_id = user.as_str(),
+                err = err.to_string(),
+                "Failed to create direct message room"
+            );
+
+            let msg = format!("Could not open a room with {user}");
+            UIError::Failure(msg)
+        })
+}
+
+async fn join_room(
+    name: String,
+    via: Vec<OwnedServerName>,
+    client: Client,
+) -> IambResult<OwnedRoomId> {
+    if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
+        match client.join_room_by_id_or_alias(&alias_id, &via).await {
+            Ok(resp) => Ok(resp.room_id().to_owned()),
+            Err(e) => {
+                let msg = e.to_string();
+                let err = UIError::Failure(msg);
+                return Err(err);
+            },
+        }
+    } else if let Ok(user) = OwnedUserId::try_from(name.as_str()) {
+        direct_message(user, client).await
+    } else {
+        let msg = format!("{:?} is not a valid room or user name", name.as_str());
+        let err = UIError::Failure(msg);
+        return Err(err);
+    }
+}
+
 #[derive(Clone)]
 pub struct Requester {
     pub client: Client,
@@ -948,12 +996,18 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn join_room(&self, name: String, via: Vec<OwnedServerName>) -> IambResult<OwnedRoomId> {
+    pub fn join_room_chan(
+        &self,
+        name: String,
+        via: Vec<OwnedServerName>,
+    ) -> ClientResponse<IambResult<OwnedRoomId>> {
         let (reply, response) = oneshot();
-
         self.tx.send(WorkerTask::JoinRoom(name, via, reply)).unwrap();
+        response
+    }
 
-        return response.recv();
+    pub fn join_room(&self, name: String, via: Vec<OwnedServerName>) -> IambResult<OwnedRoomId> {
+        self.join_room_chan(name, via).recv()
     }
 
     pub fn members(&self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
@@ -1001,7 +1055,7 @@ pub struct ClientWorker {
     unspawned_receipt_stream:
         Option<UnboundedReceiver<(OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId)>>,
 
-    /// Take care when locking since worker commands are sent with the lock already hold
+    /// Take care when locking since worker commands are sent with the lock already held
     store: Option<AsyncProgramStore>,
 }
 
@@ -1057,7 +1111,8 @@ impl ClientWorker {
             },
             WorkerTask::JoinRoom(name, via, reply) => {
                 assert!(self.initialized);
-                reply.send(self.join_room(name, via).await);
+                let client = self.client.clone();
+                tokio::spawn(async move { reply.send(join_room(name, via, client).await) });
             },
             WorkerTask::GetInviter(invited, reply) => {
                 assert!(self.initialized);
@@ -1501,27 +1556,6 @@ impl ClientWorker {
         Ok(Some(InfoMessage::from("Successfully logged out")))
     }
 
-    async fn direct_message(&mut self, user: OwnedUserId) -> IambResult<OwnedRoomId> {
-        if let Some(room) = self.client.get_dm_room(&user) {
-            return Ok(room.room_id().to_owned());
-        }
-
-        self.client
-            .create_dm(&user)
-            .await
-            .map(|room| room.room_id().to_owned())
-            .map_err(|err| {
-                error!(
-                    user_id = user.as_str(),
-                    err = err.to_string(),
-                    "Failed to create direct message room"
-                );
-
-                let msg = format!("Could not open a room with {user}");
-                UIError::Failure(msg)
-            })
-    }
-
     async fn get_inviter(&mut self, invited: MatrixRoom) -> IambResult<Option<RoomMember>> {
         let details = invited.invite_details().await.map_err(IambError::from)?;
 
@@ -1552,31 +1586,6 @@ impl ClientWorker {
 
                 return Err(err);
             },
-        }
-    }
-
-    async fn join_room(
-        &mut self,
-        name: String,
-        via: Vec<OwnedServerName>,
-    ) -> IambResult<OwnedRoomId> {
-        if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
-            match self.client.join_room_by_id_or_alias(&alias_id, &via).await {
-                Ok(resp) => Ok(resp.room_id().to_owned()),
-                Err(e) => {
-                    let msg = e.to_string();
-                    let err = UIError::Failure(msg);
-
-                    return Err(err);
-                },
-            }
-        } else if let Ok(user) = OwnedUserId::try_from(name.as_str()) {
-            self.direct_message(user).await
-        } else {
-            let msg = format!("{:?} is not a valid room or user name", name.as_str());
-            let err = UIError::Failure(msg);
-
-            return Err(err);
         }
     }
 

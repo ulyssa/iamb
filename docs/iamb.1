@@ -71,6 +71,8 @@ View a list of unread rooms.
 Mark all rooms as read.
 .It Sy ":mentions"
 View a list of rooms with mentions of the current user.
+.It Sy ":invites"
+View a list of rooms you are invited to.
 .It Sy ":welcome"
 View the startup Welcome window.
 .It Sy ":forget"
@@ -98,6 +100,8 @@ Confirm an in-progress verification.
 Reject an in-progress verification due to mismatched Emoji.
 .It Sy ":verify request [user id]"
 Request a new verification with the specified user.
+.It Sy ":verify recover [recovery key]"
+Recover the encryption secrets from the backup on your homeserver, verifying this session.
 .El
 
 .Sh "MESSAGE COMMANDS"
@@ -406,7 +410,7 @@ Overwrites the value set by the
 config value.
 The syntax is defined at
 .Lk https://docs.rs/tracing_subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
-
+.El
 .Sh EXAMPLES
 .Ss Example 1: Starting with a specific profile
 To start with a profile named

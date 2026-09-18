@@ -682,6 +682,9 @@ impl Application {
 
                 return verifications::iamb_verify_request(user_id, store).await;
             },
+            IambAction::Recover(key) => {
+                return verifications::iamb_recover(key, store).await;
+            },
         };
 
         Ok(info)

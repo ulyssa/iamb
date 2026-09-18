@@ -42,6 +42,7 @@ use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
+use url::form_urlencoded;
 
 use crate::notifications::NotificationHandle;
 use crate::prelude::*;
@@ -598,6 +599,9 @@ pub enum IambAction {
     /// Request a new verification with the specified user.
     VerifyRequest(String),
 
+    /// Recover the encryption secrets for this session with the given recovery key.
+    Recover(String),
+
     /// Toggle the focus within the focused room.
     ToggleScrollbackFocus,
 
@@ -656,6 +660,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
+            IambAction::Recover(..) => SequenceStatus::Break,
         }
     }
 
@@ -672,6 +677,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
+            IambAction::Recover(..) => SequenceStatus::Atom,
         }
     }
 
@@ -688,6 +694,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
+            IambAction::Recover(..) => SequenceStatus::Ignore,
         }
     }
 
@@ -704,6 +711,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
+            IambAction::Recover(..) => false,
         }
     }
 }
@@ -860,6 +868,10 @@ pub enum IambError {
     /// A failure occurred during verification.
     #[error("Verification request error: {0}")]
     VerificationRequestError(#[from] matrix_sdk::encryption::identities::RequestVerificationError),
+
+    /// A failure occurred while recovering the encryption secrets.
+    #[error("Recovery error: {0}")]
+    RecoveryError(#[from] matrix_sdk::encryption::recovery::RecoveryError),
 
     #[error("Notification setting error: {0}")]
     NotificationSettingError(#[from] matrix_sdk::NotificationSettingsError),
@@ -1793,22 +1805,22 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
 #[derive(Default)]
 pub struct SyncInfo {
     /// Spaces that the user is a member of.
-    pub spaces: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub spaces: Vec<MatrixRoom>,
 
     /// Rooms that the user is a member of.
-    pub rooms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub rooms: Vec<MatrixRoom>,
 
     /// DMs that the user is a member of.
-    pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub dms: Vec<MatrixRoom>,
 }
 
 impl SyncInfo {
     pub fn rooms(&self) -> impl Iterator<Item = &RoomId> {
-        self.rooms.iter().map(|r| r.0.room_id())
+        self.rooms.iter().map(|r| r.room_id())
     }
 
     pub fn dms(&self) -> impl Iterator<Item = &RoomId> {
-        self.dms.iter().map(|r| r.0.room_id())
+        self.dms.iter().map(|r| r.room_id())
     }
 
     pub fn chats(&self) -> impl Iterator<Item = &RoomId> {
@@ -1987,9 +1999,11 @@ impl ChatStore {
         self.rooms.get_or_default(room_id)
     }
 
-    /// Set the name for a room.
-    pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
-        self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
+    /// Set the name and tags for a room.
+    pub fn set_room_info(&mut self, room_id: OwnedRoomId, name: String, tags: Option<Tags>) {
+        let info = self.rooms.get_or_default(room_id);
+        info.name = name.into();
+        info.tags = tags;
     }
 }
 
@@ -2000,6 +2014,12 @@ impl ApplicationStore for ChatStore {}
 pub enum IambId {
     /// A Matrix room, with an optional thread to show.
     Room(OwnedRoomId, Option<OwnedEventId>),
+
+    /// A Matrix room that we're currently in the middle of joining.
+    Joining(String),
+
+    /// A Matrix room that we haven't joined, and aren't currently joining.
+    NotJoined(String),
 
     /// The `:dms` window.
     DirectList,
@@ -2027,6 +2047,27 @@ pub enum IambId {
 
     /// The `:mentions` window.
     MentionsList,
+
+    /// The `:invites` window.
+    InvitesList,
+}
+
+/// Encode the room name for a [IambId::Joining] or [IambId::NotJoined] window URL.
+///
+/// Note that since these names come straight from the user's argument to `:join`,
+/// they are likely room aliases containing characters like `#` that we should
+/// escape before putting them into the URL, so we can later reparse it. They can
+/// technically contain anything that the user tried to pass to `:join`.
+fn room_query(room: &str) -> String {
+    form_urlencoded::Serializer::new(String::new())
+        .append_pair("room", room)
+        .finish()
+}
+
+/// Pull the room name back out of the query parameter for `iamb://joining` or
+/// `iamb://not-joined`.
+fn query_room(url: &Url) -> Option<String> {
+    url.query_pairs().find_map(|(k, v)| (k == "room").then(|| v.into_owned()))
 }
 
 impl Display for IambId {
@@ -2037,6 +2078,12 @@ impl Display for IambId {
             },
             IambId::Room(room_id, Some(thread)) => {
                 write!(f, "iamb://room/{room_id}/threads/{thread}")
+            },
+            IambId::Joining(room) => {
+                write!(f, "iamb://joining?{}", room_query(room))
+            },
+            IambId::NotJoined(room) => {
+                write!(f, "iamb://not-joined?{}", room_query(room))
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -2049,6 +2096,7 @@ impl Display for IambId {
             IambId::ChatList => f.write_str("iamb://chats"),
             IambId::UnreadList => f.write_str("iamb://unreads"),
             IambId::MentionsList => f.write_str("iamb://mentions"),
+            IambId::InvitesList => f.write_str("iamb://invites"),
         }
     }
 }
@@ -2123,6 +2171,20 @@ impl Visitor<'_> for IambIdVisitor {
                     _ => return Err(E::custom("Invalid members window URL")),
                 }
             },
+            Some("joining") => {
+                let Some(room) = query_room(&url) else {
+                    return Err(E::custom("iamb://joining requires a room parameter"));
+                };
+
+                Ok(IambId::Joining(room))
+            },
+            Some("not-joined") => {
+                let Some(room) = query_room(&url) else {
+                    return Err(E::custom("iamb://not-joined requires a room parameter"));
+                };
+
+                Ok(IambId::NotJoined(room))
+            },
             Some("members") => {
                 let Some(path) = url.path_segments() else {
                     return Err(E::custom("Invalid members window URL"));
@@ -2193,6 +2255,13 @@ impl Visitor<'_> for IambIdVisitor {
                 }
 
                 Ok(IambId::MentionsList)
+            },
+            Some("invites") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://invites takes no path"));
+                }
+
+                Ok(IambId::InvitesList)
             },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
@@ -2267,6 +2336,9 @@ pub enum IambBufferId {
 
     /// The `:mentions` window.
     MentionsList,
+
+    /// The `:invites` window.
+    InvitesList,
 }
 
 impl IambBufferId {
@@ -2284,6 +2356,7 @@ impl IambBufferId {
             IambBufferId::ChatList => IambId::ChatList,
             IambBufferId::UnreadList => IambId::UnreadList,
             IambBufferId::MentionsList => IambId::MentionsList,
+            IambBufferId::InvitesList => IambId::InvitesList,
         };
 
         Some(id)
@@ -2454,6 +2527,35 @@ pub mod tests {
                 Span::from(" is typing...")
             ])
         );
+    }
+
+    #[test]
+    fn test_unjoined_window_ids() {
+        // Room names come from the user can contain characters that need escaping:
+        for name in [
+            "#foo:example.com",
+            "!abc123:example.com",
+            "@user:example.com",
+            "a b&c=d?e#f",
+        ] {
+            for id in [IambId::Joining(name.into()), IambId::NotJoined(name.into())] {
+                let json = serde_json::to_string(&id).unwrap();
+                assert_eq!(serde_json::from_str::<IambId>(&json).unwrap(), id);
+            }
+        }
+
+        assert_eq!(
+            IambId::Joining("#foo:example.com".into()).to_string(),
+            "iamb://joining?room=%23foo%3Aexample.com"
+        );
+        assert_eq!(
+            IambId::NotJoined("#foo:example.com".into()).to_string(),
+            "iamb://not-joined?room=%23foo%3Aexample.com"
+        );
+
+        // A window URL without a room name isn't valid and wasn't written by us:
+        assert!(serde_json::from_str::<IambId>("\"iamb://joining\"").is_err());
+        assert!(serde_json::from_str::<IambId>("\"iamb://not-joined\"").is_err());
     }
 
     #[test]
