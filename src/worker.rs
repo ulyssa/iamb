@@ -397,7 +397,7 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
 }
 
 async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: bool) {
-    let mut names = vec![];
+    let mut names_and_tags = vec![];
 
     let mut spaces = vec![];
     let mut rooms = vec![];
@@ -422,14 +422,14 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
         let name = display.to_string();
         let tags = room.tags().await.unwrap_or_default();
 
-        names.push((room.room_id().to_owned(), name));
+        names_and_tags.push((room.room_id().to_owned(), name, tags));
 
         if room.is_direct().await.unwrap_or_default() {
-            dms.push(Arc::new((room, tags)));
+            dms.push(room);
         } else if room.is_space() {
-            spaces.push(Arc::new((room, tags)));
+            spaces.push(room);
         } else {
-            rooms.push(Arc::new((room, tags)));
+            rooms.push(room);
         }
     }
 
@@ -438,8 +438,8 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     locked.application.sync_info.rooms = rooms;
     locked.application.sync_info.dms = dms;
 
-    for (room_id, name) in names {
-        locked.application.set_room_name(&room_id, &name);
+    for (room_id, name, tags) in names_and_tags {
+        locked.application.set_room_info(room_id, name, tags);
     }
 }
 
@@ -657,12 +657,12 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
     let ChatStore { sync_info, need_load, .. } = &mut locked.application;
 
     for room in sync_info.rooms.iter() {
-        let room_id = room.as_ref().0.room_id().to_owned();
+        let room_id = room.room_id().to_owned();
         need_load.need_messages(room_id);
     }
 
     for room in sync_info.dms.iter() {
-        let room_id = room.as_ref().0.room_id().to_owned();
+        let room_id = room.room_id().to_owned();
         need_load.need_messages(room_id);
     }
 

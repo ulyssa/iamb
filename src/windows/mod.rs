@@ -12,8 +12,9 @@ use std::fmt::{self};
 
 use feruca::Collator;
 use matrix_sdk::room::RoomMember;
-use matrix_sdk::ruma::RoomAliasId;
 use matrix_sdk::ruma::events::room::member::MembershipState;
+use matrix_sdk::ruma::{RoomAliasId, assign};
+use modalkit::editing::completion::CompletionMap;
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 
@@ -26,8 +27,6 @@ use crate::windows::welcome::WelcomeState;
 pub mod room;
 pub mod verify;
 pub mod welcome;
-
-type MatrixRoomInfo = Arc<(MatrixRoom, Option<Tags>)>;
 
 const MEMBER_FETCH_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -55,20 +54,10 @@ pub fn selected_style(selected: bool) -> Style {
     }
 }
 
-#[inline]
-fn selected_span(s: &str, selected: bool) -> Span<'_> {
-    Span::styled(s, selected_style(selected))
-}
-
-#[inline]
-fn selected_text(s: &str, selected: bool) -> Text<'_> {
-    Text::from(selected_span(s, selected))
-}
-
 fn name_and_labels<'a>(
     name: &'a str,
     unread: &UnreadInfo,
-    room: &MatrixRoom,
+    room_membership: MatrixRoomState,
     style: Style,
 ) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
     // TODO: use different colors for "mention", "notification", "muted room"
@@ -82,7 +71,7 @@ fn name_and_labels<'a>(
 
     let mut labels = vec![];
 
-    match room.state() {
+    match room_membership {
         MatrixRoomState::Joined => {},
         MatrixRoomState::Left => labels.push(vec![Span::styled("Left", style)]),
         MatrixRoomState::Banned => labels.push(vec![Span::styled("Banned", style)]),
@@ -263,6 +252,7 @@ trait RoomLikeItem {
     fn alias(&self) -> Option<&RoomAliasId>;
     fn name(&self) -> &str;
     fn is_invite(&self) -> bool;
+    fn has_mention(&self) -> bool;
 }
 
 #[inline]
@@ -313,17 +303,17 @@ macro_rules! delegate {
 }
 
 pub enum IambWindow {
-    DirectList(DirectListState),
+    DirectList(RoomListState),
     MemberList(MemberListState, OwnedRoomId, Option<Instant>),
     Room(RoomState),
     VerifyList(VerifyListState),
     RoomList(RoomListState),
-    SpaceList(SpaceListState),
+    SpaceList(RoomListState),
     Welcome(WelcomeState),
-    ChatList(ChatListState),
-    UnreadList(UnreadListState),
-    MentionsList(MentionsListState),
-    InvitesList(InvitesListState),
+    ChatList(RoomListState),
+    UnreadList(RoomListState),
+    MentionsList(RoomListState),
+    InvitesList(RoomListState),
 }
 
 impl IambWindow {
@@ -402,21 +392,9 @@ impl IambWindow {
     }
 }
 
-pub type DirectListState = ListState<DirectItem, IambInfo>;
 pub type MemberListState = ListState<MemberItem, IambInfo>;
-pub type RoomListState = ListState<RoomItem, IambInfo>;
-pub type ChatListState = ListState<GenericChatItem, IambInfo>;
-pub type UnreadListState = ListState<GenericChatItem, IambInfo>;
-pub type MentionsListState = ListState<GenericChatItem, IambInfo>;
-pub type InvitesListState = ListState<GenericChatItem, IambInfo>;
-pub type SpaceListState = ListState<SpaceItem, IambInfo>;
+pub type RoomListState = ListState<GenericRoomItem, IambInfo>;
 pub type VerifyListState = ListState<VerifyItem, IambInfo>;
-
-impl From<ChatListState> for IambWindow {
-    fn from(list: ChatListState) -> Self {
-        IambWindow::ChatList(list)
-    }
-}
 
 impl From<RoomState> for IambWindow {
     fn from(room: RoomState) -> Self {
@@ -427,24 +405,6 @@ impl From<RoomState> for IambWindow {
 impl From<VerifyListState> for IambWindow {
     fn from(list: VerifyListState) -> Self {
         IambWindow::VerifyList(list)
-    }
-}
-
-impl From<DirectListState> for IambWindow {
-    fn from(list: DirectListState) -> Self {
-        IambWindow::DirectList(list)
-    }
-}
-
-impl From<RoomListState> for IambWindow {
-    fn from(list: RoomListState) -> Self {
-        IambWindow::RoomList(list)
-    }
-}
-
-impl From<SpaceListState> for IambWindow {
-    fn from(list: SpaceListState) -> Self {
-        IambWindow::SpaceList(list)
     }
 }
 
@@ -511,23 +471,30 @@ impl TerminalCursor for IambWindow {
 
 impl WindowOps<IambInfo> for IambWindow {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
+        let ChatStore {
+            collator,
+            names,
+            rooms,
+            settings,
+            sync_info,
+            verifications,
+            worker,
+            ..
+        } = &mut store.application;
+
         match self {
             IambWindow::Room(state) => state.draw(area, buf, focused, store),
             IambWindow::DirectList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
+                let mut items = sync_info
                     .dms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| DirectItem::new(room_info, store))
+                    .iter()
+                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, names))
                     .collect::<Vec<_>>();
-                let fields = &store.application.settings.tunables.sort.dms;
-                let collator = &mut store.application.collator;
+                let fields = &settings.tunables.sort.dms;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
-                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+                state.set_ignorecase(settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("No direct messages yet!")
@@ -541,18 +508,18 @@ impl WindowOps<IambInfo> for IambWindow {
                     None => true,
                 };
 
-                if need_fetch && let Ok(mems) = store.application.worker.members(room_id.clone()) {
+                if need_fetch && let Ok(mems) = worker.members(room_id.clone()) {
                     let mut items = mems
                         .into_iter()
                         .map(|m| MemberItem::new(m, room_id.clone()))
                         .collect::<Vec<_>>();
-                    let fields = &store.application.settings.tunables.sort.members;
+                    let fields = &settings.tunables.sort.members;
                     items.sort_by(|a, b| user_fields_cmp(a, b, fields));
                     state.set(items);
                     *last_fetch = Some(Instant::now());
                 }
 
-                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+                state.set_ignorecase(settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("No users here yet!")
@@ -561,20 +528,16 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::RoomList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
+                let mut items = sync_info
                     .rooms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| RoomItem::new(room_info, store))
+                    .iter()
+                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, names))
                     .collect::<Vec<_>>();
-                let fields = &store.application.settings.tunables.sort.rooms;
-                let collator = &mut store.application.collator;
+                let fields = &settings.tunables.sort.rooms;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
-                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+                state.set_ignorecase(settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You haven't joined any rooms yet")
@@ -583,31 +546,18 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::ChatList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
+                let mut items = sync_info
                     .rooms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| GenericChatItem::new(room_info, store, false))
+                    .iter()
+                    .chain(sync_info.dms.iter())
+                    .map(|room| GenericRoomItem::new(room, rooms, names))
                     .collect::<Vec<_>>();
 
-                let dms = store
-                    .application
-                    .sync_info
-                    .dms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| GenericChatItem::new(room_info, store, true));
-
-                items.extend(dms);
-
-                let fields = &store.application.settings.tunables.sort.chats;
-                let collator = &mut store.application.collator;
+                let fields = &settings.tunables.sort.chats;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
-                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+                state.set_ignorecase(settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You do not have rooms or dms yet")
@@ -616,33 +566,19 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::UnreadList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
+                let mut items = sync_info
                     .rooms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| GenericChatItem::new(room_info, store, false))
+                    .iter()
+                    .chain(sync_info.dms.iter())
+                    .map(|room| GenericRoomItem::new(room, rooms, names))
                     .filter(RoomLikeItem::is_unread)
                     .collect::<Vec<_>>();
 
-                let dms = store
-                    .application
-                    .sync_info
-                    .dms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| GenericChatItem::new(room_info, store, true))
-                    .filter(RoomLikeItem::is_unread);
-
-                items.extend(dms);
-
-                let fields = &store.application.settings.tunables.sort.chats;
-                let collator = &mut store.application.collator;
+                let fields = &settings.tunables.sort.chats;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
-                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+                state.set_ignorecase(settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You do not have any unreads yet")
@@ -651,33 +587,19 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::MentionsList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
+                let mut items = sync_info
                     .rooms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| GenericChatItem::new(room_info, store, false))
-                    .filter(GenericChatItem::has_mention)
+                    .iter()
+                    .chain(sync_info.dms.iter())
+                    .map(|room| GenericRoomItem::new(room, rooms, names))
+                    .filter(RoomLikeItem::has_mention)
                     .collect::<Vec<_>>();
 
-                let dms = store
-                    .application
-                    .sync_info
-                    .dms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| GenericChatItem::new(room_info, store, true))
-                    .filter(GenericChatItem::has_mention);
-
-                items.extend(dms);
-
-                let fields = &store.application.settings.tunables.sort.chats;
-                let collator = &mut store.application.collator;
+                let fields = &settings.tunables.sort.chats;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
-                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+                state.set_ignorecase(settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You do not have any unread mentions yet")
@@ -686,33 +608,19 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::InvitesList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
+                let mut items = sync_info
                     .rooms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| GenericChatItem::new(room_info, store, false))
-                    .filter(GenericChatItem::is_invite)
+                    .iter()
+                    .chain(sync_info.dms.iter())
+                    .map(|room| GenericRoomItem::new(room, rooms, names))
+                    .filter(RoomLikeItem::is_invite)
                     .collect::<Vec<_>>();
 
-                let dms = store
-                    .application
-                    .sync_info
-                    .dms
-                    .clone()
-                    .into_iter()
-                    .map(|room_info| GenericChatItem::new(room_info, store, true))
-                    .filter(GenericChatItem::is_invite);
-
-                items.extend(dms);
-
-                let fields = &store.application.settings.tunables.sort.chats;
-                let collator = &mut store.application.collator;
+                let fields = &settings.tunables.sort.chats;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
-                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+                state.set_ignorecase(settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You do not have any open invites")
@@ -721,20 +629,17 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::SpaceList(state) => {
-                let mut items = store
-                    .application
-                    .sync_info
+                let mut items = sync_info
                     .spaces
-                    .clone()
-                    .into_iter()
-                    .map(|room| SpaceItem::new(room, store))
+                    .iter()
+                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, names))
                     .collect::<Vec<_>>();
-                let fields = &store.application.settings.tunables.sort.spaces;
-                let collator = &mut store.application.collator;
+
+                let fields = &settings.tunables.sort.spaces;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                 state.set(items);
-                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+                state.set_ignorecase(settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("You haven't joined any spaces yet")
@@ -743,9 +648,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::VerifyList(state) => {
-                let mut items = store
-                    .application
-                    .verifications
+                let mut items = verifications
                     .iter()
                     .map(|(_, req)| VerifyItem::new(req.to_owned()))
                     .collect::<Vec<_>>();
@@ -758,7 +661,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 }
 
                 state.set(items);
-                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+                state.set_ignorecase(settings.tunables.ignorecase);
 
                 List::new(store)
                     .empty_message("No in-progress verifications")
@@ -773,18 +676,18 @@ impl WindowOps<IambInfo> for IambWindow {
     fn dup(&self, store: &mut ProgramStore) -> Self {
         match self {
             IambWindow::Room(w) => w.dup(store).into(),
-            IambWindow::DirectList(w) => w.dup(store).into(),
+            IambWindow::DirectList(w) => Self::DirectList(w.dup(store)),
             IambWindow::MemberList(w, room_id, last_fetch) => {
                 IambWindow::MemberList(w.dup(store), room_id.clone(), *last_fetch)
             },
-            IambWindow::RoomList(w) => w.dup(store).into(),
-            IambWindow::SpaceList(w) => w.dup(store).into(),
+            IambWindow::RoomList(w) => Self::RoomList(w.dup(store)),
+            IambWindow::SpaceList(w) => Self::SpaceList(w.dup(store)),
             IambWindow::VerifyList(w) => w.dup(store).into(),
             IambWindow::Welcome(w) => w.dup(store).into(),
-            IambWindow::ChatList(w) => w.dup(store).into(),
-            IambWindow::UnreadList(w) => w.dup(store).into(),
-            IambWindow::MentionsList(w) => w.dup(store).into(),
-            IambWindow::InvitesList(w) => w.dup(store).into(),
+            IambWindow::ChatList(w) => Self::ChatList(w.dup(store)),
+            IambWindow::UnreadList(w) => Self::UnreadList(w.dup(store)),
+            IambWindow::MentionsList(w) => Self::MentionsList(w.dup(store)),
+            IambWindow::InvitesList(w) => Self::InvitesList(w.dup(store)),
         }
     }
 
@@ -902,26 +805,26 @@ impl Window<IambInfo> for IambWindow {
                 return Ok(RoomState::not_joined(name).into());
             },
             IambId::DirectList => {
-                let list = DirectListState::new(IambBufferId::DirectList, vec![]);
+                let list = RoomListState::new(IambBufferId::DirectList, vec![]);
 
-                return Ok(list.into());
+                return Ok(Self::DirectList(list));
             },
             IambId::MemberList(room_id) => {
                 let id = IambBufferId::MemberList(room_id.clone());
                 let list = MemberListState::new(id, vec![]);
-                let win = IambWindow::MemberList(list, room_id, None);
+                let win = Self::MemberList(list, room_id, None);
 
                 return Ok(win);
             },
             IambId::RoomList => {
                 let list = RoomListState::new(IambBufferId::RoomList, vec![]);
 
-                return Ok(list.into());
+                return Ok(Self::RoomList(list));
             },
             IambId::SpaceList => {
-                let list = SpaceListState::new(IambBufferId::SpaceList, vec![]);
+                let list = RoomListState::new(IambBufferId::SpaceList, vec![]);
 
-                return Ok(list.into());
+                return Ok(Self::SpaceList(list));
             },
             IambId::VerifyList => {
                 let list = VerifyListState::new(IambBufferId::VerifyList, vec![]);
@@ -934,24 +837,24 @@ impl Window<IambInfo> for IambWindow {
                 return Ok(win.into());
             },
             IambId::ChatList => {
-                let list = ChatListState::new(IambBufferId::ChatList, vec![]);
+                let list = RoomListState::new(IambBufferId::ChatList, vec![]);
 
-                Ok(list.into())
+                return Ok(Self::ChatList(list));
             },
             IambId::UnreadList => {
-                let list = UnreadListState::new(IambBufferId::UnreadList, vec![]);
+                let list = RoomListState::new(IambBufferId::UnreadList, vec![]);
 
-                Ok(IambWindow::UnreadList(list))
+                Ok(Self::UnreadList(list))
             },
             IambId::MentionsList => {
-                let list = MentionsListState::new(IambBufferId::MentionsList, vec![]);
+                let list = RoomListState::new(IambBufferId::MentionsList, vec![]);
 
-                Ok(IambWindow::MentionsList(list))
+                Ok(Self::MentionsList(list))
             },
             IambId::InvitesList => {
-                let list = InvitesListState::new(IambBufferId::InvitesList, vec![]);
+                let list = RoomListState::new(IambBufferId::InvitesList, vec![]);
 
-                Ok(IambWindow::InvitesList(list))
+                Ok(Self::InvitesList(list))
             },
         }
     }
@@ -978,90 +881,130 @@ impl Window<IambInfo> for IambWindow {
     }
 }
 
-#[derive(Clone)]
-pub struct GenericChatItem {
-    room_info: MatrixRoomInfo,
-    name: String,
-    alias: Option<OwnedRoomAliasId>,
-    unread: UnreadInfo,
-    is_dm: bool,
+/// This is used to determine what tag to show on a [`GenericRoomItem`].
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+enum RoomType {
+    DM,
+    Room,
+    Space,
+
+    /// Don't show a tag
+    Unspecified,
 }
 
-impl GenericChatItem {
-    fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore, is_dm: bool) -> Self {
-        let room = &room_info.deref().0;
-        let room_id = room.room_id();
+impl RoomType {
+    fn text(self) -> Option<&'static str> {
+        match self {
+            RoomType::DM => Some("DM"),
+            RoomType::Room => Some("Room"),
+            RoomType::Space => Some("Space"),
+            RoomType::Unspecified => None,
+        }
+    }
+}
 
-        let info = store.application.rooms.get_or_default(room_id.to_owned());
+#[derive(Debug, Clone)]
+pub struct GenericRoomItem {
+    room_id: OwnedRoomId,
+    name: String,
+    alias: Option<OwnedRoomAliasId>,
+    tags: Option<Tags>,
+    membership: MatrixRoomState,
+    unread: UnreadInfo,
+
+    room_type: RoomType,
+}
+
+impl GenericRoomItem {
+    pub fn new_unspecified(
+        room: &MatrixRoom,
+        rooms: &mut CompletionMap<OwnedRoomId, RoomInfo>,
+        names: &mut CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
+    ) -> Self {
+        let room_id = room.room_id().to_owned();
+
+        let info = rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
         let unread = info.unreads(room);
-        info.tags.clone_from(&room_info.deref().1);
+        let tags = info.tags.clone();
 
         if let Some(alias) = &alias {
-            store.application.names.insert(alias.to_owned(), room_id.to_owned());
+            names.insert(alias.to_owned(), room_id.to_owned());
         }
 
-        GenericChatItem { room_info, name, alias, is_dm, unread }
+        Self {
+            name,
+            room_id,
+            alias,
+            tags,
+            unread,
+            membership: room.state(),
+            room_type: RoomType::Unspecified,
+        }
     }
 
-    #[inline]
-    fn room(&self) -> &MatrixRoom {
-        &self.room_info.deref().0
+    pub fn new(
+        room: &MatrixRoom,
+        rooms: &mut CompletionMap<OwnedRoomId, RoomInfo>,
+        names: &mut CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
+    ) -> Self {
+        let room_type = if room.is_space() {
+            RoomType::Space
+        } else if room.is_dm() {
+            RoomType::DM
+        } else {
+            RoomType::Room
+        };
+
+        assign!(Self::new_unspecified(room, rooms, names), { room_type })
+    }
+}
+
+impl RoomLikeItem for GenericRoomItem {
+    fn room_id(&self) -> &RoomId {
+        &self.room_id
     }
 
-    #[inline]
-    fn tags(&self) -> &Option<Tags> {
-        &self.room_info.deref().1
+    fn has_tag(&self, tag: TagName) -> bool {
+        self.tags.as_ref().is_some_and(|tags| tags.contains_key(&tag))
     }
 
-    #[inline]
+    fn is_unread(&self) -> bool {
+        // XXX: check space children for space
+        self.unread.is_unread()
+    }
+
+    fn recent_ts(&self) -> Option<&MessageTimeStamp> {
+        // XXX: check space children for space
+        self.unread.latest()
+    }
+
+    fn alias(&self) -> Option<&RoomAliasId> {
+        self.alias.as_deref()
+    }
+
+    fn name(&self) -> &str {
+        &self.name
+    }
+
+    fn is_invite(&self) -> bool {
+        self.membership == MatrixRoomState::Invited
+    }
+
     fn has_mention(&self) -> bool {
+        // XXX: check space children for space
         self.unread.has_mention()
     }
 }
 
-impl RoomLikeItem for GenericChatItem {
-    fn name(&self) -> &str {
-        self.name.as_str()
-    }
-
-    fn alias(&self) -> Option<&RoomAliasId> {
-        self.alias.as_deref()
-    }
-
-    fn room_id(&self) -> &RoomId {
-        self.room().room_id()
-    }
-
-    fn has_tag(&self, tag: TagName) -> bool {
-        if let Some(tags) = &self.room_info.deref().1 {
-            tags.contains_key(&tag)
-        } else {
-            false
-        }
-    }
-
-    fn recent_ts(&self) -> Option<&MessageTimeStamp> {
-        self.unread.latest()
-    }
-
-    fn is_unread(&self) -> bool {
-        self.unread.is_unread()
-    }
-
-    fn is_invite(&self) -> bool {
-        self.room().state() == MatrixRoomState::Invited
-    }
-}
-
-impl Display for GenericChatItem {
+impl Display for GenericRoomItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{}", self.name)
     }
 }
 
-impl ListItem<IambInfo> for GenericChatItem {
+impl ListItem<IambInfo> for GenericRoomItem {
     fn show(
         &self,
         selected: bool,
@@ -1069,348 +1012,23 @@ impl ListItem<IambInfo> for GenericChatItem {
         _: &mut ProgramStore,
     ) -> Text<'_> {
         let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
+        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.membership, style);
         let mut spans = vec![name];
 
-        labels.push(if self.is_dm {
-            vec![Span::styled("DM", style)]
-        } else {
-            vec![Span::styled("Room", style)]
-        });
+        if let Some(label) = self.room_type.text() {
+            labels.push(vec![Span::styled(label, style)]);
+        }
 
-        if let Some(tags) = &self.tags() {
+        if let Some(tags) = &self.tags {
             labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
         }
 
         append_tags(labels, &mut spans, style);
         Text::from(Line::from(spans))
     }
-
-    fn get_word(&self) -> Option<String> {
-        self.room_id().to_string().into()
-    }
 }
 
-impl Promptable<ProgramContext, ProgramStore, IambInfo> for GenericChatItem {
-    fn prompt(
-        &mut self,
-        act: &PromptAction,
-        ctx: &ProgramContext,
-        _: &mut ProgramStore,
-    ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
-        room_prompt(self.room_id(), act, ctx)
-    }
-}
-
-#[derive(Clone)]
-pub struct RoomItem {
-    room_info: MatrixRoomInfo,
-    name: String,
-    alias: Option<OwnedRoomAliasId>,
-    unread: UnreadInfo,
-}
-
-impl RoomItem {
-    fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
-        let room = &room_info.deref().0;
-        let room_id = room.room_id();
-
-        let info = store.application.rooms.get_or_default(room_id.to_owned());
-        let name = info.name.clone().unwrap_or_default();
-        let alias = room.canonical_alias();
-        let unread = info.unreads(room);
-        info.tags.clone_from(&room_info.deref().1);
-
-        if let Some(alias) = &alias {
-            store.application.names.insert(alias.to_owned(), room_id.to_owned());
-        }
-
-        RoomItem { room_info, name, alias, unread }
-    }
-
-    #[inline]
-    fn room(&self) -> &MatrixRoom {
-        &self.room_info.deref().0
-    }
-
-    #[inline]
-    fn tags(&self) -> &Option<Tags> {
-        &self.room_info.deref().1
-    }
-}
-
-impl RoomLikeItem for RoomItem {
-    fn name(&self) -> &str {
-        self.name.as_str()
-    }
-
-    fn alias(&self) -> Option<&RoomAliasId> {
-        self.alias.as_deref()
-    }
-
-    fn room_id(&self) -> &RoomId {
-        self.room().room_id()
-    }
-
-    fn has_tag(&self, tag: TagName) -> bool {
-        if let Some(tags) = &self.room_info.deref().1 {
-            tags.contains_key(&tag)
-        } else {
-            false
-        }
-    }
-
-    fn recent_ts(&self) -> Option<&MessageTimeStamp> {
-        self.unread.latest()
-    }
-
-    fn is_unread(&self) -> bool {
-        self.unread.is_unread()
-    }
-
-    fn is_invite(&self) -> bool {
-        self.room().state() == MatrixRoomState::Invited
-    }
-}
-
-impl Display for RoomItem {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.name)
-    }
-}
-
-impl ListItem<IambInfo> for RoomItem {
-    fn show(
-        &self,
-        selected: bool,
-        _: &ViewportContext<ListCursor>,
-        _: &mut ProgramStore,
-    ) -> Text<'_> {
-        let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
-        let mut spans = vec![name];
-
-        if let Some(tags) = &self.tags() {
-            labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
-        }
-
-        append_tags(labels, &mut spans, style);
-
-        Text::from(Line::from(spans))
-    }
-
-    fn get_word(&self) -> Option<String> {
-        self.room_id().to_string().into()
-    }
-}
-
-impl Promptable<ProgramContext, ProgramStore, IambInfo> for RoomItem {
-    fn prompt(
-        &mut self,
-        act: &PromptAction,
-        ctx: &ProgramContext,
-        _: &mut ProgramStore,
-    ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
-        room_prompt(self.room_id(), act, ctx)
-    }
-}
-
-#[derive(Clone)]
-pub struct DirectItem {
-    room_info: MatrixRoomInfo,
-    name: String,
-    alias: Option<OwnedRoomAliasId>,
-    unread: UnreadInfo,
-}
-
-impl DirectItem {
-    fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
-        let room = &room_info.deref().0;
-        let room_id = room_info.0.room_id().to_owned();
-        let alias = room_info.0.canonical_alias();
-
-        let info = store.application.rooms.get_or_default(room_id);
-        let name = info.name.clone().unwrap_or_default();
-        let unread = info.unreads(room);
-        info.tags.clone_from(&room_info.deref().1);
-
-        DirectItem { room_info, name, alias, unread }
-    }
-
-    #[inline]
-    fn room(&self) -> &MatrixRoom {
-        &self.room_info.deref().0
-    }
-
-    #[inline]
-    fn tags(&self) -> &Option<Tags> {
-        &self.room_info.deref().1
-    }
-}
-
-impl RoomLikeItem for DirectItem {
-    fn name(&self) -> &str {
-        self.name.as_str()
-    }
-
-    fn alias(&self) -> Option<&RoomAliasId> {
-        self.alias.as_deref()
-    }
-
-    fn has_tag(&self, tag: TagName) -> bool {
-        if let Some(tags) = &self.room_info.deref().1 {
-            tags.contains_key(&tag)
-        } else {
-            false
-        }
-    }
-
-    fn room_id(&self) -> &RoomId {
-        self.room().room_id()
-    }
-
-    fn recent_ts(&self) -> Option<&MessageTimeStamp> {
-        self.unread.latest()
-    }
-
-    fn is_unread(&self) -> bool {
-        self.unread.is_unread()
-    }
-
-    fn is_invite(&self) -> bool {
-        self.room().state() == MatrixRoomState::Invited
-    }
-}
-
-impl Display for DirectItem {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, ":verify request {}", self.name)
-    }
-}
-
-impl ListItem<IambInfo> for DirectItem {
-    fn show(
-        &self,
-        selected: bool,
-        _: &ViewportContext<ListCursor>,
-        _: &mut ProgramStore,
-    ) -> Text<'_> {
-        let style = selected_style(selected);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.room(), style);
-        let mut spans = vec![name];
-
-        if let Some(tags) = &self.tags() {
-            labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
-        }
-
-        append_tags(labels, &mut spans, style);
-
-        Text::from(Line::from(spans))
-    }
-
-    fn get_word(&self) -> Option<String> {
-        self.room_id().to_string().into()
-    }
-}
-
-impl Promptable<ProgramContext, ProgramStore, IambInfo> for DirectItem {
-    fn prompt(
-        &mut self,
-        act: &PromptAction,
-        ctx: &ProgramContext,
-        _: &mut ProgramStore,
-    ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
-        room_prompt(self.room_id(), act, ctx)
-    }
-}
-
-#[derive(Clone)]
-pub struct SpaceItem {
-    room_info: MatrixRoomInfo,
-    name: String,
-    alias: Option<OwnedRoomAliasId>,
-}
-
-impl SpaceItem {
-    fn new(room_info: MatrixRoomInfo, store: &mut ProgramStore) -> Self {
-        let room_id = room_info.0.room_id();
-        let name = store
-            .application
-            .get_room_info(room_id.to_owned())
-            .name
-            .clone()
-            .unwrap_or_default();
-        let alias = room_info.0.canonical_alias();
-
-        if let Some(alias) = &alias {
-            store.application.names.insert(alias.to_owned(), room_id.to_owned());
-        }
-
-        SpaceItem { room_info, name, alias }
-    }
-
-    #[inline]
-    fn room(&self) -> &MatrixRoom {
-        &self.room_info.deref().0
-    }
-}
-
-impl RoomLikeItem for SpaceItem {
-    fn name(&self) -> &str {
-        self.name.as_str()
-    }
-
-    fn room_id(&self) -> &RoomId {
-        self.room().room_id()
-    }
-
-    fn alias(&self) -> Option<&RoomAliasId> {
-        self.alias.as_deref()
-    }
-
-    fn has_tag(&self, _: TagName) -> bool {
-        // I think that spaces can technically have tags, but afaik no client
-        // exposes them, so we'll just always return false here for now.
-        false
-    }
-
-    fn recent_ts(&self) -> Option<&MessageTimeStamp> {
-        // XXX: this needs to determine the room with most recent message and return its timestamp.
-        None
-    }
-
-    fn is_unread(&self) -> bool {
-        // XXX: this needs to check whether the space contains rooms with unread messages
-        false
-    }
-
-    fn is_invite(&self) -> bool {
-        self.room().state() == MatrixRoomState::Invited
-    }
-}
-
-impl Display for SpaceItem {
-    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
-        write!(f, "{}", self.name)
-    }
-}
-
-impl ListItem<IambInfo> for SpaceItem {
-    fn show(
-        &self,
-        selected: bool,
-        _: &ViewportContext<ListCursor>,
-        _: &mut ProgramStore,
-    ) -> Text<'_> {
-        selected_text(self.name.as_str(), selected)
-    }
-
-    fn get_word(&self) -> Option<String> {
-        self.room_id().to_string().into()
-    }
-}
-
-impl Promptable<ProgramContext, ProgramStore, IambInfo> for SpaceItem {
+impl Promptable<ProgramContext, ProgramStore, IambInfo> for GenericRoomItem {
     fn prompt(
         &mut self,
         act: &PromptAction,
@@ -1608,6 +1226,10 @@ mod tests {
 
         fn is_invite(&self) -> bool {
             self.invite
+        }
+
+        fn has_mention(&self) -> bool {
+            false
         }
     }
 
