@@ -477,7 +477,16 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     } else {
         let input = args.last().unwrap();
         match (args[0].as_str(), args[1].as_str(), args[2].as_str()) {
-            ("version", "upgrade", _) => complete_users(input, store),
+            ("version", "upgrade", _) => {
+                if let Some(remaining) = input.strip_prefix("++creator=") {
+                    complete_users(remaining, store)
+                        .into_iter()
+                        .map(|id| format!("++creator={id}"))
+                        .collect()
+                } else {
+                    complete_choices(input, &["++creator="])
+                }
+            },
             ("access", "set", "restricted") | ("access", "set", "knock-restricted") => {
                 if let Some(remaining) = input.strip_prefix("++members=") {
                     complete_room_alias_or_id(remaining, store)

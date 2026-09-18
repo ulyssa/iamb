@@ -1343,11 +1343,7 @@ mod tests {
     use crate::tests::{TEST_ROOM1_ID, mock_store};
 
     fn mentions_in(html: &str) -> Vec<String> {
-        extract_mentions_str(&html)
-            .user_ids
-            .iter()
-            .map(|u| u.to_string())
-            .collect()
+        extract_mentions_str(html).user_ids.iter().map(|u| u.to_string()).collect()
     }
 
     #[test]
