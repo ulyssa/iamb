@@ -179,6 +179,19 @@ fn iamb_knock(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut args = desc.arg.strings()?;
 
+    // Recovery keys are displayed in space-separated groups, so rejoin any
+    // arguments that follow the subcommand to reconstruct the key.
+    if args.first().is_some_and(|arg| arg == "recover") {
+        if args.len() < 2 {
+            return Result::Err(CommandError::InvalidArgument);
+        }
+
+        let iact = IambAction::Recover(args[1..].join(" "));
+        let step = CommandStep::Continue(iact.into(), ctx.context.clone());
+
+        return Ok(step);
+    }
+
     match args.len() {
         0 => {
             let open = ctx.switch(OpenTarget::Application(IambId::VerifyList));
@@ -430,6 +443,17 @@ fn iamb_mentions(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult 
     }
 
     let open = ctx.switch(OpenTarget::Application(IambId::MentionsList));
+    let step = CommandStep::Continue(open, ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_invites(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = ctx.switch(OpenTarget::Application(IambId::InvitesList));
     let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
@@ -751,10 +775,21 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             let additional_creators = trailing
                 .iter()
                 .map(|u| {
-                    OwnedUserId::from_str(u).map_err(|e| {
-                        let msg = format!("{u:?} is not a valid user identifier: {e}");
-                        CommandError::Error(msg)
-                    })
+                    let (flag, v) = match OptionType::from_str(u)? {
+                        OptionType::Positional(_) => return Err(CommandError::InvalidArgument),
+                        OptionType::Flag(_, None) => return Err(CommandError::InvalidArgument),
+                        OptionType::Flag(f, Some(v)) => (f, v),
+                    };
+
+                    match flag.as_str() {
+                        "creator" => {
+                            OwnedUserId::from_str(&v).map_err(|e| {
+                                let msg = format!("{u:?} is not a valid user identifier: {e}");
+                                CommandError::Error(msg)
+                            })
+                        },
+                        _ => Err(CommandError::Error(format!("unknown flag {flag:?}"))),
+                    }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             RoomAction::Upgrade(version, additional_creators, desc.bang).into()
@@ -936,7 +971,11 @@ fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let sact = SendAction::Upload(args.remove(0), None);
+    let path = args.remove(0);
+    let expanded_path =
+        shellexpand::full(&path).map_err(|e| CommandError::ParseFailed(e.to_string()))?;
+
+    let sact = SendAction::Upload(expanded_path.into_owned(), None);
     let iact = IambAction::from(sact);
     let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
@@ -1097,6 +1136,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
         aliases: vec![],
         f: iamb_mentions,
     });
+    cmds.add_command(ProgramCommand {
+        name: "invites".into(),
+        aliases: vec![],
+        f: iamb_invites,
+    });
     cmds.add_command(ProgramCommand { name: "self".into(), aliases: vec![], f: iamb_self });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),
@@ -1182,6 +1226,17 @@ mod tests {
             .input_cmd(":verify confirm @user4:example.com/GOODDEV", ctx.clone())
             .unwrap();
         let act = IambAction::Verify(VerifyAction::Confirm, "@user4:example.com/GOODDEV".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":verify recover", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd(":verify recover SOMESINGLEKEY", ctx.clone()).unwrap();
+        let act = IambAction::Recover("SOMESINGLEKEY".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":verify recover AAAA BBBB CCCC", ctx.clone()).unwrap();
+        let act = IambAction::Recover("AAAA BBBB CCCC".into());
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd(":verify confirm", ctx.clone());
@@ -1750,7 +1805,7 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
-            .input_cmd("room version upgrade 12 @foo:example.com", ctx.clone())
+            .input_cmd("room version upgrade 12 ++creator=@foo:example.com", ctx.clone())
             .unwrap();
         let act = IambAction::Room(RoomAction::Upgrade(
             RoomVersionId::V12,
@@ -1760,7 +1815,10 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
-            .input_cmd("room version upgrade 12 @foo:example.com @bar:example.com", ctx.clone())
+            .input_cmd(
+                "room version upgrade 12 ++creator=@foo:example.com ++creator=@bar:example.com",
+                ctx.clone(),
+            )
             .unwrap();
         let act = IambAction::Room(RoomAction::Upgrade(
             RoomVersionId::V12,

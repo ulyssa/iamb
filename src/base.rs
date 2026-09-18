@@ -42,6 +42,7 @@ use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
+use url::form_urlencoded;
 
 use crate::notifications::NotificationHandle;
 use crate::prelude::*;
@@ -598,6 +599,9 @@ pub enum IambAction {
     /// Request a new verification with the specified user.
     VerifyRequest(String),
 
+    /// Recover the encryption secrets for this session with the given recovery key.
+    Recover(String),
+
     /// Toggle the focus within the focused room.
     ToggleScrollbackFocus,
 
@@ -656,6 +660,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
+            IambAction::Recover(..) => SequenceStatus::Break,
         }
     }
 
@@ -672,6 +677,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
+            IambAction::Recover(..) => SequenceStatus::Atom,
         }
     }
 
@@ -688,6 +694,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
+            IambAction::Recover(..) => SequenceStatus::Ignore,
         }
     }
 
@@ -704,6 +711,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
+            IambAction::Recover(..) => false,
         }
     }
 }
@@ -860,6 +868,10 @@ pub enum IambError {
     /// A failure occurred during verification.
     #[error("Verification request error: {0}")]
     VerificationRequestError(#[from] matrix_sdk::encryption::identities::RequestVerificationError),
+
+    /// A failure occurred while recovering the encryption secrets.
+    #[error("Recovery error: {0}")]
+    RecoveryError(#[from] matrix_sdk::encryption::recovery::RecoveryError),
 
     #[error("Notification setting error: {0}")]
     NotificationSettingError(#[from] matrix_sdk::NotificationSettingsError),
@@ -1127,8 +1139,6 @@ pub struct RoomInfo {
     /// however not every user has an entry. If a user's most recent receipt is
     /// older than the oldest loaded event, that user will not be included.
     pub user_receipts: HashMap<ReceiptThread, HashMap<OwnedUserId, OwnedEventId>>,
-    /// The current user's read markers used when synchronizing receipts to the server.
-    active_receipts: HashMap<ReceiptThread, OwnedEventId>,
     /// A map of message identifiers to a map of reaction events.
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
     /// A map of message identifiers to a list of edit events for message that are not yet cached.
@@ -1167,7 +1177,6 @@ impl Default for RoomInfo {
             echo_keys: Default::default(),
             event_receipts: Default::default(),
             user_receipts: Default::default(),
-            active_receipts: Default::default(),
             reactions: Default::default(),
             threads: Default::default(),
             fetching: Default::default(),
@@ -1656,7 +1665,6 @@ impl RoomInfo {
             ReceiptThread::Thread(root) => self.threads.get(root)?,
             _ => return None,
         };
-
         messages.iter().rev().find_map(|(_, message)| {
             (message.sender == user_id)
                 .then(|| message.event.event_id().map(ToOwned::to_owned))
@@ -1672,7 +1680,6 @@ impl RoomInfo {
             Some(EventLocation::Message(Some(root), _)) => ReceiptThread::Thread(root.clone()),
             _ => return,
         };
-
         let resolved_users: Vec<_> = self
             .user_receipts
             .get(&thread)
@@ -1681,33 +1688,32 @@ impl RoomInfo {
             .filter(|(_, receipt_event_id)| *receipt_event_id == &event_id)
             .map(|(receipt_user, _)| receipt_user.clone())
             .collect();
-
         for receipt_user in resolved_users {
             if let Some(latest_event_id) = self.latest_implicit_receipt(&thread, &receipt_user) {
                 self.set_receipt(thread.clone(), receipt_user, latest_event_id);
             }
         }
-
         if self
             .user_receipts
             .get(&thread)
             .and_then(|receipts| receipts.get(&user_id))
             .is_some_and(|old_event_id| self.receipt_key(old_event_id).is_none())
         {
-            // An explicit receipt can arrive before its event. Without that event's key, we cannot
-            // prove that this implicit receipt is newer, so keep the explicit position until its
-            // event is loaded and the normal ordering check can compare them.
             return;
         }
-
         self.set_receipt(thread, user_id, event_id);
     }
 
-    pub fn set_active_receipt(&mut self, thread: ReceiptThread, event_id: OwnedEventId) {
-        self.active_receipts.insert(thread, event_id);
-    }
+    pub fn fully_read(
+        &mut self,
+        room_id: OwnedRoomId,
+        thread: ReceiptThread,
+        worker: &Requester,
+        settings: &ApplicationSettings,
+        open_notifications: &mut HashMap<OwnedRoomId, Vec<NotificationHandle>>,
+    ) {
+        let user_id = &settings.profile.user_id;
 
-    pub fn fully_read(&mut self, user_id: OwnedUserId, thread: ReceiptThread) {
         let messages = match &thread {
             ReceiptThread::Main => self.get_thread(None),
             ReceiptThread::Thread(root) => self.get_thread(Some(root)),
@@ -1720,7 +1726,7 @@ impl RoomInfo {
 
         let event_id = messages
             .iter()
-            .filter(|(_, msg)| msg.sender != user_id)
+            .filter(|(_, msg)| msg.sender != *user_id)
             .filter(|(_, msg)| {
                 matches!(
                     msg.event,
@@ -1734,22 +1740,40 @@ impl RoomInfo {
             .next_back();
 
         if let Some(event_id) = event_id {
-            self.set_active_receipt(thread, event_id.to_owned());
+            open_notifications.remove(&room_id);
+            worker.send_receipt(room_id, thread.clone(), event_id.to_owned(), settings);
         }
     }
 
-    pub fn fully_read_all(&mut self, user_id: &UserId) {
-        self.fully_read(user_id.to_owned(), ReceiptThread::Main);
-
+    pub fn fully_read_all(
+        &mut self,
+        room_id: OwnedRoomId,
+        worker: &Requester,
+        settings: &ApplicationSettings,
+        open_notifications: &mut HashMap<OwnedRoomId, Vec<NotificationHandle>>,
+    ) {
         let threads: Vec<_> = self.threads.keys().map(|root| root.to_owned()).collect();
 
         for thread in threads {
-            self.fully_read(user_id.to_owned(), ReceiptThread::Thread(thread));
+            self.fully_read(
+                room_id.to_owned(),
+                ReceiptThread::Thread(thread),
+                worker,
+                settings,
+                open_notifications,
+            );
         }
+
+        self.fully_read(room_id, ReceiptThread::Main, worker, settings, open_notifications);
     }
 
-    pub fn own_receipts(&self) -> impl Iterator<Item = (&ReceiptThread, &OwnedEventId)> {
-        self.active_receipts.iter()
+    pub fn receipts<'a>(
+        &'a self,
+        user_id: &'a UserId,
+    ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
+        self.user_receipts
+            .iter()
+            .filter_map(move |(t, rs)| rs.get(user_id).map(|r| (t, r)))
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {
@@ -1857,22 +1881,22 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
 #[derive(Default)]
 pub struct SyncInfo {
     /// Spaces that the user is a member of.
-    pub spaces: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub spaces: Vec<MatrixRoom>,
 
     /// Rooms that the user is a member of.
-    pub rooms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub rooms: Vec<MatrixRoom>,
 
     /// DMs that the user is a member of.
-    pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub dms: Vec<MatrixRoom>,
 }
 
 impl SyncInfo {
     pub fn rooms(&self) -> impl Iterator<Item = &RoomId> {
-        self.rooms.iter().map(|r| r.0.room_id())
+        self.rooms.iter().map(|r| r.room_id())
     }
 
     pub fn dms(&self) -> impl Iterator<Item = &RoomId> {
-        self.dms.iter().map(|r| r.0.room_id())
+        self.dms.iter().map(|r| r.room_id())
     }
 
     pub fn chats(&self) -> impl Iterator<Item = &RoomId> {
@@ -2051,9 +2075,11 @@ impl ChatStore {
         self.rooms.get_or_default(room_id)
     }
 
-    /// Set the name for a room.
-    pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
-        self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
+    /// Set the name and tags for a room.
+    pub fn set_room_info(&mut self, room_id: OwnedRoomId, name: String, tags: Option<Tags>) {
+        let info = self.rooms.get_or_default(room_id);
+        info.name = name.into();
+        info.tags = tags;
     }
 }
 
@@ -2064,6 +2090,12 @@ impl ApplicationStore for ChatStore {}
 pub enum IambId {
     /// A Matrix room, with an optional thread to show.
     Room(OwnedRoomId, Option<OwnedEventId>),
+
+    /// A Matrix room that we're currently in the middle of joining.
+    Joining(String),
+
+    /// A Matrix room that we haven't joined, and aren't currently joining.
+    NotJoined(String),
 
     /// The `:dms` window.
     DirectList,
@@ -2091,6 +2123,27 @@ pub enum IambId {
 
     /// The `:mentions` window.
     MentionsList,
+
+    /// The `:invites` window.
+    InvitesList,
+}
+
+/// Encode the room name for a [IambId::Joining] or [IambId::NotJoined] window URL.
+///
+/// Note that since these names come straight from the user's argument to `:join`,
+/// they are likely room aliases containing characters like `#` that we should
+/// escape before putting them into the URL, so we can later reparse it. They can
+/// technically contain anything that the user tried to pass to `:join`.
+fn room_query(room: &str) -> String {
+    form_urlencoded::Serializer::new(String::new())
+        .append_pair("room", room)
+        .finish()
+}
+
+/// Pull the room name back out of the query parameter for `iamb://joining` or
+/// `iamb://not-joined`.
+fn query_room(url: &Url) -> Option<String> {
+    url.query_pairs().find_map(|(k, v)| (k == "room").then(|| v.into_owned()))
 }
 
 impl Display for IambId {
@@ -2101,6 +2154,12 @@ impl Display for IambId {
             },
             IambId::Room(room_id, Some(thread)) => {
                 write!(f, "iamb://room/{room_id}/threads/{thread}")
+            },
+            IambId::Joining(room) => {
+                write!(f, "iamb://joining?{}", room_query(room))
+            },
+            IambId::NotJoined(room) => {
+                write!(f, "iamb://not-joined?{}", room_query(room))
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -2113,6 +2172,7 @@ impl Display for IambId {
             IambId::ChatList => f.write_str("iamb://chats"),
             IambId::UnreadList => f.write_str("iamb://unreads"),
             IambId::MentionsList => f.write_str("iamb://mentions"),
+            IambId::InvitesList => f.write_str("iamb://invites"),
         }
     }
 }
@@ -2187,6 +2247,20 @@ impl Visitor<'_> for IambIdVisitor {
                     _ => return Err(E::custom("Invalid members window URL")),
                 }
             },
+            Some("joining") => {
+                let Some(room) = query_room(&url) else {
+                    return Err(E::custom("iamb://joining requires a room parameter"));
+                };
+
+                Ok(IambId::Joining(room))
+            },
+            Some("not-joined") => {
+                let Some(room) = query_room(&url) else {
+                    return Err(E::custom("iamb://not-joined requires a room parameter"));
+                };
+
+                Ok(IambId::NotJoined(room))
+            },
             Some("members") => {
                 let Some(path) = url.path_segments() else {
                     return Err(E::custom("Invalid members window URL"));
@@ -2257,6 +2331,13 @@ impl Visitor<'_> for IambIdVisitor {
                 }
 
                 Ok(IambId::MentionsList)
+            },
+            Some("invites") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://invites takes no path"));
+                }
+
+                Ok(IambId::InvitesList)
             },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
@@ -2331,6 +2412,9 @@ pub enum IambBufferId {
 
     /// The `:mentions` window.
     MentionsList,
+
+    /// The `:invites` window.
+    InvitesList,
 }
 
 impl IambBufferId {
@@ -2348,6 +2432,7 @@ impl IambBufferId {
             IambBufferId::ChatList => IambId::ChatList,
             IambBufferId::UnreadList => IambId::UnreadList,
             IambBufferId::MentionsList => IambId::MentionsList,
+            IambBufferId::InvitesList => IambId::InvitesList,
         };
 
         Some(id)
@@ -2481,7 +2566,6 @@ pub mod tests {
                 .and_then(|receipts| receipts.get(&*MSG5_EVID))
                 .is_some_and(|users| users.contains(&*TEST_USER2))
         );
-        assert!(info.active_receipts.is_empty());
     }
 
     #[test]
@@ -2618,20 +2702,6 @@ pub mod tests {
     }
 
     #[test]
-    fn received_receipts_do_not_become_outgoing_receipts() {
-        let mut info = RoomInfo::default();
-        info.set_receipt(ReceiptThread::Main, TEST_USER1.clone(), MSG3_EVID.clone());
-
-        assert!(info.own_receipts().next().is_none());
-        assert_eq!(
-            info.user_receipts
-                .get(&ReceiptThread::Main)
-                .and_then(|receipts| receipts.get(&*TEST_USER1)),
-            Some(&*MSG3_EVID),
-        );
-    }
-
-    #[test]
     fn test_typing_spans() {
         let mut info = RoomInfo::default();
         let settings = mock_settings();
@@ -2706,6 +2776,35 @@ pub mod tests {
                 Span::from(" is typing...")
             ])
         );
+    }
+
+    #[test]
+    fn test_unjoined_window_ids() {
+        // Room names come from the user can contain characters that need escaping:
+        for name in [
+            "#foo:example.com",
+            "!abc123:example.com",
+            "@user:example.com",
+            "a b&c=d?e#f",
+        ] {
+            for id in [IambId::Joining(name.into()), IambId::NotJoined(name.into())] {
+                let json = serde_json::to_string(&id).unwrap();
+                assert_eq!(serde_json::from_str::<IambId>(&json).unwrap(), id);
+            }
+        }
+
+        assert_eq!(
+            IambId::Joining("#foo:example.com".into()).to_string(),
+            "iamb://joining?room=%23foo%3Aexample.com"
+        );
+        assert_eq!(
+            IambId::NotJoined("#foo:example.com".into()).to_string(),
+            "iamb://not-joined?room=%23foo%3Aexample.com"
+        );
+
+        // A window URL without a room name isn't valid and wasn't written by us:
+        assert!(serde_json::from_str::<IambId>("\"iamb://joining\"").is_err());
+        assert!(serde_json::from_str::<IambId>("\"iamb://not-joined\"").is_err());
     }
 
     #[test]

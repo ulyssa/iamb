@@ -371,10 +371,12 @@ fn complete_iamb_verify(args: Vec<String>, store: &ChatStore) -> Vec<String> {
         "cancel",
         "missmatch",
         "emoji",
+        "recover",
     ];
     match args.len() {
         1 => complete_choices(&args[0], &subcmds),
         2 if args[0] == "request" => complete_users(&args[1], store),
+        2 if args[0] == "recover" => vec![],
         2 if subcmds.contains(&args[0].as_str()) => complete_verification(&args[1], store),
         _ => vec![],
     }
@@ -475,7 +477,16 @@ fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     } else {
         let input = args.last().unwrap();
         match (args[0].as_str(), args[1].as_str(), args[2].as_str()) {
-            ("version", "upgrade", _) => complete_users(input, store),
+            ("version", "upgrade", _) => {
+                if let Some(remaining) = input.strip_prefix("++creator=") {
+                    complete_users(remaining, store)
+                        .into_iter()
+                        .map(|id| format!("++creator={id}"))
+                        .collect()
+                } else {
+                    complete_choices(input, &["++creator="])
+                }
+            },
             ("access", "set", "restricted") | ("access", "set", "knock-restricted") => {
                 if let Some(remaining) = input.strip_prefix("++members=") {
                     complete_room_alias_or_id(remaining, store)
@@ -611,8 +622,8 @@ fn complete_cmdarg(
         "verify" => complete_iamb_verify(args, store),
 
         // These have no arguments
-        "cancel" | "chats" | "dms" | "editor" | "edit" | "forget" | "leave" | "members" |
-        "mentions" | "replied" | "reply" | "rooms" | "spaces" | "welcome" => vec![],
+        "cancel" | "chats" | "dms" | "editor" | "edit" | "forget" | "invites" | "leave" |
+        "members" | "mentions" | "replied" | "reply" | "rooms" | "spaces" | "welcome" => vec![],
 
         "abo" | "aboveleft" | "bel" | "belowright" | "hor" | "horizontal" | "lefta" |
         "leftabove" | "rightb" | "rightbelow" | "tab" | "vert" | "vertical" => {
@@ -782,6 +793,7 @@ impl Completer<IambInfo> for IambCompleter {
             IambBufferId::ChatList => vec![],
             IambBufferId::UnreadList => vec![],
             IambBufferId::MentionsList => vec![],
+            IambBufferId::InvitesList => vec![],
         }
     }
 }
@@ -877,7 +889,7 @@ pub mod tests {
         let text = EditRope::from("abo hor inv");
         let mut cursor = Cursor::new(0, 11);
         let res = complete_cmdbar(&text, &mut cursor, &store);
-        assert_eq!(res, vec!["invite"]);
+        assert_eq!(res, vec!["invite", "invites"]);
 
         let text = EditRope::from("abo hor invite send \n");
         let mut cursor = Cursor::new(0, 20);

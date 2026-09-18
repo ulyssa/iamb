@@ -218,3 +218,37 @@ pub async fn iamb_verify_request(
     let info = format!("Sent verification request to {user_id}");
     Ok(Some(InfoMessage::from(info)))
 }
+
+pub async fn iamb_recover(key: String, store: &ProgramStore) -> IambResult<EditInfo> {
+    let client = &store.application.worker.client;
+
+    client
+        .encryption()
+        .recovery()
+        .recover(&key)
+        .await
+        .map_err(IambError::from)?;
+
+    // Recovering imports whatever secrets the account's secret storage holds;
+    // it is the self-signing key that signs this device and marks it verified,
+    // and not every account stores one, so read the result back rather than
+    // assume it.
+    match client.encryption().get_own_device().await {
+        Ok(Some(device)) if device.is_verified_with_cross_signing() => {
+            tracing::info!("recovered encryption secrets; this session is now verified");
+            Ok(Some(InfoMessage::from(
+                "Recovered encryption secrets; this session is now verified",
+            )))
+        },
+        Ok(_) => {
+            tracing::info!("recovered encryption secrets; this session is not cross-signed");
+            Ok(Some(InfoMessage::from(
+                "Recovered encryption secrets, but this session is not verified (no self-signing key in secret storage)",
+            )))
+        },
+        Err(err) => {
+            tracing::warn!("recovered encryption secrets; could not read the device back: {err}");
+            Ok(Some(InfoMessage::from("Recovered encryption secrets")))
+        },
+    }
+}
