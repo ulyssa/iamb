@@ -775,10 +775,21 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             let additional_creators = trailing
                 .iter()
                 .map(|u| {
-                    OwnedUserId::from_str(u).map_err(|e| {
-                        let msg = format!("{u:?} is not a valid user identifier: {e}");
-                        CommandError::Error(msg)
-                    })
+                    let (flag, v) = match OptionType::from_str(u)? {
+                        OptionType::Positional(_) => return Err(CommandError::InvalidArgument),
+                        OptionType::Flag(_, None) => return Err(CommandError::InvalidArgument),
+                        OptionType::Flag(f, Some(v)) => (f, v),
+                    };
+
+                    match flag.as_str() {
+                        "creator" => {
+                            OwnedUserId::from_str(&v).map_err(|e| {
+                                let msg = format!("{u:?} is not a valid user identifier: {e}");
+                                CommandError::Error(msg)
+                            })
+                        },
+                        _ => Err(CommandError::Error(format!("unknown flag {flag:?}"))),
+                    }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             RoomAction::Upgrade(version, additional_creators, desc.bang).into()
@@ -1794,7 +1805,7 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
-            .input_cmd("room version upgrade 12 @foo:example.com", ctx.clone())
+            .input_cmd("room version upgrade 12 ++creator=@foo:example.com", ctx.clone())
             .unwrap();
         let act = IambAction::Room(RoomAction::Upgrade(
             RoomVersionId::V12,
@@ -1804,7 +1815,10 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
-            .input_cmd("room version upgrade 12 @foo:example.com @bar:example.com", ctx.clone())
+            .input_cmd(
+                "room version upgrade 12 ++creator=@foo:example.com ++creator=@bar:example.com",
+                ctx.clone(),
+            )
             .unwrap();
         let act = IambAction::Room(RoomAction::Upgrade(
             RoomVersionId::V12,
