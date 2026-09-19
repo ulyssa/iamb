@@ -181,7 +181,7 @@ impl ChatState {
 
                     let media = client.media();
                     let mut filename = match (filename, &settings.dirs.downloads) {
-                        (Some(f), _) => PathBuf::from(f),
+                        (Some(f), _) => f,
                         (None, Some(downloads)) => downloads.clone(),
                         (None, None) => return Err(IambError::NoDownloadDir.into()),
                     };
@@ -684,11 +684,10 @@ impl ChatState {
                     return Err(UIError::NeedConfirm(prompt));
                 }
 
-                let path = Path::new(file.as_str());
-                let mime = mime_guess::from_path(path).first_or(mime::APPLICATION_OCTET_STREAM);
+                let mime = mime_guess::from_path(&file).first_or(mime::APPLICATION_OCTET_STREAM);
 
-                let bytes = fs::read(path)?;
-                let name = path
+                let bytes = fs::read(&file)?;
+                let name = file
                     .file_name()
                     .map(OsStr::to_string_lossy)
                     .unwrap_or_else(|| Cow::from("Attachment"));
