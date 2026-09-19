@@ -8,6 +8,7 @@ use std::io::{BufReader, BufWriter, Write as _};
 use std::process;
 
 use clap::Parser;
+use indexmap::IndexMap;
 use lazy_static::lazy_static;
 use matrix_sdk::EncryptionState;
 use matrix_sdk::authentication::matrix::MatrixSession;
@@ -26,7 +27,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 use crate::prelude::*;
 
-type Aliases = HashMap<String, String>;
+pub type Aliases = IndexMap<String, String>;
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
 
 macro_rules! usage {
@@ -368,20 +369,14 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
-fn merge_maps<K, V>(
-    profile: Option<HashMap<K, V>>,
-    global: Option<HashMap<K, V>>,
-) -> Option<HashMap<K, V>>
+fn merge_maps<M, K, V>(profile: Option<M>, global: Option<M>) -> Option<M>
 where
-    K: Eq + Hash,
+    M: Extend<(K, V)> + IntoIterator<Item = (K, V)>,
 {
     match (global, profile) {
         (Some(m), None) | (None, Some(m)) => Some(m),
         (Some(mut global), Some(profile)) => {
-            for (k, v) in profile {
-                global.insert(k, v);
-            }
-
+            global.extend(profile);
             Some(global)
         },
         (None, None) => None,
@@ -1830,6 +1825,29 @@ mod tests {
 
         let aliased = res.get("c").unwrap();
         assert_eq!(aliased, "chats");
+    }
+
+    #[test]
+    fn test_parse_aliases_preserves_order() {
+        // Aliases are registered in order, which allows alias to refer to earlier ones, so
+        // ensure we register in user-specified order:
+        let res: Aliases = toml::from_str("c = \"chats\"\ncc = \"c\"\nd = \"download\"").unwrap();
+        let order = res.keys().map(String::as_str).collect::<Vec<_>>();
+
+        assert_eq!(order, vec!["c", "cc", "d"]);
+    }
+
+    #[test]
+    fn test_merge_aliases_preserves_order() {
+        let profile: Aliases = toml::from_str("c = \"chats\"\nz = \"redact\"").unwrap();
+        let global: Aliases = toml::from_str("c = \"cancel\"\nd = \"download\"").unwrap();
+
+        let res = merge_maps(Some(profile), Some(global)).unwrap();
+        let order = res.keys().map(String::as_str).collect::<Vec<_>>();
+
+        // The profile wins for keys in both, but doesn't get to move them.
+        assert_eq!(order, vec!["c", "d", "z"]);
+        assert_eq!(res.get("c").unwrap(), "chats");
     }
 
     #[test]

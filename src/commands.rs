@@ -1172,7 +1172,10 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
 }
 
 /// Initialize the default command state.
-pub fn setup_commands(aliases: &HashMap<String, String>) -> Result<ProgramCommands, CommandError> {
+///
+/// Aliases are registered in the order they appear in the configuration file,
+/// which allows later definitions to possibly refer to earlier ones.
+pub fn setup_commands(aliases: &Aliases) -> Result<ProgramCommands, CommandError> {
     let mut cmds = ProgramCommands::default();
 
     add_iamb_commands(&mut cmds);
@@ -1193,7 +1196,24 @@ mod tests {
     use modalkit::editing::context::EditContext;
 
     fn setup_test_commands() -> ProgramCommands {
-        setup_commands(&HashMap::new()).unwrap()
+        setup_commands(&Aliases::new()).unwrap()
+    }
+
+    #[test]
+    fn test_cmd_aliases_order() {
+        let ctx = EditContext::default();
+        let aliases = Aliases::from_iter([
+            ("c".to_string(), "chats".to_string()),
+            ("cc".to_string(), "c".to_string()),
+        ]);
+
+        let mut cmds = setup_commands(&aliases).unwrap();
+
+        let act = WindowAction::Switch(OpenTarget::Application(IambId::ChatList));
+        let expected = vec![(act.into(), ctx.clone())];
+
+        assert_eq!(cmds.input_cmd("c", ctx.clone()).unwrap(), expected);
+        assert_eq!(cmds.input_cmd("cc", ctx.clone()).unwrap(), expected);
     }
 
     #[test]
