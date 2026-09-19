@@ -2542,6 +2542,7 @@ dependencies = [
  "http-serde",
  "humansize",
  "image",
+ "indexmap",
  "lazy_static 1.5.0",
  "libc",
  "linkify",
