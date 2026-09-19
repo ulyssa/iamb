@@ -92,6 +92,12 @@ const IAMB_DEVICE_NAME: &str = "iamb";
 const IAMB_USER_AGENT: &str = "iamb";
 const MIN_MSG_LOAD: u32 = 50;
 
+/// How long to wait before retrying receipts that we failed to send.
+const RECEIPT_RETRY_INTERVAL: Duration = Duration::from_secs(2);
+
+type ReceiptKey = (OwnedRoomId, ReceiptThread, ReceiptType);
+type ReceiptUpdate = (OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId);
+
 type MessageFetchResult = IambResult<(Option<String>, Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>)>;
 
 fn initial_devname() -> String {
@@ -462,16 +468,18 @@ fn convert_receipt_type(value: ReceiptType) -> CreateReceiptType {
     }
 }
 
+/// Send a single read receipt, and return `true` if the server accepted it and we don't need
+/// to retry sending it later on.
 async fn send_single_receipt(
     client: &Client,
-    room_id: OwnedRoomId,
+    room_id: &RoomId,
     thread: ReceiptThread,
     receipt_type: ReceiptType,
     event_id: OwnedEventId,
-) {
-    let Some(room) = client.get_room(&room_id) else {
+) -> bool {
+    let Some(room) = client.get_room(room_id) else {
         tracing::warn!(?room_id, "trying to send receipt to unknown room");
-        return;
+        return false;
     };
 
     if ReceiptThread::Main == thread || ReceiptThread::Unthreaded == thread {
@@ -481,37 +489,73 @@ async fn send_single_receipt(
             .inspect_err(|e| tracing::warn!(?room_id, "Failed to clear unread flag: {e}"));
     }
 
-    let _ = room
-        .send_single_receipt(convert_receipt_type(receipt_type), thread, event_id)
+    room.send_single_receipt(convert_receipt_type(receipt_type), thread, event_id)
         .await
-        .inspect_err(|e| tracing::warn!(?room_id, "Failed to send read receipt: {e}"));
+        .inspect_err(|e| tracing::warn!(?room_id, "Failed to send read receipt: {e}"))
+        .is_ok()
 }
 
-async fn send_receipts_forever(
-    client: &Client,
-    stream: UnboundedReceiver<(OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId)>,
-) {
-    let stream = UnboundedReceiverStream::new(stream);
-    let mut sent: HashMap<(OwnedRoomId, ReceiptThread, ReceiptType), OwnedEventId> =
-        Default::default();
+/// Listen for receipt updates from the main thread, and try sending them to the homeserver.
+///
+/// Any receipts we fail to send will be queued for resending later on.
+async fn send_receipts_forever(client: &Client, stream: UnboundedReceiver<ReceiptUpdate>) {
+    let mut stream = UnboundedReceiverStream::new(stream);
 
-    stream
-        .for_each_concurrent(None, |(room_id, thread, receipt_type, event_id)| {
-            let key = (room_id.clone(), thread.clone(), receipt_type.clone());
-            if sent.get(&key).is_some_and(|receipt| *receipt == event_id) {
-                futures::future::Either::Left(futures::future::ready(()))
+    let mut sent: HashMap<ReceiptKey, OwnedEventId> = Default::default();
+    let mut outstanding: HashMap<ReceiptKey, OwnedEventId> = Default::default();
+    let mut next_attempt = Instant::now();
+
+    loop {
+        tokio::select! {
+            update = stream.next() => {
+                let Some((room_id, thread, receipt_type, event_id)) = update else {
+                    // The sender side has gone away, so just exit the loop.
+                    return;
+                };
+
+                let key = (room_id, thread, receipt_type);
+
+                if sent.get(&key).is_some_and(|sent| *sent == event_id) {
+                    // Skip sending a duplicate receipt update.
+                    continue;
+                }
+
+                outstanding.insert(key, event_id);
+            },
+
+            // If we have outstanding receipts, then ensure that we attempt a retry before
+            // the next receipt update arrives over the stream:
+            _ = tokio::time::sleep_until(next_attempt.into()), if !outstanding.is_empty() => {},
+        }
+
+        if Instant::now() < next_attempt {
+            // Still backing off from an earlier failure.
+            continue;
+        }
+
+        // Receipts are sent one at a time: two updates for the same room sent concurrently
+        // can land out of order and leave the server pointing at the older event.
+        let mut failed = false;
+
+        for (key, event_id) in std::mem::take(&mut outstanding) {
+            let (room_id, thread, receipt_type) = key.clone();
+            let success =
+                send_single_receipt(client, &room_id, thread, receipt_type, event_id.clone()).await;
+
+            if success {
+                sent.insert(key, event_id);
             } else {
-                sent.insert(key, event_id.clone());
-                futures::future::Either::Right(send_single_receipt(
-                    client,
-                    room_id,
-                    thread,
-                    receipt_type,
-                    event_id,
-                ))
+                // Could not contact homeserver to send the receipt, so queue for a later
+                // retry and mark that we need to backoff to avoid spamming send failures.
+                outstanding.insert(key, event_id);
+                failed = true;
             }
-        })
-        .await;
+        }
+
+        if failed {
+            next_attempt = Instant::now() + RECEIPT_RETRY_INTERVAL;
+        }
+    }
 }
 
 fn insert_local_echo(
@@ -928,7 +972,7 @@ async fn join_room(
 pub struct Requester {
     pub client: Client,
     pub tx: UnboundedSender<WorkerTask>,
-    pub receipts: UnboundedSender<(OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId)>,
+    pub receipts: UnboundedSender<ReceiptUpdate>,
 }
 
 impl Requester {
@@ -953,7 +997,10 @@ impl Requester {
             ReceiptType::ReadPrivate
         };
 
-        self.receipts.send((room, thread, receipt_type, event)).unwrap();
+        let _ = self
+            .receipts
+            .send((room, thread, receipt_type, event))
+            .inspect_err(|_| tracing::warn!("Read receipt worker is no longer running"));
     }
 
     pub fn login(&self, style: LoginStyle) -> IambResult<EditInfo> {
@@ -1052,8 +1099,7 @@ pub struct ClientWorker {
     sync_handle: Option<JoinHandle<()>>,
 
     /// this will be removed after login
-    unspawned_receipt_stream:
-        Option<UnboundedReceiver<(OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId)>>,
+    unspawned_receipt_stream: Option<UnboundedReceiver<ReceiptUpdate>>,
 
     /// Take care when locking since worker commands are sent with the lock already held
     store: Option<AsyncProgramStore>,
