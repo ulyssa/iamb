@@ -2,13 +2,13 @@
 
 ## Linking Against System Packages
 
-The default Cargo features for __iamb__ will bundle SQLite and use [rustls] for
-TLS. Package maintainers may want to link against the system's native SQLite
-and TLS libraries instead. To do so, you'll want to build without the default
-features and specify that it should build with `native-tls`:
+The default Cargo features for __iamb__ will bundle SQLite. Package maintainers
+may want to link against the system's native SQLite instead. To do so, you'll
+want to build without the default features, and explicitly add back in `desktop`
+(assuming you want notifications and clipboard support):
 
 ```
-% cargo build --release --no-default-features --features=native-tls
+% cargo build --release --no-default-features --features=desktop
 ```
 
 ## Enabling LTO
