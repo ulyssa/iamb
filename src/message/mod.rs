@@ -1895,7 +1895,9 @@ pub mod tests {
         assert!(has_trackbar(&text, 60));
         assert_eq!(text.lines[0].spans[0].content.as_ref(), HORIZONTAL.repeat(60));
 
-        // A marker on the message itself means the trackbar belongs to the next one.
+        // Use a fresh room because receipt updates are monotonic: this case tests a marker
+        // already positioned on the rendered message, not moving an existing marker backwards.
+        let mut info = mock_room();
         info.set_receipt(ReceiptThread::Main, user_id.clone(), MSG2_EVID.clone());
         let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
         assert!(!has_trackbar(&text, 60));
