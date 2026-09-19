@@ -1672,6 +1672,18 @@ impl RoomInfo {
         })
     }
 
+    /// Whenever a user sends a message, we can consider that an effective update to their
+    /// read receipt, even when their client isn't sending them to the room.
+    ///
+    /// While the Matrix specification doesn't explicitly mention "implicit receipts", this
+    /// is effectively what is described by "Marking notifications as read",
+    ///
+    /// > When the user updates their read receipt (either by using the API or by sending an
+    /// > event), notifications prior to and including that event MUST be marked as read.
+    ///
+    /// This method is called every time we insert a new message into the [RoomInfo], so that
+    /// we show in the timeline that the user has now read up to the point where they sent
+    /// a message.
     fn set_implicit_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
         let thread = match self.keys.get(&event_id) {
             Some(EventLocation::Message(None, _)) | Some(EventLocation::State(_)) => {
@@ -2502,7 +2514,7 @@ pub mod tests {
     }
 
     #[test]
-    fn multiple_identical_reactions() {
+    fn test_multiple_identical_reactions() {
         let mut info = RoomInfo::default();
 
         let content = ReactionEventContent::new(Annotation::new(
@@ -2542,7 +2554,7 @@ pub mod tests {
     }
 
     #[test]
-    fn implicit_receipt_tracks_message_sender_for_display() {
+    fn test_implicit_receipt_tracks_message_sender_for_display() {
         let mut info = RoomInfo::default();
         let settings = mock_settings();
         let mut previews = PreviewManager::new(&settings);
@@ -2569,7 +2581,7 @@ pub mod tests {
     }
 
     #[test]
-    fn implicit_receipts_do_not_move_backwards_during_backpagination() {
+    fn test_implicit_receipts_do_not_move_backwards_during_backpagination() {
         let mut info = RoomInfo::default();
         let settings = mock_settings();
         let mut previews = PreviewManager::new(&settings);
@@ -2596,7 +2608,7 @@ pub mod tests {
     }
 
     #[test]
-    fn implicit_receipt_preserves_thread_context() {
+    fn test_implicit_receipt_preserves_thread_context() {
         let mut info = RoomInfo::default();
         let root = owned_event_id!("$thread_root");
         let reply = owned_event_id!("$thread_reply");
@@ -2615,7 +2627,7 @@ pub mod tests {
     }
 
     #[test]
-    fn implicit_receipt_supports_state_events() {
+    fn test_implicit_receipt_supports_state_events() {
         let mut info = RoomInfo::default();
         info.keys.insert(MSG5_EVID.clone(), EventLocation::State(MSG5_KEY.clone()));
 
@@ -2630,7 +2642,7 @@ pub mod tests {
     }
 
     #[test]
-    fn explicit_receipt_does_not_move_implicit_receipt_backwards() {
+    fn test_explicit_receipt_does_not_move_implicit_receipt_backwards() {
         let mut info = RoomInfo::default();
         let older = mock_room_message_event(
             RoomMessageEventContent::text_plain("older"),
@@ -2656,7 +2668,7 @@ pub mod tests {
     }
 
     #[test]
-    fn implicit_receipt_waits_for_unloaded_explicit_receipt() {
+    fn test_implicit_receipt_waits_for_unloaded_explicit_receipt() {
         let mut info = RoomInfo::default();
         info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG5_EVID.clone());
         let older = mock_room_message_event(
@@ -2676,7 +2688,7 @@ pub mod tests {
     }
 
     #[test]
-    fn implicit_receipt_advances_after_explicit_event_loads() {
+    fn test_implicit_receipt_advances_after_explicit_event_loads() {
         let mut info = RoomInfo::default();
         info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG2_EVID.clone());
         let newer = mock_room_message_event(
