@@ -1026,6 +1026,11 @@ impl ListItem<IambInfo> for GenericRoomItem {
         append_tags(labels, &mut spans, style);
         Text::from(Line::from(spans))
     }
+
+    fn get_word(&self) -> Option<String> {
+        // Return the room identifier so that `gf`/`<C-W>gf`/etc. go to the room:
+        self.room_id().to_string().into()
+    }
 }
 
 impl Promptable<ProgramContext, ProgramStore, IambInfo> for GenericRoomItem {
@@ -1231,6 +1236,24 @@ mod tests {
         fn has_mention(&self) -> bool {
             false
         }
+    }
+
+    #[test]
+    fn test_list_item_points_to_room() {
+        let server = server_name!("example.com");
+        let room_id = RoomId::new_v1(server).to_owned();
+        let item = GenericRoomItem {
+            room_id: room_id.clone(),
+            name: "Watercooler Discussion".into(),
+            alias: Some(room_alias_id!("#room1:example.com").to_owned()),
+            tags: None,
+            membership: MatrixRoomState::Joined,
+            unread: UnreadInfo::default(),
+            room_type: RoomType::Room,
+        };
+
+        // This should return the room ID, and not the alias or name:
+        assert_eq!(item.get_word(), Some(room_id.to_string()));
     }
 
     #[test]
