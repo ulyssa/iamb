@@ -1833,7 +1833,7 @@ mod tests {
 
     #[test]
     fn test_cmd_pin() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("pin", ctx.clone()).unwrap();
