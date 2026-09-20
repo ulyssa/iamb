@@ -1819,11 +1819,12 @@ impl ClientWorker {
             },
         }
 
+        let sync_delay = Duration::from_millis(self.settings.tunables.sync_delay_ms);
         self.sync_handle = tokio::spawn(async move {
             loop {
                 let settings = SyncSettings::default();
-
                 let _ = client.sync(settings).await;
+                tokio::time::sleep(sync_delay).await;
             }
         })
         .into();
