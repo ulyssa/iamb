@@ -125,7 +125,6 @@ impl Poll {
             .unwrap_or(&self.start.poll)
     }
 
-    // fn results(&self) -> IndexMap<&str, BTreeSet<&UserId>> {
     fn results(&self) -> impl IntoIterator<Item = (&str, BTreeSet<&UserId>)> {
         let poll = self.content();
         let responses = self.responeses.values().map(OriginalPollResponseEvent::data);
@@ -327,7 +326,6 @@ impl UnstablePoll {
             .unwrap_or(&self.start.poll_start)
     }
 
-    // fn results(&self) -> IndexMap<&str, BTreeSet<&UserId>> {
     fn results(&self) -> impl IntoIterator<Item = (&str, BTreeSet<&UserId>)> {
         let poll = self.content();
         let responses = self.responeses.values().map(OriginalUnstablePollResponseEvent::data);

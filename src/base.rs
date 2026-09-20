@@ -1486,33 +1486,30 @@ impl RoomInfo {
 
     /// Insert the start of a poll.
     pub fn insert_poll_start(&mut self, poll: PollStartEvent) {
+        let sender = poll.sender().to_owned();
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
             ts: poll.origin_server_ts().into(),
-            id: event_id.to_owned().into(),
+            id: event_id.clone().into(),
         };
 
         match poll {
             MessageLikeEvent::Original(ev) => {
-                if matches!(ev.content.relates_to, Some(Relation::Replacement(..))) {
-                    let Some(Relation::Replacement(Replacement {
-                        event_id: poll_event_id,
-                        new_content,
-                        ..
-                    })) = ev.content.relates_to
-                    else {
-                        unreachable!()
-                    };
-
+                if let Some(Relation::Replacement(Replacement {
+                    event_id: poll_event_id,
+                    new_content,
+                    ..
+                })) = ev.content.relates_to
+                {
                     let loc = EventLocation::Poll(
                         poll_event_id.to_owned(),
                         PollEventLocation::Replacement(key.clone()),
                     );
-                    self.keys.insert(event_id, loc);
+                    self.keys.insert(event_id.clone(), loc);
 
                     if let Some(msg) = self.get_event_mut(&poll_event_id) {
                         let MessageEvent::Poll(poll) = &mut msg.event else {
-                            tracing::warn!("encounterd poll replacement for non-poll message");
+                            tracing::warn!("encountered poll replacement for non-poll message");
                             return;
                         };
 
@@ -1533,7 +1530,7 @@ impl RoomInfo {
                     };
 
                     let loc = EventLocation::Message(thread_root.clone(), key.clone());
-                    self.keys.insert(event_id, loc);
+                    self.keys.insert(event_id.clone(), loc);
 
                     let unloaded = self.unloaded_polls.remove(&ev.event_id).unwrap_or_default();
                     let msg = MessageEvent::Poll(
@@ -1547,18 +1544,21 @@ impl RoomInfo {
             MessageLikeEvent::Redacted(ev) => {
                 let loc = EventLocation::Message(None, key.clone());
                 let message: Message = ev.into();
-                self.keys.insert(event_id, loc);
+                self.keys.insert(event_id.clone(), loc);
                 self.messages.insert_message(key, message);
             },
         }
+
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert the start of a poll.
     pub fn insert_unstable_poll_start(&mut self, poll: UnstablePollStartEvent) {
+        let sender = poll.sender().to_owned();
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
             ts: poll.origin_server_ts().into(),
-            id: event_id.to_owned().into(),
+            id: event_id.clone().into(),
         };
 
         match poll {
@@ -1573,7 +1573,7 @@ impl RoomInfo {
                         };
 
                         let loc = EventLocation::Message(thread_root.clone(), key.clone());
-                        self.keys.insert(event_id, loc);
+                        self.keys.insert(event_id.clone(), loc);
 
                         let unloaded =
                             self.unloaded_unstable_polls.remove(&ev.event_id).unwrap_or_default();
@@ -1590,11 +1590,11 @@ impl RoomInfo {
                             content.relates_to.event_id.to_owned(),
                             PollEventLocation::Replacement(key.clone()),
                         );
-                        self.keys.insert(event_id, loc);
+                        self.keys.insert(event_id.clone(), loc);
 
                         if let Some(msg) = self.get_event_mut(&content.relates_to.event_id) {
                             let MessageEvent::UnstablePoll(poll) = &mut msg.event else {
-                                tracing::warn!("encounterd poll replacement for non-poll message");
+                                tracing::warn!("encountered poll replacement for non-poll message");
                                 return;
                             };
 
@@ -1615,10 +1615,12 @@ impl RoomInfo {
             MessageLikeEvent::Redacted(ev) => {
                 let loc = EventLocation::Message(None, key.clone());
                 let message: Message = ev.into();
-                self.keys.insert(event_id, loc);
+                self.keys.insert(event_id.clone(), loc);
                 self.messages.insert_message(key, message);
             },
         }
+
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert an event that relates to a poll
@@ -1628,7 +1630,7 @@ impl RoomInfo {
 
         let loc = if let Some(msg) = self.get_event_mut(&poll_event_id) {
             let MessageEvent::Poll(poll) = &mut msg.event else {
-                tracing::warn!("encounterd poll replacement for non-poll message");
+                tracing::warn!("encountered poll replacement for non-poll message");
                 return;
             };
 
@@ -1650,7 +1652,7 @@ impl RoomInfo {
 
         let loc = if let Some(msg) = self.get_event_mut(&poll_event_id) {
             let MessageEvent::UnstablePoll(poll) = &mut msg.event else {
-                tracing::warn!("encounterd poll replacement for non-poll message");
+                tracing::warn!("encountered poll replacement for non-poll message");
                 return;
             };
 
