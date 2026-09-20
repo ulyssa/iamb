@@ -173,6 +173,7 @@ pub fn mock_tunables() -> TunableValues {
         request_timeout: 120,
         sort: SortOverrides::default().values(),
         state_event_display: true,
+        sync_delay_ms: 1000,
         terminal: Terminal::default().values(),
         typing_notice_send: true,
         typing_notice_display: true,

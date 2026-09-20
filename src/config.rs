@@ -58,6 +58,7 @@ const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
 
 const DEFAULT_ENABLE_TITLE: bool = true;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
+const DEFAULT_SYNC_FREQUENCY: u64 = 250;
 
 const DEFAULT_ENC_INDICATOR_LOC: EncryptionIndicatorLocation = EncryptionIndicatorLocation::PROMPT;
 const DEFAULT_ICON_ENC: Cow<'static, str> = Cow::Borrowed("[E] ");
@@ -849,6 +850,7 @@ pub struct TunableValues {
     pub request_timeout: u64,
     pub sort: SortValues,
     pub state_event_display: bool,
+    pub sync_delay_ms: u64,
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
     pub users: UserOverrides,
@@ -905,6 +907,7 @@ pub struct Tunables {
     pub read_receipt_display: Option<bool>,
     pub request_timeout: Option<u64>,
     pub state_event_display: Option<bool>,
+    pub sync_delay_ms: Option<u64>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
     pub username_display: Option<UserDisplayStyle>,
@@ -957,6 +960,7 @@ impl Tunables {
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
             request_timeout: self.request_timeout.or(other.request_timeout),
             state_event_display: self.state_event_display.or(other.state_event_display),
+            sync_delay_ms: self.sync_delay_ms.or(other.sync_delay_ms),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
             username_display: self.username_display.or(other.username_display),
@@ -1002,6 +1006,7 @@ impl Tunables {
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             state_event_display: self.state_event_display.unwrap_or(true),
+            sync_delay_ms: self.sync_delay_ms.unwrap_or(DEFAULT_SYNC_FREQUENCY),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
             username_display: self.username_display.unwrap_or_default(),
