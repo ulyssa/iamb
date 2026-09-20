@@ -336,6 +336,8 @@ impl ChatState {
 
                         return Err(err);
                     },
+                    MessageEvent::Poll(ev) => ev.event_id().to_owned(),
+                    MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
                 };
 
                 if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
@@ -391,6 +393,8 @@ impl ChatState {
 
                         return Err(err);
                     },
+                    MessageEvent::Poll(ev) => ev.event_id().to_owned(),
+                    MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
                 };
 
                 let event_id = event_id.as_ref();
@@ -462,6 +466,8 @@ impl ChatState {
 
                         return Err(err);
                     },
+                    MessageEvent::Poll(ev) => ev.event_id().to_owned(),
+                    MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
                 };
 
                 let reactions = match info.reactions.get(&event_id) {
