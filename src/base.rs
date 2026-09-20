@@ -102,6 +102,13 @@ pub enum VerifyAction {
     Emoji,
 }
 
+/// An action taken against a room's timeline.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TimelineAction {
+    /// Jump to a loaded message in the scrollback.
+    GotoEvent(OwnedEventId),
+}
+
 /// An action taken against the currently selected message.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
@@ -126,6 +133,9 @@ pub enum MessageAction {
     /// when it is `true`.
     React(String, bool),
 
+    /// Pin a message to the room.
+    Pin,
+
     /// Redact a message, with an optional reason.
     ///
     /// The [bool] argument indicates whether to skip confirmation.
@@ -146,6 +156,9 @@ pub enum MessageAction {
     /// and error when it doesn't recognize it. The second [bool] argument forces it to be
     /// interpreted literally when it is `true`.
     Unreact(Option<String>, bool),
+
+    /// Unpin a message from the room.
+    Unpin,
 }
 
 /// An action taken in the currently selected space.
@@ -505,6 +518,9 @@ pub enum RoomAction {
     /// Open the members window.
     Members(Box<CommandContext>),
 
+    /// Open the pinned messages window.
+    Pinned(Box<CommandContext>),
+
     /// Set whether a room is a direct message.
     SetDirect(bool),
 
@@ -590,6 +606,9 @@ pub enum IambAction {
     /// Perform an action against the homeserver.
     Homeserver(HomeserverAction),
 
+    /// Perform an action against a room's timeline.
+    Timeline(TimelineAction),
+
     /// Perform an action over room keys.
     Keys(KeysAction),
 
@@ -661,6 +680,12 @@ impl From<SendAction> for IambAction {
     }
 }
 
+impl From<TimelineAction> for IambAction {
+    fn from(act: TimelineAction) -> Self {
+        IambAction::Timeline(act)
+    }
+}
+
 impl ApplicationAction for IambAction {
     fn is_edit_sequence(&self, _: &EditContext) -> SequenceStatus {
         match self {
@@ -672,6 +697,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
+            IambAction::Timeline(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
@@ -689,6 +715,7 @@ impl ApplicationAction for IambAction {
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
+            IambAction::Timeline(..) => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
@@ -706,6 +733,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
+            IambAction::Timeline(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
@@ -723,6 +751,7 @@ impl ApplicationAction for IambAction {
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
             IambAction::OpenLink(..) => false,
+            IambAction::Timeline(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
@@ -739,6 +768,12 @@ impl From<RoomAction> for ProgramAction {
 
 impl From<SpaceAction> for ProgramAction {
     fn from(act: SpaceAction) -> Self {
+        IambAction::from(act).into()
+    }
+}
+
+impl From<TimelineAction> for ProgramAction {
+    fn from(act: TimelineAction) -> Self {
         IambAction::from(act).into()
     }
 }
@@ -1185,6 +1220,15 @@ pub struct RoomInfo {
 
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
+
+    /// The room's pinned events, mirrored from the SDK's room state for rendering.
+    pub pinned_events: Vec<OwnedEventId>,
+
+    /// Pinned events fetched for the `:pinned` window that aren't in the loaded scrollback.
+    pub pinned_previews: HashMap<OwnedEventId, Message>,
+
+    /// How many times fetching each pinned event for the `:pinned` window has failed.
+    pub pinned_failures: HashMap<OwnedEventId, u8>,
 }
 
 impl Default for RoomInfo {
@@ -1206,6 +1250,9 @@ impl Default for RoomInfo {
             users_typing: Default::default(),
             display_names: Default::default(),
             draw_last: Default::default(),
+            pinned_events: Default::default(),
+            pinned_previews: Default::default(),
+            pinned_failures: Default::default(),
             unloaded_edits: Default::default(),
             unloaded_polls: Default::default(),
             unloaded_unstable_polls: Default::default(),
@@ -1258,6 +1305,56 @@ impl RoomInfo {
         } else {
             None
         }
+    }
+
+    /// Whether a message is pinned to the room.
+    pub fn is_pinned(&self, event_id: &EventId) -> bool {
+        self.pinned_events.iter().any(|id| id == event_id)
+    }
+
+    /// Get a pinned message, from the scrollback if it's loaded or else from the fetched previews.
+    pub fn get_pinned(&self, event_id: &EventId) -> Option<&Message> {
+        self.get_event(event_id).or_else(|| self.pinned_previews.get(event_id))
+    }
+
+    /// Whether fetching a pinned event has failed too many times to keep retrying.
+    pub fn pinned_unavailable(&self, event_id: &EventId) -> bool {
+        self.pinned_failures
+            .get(event_id)
+            .is_some_and(|failures| *failures >= PINNED_FETCH_ATTEMPTS)
+    }
+
+    /// Record the result of fetching a pinned event for the `:pinned` window.
+    pub fn insert_pinned(&mut self, event_id: OwnedEventId, msg: Option<Message>) {
+        match msg {
+            Some(msg) => {
+                self.pinned_failures.remove(&event_id);
+                self.pinned_previews.insert(event_id, msg);
+            },
+            None => {
+                let failures = self.pinned_failures.entry(event_id).or_default();
+                *failures = failures.saturating_add(1);
+            },
+        }
+    }
+
+    /// Pinned events that still need to be fetched for the `:pinned` window.
+    pub fn missing_pinned(&self) -> Vec<OwnedEventId> {
+        self.pinned_events
+            .iter()
+            .filter(|id| self.get_pinned(id).is_none() && !self.pinned_unavailable(id))
+            .cloned()
+            .collect()
+    }
+
+    /// Get where a loaded message lives, as its thread root and key.
+    pub fn get_message_location(
+        &self,
+        event_id: &EventId,
+    ) -> Option<(Option<&EventId>, &MessageKey)> {
+        let loc = self.keys.get(event_id)?;
+
+        Some((loc.to_thread_root(), loc.to_message_key()?))
     }
 
     pub fn get_receipt_thread(&self, event_id: &EventId) -> Option<ReceiptThread> {
@@ -2166,6 +2263,9 @@ impl SyncInfo {
 
 static MESSAGE_NEED_TTL: u8 = 30;
 
+/// How many failed fetches of a pinned event before the `:pinned` window stops retrying.
+const PINNED_FETCH_ATTEMPTS: u8 = 10;
+
 #[derive(Debug, PartialEq)]
 /// Load messages until the event is loaded or `ttl` loads are exceeded
 pub struct MessageNeed {
@@ -2176,6 +2276,7 @@ pub struct MessageNeed {
 #[derive(Default, Debug, PartialEq)]
 pub struct Need {
     pub members: bool,
+    pub pinned: bool,
     pub messages: Option<Vec<MessageNeed>>,
 }
 
@@ -2189,6 +2290,11 @@ impl RoomNeeds {
     /// Mark a room for needing to load members.
     pub fn need_members(&mut self, room_id: OwnedRoomId) {
         self.needs.entry(room_id).or_default().members = true;
+    }
+
+    /// Mark a room for needing to fetch its pinned events.
+    pub fn need_pinned(&mut self, room_id: OwnedRoomId) {
+        self.needs.entry(room_id).or_default().pinned = true;
     }
 
     /// Mark a room for needing to load messages.
@@ -2269,6 +2375,9 @@ pub struct ChatStore {
     /// Whether to ring the terminal bell on the next redraw.
     pub ring_bell: bool,
 
+    /// An error raised while drawing, shown in the message bar on the next redraw.
+    pub draw_error: Option<String>,
+
     /// Whether the application is currently focused
     pub focused: bool,
 
@@ -2301,6 +2410,7 @@ impl ChatStore {
             sync_info: Default::default(),
             draw_curr: None,
             ring_bell: false,
+            draw_error: None,
             focused: true,
             open_notifications: Default::default(),
         };
@@ -2366,6 +2476,9 @@ pub enum IambId {
     /// The `:members` window for a given Matrix room.
     MemberList(OwnedRoomId),
 
+    /// The `:pinned` window for a given Matrix room.
+    PinnedList(OwnedRoomId),
+
     /// The `:rooms` window.
     RoomList,
 
@@ -2426,6 +2539,9 @@ impl Display for IambId {
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
+            },
+            IambId::PinnedList(room_id) => {
+                write!(f, "iamb://room/{room_id}/pinned")
             },
             IambId::DirectList => f.write_str("iamb://dms"),
             IambId::RoomList => f.write_str("iamb://rooms"),
@@ -2507,7 +2623,14 @@ impl Visitor<'_> for IambIdVisitor {
 
                         Ok(IambId::Room(room_id, Some(thread_root)))
                     },
-                    _ => return Err(E::custom("Invalid members window URL")),
+                    [room_id, "pinned"] => {
+                        let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
+                            return Err(E::custom("Invalid room identifier"));
+                        };
+
+                        Ok(IambId::PinnedList(room_id))
+                    },
+                    _ => return Err(E::custom("Invalid iamb window URL")),
                 }
             },
             Some("joining") => {
@@ -2655,6 +2778,9 @@ pub enum IambBufferId {
     /// The `:members` window for a room.
     MemberList(OwnedRoomId),
 
+    /// The `:pinned` window for a room.
+    PinnedList(OwnedRoomId),
+
     /// The `:rooms` window.
     RoomList,
 
@@ -2688,6 +2814,7 @@ impl IambBufferId {
             IambBufferId::Room(room, thread, _) => IambId::Room(room.clone(), thread.clone()),
             IambBufferId::DirectList => IambId::DirectList,
             IambBufferId::MemberList(room) => IambId::MemberList(room.clone()),
+            IambBufferId::PinnedList(room) => IambId::PinnedList(room.clone()),
             IambBufferId::RoomList => IambId::RoomList,
             IambBufferId::SpaceList => IambId::SpaceList,
             IambBufferId::VerifyList => IambId::VerifyList,
@@ -3055,8 +3182,62 @@ pub mod tests {
 
         assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
             room_id,
-            Need { members: true, messages: Some(Vec::new()) }
+            Need {
+                members: true,
+                messages: Some(Vec::new()),
+                pinned: false
+            }
         )],);
+    }
+
+    #[test]
+    fn test_pinned_lookup() {
+        let mut info = mock_room();
+        let unloaded = owned_event_id!("$unloaded");
+
+        info.pinned_events = vec![MSG3_EVID.clone(), unloaded.clone()];
+
+        assert!(info.is_pinned(&MSG3_EVID));
+        assert!(!info.is_pinned(&MSG4_EVID));
+
+        // Loaded messages come from the scrollback, so only the unloaded one needs fetching.
+        assert!(info.get_pinned(&MSG3_EVID).is_some());
+        assert_eq!(info.missing_pinned(), vec![unloaded.clone()]);
+
+        info.insert_pinned(unloaded.clone(), mock_message1().into());
+        assert!(info.get_pinned(&unloaded).is_some());
+        assert!(info.missing_pinned().is_empty());
+
+        // Failed fetches are retried until they hit the limit.
+        let broken = owned_event_id!("$broken");
+        info.pinned_events.push(broken.clone());
+
+        for _ in 1..PINNED_FETCH_ATTEMPTS {
+            info.insert_pinned(broken.clone(), None);
+        }
+        assert!(!info.pinned_unavailable(&broken));
+        assert_eq!(info.missing_pinned(), vec![broken.clone()]);
+
+        info.insert_pinned(broken.clone(), None);
+        assert!(info.pinned_unavailable(&broken));
+        assert!(info.missing_pinned().is_empty());
+
+        let (thread, key) = info.get_message_location(&MSG3_EVID).unwrap();
+        assert_eq!(thread, None);
+        assert_eq!(key, &*MSG3_KEY);
+        assert!(info.get_message_location(&unloaded).is_none());
+    }
+
+    #[test]
+    fn test_pinned_window_id() {
+        let room_id = TEST_ROOM1_ID.clone();
+        let id = IambId::PinnedList(room_id.clone());
+        let url = format!("iamb://room/{room_id}/pinned");
+
+        assert_eq!(id.to_string(), url);
+
+        let parsed: IambId = serde_json::from_str(&format!("{url:?}")).unwrap();
+        assert_eq!(parsed, id);
     }
 
     #[test]

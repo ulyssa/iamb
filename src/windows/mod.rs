@@ -290,6 +290,7 @@ macro_rules! delegate {
             IambWindow::Room($id) => $e,
             IambWindow::DirectList($id) => $e,
             IambWindow::MemberList($id, _, _) => $e,
+            IambWindow::PinnedList($id, _, _) => $e,
             IambWindow::RoomList($id) => $e,
             IambWindow::SpaceList($id) => $e,
             IambWindow::VerifyList($id) => $e,
@@ -305,6 +306,7 @@ macro_rules! delegate {
 pub enum IambWindow {
     DirectList(RoomListState),
     MemberList(MemberListState, OwnedRoomId, Option<Instant>),
+    PinnedList(PinnedListState, OwnedRoomId, Option<Instant>),
     Room(RoomState),
     VerifyList(VerifyListState),
     RoomList(RoomListState),
@@ -322,6 +324,19 @@ impl IambWindow {
             w.focus_toggle()
         } else {
             return;
+        }
+    }
+
+    pub async fn timeline_command(
+        &mut self,
+        act: TimelineAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        if let IambWindow::Room(w) = self {
+            w.timeline_command(act, ctx, store).await
+        } else {
+            Err(IambError::NoSelectedRoom.into())
         }
     }
 
@@ -360,6 +375,7 @@ impl IambWindow {
         let id = match self {
             IambWindow::Room(state) => state.id(),
             IambWindow::MemberList(_, room_id, _) => Some(&**room_id),
+            IambWindow::PinnedList(_, room_id, _) => Some(&**room_id),
 
             IambWindow::DirectList(state) => state.get().map(|state| state.room_id()),
             IambWindow::RoomList(state) => state.get().map(|state| state.room_id()),
@@ -393,6 +409,7 @@ impl IambWindow {
 }
 
 pub type MemberListState = ListState<MemberItem, IambInfo>;
+pub type PinnedListState = ListState<PinnedItem, IambInfo>;
 pub type RoomListState = ListState<GenericRoomItem, IambInfo>;
 pub type VerifyListState = ListState<VerifyItem, IambInfo>;
 
@@ -523,6 +540,33 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 List::new(store)
                     .empty_message("No users here yet!")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .render(area, buf, state);
+            },
+            IambWindow::PinnedList(state, room_id, last_fetch) => {
+                let info = store.application.rooms.get_or_default(room_id.clone());
+
+                // Most recently pinned first.
+                let items = info
+                    .pinned_events
+                    .iter()
+                    .rev()
+                    .map(|event_id| PinnedItem::new(room_id.clone(), event_id.clone()))
+                    .collect::<Vec<_>>();
+
+                let need_fetch = last_fetch.is_none_or(|i| i.elapsed() >= MEMBER_FETCH_DEBOUNCE);
+
+                if need_fetch && !info.missing_pinned().is_empty() {
+                    store.application.need_load.need_pinned(room_id.clone());
+                    *last_fetch = Some(Instant::now());
+                }
+
+                state.set(items);
+                state.set_ignorecase(store.application.settings.tunables.ignorecase);
+
+                List::new(store)
+                    .empty_message("No pinned messages in this room")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
                     .render(area, buf, state);
@@ -680,6 +724,9 @@ impl WindowOps<IambInfo> for IambWindow {
             IambWindow::MemberList(w, room_id, last_fetch) => {
                 IambWindow::MemberList(w.dup(store), room_id.clone(), *last_fetch)
             },
+            IambWindow::PinnedList(w, room_id, last_fetch) => {
+                IambWindow::PinnedList(w.dup(store), room_id.clone(), *last_fetch)
+            },
             IambWindow::RoomList(w) => Self::RoomList(w.dup(store)),
             IambWindow::SpaceList(w) => Self::SpaceList(w.dup(store)),
             IambWindow::VerifyList(w) => w.dup(store).into(),
@@ -723,6 +770,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::Room(room) => room.window_id(),
             IambWindow::DirectList(_) => IambId::DirectList,
             IambWindow::MemberList(_, room_id, _) => IambId::MemberList(room_id.clone()),
+            IambWindow::PinnedList(_, room_id, _) => IambId::PinnedList(room_id.clone()),
             IambWindow::RoomList(_) => IambId::RoomList,
             IambWindow::SpaceList(_) => IambId::SpaceList,
             IambWindow::VerifyList(_) => IambId::VerifyList,
@@ -757,6 +805,16 @@ impl Window<IambInfo> for IambWindow {
                 ];
                 Line::from(v)
             },
+            IambWindow::PinnedList(state, room_id, _) => {
+                let title = store.application.get_room_title(room_id.as_ref());
+                let n = state.len();
+                let v = vec![
+                    bold_span("Pinned Messages "),
+                    Span::styled(format!("({n}): "), bold_style()),
+                    title.into(),
+                ];
+                Line::from(v)
+            },
         }
     }
 
@@ -778,6 +836,16 @@ impl Window<IambInfo> for IambWindow {
                 let n = state.len();
                 let v = vec![
                     bold_span("Room Members "),
+                    Span::styled(format!("({n}): "), bold_style()),
+                    title.into(),
+                ];
+                Line::from(v)
+            },
+            IambWindow::PinnedList(state, room_id, _) => {
+                let title = store.application.get_room_title(room_id.as_ref());
+                let n = state.len();
+                let v = vec![
+                    bold_span("Pinned Messages "),
                     Span::styled(format!("({n}): "), bold_style()),
                     title.into(),
                 ];
@@ -813,6 +881,13 @@ impl Window<IambInfo> for IambWindow {
                 let id = IambBufferId::MemberList(room_id.clone());
                 let list = MemberListState::new(id, vec![]);
                 let win = Self::MemberList(list, room_id, None);
+
+                return Ok(win);
+            },
+            IambId::PinnedList(room_id) => {
+                let id = IambBufferId::PinnedList(room_id.clone());
+                let list = PinnedListState::new(id, vec![]);
+                let win = IambWindow::PinnedList(list, room_id, None);
 
                 return Ok(win);
             },
@@ -1172,6 +1247,100 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
         match act {
             PromptAction::Submit => Ok(vec![]),
+            PromptAction::Abort(_) => {
+                let msg = "Cannot abort entry inside a list";
+                let err = EditError::Failure(msg.into());
+
+                Err(err)
+            },
+            PromptAction::Recall(..) => {
+                let msg = "Cannot recall history inside a list";
+                let err = EditError::Failure(msg.into());
+
+                Err(err)
+            },
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct PinnedItem {
+    room_id: OwnedRoomId,
+    event_id: OwnedEventId,
+}
+
+impl PinnedItem {
+    fn new(room_id: OwnedRoomId, event_id: OwnedEventId) -> Self {
+        Self { room_id, event_id }
+    }
+}
+
+impl Display for PinnedItem {
+    fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
+        write!(f, "{}", self.event_id)
+    }
+}
+
+impl ListItem<IambInfo> for PinnedItem {
+    fn show(
+        &self,
+        selected: bool,
+        _: &ViewportContext<ListCursor>,
+        store: &mut ProgramStore,
+    ) -> Text<'_> {
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        let settings = &store.application.settings;
+
+        let style = if selected {
+            Style::default().add_modifier(StyleModifier::REVERSED)
+        } else {
+            Style::default()
+        };
+
+        let Some(msg) = info.get_pinned(&self.event_id) else {
+            let text = if info.pinned_unavailable(&self.event_id) {
+                "Unable to load message"
+            } else {
+                "Loading pinned message..."
+            };
+
+            return Span::styled(text, style.fg(Color::Gray)).into();
+        };
+
+        let sender = settings.get_user_span(&msg.sender, info);
+        let sender = Span::styled(sender.content.into_owned(), sender.style.patch(style));
+        let time = format!(" [{}]: ", msg.timestamp.show_datetime());
+        let body = msg.event.body().lines().next().unwrap_or_default().to_string();
+
+        Line::from(vec![sender, Span::styled(time, style), Span::styled(body, style)]).into()
+    }
+
+    fn get_word(&self) -> Option<String> {
+        self.event_id.to_string().into()
+    }
+}
+
+impl Promptable<ProgramContext, ProgramStore, IambInfo> for PinnedItem {
+    fn prompt(
+        &mut self,
+        act: &PromptAction,
+        ctx: &ProgramContext,
+        store: &mut ProgramStore,
+    ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
+        match act {
+            PromptAction::Submit => {
+                let info = store.application.rooms.get_or_default(self.room_id.clone());
+                let thread = info
+                    .get_message_location(&self.event_id)
+                    .and_then(|(thread, _)| thread)
+                    .map(ToOwned::to_owned);
+
+                let room = IambId::Room(self.room_id.clone(), thread);
+                let open = WindowAction::Switch(OpenTarget::Application(room));
+                let jump = IambAction::from(TimelineAction::GotoEvent(self.event_id.clone()));
+
+                Ok(vec![(open.into(), ctx.clone()), (jump.into(), ctx.clone())])
+            },
             PromptAction::Abort(_) => {
                 let msg = "Cannot abort entry inside a list";
                 let err = EditError::Failure(msg.into());

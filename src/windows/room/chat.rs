@@ -12,6 +12,7 @@ use matrix_sdk::attachment::{AttachmentInfo, BaseImageInfo};
 use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::room::reply::{EnforceThread, Reply};
 use matrix_sdk::ruma::events::Mentions;
+use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::ruma::events::reaction::ReactionEventContent;
 use matrix_sdk::ruma::events::relation::Annotation;
 use matrix_sdk::ruma::events::room::message::{
@@ -21,6 +22,7 @@ use matrix_sdk::ruma::events::room::message::{
     ReplyWithinThread,
     TextMessageEventContent,
 };
+use matrix_sdk::ruma::events::room::pinned_events::RoomPinnedEventsEventContent;
 use matrix_sdk::send_queue::RoomSendQueueError;
 use modalkit::editing::history::{self, HistoryList};
 use modalkit::editing::store::RegisterError;
@@ -30,7 +32,7 @@ use modalkit_ratatui::textbox::{TextBox, TextBoxState};
 use ratatui::prelude::Stylize;
 use regex::Regex;
 
-use crate::base::{DownloadFlags, EchoLocation};
+use crate::base::{DownloadFlags, EchoLocation, RoomFetchStatus};
 use crate::config::EncryptionIndicatorLocation;
 use crate::message::{
     MessageId,
@@ -41,6 +43,11 @@ use crate::message::{
 use crate::prelude::*;
 use crate::util::SuspendedTty;
 use crate::windows::room::scrollback::{Scrollback, ScrollbackState};
+
+/// How long to wait for a message to load before giving up on jumping to it.
+///
+/// History loads one page roughly every two seconds, for up to `MESSAGE_NEED_TTL` pages.
+const PENDING_JUMP_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// State needed for rendering [Chat].
 pub struct ChatState {
@@ -56,6 +63,9 @@ pub struct ChatState {
 
     reply_to: Option<MessageKey>,
     editing: Option<MessageKey>,
+
+    /// A message to jump to once it has been loaded, and when the jump was requested.
+    pending_jump: Option<(OwnedEventId, Instant)>,
 }
 
 impl ChatState {
@@ -79,6 +89,7 @@ impl ChatState {
 
             reply_to: None,
             editing: None,
+            pending_jump: None,
         }
     }
 
@@ -119,6 +130,77 @@ impl ChatState {
     pub fn refresh_room(&mut self, store: &mut ProgramStore) {
         if let Some(room) = store.application.worker.client.get_room(self.id()) {
             self.room = room;
+        }
+    }
+
+    /// Where to put the cursor for a loaded message.
+    ///
+    /// A thread reply can't be shown in the main timeline, so that lands on its thread root.
+    fn jump_target(&self, info: &RoomInfo, event_id: &EventId) -> Option<MessageKey> {
+        let (thread, key) = info.get_message_location(event_id)?;
+
+        match thread {
+            Some(root) if self.thread().is_none() => info.get_message_key(root).cloned(),
+            _ => Some(key.clone()),
+        }
+    }
+
+    fn jump_to_message(
+        &mut self,
+        event_id: OwnedEventId,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
+
+        if let Some(key) = self.jump_target(info, &event_id) {
+            self.pending_jump = None;
+            self.scrollback.goto_message(key);
+            self.focus = RoomFocus::Scrollback;
+
+            return Ok(None);
+        }
+
+        store
+            .application
+            .need_load
+            .need_message(self.room_id.clone(), event_id.clone());
+        self.pending_jump = Some((event_id, Instant::now()));
+
+        let msg = "Loading message; will jump to it once it arrives";
+        Ok(Some(InfoMessage::from(msg)))
+    }
+
+    /// Finish a jump that was waiting on its message to load.
+    fn complete_pending_jump(&mut self, store: &mut ProgramStore) {
+        let Some((event_id, requested)) = &self.pending_jump else {
+            return;
+        };
+
+        let info = store.application.rooms.get_or_default(self.room_id.clone());
+
+        if let Some(key) = self.jump_target(info, event_id) {
+            self.pending_jump = None;
+            self.scrollback.goto_message(key);
+            self.focus = RoomFocus::Scrollback;
+        } else if matches!(info.fetch_id, RoomFetchStatus::Done) ||
+            requested.elapsed() >= PENDING_JUMP_TIMEOUT
+        {
+            // The whole history is loaded without it, or it's too far back to find.
+            self.pending_jump = None;
+
+            let msg = "Unable to jump to message: it's too far back in the room's history";
+            store.application.draw_error = Some(msg.into());
+        }
+    }
+
+    pub async fn timeline_command(
+        &mut self,
+        act: TimelineAction,
+        _: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        match act {
+            TimelineAction::GotoEvent(event_id) => self.jump_to_message(event_id, store),
         }
     }
 
@@ -351,6 +433,69 @@ impl ChatState {
                 let msg = ReactionEventContent::new(reaction);
 
                 room.send_queue().send(msg.into()).await.map_err(IambError::from)?;
+
+                Ok(None)
+            },
+            MessageAction::Pin | MessageAction::Unpin => {
+                let pin = act == MessageAction::Pin;
+
+                let event_id = match &msg.event {
+                    MessageEvent::Local(..) => {
+                        let msg = "Cannot pin a message that hasn't been sent yet";
+                        return Err(UIError::Failure(msg.into()));
+                    },
+                    MessageEvent::Redacted(..) | MessageEvent::EncryptedRedacted(_) if pin => {
+                        let msg = "Cannot pin a redacted message";
+                        return Err(UIError::Failure(msg.into()));
+                    },
+                    event => {
+                        event
+                            .event_id()
+                            .map(ToOwned::to_owned)
+                            .ok_or(IambError::NoSelectedMessage)?
+                    },
+                };
+
+                let room = self.get_joined(&store.application.worker)?;
+
+                let can_pin = room
+                    .power_levels()
+                    .await
+                    .map_err(matrix_sdk::Error::from)
+                    .map_err(IambError::from)?
+                    .user_can_send_state(
+                        &settings.profile.user_id,
+                        StateEventType::RoomPinnedEvents,
+                    );
+
+                if !can_pin {
+                    return Err(IambError::InsufficientPermission.into());
+                }
+
+                // The state event holds the whole list, so rebuild it from the SDK's latest copy.
+                let mut pinned = room.pinned_event_ids().unwrap_or_default();
+                let position = pinned.iter().position(|id| *id == event_id);
+
+                match (pin, position) {
+                    (true, Some(_)) => {
+                        let msg = "This message is already pinned";
+                        return Err(UIError::Failure(msg.into()));
+                    },
+                    (false, None) => {
+                        let msg = "This message is not pinned";
+                        return Err(UIError::Failure(msg.into()));
+                    },
+                    (true, None) => {
+                        pinned.push(event_id);
+                    },
+                    (false, Some(idx)) => {
+                        pinned.remove(idx);
+                    },
+                }
+
+                room.send_state_event(RoomPinnedEventsEventContent::new(pinned))
+                    .await
+                    .map_err(IambError::from)?;
 
                 Ok(None)
             },
@@ -874,6 +1019,7 @@ impl WindowOps<IambInfo> for ChatState {
 
             reply_to: None,
             editing: None,
+            pending_jump: None,
         }
     }
 
@@ -1108,6 +1254,8 @@ impl StatefulWidget for Chat<'_> {
     type State = ChatState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        state.complete_pending_jump(self.store);
+
         let settings = &self.store.application.settings;
 
         // Determine whether we have a description to show for the message bar.

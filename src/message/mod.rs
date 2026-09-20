@@ -234,6 +234,11 @@ impl MessageTimeStamp {
         Span::styled(time, BOLD_STYLE)
     }
 
+    /// A compact date and time, for places without a date separator line.
+    pub fn show_datetime(self) -> String {
+        self.as_datetime().format("%Y-%m-%d %H:%M").to_string()
+    }
+
     fn show_time(self) -> Span<'static> {
         let time = self.as_datetime().format("%T");
         let time = format!("  [{time}]");
@@ -1291,11 +1296,19 @@ impl Message {
             fmt.push_spans(space_span(width, style).into(), style, &mut text);
         }
 
-        if self.event.is_edited() {
+        let pinned = self.event.event_id().is_some_and(|id| info.is_pinned(id));
+        let label = match (self.event.is_edited(), pinned) {
+            (true, true) => Some("(pinned, edited)"),
+            (true, false) => Some("(edited)"),
+            (false, true) => Some("(pinned)"),
+            (false, false) => None,
+        };
+
+        if let Some(label) = label {
             fmt.push_spans(
                 Line::from(vec![
-                    Span::styled("(edited)", style.fg(Color::Gray)),
-                    space_span(fmt.width().saturating_sub(8), style),
+                    Span::styled(label, style.fg(Color::Gray)),
+                    space_span(fmt.width().saturating_sub(label.len()), style),
                 ]),
                 style,
                 &mut text,

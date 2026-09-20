@@ -209,6 +209,13 @@ pub async fn room_command(
 
             Ok(vec![(act, cmd.context.clone())])
         },
+        RoomAction::Pinned(cmd) => {
+            let id = IambId::PinnedList(id.to_owned());
+            let target = OpenTarget::Application(id);
+            let act = cmd.switch(target);
+
+            Ok(vec![(act, cmd.context.clone())])
+        },
         RoomAction::SetAccess(rule) => {
             let Some(room) = store.application.worker.client.get_room(id) else {
                 return Err(IambError::NotJoined.into());
@@ -830,6 +837,19 @@ impl RoomState {
         Paragraph::new(text).alignment(Alignment::Center).render(area, buf);
 
         return;
+    }
+
+    pub async fn timeline_command(
+        &mut self,
+        act: TimelineAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        if let RoomState::Chat(chat) = self {
+            chat.timeline_command(act, ctx, store).await
+        } else {
+            Err(IambError::NoSelectedRoom.into())
+        }
     }
 
     pub async fn message_command(
