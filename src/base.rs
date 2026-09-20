@@ -839,10 +839,6 @@ pub enum IambError {
     #[error("Failed to import room keys: {0}")]
     FailedKeyImport(#[from] matrix_sdk::encryption::RoomKeyImportError),
 
-    /// A failure related to the cryptographic store.
-    #[error("Cannot export keys from sled: {0}")]
-    UpgradeSled(#[from] crate::sled_export::SledMigrationError),
-
     /// An HTTP error.
     #[error("HTTP client error: {0}")]
     Http(#[from] matrix_sdk::HttpError),
