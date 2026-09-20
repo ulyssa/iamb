@@ -108,7 +108,7 @@ pub fn mock_message5() -> Message {
 pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
     let mut keys = HashMap::new();
 
-    keys.insert(MSG1_EVID.clone(), EventLocation::Message(None, MSG2_KEY.clone()));
+    keys.insert(MSG1_EVID.clone(), EventLocation::Message(None, MSG1_KEY.clone()));
     keys.insert(MSG2_EVID.clone(), EventLocation::Message(None, MSG2_KEY.clone()));
     keys.insert(MSG3_EVID.clone(), EventLocation::Message(None, MSG3_KEY.clone()));
     keys.insert(MSG4_EVID.clone(), EventLocation::Message(None, MSG4_KEY.clone()));
@@ -157,6 +157,7 @@ pub fn mock_tunables() -> TunableValues {
         ignorecase: false,
         default_register: None,
         default_room: None,
+        default_via: vec![],
         encryption: Encryption::default().values(),
         input_prompt: None,
         log_level: "warn".into(),
@@ -220,17 +221,20 @@ pub fn mock_settings() -> ApplicationSettings {
             dirs: None,
             layout: None,
             macros: None,
+            aliases: None,
         },
         tunables: mock_tunables(),
         dirs: mock_dirs(),
         layout: Default::default(),
         macros: HashMap::default(),
+        aliases: Aliases::default(),
         enable_enhanced_keys: false,
     }
 }
 
 pub async fn mock_store() -> ProgramStore {
     let (tx, _) = unbounded_channel();
+    let (receipts, _) = unbounded_channel();
     let client = matrix_sdk::Client::builder()
         .homeserver_url("https://localhost")
         // don't panic if no certs are available like in a nix build sandbox
@@ -238,9 +242,9 @@ pub async fn mock_store() -> ProgramStore {
         .build()
         .await
         .unwrap();
-    let worker = Requester { tx, client };
+    let worker = Requester { tx, receipts, client };
 
-    let mut store = ChatStore::new(worker, mock_settings());
+    let mut store = ChatStore::new(worker, mock_settings()).unwrap();
 
     // Add presence information.
     store.presences.get_or_default(TEST_USER1.clone());

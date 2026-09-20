@@ -7,9 +7,15 @@ use std::collections::{BTreeSet, HashSet};
 
 use emojis::Emoji;
 use matrix_sdk::Client;
+use matrix_sdk::ruma::events::poll::start::PollStartEvent;
+use matrix_sdk::ruma::events::poll::unstable_start::{
+    UnstablePollStartEvent,
+    UnstablePollStartEventContent,
+};
 use matrix_sdk::ruma::events::reaction::ReactionEvent;
 use matrix_sdk::ruma::events::relation::Replacement;
 use matrix_sdk::ruma::events::room::encrypted::RoomEncryptedEvent;
+use matrix_sdk::ruma::events::room::message::RelationWithoutReplacement;
 use matrix_sdk::ruma::events::room::message::{
     RoomMessageEvent,
     RoomMessageEventContentWithoutRelation,
@@ -42,7 +48,17 @@ use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
+use url::form_urlencoded;
 
+use crate::message::poll::{
+    Poll,
+    PollEventLocation,
+    PollRelation,
+    UnloadedPoll,
+    UnloadedUnstablePoll,
+    UnstablePoll,
+    UnstablePollRelation,
+};
 use crate::notifications::NotificationHandle;
 use crate::prelude::*;
 
@@ -105,7 +121,7 @@ pub enum MessageAction {
     ///
     /// The second argument controls whether to overwrite any already existing file at the
     /// destination path, or to open the attachment after downloading.
-    Download(Option<String>, DownloadFlags),
+    Download(Option<PathBuf>, DownloadFlags),
 
     /// Edit a sent message.
     Edit,
@@ -540,7 +556,7 @@ pub enum SendAction {
     ///
     /// The second argument indicates whether to use the messagebar as a caption, don't use it or
     /// ask the user.
-    Upload(String, Option<bool>),
+    Upload(PathBuf, Option<bool>),
 
     /// Upload the image data.
     ///
@@ -617,6 +633,9 @@ pub enum IambAction {
     /// Request a new verification with the specified user.
     VerifyRequest(String),
 
+    /// Recover the encryption secrets for this session with the given recovery key.
+    Recover(String),
+
     /// Toggle the focus within the focused room.
     ToggleScrollbackFocus,
 
@@ -682,6 +701,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
+            IambAction::Recover(..) => SequenceStatus::Break,
         }
     }
 
@@ -699,6 +719,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
+            IambAction::Recover(..) => SequenceStatus::Atom,
         }
     }
 
@@ -716,6 +737,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
+            IambAction::Recover(..) => SequenceStatus::Ignore,
         }
     }
 
@@ -733,6 +755,7 @@ impl ApplicationAction for IambAction {
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
+            IambAction::Recover(..) => false,
         }
     }
 }
@@ -896,6 +919,10 @@ pub enum IambError {
     #[error("Verification request error: {0}")]
     VerificationRequestError(#[from] matrix_sdk::encryption::identities::RequestVerificationError),
 
+    /// A failure occurred while recovering the encryption secrets.
+    #[error("Recovery error: {0}")]
+    RecoveryError(#[from] matrix_sdk::encryption::recovery::RecoveryError),
+
     #[error("Notification setting error: {0}")]
     NotificationSettingError(#[from] matrix_sdk::NotificationSettingsError),
 
@@ -959,6 +986,9 @@ pub enum EventLocation {
 
     /// The [EventId] belongs to an edit for the given event and has key [MessageKey].
     Edit(OwnedEventId, MessageKey),
+
+    /// The [EventId] belongs to an aggregation for the given poll.
+    Poll(OwnedEventId, PollEventLocation),
 }
 
 impl EventLocation {
@@ -1122,22 +1152,17 @@ impl DisplayNameStore {
             .into_iter()
             .flat_map(|name| {
                 let users = self.by_names.get(&name).unwrap();
-                users
-                    .active
-                    .iter()
-                    .map(move |id| format!("[{name}]({})", id.matrix_to_uri()))
+                users.active.iter().map(move |id| format!("[{name}][{}]", id))
             })
             .collect();
 
         users.extend(self.by_ids.complete(prefix).into_iter().map(|id| {
-            format!(
-                "[{}]({})",
-                self.by_ids
-                    .get(&id)
-                    .and_then(|(name, _)| name.as_deref())
-                    .unwrap_or(id.as_str()),
-                id.matrix_to_uri()
-            )
+            let name = self
+                .by_ids
+                .get(&id)
+                .and_then(|(name, _)| name.as_deref())
+                .unwrap_or(id.as_str());
+            format!("[{}][{}]", name, id)
         }));
 
         users.into_iter().collect()
@@ -1171,6 +1196,9 @@ pub struct RoomInfo {
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
     /// A map of message identifiers to a list of edit events for message that are not yet cached.
     pub unloaded_edits: HashMap<OwnedEventId, MessageEdits>,
+    /// A map of message identifiers to the aggregated data for a poll that hasn't been loaded.
+    pub unloaded_polls: HashMap<OwnedEventId, UnloadedPoll>,
+    pub unloaded_unstable_polls: HashMap<OwnedEventId, UnloadedUnstablePoll>,
 
     /// A map of message identifiers to thread replies.
     threads: HashMap<OwnedEventId, Messages>,
@@ -1226,6 +1254,8 @@ impl Default for RoomInfo {
             pinned_previews: Default::default(),
             pinned_failures: Default::default(),
             unloaded_edits: Default::default(),
+            unloaded_polls: Default::default(),
+            unloaded_unstable_polls: Default::default(),
         }
     }
 }
@@ -1327,6 +1357,14 @@ impl RoomInfo {
         Some((loc.to_thread_root(), loc.to_message_key()?))
     }
 
+    pub fn get_receipt_thread(&self, event_id: &EventId) -> Option<ReceiptThread> {
+        match self.keys.get(event_id)? {
+            EventLocation::Message(None, _) | EventLocation::State(_) => Some(ReceiptThread::Main),
+            EventLocation::Message(Some(root), _) => Some(ReceiptThread::Thread(root.clone())),
+            _ => None,
+        }
+    }
+
     /// Get the reactions and their counts for a message.
     pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize, &Option<MediaSource>)> {
         if let Some(reacts) = self.reactions.get(event_id) {
@@ -1412,6 +1450,19 @@ impl RoomInfo {
                     msg.redact(ev);
                 }
             },
+            Some(EventLocation::Poll(poll_event_id, loc)) => {
+                let poll_event_id = poll_event_id.to_owned();
+                let loc = loc.to_owned();
+                if let Some(Message { event, .. }) = self.get_event_mut(&poll_event_id) {
+                    match event {
+                        MessageEvent::Poll(poll) => poll.redact(&loc),
+                        MessageEvent::UnstablePoll(poll) => poll.redact(&loc),
+                        _ => (),
+                    }
+                } else if let Some(poll) = self.unloaded_unstable_polls.get_mut(&poll_event_id) {
+                    poll.redact(&loc);
+                }
+            },
             Some(EventLocation::State(key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
@@ -1468,6 +1519,7 @@ impl RoomInfo {
         previews: &mut PreviewManager,
     ) {
         let event_id = sticker.event_id().to_owned();
+        let sender = sticker.sender().to_owned();
         let key = MessageKey {
             ts: sticker.origin_server_ts().into(),
             id: event_id.clone().into(),
@@ -1496,10 +1548,11 @@ impl RoomInfo {
         }
 
         let loc = EventLocation::Message(thread_root.clone(), key.clone());
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.clone(), loc);
 
         let thread = self.get_thread_mut(thread_root);
         thread.insert_message(key, sticker);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert a reaction to a message.
@@ -1526,6 +1579,189 @@ impl RoomInfo {
         }
 
         self.insert_reaction(react, source);
+    }
+
+    /// Insert the start of a poll.
+    pub fn insert_poll_start(&mut self, poll: PollStartEvent) {
+        let sender = poll.sender().to_owned();
+        let event_id = poll.event_id().to_owned();
+        let key = MessageKey {
+            ts: poll.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
+
+        match poll {
+            MessageLikeEvent::Original(ev) => {
+                if let Some(Relation::Replacement(Replacement {
+                    event_id: poll_event_id,
+                    new_content,
+                    ..
+                })) = ev.content.relates_to
+                {
+                    let loc = EventLocation::Poll(
+                        poll_event_id.to_owned(),
+                        PollEventLocation::Replacement(key.clone()),
+                    );
+                    self.keys.insert(event_id.clone(), loc);
+
+                    if let Some(msg) = self.get_event_mut(&poll_event_id) {
+                        let MessageEvent::Poll(poll) = &mut msg.event else {
+                            tracing::warn!("encountered poll replacement for non-poll message");
+                            return;
+                        };
+
+                        poll.replacements.insert(key, new_content);
+                    } else {
+                        self.unloaded_polls
+                            .entry(poll_event_id)
+                            .or_default()
+                            .replacements
+                            .insert(key, new_content);
+                    }
+                } else {
+                    let thread_root = match &ev.content.relates_to {
+                        Some(Relation::Thread(Thread { event_id, .. })) => {
+                            Some(event_id.to_owned())
+                        },
+                        _ => None,
+                    };
+
+                    let loc = EventLocation::Message(thread_root.clone(), key.clone());
+                    self.keys.insert(event_id.clone(), loc);
+
+                    let unloaded = self.unloaded_polls.remove(&ev.event_id).unwrap_or_default();
+                    let msg = MessageEvent::Poll(
+                        Poll::new(ev.event_id, ev.sender.to_owned(), ev.content, unloaded).into(),
+                    );
+                    let msg = Message::new(msg, ev.sender, ev.origin_server_ts.into());
+
+                    self.get_thread_mut(thread_root).insert_message(key, msg);
+                }
+            },
+            MessageLikeEvent::Redacted(ev) => {
+                let loc = EventLocation::Message(None, key.clone());
+                let message: Message = ev.into();
+                self.keys.insert(event_id.clone(), loc);
+                self.messages.insert_message(key, message);
+            },
+        }
+
+        self.set_implicit_receipt(sender, event_id);
+    }
+
+    /// Insert the start of a poll.
+    pub fn insert_unstable_poll_start(&mut self, poll: UnstablePollStartEvent) {
+        let sender = poll.sender().to_owned();
+        let event_id = poll.event_id().to_owned();
+        let key = MessageKey {
+            ts: poll.origin_server_ts().into(),
+            id: event_id.clone().into(),
+        };
+
+        match poll {
+            MessageLikeEvent::Original(ev) => {
+                match ev.content {
+                    UnstablePollStartEventContent::New(content) => {
+                        let thread_root = match &content.relates_to {
+                            Some(RelationWithoutReplacement::Thread(Thread {
+                                event_id, ..
+                            })) => Some(event_id.to_owned()),
+                            _ => None,
+                        };
+
+                        let loc = EventLocation::Message(thread_root.clone(), key.clone());
+                        self.keys.insert(event_id.clone(), loc);
+
+                        let unloaded =
+                            self.unloaded_unstable_polls.remove(&ev.event_id).unwrap_or_default();
+                        let msg = MessageEvent::UnstablePoll(
+                            UnstablePoll::new(ev.event_id, ev.sender.to_owned(), content, unloaded)
+                                .into(),
+                        );
+                        let msg = Message::new(msg, ev.sender, ev.origin_server_ts.into());
+
+                        self.get_thread_mut(thread_root).insert_message(key, msg);
+                    },
+                    UnstablePollStartEventContent::Replacement(content) => {
+                        let loc = EventLocation::Poll(
+                            content.relates_to.event_id.to_owned(),
+                            PollEventLocation::Replacement(key.clone()),
+                        );
+                        self.keys.insert(event_id.clone(), loc);
+
+                        if let Some(msg) = self.get_event_mut(&content.relates_to.event_id) {
+                            let MessageEvent::UnstablePoll(poll) = &mut msg.event else {
+                                tracing::warn!("encountered poll replacement for non-poll message");
+                                return;
+                            };
+
+                            poll.replacements.insert(key, content);
+                        } else {
+                            self.unloaded_unstable_polls
+                                .entry(content.relates_to.event_id.to_owned())
+                                .or_default()
+                                .replacements
+                                .insert(key, content);
+                        }
+                    },
+                    _ => {
+                        tracing::warn!("ignoring unknown unstable poll variant");
+                    },
+                }
+            },
+            MessageLikeEvent::Redacted(ev) => {
+                let loc = EventLocation::Message(None, key.clone());
+                let message: Message = ev.into();
+                self.keys.insert(event_id.clone(), loc);
+                self.messages.insert_message(key, message);
+            },
+        }
+
+        self.set_implicit_receipt(sender, event_id);
+    }
+
+    /// Insert an event that relates to a poll
+    pub fn insert_poll_relation(&mut self, relation: PollRelation) {
+        let event_id = relation.event_id().to_owned();
+        let poll_event_id = relation.poll_event_id().to_owned();
+
+        let loc = if let Some(msg) = self.get_event_mut(&poll_event_id) {
+            let MessageEvent::Poll(poll) = &mut msg.event else {
+                tracing::warn!("encountered poll replacement for non-poll message");
+                return;
+            };
+
+            poll.insert_relation(relation)
+        } else {
+            self.unloaded_polls
+                .entry(poll_event_id.to_owned())
+                .or_default()
+                .insert_relation(relation)
+        };
+
+        self.keys.insert(event_id, EventLocation::Poll(poll_event_id, loc));
+    }
+
+    /// Insert an event that relates to a poll
+    pub fn insert_unstable_poll_relation(&mut self, relation: UnstablePollRelation) {
+        let event_id = relation.event_id().to_owned();
+        let poll_event_id = relation.poll_event_id().to_owned();
+
+        let loc = if let Some(msg) = self.get_event_mut(&poll_event_id) {
+            let MessageEvent::UnstablePoll(poll) = &mut msg.event else {
+                tracing::warn!("encountered poll replacement for non-poll message");
+                return;
+            };
+
+            poll.insert_relation(relation)
+        } else {
+            self.unloaded_unstable_polls
+                .entry(poll_event_id.to_owned())
+                .or_default()
+                .insert_relation(relation)
+        };
+
+        self.keys.insert(event_id, EventLocation::Poll(poll_event_id, loc));
     }
 
     /// Insert an edit.
@@ -1561,14 +1797,16 @@ impl RoomInfo {
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
         let event_id = msg.event_id().to_owned();
+        let sender = msg.sender().to_owned();
         let key = MessageKey {
             ts: msg.origin_server_ts().into(),
             id: event_id.clone().into(),
         };
 
         let loc = EventLocation::State(key.clone());
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.clone(), loc);
         self.messages.insert_message(key, msg);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Indicates whether this room has unread messages.
@@ -1591,18 +1829,22 @@ impl RoomInfo {
     /// Inserts events that couldn't be decrypted into the scrollback.
     pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
         let event_id = msg.event_id().to_owned();
+        let sender = msg.sender().to_owned();
         let key = MessageKey {
             ts: msg.origin_server_ts().into(),
             id: event_id.clone().into(),
         };
 
-        self.keys.insert(event_id, EventLocation::Message(None, key.clone()));
+        self.keys
+            .insert(event_id.clone(), EventLocation::Message(None, key.clone()));
         self.messages.insert(key, msg.into());
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert a new message.
     pub fn insert_message(&mut self, msg: RoomMessageEvent) {
         let event_id = msg.event_id().to_owned();
+        let sender = msg.sender().to_owned();
         let key = MessageKey {
             ts: msg.origin_server_ts().into(),
             id: event_id.clone().into(),
@@ -1613,12 +1855,14 @@ impl RoomInfo {
         if let Some(edits) = self.unloaded_edits.remove(&event_id) {
             message.set_edits(edits);
         }
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.clone(), loc);
         self.messages.insert_message(key, message);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
         let event_id = msg.event_id().to_owned();
+        let sender = msg.sender().to_owned();
         let key = MessageKey {
             ts: msg.origin_server_ts().into(),
             id: event_id.clone().into(),
@@ -1633,8 +1877,9 @@ impl RoomInfo {
         if let Some(edits) = self.unloaded_edits.remove(&event_id) {
             message.set_edits(edits);
         }
-        self.keys.insert(event_id, loc);
+        self.keys.insert(event_id.clone(), loc);
         replies.insert_message(key, message);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert a new message event.
@@ -1686,14 +1931,14 @@ impl RoomInfo {
     }
 
     fn clear_receipt(&mut self, thread: &ReceiptThread, user_id: &OwnedUserId) -> Option<()> {
-        let old_event_id =
-            self.user_receipts.get(thread).and_then(|receipts| receipts.get(user_id))?;
+        let old_user_receipts = self.user_receipts.get_mut(thread);
+        let old_event_id = old_user_receipts.and_then(|rs| rs.remove(user_id))?;
         let old_thread = self.event_receipts.get_mut(thread)?;
-        let old_receipts = old_thread.get_mut(old_event_id)?;
+        let old_receipts = old_thread.get_mut(&old_event_id)?;
         old_receipts.remove(user_id);
 
         if old_receipts.is_empty() {
-            old_thread.remove(old_event_id);
+            old_thread.remove(&old_event_id);
         }
         if old_thread.is_empty() {
             self.event_receipts.remove(thread);
@@ -1708,17 +1953,105 @@ impl RoomInfo {
         user_id: OwnedUserId,
         event_id: OwnedEventId,
     ) {
+        if let Some(old_event_id) =
+            self.user_receipts.get(&thread).and_then(|receipts| receipts.get(&user_id)) &&
+            let (Some(old_key), Some(new_key)) =
+                (self.receipt_key(old_event_id), self.receipt_key(&event_id)) &&
+            new_key <= old_key
+        {
+            return;
+        }
+
         self.clear_receipt(&thread, &user_id);
-        self.event_receipts
-            .entry(thread.clone())
-            .or_default()
-            .entry(event_id.clone())
-            .or_default()
-            .insert(user_id.clone());
+        self.event_receipts(&thread, &event_id).insert(user_id.clone());
         self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
     }
 
-    pub fn fully_read(&mut self, user_id: OwnedUserId, thread: ReceiptThread) {
+    /// Get the users whose receipts currently point at the given event in the specified `thread`.
+    fn event_receipts(
+        &mut self,
+        thread: &ReceiptThread,
+        event_id: &EventId,
+    ) -> &mut HashSet<OwnedUserId> {
+        self.event_receipts
+            .entry(thread.clone())
+            .or_default()
+            .entry(event_id.to_owned())
+            .or_default()
+    }
+
+    fn receipt_key(&self, event_id: &EventId) -> Option<&MessageKey> {
+        match self.keys.get(event_id)? {
+            EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
+            _ => None,
+        }
+    }
+
+    /// Whenever a user sends a message, we can consider that an effective update to their
+    /// read receipt, even when their client isn't sending them to the room.
+    ///
+    /// While the Matrix specification doesn't explicitly mention "implicit receipts", this
+    /// is effectively what is described by "Marking notifications as read",
+    ///
+    /// > When the user updates their read receipt (either by using the API or by sending an
+    /// > event), notifications prior to and including that event MUST be marked as read.
+    ///
+    /// This method is called every time we insert a new message into the [RoomInfo], so that
+    /// we show in the timeline that the user has now read up to the point where they sent
+    /// a message.
+    fn set_implicit_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
+        let Some(thread) = self.get_receipt_thread(&event_id) else {
+            return;
+        };
+
+        let current = self.user_receipts.get(&thread).and_then(|receipts| receipts.get(&user_id));
+        let current_key = current.and_then(|event_id| self.receipt_key(event_id));
+
+        if current.is_some() && current_key.is_none() {
+            // Do not set an implicit receipt if we have an explicit receipt that points
+            // at an event whose information we don't have, since we need it to make sure
+            // that we don't move the receipt backwards in the timeline.
+            //
+            // This event could technically be newer than the one the receipt currently
+            // points at, but we can't be sure, so just trust what the user's receipt in
+            // the room says to point at, and we'll update it once they send us a new one.
+            //
+            // This technically makes it possible for a user who previously sent room
+            // receipts and then switched to just private receipts to not have their marker
+            // moved with recent messages, but solving that would require us to force a
+            // load of the event that every user's read marker points at.
+            return;
+        }
+
+        // If the user's client isn't thread-aware then make sure the implicit receipt
+        // doesn't result in displaying a second read receipt after where their unthreaded
+        // receipt is currently pointing at:
+        self.clear_receipt(&ReceiptThread::Unthreaded, &user_id);
+
+        self.set_receipt(thread, user_id, event_id);
+    }
+
+    /// This is called whenever the user has viewed the most recent message sent to a room or
+    /// thread, so that we can update the read receipt on the homeserver.
+    ///
+    /// Note that the Matrix specification says:
+    ///
+    /// > Clients should send read receipts when there is some certainty that the event in
+    /// > question has been displayed to the user. Simply receiving an event does not provide
+    /// > enough certainty that the user has seen the event. The user SHOULD need to take some
+    /// > action such as viewing the room that the event was sent to or dismissing a notification
+    /// > in order for the event to count as “read”. Clients SHOULD NOT send read receipts for
+    /// > events sent by their own user.
+    pub fn fully_read(
+        &mut self,
+        room_id: OwnedRoomId,
+        thread: ReceiptThread,
+        worker: &Requester,
+        settings: &ApplicationSettings,
+        open_notifications: &mut HashMap<OwnedRoomId, Vec<NotificationHandle>>,
+    ) {
+        let user_id = &settings.profile.user_id;
+
         let messages = match &thread {
             ReceiptThread::Main => self.get_thread(None),
             ReceiptThread::Thread(root) => self.get_thread(Some(root)),
@@ -1731,7 +2064,11 @@ impl RoomInfo {
 
         let event_id = messages
             .iter()
-            .filter(|(_, msg)| msg.sender != user_id)
+            .filter(|(_, msg)| {
+                // Handle the "do not send read receipts for our own events" part of the
+                // specification quoted above.
+                msg.sender != *user_id
+            })
             .filter(|(_, msg)| {
                 matches!(
                     msg.event,
@@ -1742,30 +2079,58 @@ impl RoomInfo {
                 )
             })
             .flat_map(|(_, msg)| msg.event.event_id())
-            .next_back();
+            .next_back()
+            .map(ToOwned::to_owned);
+
+        if let Some((_, msg)) = messages.last_key_value() &&
+            let Some(event_id) = msg.event.event_id()
+        {
+            // Always update the local receipt info for this room so that we aren't reliant
+            // on the homeserver echoing it back to us to update this and clear the trackbar:
+            self.set_receipt(thread.clone(), user_id.clone(), event_id.to_owned());
+        }
 
         if let Some(event_id) = event_id {
-            self.set_receipt(thread, user_id, event_id.to_owned());
+            // Clear any desktop notifications for the room:
+            open_notifications.remove(&room_id);
+
+            // Update the homeserver with the latest receipt:
+            worker.send_receipt(room_id, thread, event_id, settings);
         }
     }
 
-    pub fn fully_read_all(&mut self, user_id: &UserId) {
-        self.fully_read(user_id.to_owned(), ReceiptThread::Main);
-
+    pub fn fully_read_all(
+        &mut self,
+        room_id: OwnedRoomId,
+        worker: &Requester,
+        settings: &ApplicationSettings,
+        open_notifications: &mut HashMap<OwnedRoomId, Vec<NotificationHandle>>,
+    ) {
         let threads: Vec<_> = self.threads.keys().map(|root| root.to_owned()).collect();
 
         for thread in threads {
-            self.fully_read(user_id.to_owned(), ReceiptThread::Thread(thread));
+            self.fully_read(
+                room_id.to_owned(),
+                ReceiptThread::Thread(thread),
+                worker,
+                settings,
+                open_notifications,
+            );
         }
+
+        self.fully_read(room_id, ReceiptThread::Main, worker, settings, open_notifications);
     }
 
-    pub fn receipts<'a>(
+    pub fn read_event_users<'a>(
         &'a self,
-        user_id: &'a UserId,
-    ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
-        self.user_receipts
-            .iter()
-            .filter_map(move |(t, rs)| rs.get(user_id).map(|r| (t, r)))
+        thread: ReceiptThread,
+        event_id: &'a EventId,
+    ) -> impl Iterator<Item = &'a OwnedUserId> + 'a {
+        self.event_receipts
+            .get(&thread)
+            .and_then(|rs| rs.get(event_id))
+            .map(|read| read.iter())
+            .unwrap_or_default()
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {
@@ -1873,22 +2238,22 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
 #[derive(Default)]
 pub struct SyncInfo {
     /// Spaces that the user is a member of.
-    pub spaces: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub spaces: Vec<MatrixRoom>,
 
     /// Rooms that the user is a member of.
-    pub rooms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub rooms: Vec<MatrixRoom>,
 
     /// DMs that the user is a member of.
-    pub dms: Vec<Arc<(MatrixRoom, Option<Tags>)>>,
+    pub dms: Vec<MatrixRoom>,
 }
 
 impl SyncInfo {
     pub fn rooms(&self) -> impl Iterator<Item = &RoomId> {
-        self.rooms.iter().map(|r| r.0.room_id())
+        self.rooms.iter().map(|r| r.room_id())
     }
 
     pub fn dms(&self) -> impl Iterator<Item = &RoomId> {
-        self.dms.iter().map(|r| r.0.room_id())
+        self.dms.iter().map(|r| r.room_id())
     }
 
     pub fn chats(&self) -> impl Iterator<Item = &RoomId> {
@@ -2025,14 +2390,15 @@ pub struct ChatStore {
 
 impl ChatStore {
     /// Create a new [ChatStore].
-    pub fn new(worker: Requester, settings: ApplicationSettings) -> Self {
+    pub fn new(worker: Requester, settings: ApplicationSettings) -> IambResult<Self> {
         let previews = PreviewManager::new(&settings);
+        let cmds = crate::commands::setup_commands(&settings.aliases)?;
 
-        ChatStore {
+        let store = ChatStore {
             worker,
             settings,
             previews,
-            cmds: crate::commands::setup_commands(),
+            cmds,
             emojis: emoji_map(),
 
             collator: Default::default(),
@@ -2047,7 +2413,9 @@ impl ChatStore {
             draw_error: None,
             focused: true,
             open_notifications: Default::default(),
-        }
+        };
+
+        Ok(store)
     }
 
     /// Get a joined room.
@@ -2080,9 +2448,11 @@ impl ChatStore {
         self.rooms.get_or_default(room_id)
     }
 
-    /// Set the name for a room.
-    pub fn set_room_name(&mut self, room_id: &RoomId, name: &str) {
-        self.rooms.get_or_default(room_id.to_owned()).name = name.to_string().into();
+    /// Set the name and tags for a room.
+    pub fn set_room_info(&mut self, room_id: OwnedRoomId, name: String, tags: Option<Tags>) {
+        let info = self.rooms.get_or_default(room_id);
+        info.name = name.into();
+        info.tags = tags;
     }
 }
 
@@ -2093,6 +2463,12 @@ impl ApplicationStore for ChatStore {}
 pub enum IambId {
     /// A Matrix room, with an optional thread to show.
     Room(OwnedRoomId, Option<OwnedEventId>),
+
+    /// A Matrix room that we're currently in the middle of joining.
+    Joining(String),
+
+    /// A Matrix room that we haven't joined, and aren't currently joining.
+    NotJoined(String),
 
     /// The `:dms` window.
     DirectList,
@@ -2123,6 +2499,27 @@ pub enum IambId {
 
     /// The `:mentions` window.
     MentionsList,
+
+    /// The `:invites` window.
+    InvitesList,
+}
+
+/// Encode the room name for a [IambId::Joining] or [IambId::NotJoined] window URL.
+///
+/// Note that since these names come straight from the user's argument to `:join`,
+/// they are likely room aliases containing characters like `#` that we should
+/// escape before putting them into the URL, so we can later reparse it. They can
+/// technically contain anything that the user tried to pass to `:join`.
+fn room_query(room: &str) -> String {
+    form_urlencoded::Serializer::new(String::new())
+        .append_pair("room", room)
+        .finish()
+}
+
+/// Pull the room name back out of the query parameter for `iamb://joining` or
+/// `iamb://not-joined`.
+fn query_room(url: &Url) -> Option<String> {
+    url.query_pairs().find_map(|(k, v)| (k == "room").then(|| v.into_owned()))
 }
 
 impl Display for IambId {
@@ -2133,6 +2530,12 @@ impl Display for IambId {
             },
             IambId::Room(room_id, Some(thread)) => {
                 write!(f, "iamb://room/{room_id}/threads/{thread}")
+            },
+            IambId::Joining(room) => {
+                write!(f, "iamb://joining?{}", room_query(room))
+            },
+            IambId::NotJoined(room) => {
+                write!(f, "iamb://not-joined?{}", room_query(room))
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -2148,6 +2551,7 @@ impl Display for IambId {
             IambId::ChatList => f.write_str("iamb://chats"),
             IambId::UnreadList => f.write_str("iamb://unreads"),
             IambId::MentionsList => f.write_str("iamb://mentions"),
+            IambId::InvitesList => f.write_str("iamb://invites"),
         }
     }
 }
@@ -2229,6 +2633,20 @@ impl Visitor<'_> for IambIdVisitor {
                     _ => return Err(E::custom("Invalid iamb window URL")),
                 }
             },
+            Some("joining") => {
+                let Some(room) = query_room(&url) else {
+                    return Err(E::custom("iamb://joining requires a room parameter"));
+                };
+
+                Ok(IambId::Joining(room))
+            },
+            Some("not-joined") => {
+                let Some(room) = query_room(&url) else {
+                    return Err(E::custom("iamb://not-joined requires a room parameter"));
+                };
+
+                Ok(IambId::NotJoined(room))
+            },
             Some("members") => {
                 let Some(path) = url.path_segments() else {
                     return Err(E::custom("Invalid members window URL"));
@@ -2299,6 +2717,13 @@ impl Visitor<'_> for IambIdVisitor {
                 }
 
                 Ok(IambId::MentionsList)
+            },
+            Some("invites") => {
+                if url.path() != "" {
+                    return Err(E::custom("iamb://invites takes no path"));
+                }
+
+                Ok(IambId::InvitesList)
             },
             Some(s) => Err(E::custom(format!("{s:?} is not a valid window"))),
             None => Err(E::custom("Invalid iamb window URL")),
@@ -2376,6 +2801,9 @@ pub enum IambBufferId {
 
     /// The `:mentions` window.
     MentionsList,
+
+    /// The `:invites` window.
+    InvitesList,
 }
 
 impl IambBufferId {
@@ -2394,6 +2822,7 @@ impl IambBufferId {
             IambBufferId::ChatList => IambId::ChatList,
             IambBufferId::UnreadList => IambId::UnreadList,
             IambBufferId::MentionsList => IambId::MentionsList,
+            IambBufferId::InvitesList => IambId::InvitesList,
         };
 
         Some(id)
@@ -2430,6 +2859,19 @@ pub mod tests {
     use crate::config::user_style_from_color;
     use crate::tests::*;
 
+    fn mock_room_message_event(
+        content: RoomMessageEventContent,
+        sender: OwnedUserId,
+        key: MessageKey,
+    ) -> RoomMessageEvent {
+        let message = mock_room1_message(content, sender, key);
+        let MessageEvent::Original(event, _) = message.event else {
+            unreachable!("mock_room1_message always returns an original room message")
+        };
+
+        MessageLikeEvent::Original(*event)
+    }
+
     fn create_reaction_event(
         content: &ReactionEventContent,
         event_id: &str,
@@ -2450,7 +2892,7 @@ pub mod tests {
     }
 
     #[test]
-    fn multiple_identical_reactions() {
+    fn test_multiple_identical_reactions() {
         let mut info = RoomInfo::default();
 
         let content = ReactionEventContent::new(Annotation::new(
@@ -2487,6 +2929,140 @@ pub mod tests {
             .map(|(key, count, _)| (key, count))
             .collect();
         assert_eq!(reacts, vec![("🏠", 1), ("🙂", 2)]);
+    }
+
+    #[test]
+    fn test_implicit_receipt_tracks_message_sender_for_display() {
+        let mut info = RoomInfo::default();
+        let settings = mock_settings();
+        let mut previews = PreviewManager::new(&settings);
+        let event = mock_room_message_event(
+            RoomMessageEventContent::text_plain("sent by another user"),
+            TEST_USER2.clone(),
+            MSG5_KEY.clone(),
+        );
+
+        info.insert_with_preview(event, &settings, &mut previews);
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+        assert!(
+            info.event_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*MSG5_EVID))
+                .is_some_and(|users| users.contains(&*TEST_USER2))
+        );
+    }
+
+    #[test]
+    fn test_implicit_receipts_do_not_move_backwards_during_backpagination() {
+        let mut info = RoomInfo::default();
+        let settings = mock_settings();
+        let mut previews = PreviewManager::new(&settings);
+        let newer = mock_room_message_event(
+            RoomMessageEventContent::text_plain("newer"),
+            TEST_USER2.clone(),
+            MSG5_KEY.clone(),
+        );
+        let older = mock_room_message_event(
+            RoomMessageEventContent::text_plain("older"),
+            TEST_USER2.clone(),
+            MSG2_KEY.clone(),
+        );
+
+        info.insert_with_preview(newer, &settings, &mut previews);
+        info.insert_with_preview(older, &settings, &mut previews);
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+    }
+
+    #[test]
+    fn test_implicit_receipt_preserves_thread_context() {
+        let mut info = RoomInfo::default();
+        let root = owned_event_id!("$thread_root");
+        let reply = owned_event_id!("$thread_reply");
+        let thread = ReceiptThread::Thread(root.clone());
+
+        info.keys
+            .insert(reply.clone(), EventLocation::Message(Some(root), MSG5_KEY.clone()));
+        info.set_implicit_receipt(TEST_USER1.clone(), reply.clone());
+
+        assert_eq!(
+            info.user_receipts
+                .get(&thread)
+                .and_then(|receipts| receipts.get(&*TEST_USER1)),
+            Some(&reply),
+        );
+    }
+
+    #[test]
+    fn test_implicit_receipt_supports_state_events() {
+        let mut info = RoomInfo::default();
+        info.keys.insert(MSG5_EVID.clone(), EventLocation::State(MSG5_KEY.clone()));
+
+        info.set_implicit_receipt(TEST_USER2.clone(), MSG5_EVID.clone());
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+    }
+
+    #[test]
+    fn test_explicit_receipt_does_not_move_implicit_receipt_backwards() {
+        let mut info = RoomInfo::default();
+        let older = mock_room_message_event(
+            RoomMessageEventContent::text_plain("older"),
+            TEST_USER2.clone(),
+            MSG2_KEY.clone(),
+        );
+        let newer = mock_room_message_event(
+            RoomMessageEventContent::text_plain("newer"),
+            TEST_USER2.clone(),
+            MSG5_KEY.clone(),
+        );
+
+        info.insert_message(older);
+        info.insert_message(newer);
+        info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG2_EVID.clone());
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
+    }
+
+    #[test]
+    fn test_implicit_receipt_waits_for_unloaded_explicit_receipt() {
+        let mut info = RoomInfo::default();
+        info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG5_EVID.clone());
+        let older = mock_room_message_event(
+            RoomMessageEventContent::text_plain("older"),
+            TEST_USER2.clone(),
+            MSG2_KEY.clone(),
+        );
+
+        info.insert_message(older);
+
+        assert_eq!(
+            info.user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&*TEST_USER2)),
+            Some(&*MSG5_EVID),
+        );
     }
 
     #[test]
@@ -2564,6 +3140,35 @@ pub mod tests {
                 Span::from(" is typing...")
             ])
         );
+    }
+
+    #[test]
+    fn test_unjoined_window_ids() {
+        // Room names come from the user can contain characters that need escaping:
+        for name in [
+            "#foo:example.com",
+            "!abc123:example.com",
+            "@user:example.com",
+            "a b&c=d?e#f",
+        ] {
+            for id in [IambId::Joining(name.into()), IambId::NotJoined(name.into())] {
+                let json = serde_json::to_string(&id).unwrap();
+                assert_eq!(serde_json::from_str::<IambId>(&json).unwrap(), id);
+            }
+        }
+
+        assert_eq!(
+            IambId::Joining("#foo:example.com".into()).to_string(),
+            "iamb://joining?room=%23foo%3Aexample.com"
+        );
+        assert_eq!(
+            IambId::NotJoined("#foo:example.com".into()).to_string(),
+            "iamb://not-joined?room=%23foo%3Aexample.com"
+        );
+
+        // A window URL without a room name isn't valid and wasn't written by us:
+        assert!(serde_json::from_str::<IambId>("\"iamb://joining\"").is_err());
+        assert!(serde_json::from_str::<IambId>("\"iamb://not-joined\"").is_err());
     }
 
     #[test]

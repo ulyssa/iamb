@@ -6,7 +6,7 @@ use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use modalkit_ratatui::list::{List, ListState};
 
 use crate::prelude::*;
-use crate::windows::{RoomItem, RoomLikeItem, room_fields_cmp};
+use crate::windows::{GenericRoomItem, RoomLikeItem, room_fields_cmp};
 
 const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 
@@ -14,7 +14,7 @@ const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
 pub struct SpaceState {
     room_id: OwnedRoomId,
     room: MatrixRoom,
-    list: ListState<RoomItem, IambInfo>,
+    list: ListState<GenericRoomItem, IambInfo>,
     last_fetch: Option<Instant>,
 }
 
@@ -155,7 +155,7 @@ impl TerminalCursor for SpaceState {
 }
 
 impl Deref for SpaceState {
-    type Target = ListState<RoomItem, IambInfo>;
+    type Target = ListState<GenericRoomItem, IambInfo>;
 
     fn deref(&self) -> &Self::Target {
         &self.list
@@ -189,7 +189,9 @@ impl StatefulWidget for Space<'_> {
     type State = SpaceState;
 
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
-        state.set_ignorecase(self.store.application.settings.tunables.ignorecase);
+        let ChatStore { rooms, names, worker, settings, collator, .. } =
+            &mut self.store.application;
+        state.set_ignorecase(settings.tunables.ignorecase);
 
         let mut empty_message = None;
         let need_fetch = match state.last_fetch {
@@ -198,26 +200,24 @@ impl StatefulWidget for Space<'_> {
         };
 
         if need_fetch {
-            let res = self.store.application.worker.space_members(state.room_id.clone());
+            let res = worker.space_members(state.room_id.clone());
 
             match res {
                 Ok(members) => {
                     let mut items = members
                         .into_iter()
                         .filter_map(|id| {
-                            let (room, _, tags) =
-                                self.store.application.worker.get_room(id.clone()).ok()?;
+                            let (room, _, tags) = worker.get_room(id.clone()).ok()?;
                             let room_info = std::sync::Arc::new((room, tags));
 
                             if id != state.room_id {
-                                Some(RoomItem::new(room_info, self.store))
+                                Some(GenericRoomItem::new(&room_info.0, rooms, names))
                             } else {
                                 None
                             }
                         })
                         .collect::<Vec<_>>();
-                    let fields = &self.store.application.settings.tunables.sort.rooms;
-                    let collator = &mut self.store.application.collator;
+                    let fields = &settings.tunables.sort.rooms;
                     items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
 
                     state.list.set(items);

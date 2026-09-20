@@ -8,11 +8,13 @@ use std::io::{BufReader, BufWriter, Write as _};
 use std::process;
 
 use clap::Parser;
+use indexmap::IndexMap;
+use lazy_static::lazy_static;
 use matrix_sdk::EncryptionState;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
-use matrix_sdk::ruma::OwnedDeviceId;
+use matrix_sdk::ruma::{OwnedDeviceId, owned_server_name};
 use modalkit::crossterm;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
@@ -25,6 +27,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 use crate::prelude::*;
 
+pub type Aliases = IndexMap<String, String>;
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
 
 macro_rules! usage {
@@ -32,6 +35,10 @@ macro_rules! usage {
         println!($($args)*);
         process::exit(2);
     }
+}
+
+lazy_static! {
+    pub static ref DEFAULT_VIA_SERVER: OwnedServerName = owned_server_name!("matrix.org");
 }
 
 const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
@@ -362,20 +369,14 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
-fn merge_maps<K, V>(
-    profile: Option<HashMap<K, V>>,
-    global: Option<HashMap<K, V>>,
-) -> Option<HashMap<K, V>>
+fn merge_maps<M, K, V>(profile: Option<M>, global: Option<M>) -> Option<M>
 where
-    K: Eq + Hash,
+    M: Extend<(K, V)> + IntoIterator<Item = (K, V)>,
 {
     match (global, profile) {
         (Some(m), None) | (None, Some(m)) => Some(m),
         (Some(mut global), Some(profile)) => {
-            for (k, v) in profile {
-                global.insert(k, v);
-            }
-
+            global.extend(profile);
             Some(global)
         },
         (None, None) => None,
@@ -855,6 +856,7 @@ pub struct TunableValues {
     pub message_user_color: bool,
     pub default_register: Option<Register>,
     pub default_room: Option<String>,
+    pub default_via: Vec<OwnedServerName>,
     pub open_command: Option<Vec<String>>,
     pub mouse: Mouse,
     pub notifications: Notifications,
@@ -910,6 +912,7 @@ pub struct Tunables {
     #[serde(default, deserialize_with = "deserialize_register")]
     pub default_register: Option<Register>,
     pub default_room: Option<String>,
+    pub default_via: Option<Vec<OwnedServerName>>,
     pub open_command: Option<Vec<String>>,
     pub mouse: Option<Mouse>,
     pub notifications: Option<Notifications>,
@@ -960,6 +963,7 @@ impl Tunables {
             message_user_color: self.message_user_color.or(other.message_user_color),
             default_register: self.default_register.or(other.default_register),
             default_room: self.default_room.or(other.default_room),
+            default_via: self.default_via.or(other.default_via),
             open_command: self.open_command.or(other.open_command),
             mouse: self.mouse.or(other.mouse),
             notifications: self.notifications.or(other.notifications),
@@ -1004,6 +1008,7 @@ impl Tunables {
             message_user_color: self.message_user_color.unwrap_or(false),
             default_register: self.default_register,
             default_room: self.default_room,
+            default_via: self.default_via.unwrap_or_else(|| vec![DEFAULT_VIA_SERVER.clone()]),
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),
@@ -1196,6 +1201,7 @@ pub struct ProfileConfig {
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
+    pub aliases: Option<Aliases>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -1206,6 +1212,7 @@ pub struct IambConfig {
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
+    pub aliases: Option<Aliases>,
 }
 
 impl IambConfig {
@@ -1238,6 +1245,7 @@ pub struct ApplicationSettings {
     pub dirs: DirectoryValues,
     pub layout: Layout,
     pub macros: Macros,
+    pub aliases: Aliases,
 
     /// Whether to use the Kitty keyboard protocol. Resolved by
     /// [`ApplicationSettings::probe_enhanced_keys`] once the TUI starts, since
@@ -1286,6 +1294,7 @@ impl ApplicationSettings {
             settings: global,
             layout,
             macros,
+            aliases,
         } = config;
 
         validate_profile_names(&profiles);
@@ -1327,6 +1336,7 @@ impl ApplicationSettings {
             }
         };
 
+        let aliases = merge_maps(profile.aliases.take(), aliases).unwrap_or_default();
         let macros = merge_maps(profile.macros.take(), macros).unwrap_or_default();
         let layout = profile.layout.take().or(layout).unwrap_or_default();
 
@@ -1386,6 +1396,7 @@ impl ApplicationSettings {
             dirs,
             layout,
             macros,
+            aliases,
             enable_enhanced_keys: false,
         };
 
@@ -1808,6 +1819,38 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_aliases() {
+        let res: Aliases = serde_json::from_str("{\"c\":\"chats\"}").unwrap();
+        assert_eq!(res.len(), 1);
+
+        let aliased = res.get("c").unwrap();
+        assert_eq!(aliased, "chats");
+    }
+
+    #[test]
+    fn test_parse_aliases_preserves_order() {
+        // Aliases are registered in order, which allows alias to refer to earlier ones, so
+        // ensure we register in user-specified order:
+        let res: Aliases = toml::from_str("c = \"chats\"\ncc = \"c\"\nd = \"download\"").unwrap();
+        let order = res.keys().map(String::as_str).collect::<Vec<_>>();
+
+        assert_eq!(order, vec!["c", "cc", "d"]);
+    }
+
+    #[test]
+    fn test_merge_aliases_preserves_order() {
+        let profile: Aliases = toml::from_str("c = \"chats\"\nz = \"redact\"").unwrap();
+        let global: Aliases = toml::from_str("c = \"cancel\"\nd = \"download\"").unwrap();
+
+        let res = merge_maps(Some(profile), Some(global)).unwrap();
+        let order = res.keys().map(String::as_str).collect::<Vec<_>>();
+
+        // The profile wins for keys in both, but doesn't get to move them.
+        assert_eq!(order, vec!["c", "d", "z"]);
+        assert_eq!(res.get("c").unwrap(), "chats");
+    }
+
+    #[test]
     fn test_parse_macros() {
         let res: Macros = serde_json::from_str("{\"i|c\":{\"jj\":\"<Esc>\"}}").unwrap();
         assert_eq!(res.len(), 1);
@@ -1871,6 +1914,7 @@ mod tests {
             dirs,
             layout,
             macros,
+            aliases,
         } = &config;
 
         // There should be an example object for each top-level field.
@@ -1880,6 +1924,7 @@ mod tests {
         assert!(dirs.is_some());
         assert!(layout.is_some());
         assert!(macros.is_some());
+        assert!(aliases.is_some());
     }
 
     #[test]

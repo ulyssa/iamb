@@ -30,6 +30,7 @@ The different subcommands are:
 - `:verify confirm USERNAME/DEVICE` will confirm a verification
 - `:verify mismatch USERNAME/DEVICE` will cancel a verification where the Emoji don't match
 - `:verify cancel USERNAME/DEVICE` will cancel a verification
+- `:verify recover RECOVERYKEY` will recover your encryption secrets and verify this session
 
 ## Other Useful Commands
 

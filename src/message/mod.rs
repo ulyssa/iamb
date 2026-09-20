@@ -10,6 +10,8 @@ use humansize::{DECIMAL, format_size};
 use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::ruma::UInt;
 use matrix_sdk::ruma::events::RedactedUnsigned;
+use matrix_sdk::ruma::events::poll::start::RedactedPollStartEvent;
+use matrix_sdk::ruma::events::poll::unstable_start::RedactedUnstablePollStartEvent;
 use matrix_sdk::ruma::events::room::encrypted::{
     OriginalRoomEncryptedEvent,
     RedactedRoomEncryptedEvent,
@@ -27,11 +29,12 @@ use matrix_sdk::ruma::events::sticker::{OriginalStickerEvent, RedactedStickerEve
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
 use matrix_sdk::send_queue::SendHandle;
 use modalkit::editing::cursor::Cursor;
-use ratatui::symbols::line::THICK_VERTICAL;
+use ratatui::symbols::line::{HORIZONTAL, THICK_VERTICAL};
 use ratatui_image::sliced::SlicedProtocol;
 
 use crate::base::MessageEdits;
 use crate::message::html::{StyleTree, parse_matrix_html};
+use crate::message::poll::{Poll, UnstablePoll};
 use crate::message::state::{body_cow_state, html_state};
 use crate::prelude::*;
 use crate::preview::ImageStatus;
@@ -41,6 +44,8 @@ mod compose;
 mod html;
 mod printer;
 mod state;
+
+pub mod poll;
 
 pub use self::compose::{text_to_message, text_to_text_message_event_content};
 pub use self::html::TreeGenState;
@@ -413,6 +418,8 @@ pub enum MessageEvent {
     State(Box<AnySyncStateEvent>),
     Sticker(Box<OriginalStickerEvent>, MediaSource),
     Local(OwnedTransactionId, SendHandle, Box<RoomMessageEventContent>),
+    Poll(Box<Poll>),
+    UnstablePoll(Box<UnstablePoll>),
 }
 
 impl MessageEvent {
@@ -425,6 +432,8 @@ impl MessageEvent {
             MessageEvent::State(ev) => ev.event_id(),
             MessageEvent::Local(..) => return None,
             MessageEvent::Sticker(ev, ..) => ev.event_id.as_ref(),
+            MessageEvent::Poll(ev) => ev.event_id(),
+            MessageEvent::UnstablePoll(ev) => ev.event_id(),
         };
 
         Some(event_id)
@@ -432,18 +441,20 @@ impl MessageEvent {
 
     pub fn msgtype(&self) -> Option<&MessageType> {
         match self {
-            MessageEvent::EncryptedOriginal(_) => None,
             MessageEvent::Original(ev, edits) => {
                 edits
                     .last_key_value()
                     .map(|(_, ev)| &ev.msgtype)
                     .or(Some(&ev.content.msgtype))
             },
-            MessageEvent::EncryptedRedacted(_) => None,
-            MessageEvent::Redacted(_, _) => None,
-            MessageEvent::State(_) => None,
-            MessageEvent::Sticker(..) => None,
             MessageEvent::Local(_, _, content) => Some(&content.msgtype),
+            MessageEvent::EncryptedOriginal(..) |
+            MessageEvent::EncryptedRedacted(..) |
+            MessageEvent::Redacted(..) |
+            MessageEvent::State(..) |
+            MessageEvent::Sticker(..) |
+            MessageEvent::Poll(..) |
+            MessageEvent::UnstablePoll(..) => None,
         }
     }
 
@@ -464,6 +475,8 @@ impl MessageEvent {
             MessageEvent::Sticker(ev, ..) => body_cow_sticker(ev),
             MessageEvent::State(ev) => body_cow_state(ev),
             MessageEvent::Local(_, _, content) => body_cow_content(&content.msgtype),
+            MessageEvent::Poll(poll) => poll.body_cow(),
+            MessageEvent::UnstablePoll(poll) => poll.body_cow(),
         }
     }
 
@@ -496,14 +509,25 @@ impl MessageEvent {
                 let reason = redaction_reason_event(redaction);
                 *self = MessageEvent::Redacted(event_id, reason);
             },
+            MessageEvent::Poll(ev) => {
+                let event_id = ev.event_id().to_owned();
+                let reason = redaction_reason_event(redaction);
+                *self = MessageEvent::Redacted(event_id, reason);
+            },
+            MessageEvent::UnstablePoll(ev) => {
+                let event_id = ev.event_id().to_owned();
+                let reason = redaction_reason_event(redaction);
+                *self = MessageEvent::Redacted(event_id, reason);
+            },
         }
     }
 
     fn is_edited(&self) -> bool {
-        if let MessageEvent::Original(_, edits) = self {
-            !edits.is_empty()
-        } else {
-            false
+        match self {
+            Self::Original(_, edits) => !edits.is_empty(),
+            Self::Poll(poll) => !poll.replacements.is_empty(),
+            Self::UnstablePoll(poll) => !poll.replacements.is_empty(),
+            _ => false,
         }
     }
 }
@@ -669,6 +693,9 @@ struct MessageFormatter<'a> {
     /// The date the message was sent.
     date: Option<Span<'a>>,
 
+    /// Whether to draw the read marker's trackbar above this message.
+    trackbar: bool,
+
     /// The users who have read up to this message.
     read: Vec<OwnedUserId>,
 }
@@ -685,6 +712,10 @@ impl<'a> MessageFormatter<'a> {
             line += 1;
         }
 
+        if self.trackbar {
+            line += 1;
+        }
+
         if let SenderSpan::Line(_) = self.user {
             line += 1;
         }
@@ -694,6 +725,12 @@ impl<'a> MessageFormatter<'a> {
 
     #[inline]
     fn push_spans(&mut self, prev_line: Line<'a>, style: Style, text: &mut Text<'a>) {
+        if std::mem::take(&mut self.trackbar) {
+            let trackbar_style = Style::default().add_modifier(StyleModifier::DIM);
+            text.lines
+                .push(Line::from(Span::styled(HORIZONTAL.repeat(self.orig), trackbar_style)));
+        }
+
         if let Some(date) = self.date.take() {
             let len = date.content.as_ref().len();
             let padding = self.orig.saturating_sub(len);
@@ -926,6 +963,18 @@ pub struct Message {
     pub html: Option<StyleTree>,
 }
 
+/// Whether the read marker sits between the previous message and this one.
+///
+/// The marker's event is the last one the user has read, so the first message
+/// after it is the first unread one. A missing marker, or one whose message
+/// isn't among the loaded ones, leaves nothing to mark.
+fn is_after_read_marker(prev: Option<&Message>, marker: Option<&OwnedEventId>) -> bool {
+    match (prev.and_then(|msg| msg.event.event_id()), marker) {
+        (Some(prev), Some(marker)) => prev == marker,
+        _ => false,
+    }
+}
+
 impl Message {
     pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
         let html = event.html();
@@ -953,6 +1002,8 @@ impl Message {
                     Some(_) | None => None,
                 };
             },
+            MessageEvent::Poll(poll) => return poll.reply_to().map(ToOwned::to_owned),
+            MessageEvent::UnstablePoll(poll) => return poll.reply_to().map(ToOwned::to_owned),
         };
 
         match &content.relates_to {
@@ -966,6 +1017,7 @@ impl Message {
         }
     }
 
+    /// Return the thread root if this is the first message in the thread.
     pub fn thread_root(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
@@ -975,6 +1027,8 @@ impl Message {
             MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
             MessageEvent::Sticker(..) => return None,
+            MessageEvent::Poll(poll) => return poll.thread_root().map(ToOwned::to_owned),
+            MessageEvent::UnstablePoll(poll) => return poll.thread_root().map(ToOwned::to_owned),
         };
 
         match &content.relates_to {
@@ -1024,6 +1078,33 @@ impl Message {
 
         !prev.timestamp.same_day(self.timestamp)
     }
+
+    /// Whether the current user's read marker sits right before this message.
+    ///
+    /// Each thread keeps its own marker, so the rule only shows up in the view
+    /// whose messages the marker belongs to.
+    pub fn show_trackbar(
+        &self,
+        prev: Option<&Message>,
+        info: &RoomInfo,
+        settings: &ApplicationSettings,
+    ) -> bool {
+        let marker = info
+            .user_receipts
+            .get(&self.receipt_thread(info))
+            .and_then(|receipts| receipts.get(&settings.profile.user_id));
+
+        is_after_read_marker(prev, marker)
+    }
+
+    /// The read receipt thread that this message was inserted into.
+    fn receipt_thread(&self, info: &RoomInfo) -> ReceiptThread {
+        self.event
+            .event_id()
+            .and_then(|event_id| info.get_receipt_thread(event_id))
+            .unwrap_or(ReceiptThread::Main)
+    }
+
     pub fn message_column_width(
         viewctx: &ViewportContext<MessageCursor>,
         settings: &ApplicationSettings,
@@ -1053,6 +1134,7 @@ impl Message {
     ) -> MessageFormatter<'a> {
         let orig = width;
         let date = self.show_date(prev).then(|| self.timestamp.show_date());
+        let trackbar = self.show_trackbar(prev, info, settings);
         let user_gutter = settings.tunables.user_gutter_width;
 
         if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
@@ -1062,13 +1144,21 @@ impl Message {
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings, width);
             let time = Some(self.timestamp.show_time());
-            let read = info
-                .event_receipts
-                .values()
-                .filter_map(|receipts| self.event.event_id().and_then(|id| receipts.get(id)))
-                .flat_map(|read| read.iter())
-                .map(|user_id| user_id.to_owned())
-                .collect();
+
+            let read = self
+                .event
+                .event_id()
+                .map(|event_id| {
+                    // Iterate over both `ReceiptThread::Unthreaded` for clients unaware
+                    // of threads, and over the appropriate `ReceiptThread::Main` or
+                    // `ReceiptThread::Thread` for ones from thread-aware clients, like
+                    // our own receipts or implicit receipts we've generated.
+                    let receipt_thread = self.receipt_thread(info);
+                    let threaded = info.read_event_users(receipt_thread, event_id);
+                    let unthreaded = info.read_event_users(ReceiptThread::Unthreaded, event_id);
+                    threaded.chain(unthreaded).map(|user_id| user_id.to_owned()).collect()
+                })
+                .unwrap_or_default();
 
             MessageFormatter {
                 settings,
@@ -1077,6 +1167,7 @@ impl Message {
                 fill,
                 user,
                 date,
+                trackbar,
                 time,
                 read,
                 info,
@@ -1095,6 +1186,7 @@ impl Message {
                 fill,
                 user,
                 date,
+                trackbar,
                 time,
                 read,
                 info,
@@ -1113,6 +1205,7 @@ impl Message {
                 fill,
                 user,
                 date,
+                trackbar,
                 time,
                 read,
                 info,
@@ -1131,6 +1224,7 @@ impl Message {
                 fill,
                 user,
                 date,
+                trackbar,
                 time,
                 read,
                 info,
@@ -1442,6 +1536,32 @@ impl From<RoomMessageEvent> for Message {
     }
 }
 
+impl From<RedactedPollStartEvent> for Message {
+    fn from(event: RedactedPollStartEvent) -> Self {
+        let timestamp = event.origin_server_ts.into();
+        let user_id = event.sender.clone();
+
+        let event_id = event.event_id;
+        let reason = redaction_reason_unsigned(&event.unsigned);
+        let content = MessageEvent::Redacted(event_id, reason);
+
+        Message::new(content, user_id, timestamp)
+    }
+}
+
+impl From<RedactedUnstablePollStartEvent> for Message {
+    fn from(event: RedactedUnstablePollStartEvent) -> Self {
+        let timestamp = event.origin_server_ts.into();
+        let user_id = event.sender.clone();
+
+        let event_id = event.event_id;
+        let reason = redaction_reason_unsigned(&event.unsigned);
+        let content = MessageEvent::Redacted(event_id, reason);
+
+        Message::new(content, user_id, timestamp)
+    }
+}
+
 impl From<AnySyncStateEvent> for Message {
     fn from(event: AnySyncStateEvent) -> Self {
         let timestamp = event.origin_server_ts().into();
@@ -1506,6 +1626,7 @@ pub mod tests {
         VideoMessageEventContent,
     };
 
+    use crate::base::EventLocation;
     use crate::tests::*;
 
     #[test]
@@ -1793,5 +1914,94 @@ pub mod tests {
             )),
             "[Attached Video: Alt text (44 kB)]".to_string().into()
         );
+    }
+
+    #[test]
+    fn test_is_after_read_marker() {
+        let first = mock_message1();
+        let second = mock_message2();
+
+        // Without a marker there's nothing to mark.
+        assert!(!is_after_read_marker(Some(&first), None));
+        assert!(!is_after_read_marker(None, None));
+
+        // The marker names the last read message, so the message immediately
+        // after it draws the trackbar.
+        assert!(is_after_read_marker(Some(&first), Some(&MSG1_EVID)));
+        assert!(is_after_read_marker(Some(&second), Some(&MSG2_EVID)));
+
+        // A marker on the rendered message belongs to the next message instead,
+        // so the last loaded message never draws a trackbar when it's the
+        // marker itself.
+        assert!(!is_after_read_marker(Some(&first), Some(&MSG2_EVID)));
+
+        // The first loaded message has no predecessor to prove the marker is
+        // its neighbor, and markers for unloaded messages aren't neighbors.
+        assert!(!is_after_read_marker(None, Some(&MSG1_EVID)));
+        assert!(!is_after_read_marker(Some(&second), Some(&MSG5_EVID)));
+    }
+
+    fn has_trackbar(text: &Text<'_>, width: usize) -> bool {
+        text.lines.iter().any(|line| {
+            line.spans
+                .iter()
+                .any(|span| span.content.as_ref() == HORIZONTAL.repeat(width))
+        })
+    }
+
+    #[test]
+    fn test_show_trackbar() {
+        let settings = mock_settings();
+        let previews = PreviewManager::new(&settings);
+        let mut info = mock_room();
+        let vwctx = ViewportContext { dimensions: (60, 5), ..Default::default() };
+
+        let prev = mock_message1();
+        let msg = mock_message2();
+        let user_id = settings.profile.user_id.clone();
+
+        // Without a marker, no trackbar is drawn.
+        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        assert!(!has_trackbar(&text, 60));
+
+        // When the marker names the previous message, the rule leads the message.
+        info.set_receipt(ReceiptThread::Main, user_id.clone(), MSG1_EVID.clone());
+        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        assert!(has_trackbar(&text, 60));
+        assert_eq!(text.lines[0].spans[0].content.as_ref(), HORIZONTAL.repeat(60));
+
+        // Use a fresh room because receipt updates are monotonic: this case tests a marker
+        // already positioned on the rendered message, not moving an existing marker backwards.
+        let mut info = mock_room();
+        info.set_receipt(ReceiptThread::Main, user_id.clone(), MSG2_EVID.clone());
+        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        assert!(!has_trackbar(&text, 60));
+        let text = prev.show(Some(&msg), false, &vwctx, &info, &settings, &previews);
+        assert!(has_trackbar(&text, 60));
+    }
+
+    #[test]
+    fn test_show_trackbar_thread() {
+        let settings = mock_settings();
+        let mut info = mock_room();
+        let user_id = settings.profile.user_id.clone();
+
+        let prev = mock_message1();
+        let msg = mock_message2();
+
+        let root = MSG5_EVID.clone();
+        info.keys.insert(
+            MSG2_EVID.clone(),
+            EventLocation::Message(Some(root.clone()), MSG2_KEY.clone()),
+        );
+
+        // A marker for the thread that this message belongs to is shown.
+        info.set_receipt(ReceiptThread::Thread(root.clone()), user_id.clone(), MSG1_EVID.clone());
+        assert!(msg.show_trackbar(Some(&prev), &info, &settings));
+
+        // The main timeline's marker doesn't apply to a thread's messages.
+        info.user_receipts.remove(&ReceiptThread::Thread(root));
+        info.set_receipt(ReceiptThread::Main, user_id, MSG1_EVID.clone());
+        assert!(!msg.show_trackbar(Some(&prev), &info, &settings));
     }
 }

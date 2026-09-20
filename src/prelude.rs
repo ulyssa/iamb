@@ -30,6 +30,7 @@ pub use matrix_sdk::ruma::{
     OwnedRoomAliasId,
     OwnedRoomId,
     OwnedRoomOrAliasId,
+    OwnedServerName,
     OwnedUserId,
     RoomId,
     UserId,
@@ -88,7 +89,7 @@ pub use crate::base::{
     SpaceAction,
     TimelineAction,
 };
-pub use crate::config::ApplicationSettings;
+pub use crate::config::{Aliases, ApplicationSettings};
 pub use crate::message::{Message, MessageEvent, MessageKey, MessageTimeStamp, Messages};
 pub use crate::preview::{PreviewKind, PreviewManager};
 pub use crate::worker::Requester;

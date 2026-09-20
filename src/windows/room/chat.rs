@@ -242,9 +242,28 @@ impl ChatState {
                 }
 
                 if let Some(msgtype) = msg.event.msgtype() {
+                    // A location message has no attachment to download, so `:open`
+                    // hands its `geo:` URI over to the system handler, which will
+                    // let the desktop open it with an application of its choosing.
+                    if let Some(geo_uri) = location_geo_uri(msgtype) {
+                        if !flags.contains(DownloadFlags::OPEN) {
+                            return Err(IambError::NoAttachment.into());
+                        }
+
+                        let target = OsString::from(geo_uri.to_owned());
+
+                        return match open_command(
+                            store.application.settings.tunables.open_command.as_ref(),
+                            target,
+                        ) {
+                            Ok(_) => Ok(InfoMessage::from(format!("Opened {geo_uri}")).into()),
+                            Err(err) => Err(err),
+                        };
+                    }
+
                     let media = client.media();
                     let mut filename = match (filename, &settings.dirs.downloads) {
-                        (Some(f), _) => PathBuf::from(f),
+                        (Some(f), _) => f,
                         (None, Some(downloads)) => downloads.clone(),
                         (None, None) => return Err(IambError::NoDownloadDir.into()),
                     };
@@ -399,6 +418,8 @@ impl ChatState {
 
                         return Err(err);
                     },
+                    MessageEvent::Poll(ev) => ev.event_id().to_owned(),
+                    MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
                 };
 
                 if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
@@ -517,6 +538,8 @@ impl ChatState {
 
                         return Err(err);
                     },
+                    MessageEvent::Poll(ev) => ev.event_id().to_owned(),
+                    MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
                 };
 
                 let event_id = event_id.as_ref();
@@ -588,6 +611,8 @@ impl ChatState {
 
                         return Err(err);
                     },
+                    MessageEvent::Poll(ev) => ev.event_id().to_owned(),
+                    MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
                 };
 
                 let reactions = match info.reactions.get(&event_id) {
@@ -810,11 +835,10 @@ impl ChatState {
                     return Err(UIError::NeedConfirm(prompt));
                 }
 
-                let path = Path::new(file.as_str());
-                let mime = mime_guess::from_path(path).first_or(mime::APPLICATION_OCTET_STREAM);
+                let mime = mime_guess::from_path(&file).first_or(mime::APPLICATION_OCTET_STREAM);
 
-                let bytes = fs::read(path)?;
-                let name = path
+                let bytes = fs::read(&file)?;
+                let name = file
                     .file_name()
                     .map(OsStr::to_string_lossy)
                     .unwrap_or_else(|| Cow::from("Attachment"));
@@ -870,7 +894,13 @@ impl ChatState {
         if tunables.read_receipt_trigger.on_message() &&
             let Some(thread) = self.scrollback.get_thread(info)
         {
-            info.fully_read(settings.profile.user_id.clone(), thread.1.clone());
+            info.fully_read(
+                self.room_id.clone(),
+                thread.1.clone(),
+                &store.application.worker,
+                settings,
+                &mut store.application.open_notifications,
+            );
         }
 
         Ok(None)
@@ -1323,6 +1353,14 @@ impl StatefulWidget for Chat<'_> {
     }
 }
 
+/// Returns the `geo:` URI that a location message refers to.
+fn location_geo_uri(msgtype: &MessageType) -> Option<&str> {
+    match msgtype {
+        MessageType::Location(content) => Some(content.geo_uri()),
+        _ => None,
+    }
+}
+
 fn open_command(open_command: Option<&Vec<String>>, target: OsString) -> IambResult<()> {
     if let Some(mut cmd) = open_command.and_then(cmd) {
         cmd.arg(target);
@@ -1345,18 +1383,21 @@ fn extract_mentions(content: &TextMessageEventContent) -> Mentions {
     if !matches!(formatted.format, MessageFormat::Html) {
         return Mentions::new();
     }
-    let html = formatted.body.as_str();
+    extract_mentions_str(formatted.body.as_str())
+}
 
+fn extract_mentions_str(html: &str) -> Mentions {
     let re = Regex::new(r#"<a href="(https://matrix.to/#/@[^"]*:[^"]*)">"#).unwrap();
 
-    let user_ids = re.captures_iter(html).map(|capture| {
-        let link = capture.get(1).unwrap().as_str();
-        let uri = MatrixToUri::parse(link).unwrap();
-        let MatrixId::User(user_id) = uri.id() else {
-            // we only matched user links (starting with `@`)
-            unreachable!()
-        };
-        user_id.to_owned()
+    let user_ids = re.captures_iter(html).filter_map(|capture| {
+        let link = capture.get(1)?.as_str();
+        let uri = MatrixToUri::parse(link).ok()?;
+
+        if let MatrixId::User(user_id) = uri.id() {
+            Some(user_id.to_owned())
+        } else {
+            None
+        }
     });
 
     Mentions::with_user_ids(user_ids)
@@ -1453,6 +1494,88 @@ mod tests {
     use modalkit::actions::{EditAction, InsertTextAction};
 
     use crate::tests::{TEST_ROOM1_ID, mock_store};
+
+    fn mentions_in(html: &str) -> Vec<String> {
+        extract_mentions_str(html).user_ids.iter().map(|u| u.to_string()).collect()
+    }
+
+    #[test]
+    fn test_location_geo_uri() {
+        use matrix_sdk::ruma::events::room::message::{
+            LocationMessageEventContent,
+            TextMessageEventContent,
+        };
+
+        let location = MessageType::Location(LocationMessageEventContent::new(
+            "geo test".into(),
+            "geo:51.5072,-0.1276".into(),
+        ));
+        assert_eq!(location_geo_uri(&location), Some("geo:51.5072,-0.1276"));
+
+        let text = MessageType::Text(TextMessageEventContent::plain("not a location"));
+        assert_eq!(location_geo_uri(&text), None);
+    }
+
+    #[test]
+    fn test_extract_mentions_normal() {
+        let res = mentions_in(r#"<a href="https://matrix.to/#/@user:example.com">user</a>"#);
+        assert_eq!(res, vec!["@user:example.com"]);
+    }
+
+    #[test]
+    fn test_extract_mentions_ignore_parameters() {
+        let res =
+            mentions_in(r#"<a href="https://matrix.to/#/@user:example.com?via=example.com">u</a>"#);
+        assert_eq!(res, vec!["@user:example.com"]);
+    }
+
+    #[test]
+    fn test_extract_mentions_multiple_dedupe() {
+        let res = mentions_in(
+            r#"<a href="https://matrix.to/#/@a:example.com">a</a> and
+                   <a href="https://matrix.to/#/@b:example.com">b</a> and
+                   <a href="https://matrix.to/#/@a:example.com">a again</a>"#,
+        );
+        assert_eq!(res, vec!["@a:example.com", "@b:example.com"]);
+    }
+
+    #[test]
+    fn test_extract_mentions_skips_invalid_links() {
+        let empty = vec![
+            r#"<a href="https://matrix.to/#/@user:example.com/$eventid">e</a>"#,
+            r#"<a href="https://matrix.to/#/@bob:">bob</a>"#,
+            r#"<a href="https://matrix.to/#/@user:%E4%BE%8B.com">x</a>"#,
+        ];
+
+        for html in empty {
+            assert!(mentions_in(html).is_empty());
+        }
+
+        // An invalid link is ignored, but a valid one is still extracted:
+        assert_eq!(
+            mentions_in(
+                r#"<a href="https://matrix.to/#/@bob:">bob</a>
+                   <a href="https://matrix.to/#/@user:example.com">user</a>"#
+            ),
+            vec!["@user:example.com"]
+        );
+    }
+
+    #[test]
+    fn test_extract_mentions_ignores_unformatted() {
+        // URIs in plain text messages don't count as mentions:
+        let plain = TextMessageEventContent::plain(
+            r#"<a href="https://matrix.to/#/@user:example.com">user</a>"#,
+        );
+        assert!(extract_mentions(&plain).user_ids.is_empty());
+
+        // Links to things other than users aren't mentions:
+        let room = r#"<a href="https://matrix.to/#/#room:example.com">room</a>"#;
+        assert!(mentions_in(room).is_empty());
+
+        let nonmx = r#"<a href="https://example.com/@user:example.com">nope</a>"#;
+        assert!(mentions_in(nonmx).is_empty());
+    }
 
     macro_rules! move_line {
         ($dir: expr, $count: expr) => {
