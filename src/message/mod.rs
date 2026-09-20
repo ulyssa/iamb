@@ -1111,13 +1111,15 @@ impl Message {
             let user = self.show_sender(prev, true, info, settings, width);
             let time = Some(self.timestamp.show_time());
 
-            // Iterate over everything, to ensure we see the receipts for clients using
-            // `ReceiptThread::Unthreaded` and for thread-aware clients using `
-            let receipt_thread = self.receipt_thread(info);
             let read = self
                 .event
                 .event_id()
                 .map(|event_id| {
+                    // Iterate over both `ReceiptThread::Unthreaded` for clients unaware
+                    // of threads, and over the appropriate `ReceiptThread::Main` or
+                    // `ReceiptThread::Thread` for ones from thread-aware clients, like
+                    // our own receipts or implicit receipts we've generated.
+                    let receipt_thread = self.receipt_thread(info);
                     let threaded = info.read_event_users(receipt_thread, event_id);
                     let unthreaded = info.read_event_users(ReceiptThread::Unthreaded, event_id);
                     threaded.chain(unthreaded).map(|user_id| user_id.to_owned()).collect()

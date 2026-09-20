@@ -1615,14 +1615,14 @@ impl RoomInfo {
     }
 
     fn clear_receipt(&mut self, thread: &ReceiptThread, user_id: &OwnedUserId) -> Option<()> {
-        let old_event_id =
-            self.user_receipts.get(thread).and_then(|receipts| receipts.get(user_id))?;
+        let old_user_receipts = self.user_receipts.get_mut(thread);
+        let old_event_id = old_user_receipts.and_then(|rs| rs.remove(user_id))?;
         let old_thread = self.event_receipts.get_mut(thread)?;
-        let old_receipts = old_thread.get_mut(old_event_id)?;
+        let old_receipts = old_thread.get_mut(&old_event_id)?;
         old_receipts.remove(user_id);
 
         if old_receipts.is_empty() {
-            old_thread.remove(old_event_id);
+            old_thread.remove(&old_event_id);
         }
         if old_thread.is_empty() {
             self.event_receipts.remove(thread);
@@ -1647,7 +1647,6 @@ impl RoomInfo {
         }
 
         self.clear_receipt(&thread, &user_id);
-        self.clear_receipt(&ReceiptThread::Unthreaded, &user_id);
         self.event_receipts(&thread, &event_id).insert(user_id.clone());
         self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
     }
@@ -1707,6 +1706,11 @@ impl RoomInfo {
             // load of the event that every user's read marker points at.
             return;
         }
+
+        // If the user's client isn't thread-aware then make sure the implicit receipt
+        // doesn't result in displaying a second read receipt after where their unthreaded
+        // receipt is currently pointing at:
+        self.clear_receipt(&ReceiptThread::Unthreaded, &user_id);
 
         self.set_receipt(thread, user_id, event_id);
     }
@@ -1799,15 +1803,6 @@ impl RoomInfo {
         }
 
         self.fully_read(room_id, ReceiptThread::Main, worker, settings, open_notifications);
-    }
-
-    pub fn receipts<'a>(
-        &'a self,
-        user_id: &'a UserId,
-    ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
-        self.user_receipts
-            .iter()
-            .filter_map(move |(t, rs)| rs.get(user_id).map(|r| (t, r)))
     }
 
     pub fn read_event_users<'a>(
