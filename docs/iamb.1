@@ -5,7 +5,7 @@
 .\"
 .\" You can preview this file with:
 .\"     $ man ./docs/iamb.1
-.Dd Sep 11, 2025
+.Dd Sep 19, 2026
 .Dt IAMB 1
 .Os
 .Sh NAME
@@ -71,6 +71,8 @@ View a list of unread rooms.
 Mark all rooms as read.
 .It Sy ":mentions"
 View a list of rooms with mentions of the current user.
+.It Sy ":invites"
+View a list of rooms you are invited to.
 .It Sy ":welcome"
 View the startup Welcome window.
 .It Sy ":forget"
@@ -98,6 +100,8 @@ Confirm an in-progress verification.
 Reject an in-progress verification due to mismatched Emoji.
 .It Sy ":verify request [user id]"
 Request a new verification with the specified user.
+.It Sy ":verify recover [recovery key]"
+Recover the encryption secrets from the backup on your homeserver, verifying this session.
 .El
 
 .Sh "MESSAGE COMMANDS"
@@ -202,7 +206,7 @@ Alias for
 .Sy :room unread unset .
 .It Sy ":room version show"
 Show the Matrix version for this room.
-.It Sy ":room version upgrade [version] [additional creators...]"
+.It Sy ":room version upgrade [version] [++creator=additional creator...]"
 Upgrade the Matrix version for this room to the specified version.
 Note that room upgrading in Matrix works by creating a new room that everyone else will then need to join.
 .It Sy ":room notify set [level]"
@@ -406,7 +410,7 @@ Overwrites the value set by the
 config value.
 The syntax is defined at
 .Lk https://docs.rs/tracing_subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
-
+.El
 .Sh EXAMPLES
 .Ss Example 1: Starting with a specific profile
 To start with a profile named

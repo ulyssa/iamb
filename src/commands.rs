@@ -179,6 +179,19 @@ fn iamb_knock(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut args = desc.arg.strings()?;
 
+    // Recovery keys are displayed in space-separated groups, so rejoin any
+    // arguments that follow the subcommand to reconstruct the key.
+    if args.first().is_some_and(|arg| arg == "recover") {
+        if args.len() < 2 {
+            return Result::Err(CommandError::InvalidArgument);
+        }
+
+        let iact = IambAction::Recover(args[1..].join(" "));
+        let step = CommandStep::Continue(iact.into(), ctx.context.clone());
+
+        return Ok(step);
+    }
+
     match args.len() {
         0 => {
             let open = ctx.switch(OpenTarget::Application(IambId::VerifyList));
@@ -430,6 +443,17 @@ fn iamb_mentions(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult 
     }
 
     let open = ctx.switch(OpenTarget::Application(IambId::MentionsList));
+    let step = CommandStep::Continue(open, ctx.context.clone());
+
+    return Ok(step);
+}
+
+fn iamb_invites(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = ctx.switch(OpenTarget::Application(IambId::InvitesList));
     let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
@@ -751,10 +775,21 @@ fn iamb_room(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             let additional_creators = trailing
                 .iter()
                 .map(|u| {
-                    OwnedUserId::from_str(u).map_err(|e| {
-                        let msg = format!("{u:?} is not a valid user identifier: {e}");
-                        CommandError::Error(msg)
-                    })
+                    let (flag, v) = match OptionType::from_str(u)? {
+                        OptionType::Positional(_) => return Err(CommandError::InvalidArgument),
+                        OptionType::Flag(_, None) => return Err(CommandError::InvalidArgument),
+                        OptionType::Flag(f, Some(v)) => (f, v),
+                    };
+
+                    match flag.as_str() {
+                        "creator" => {
+                            OwnedUserId::from_str(&v).map_err(|e| {
+                                let msg = format!("{u:?} is not a valid user identifier: {e}");
+                                CommandError::Error(msg)
+                            })
+                        },
+                        _ => Err(CommandError::Error(format!("unknown flag {flag:?}"))),
+                    }
                 })
                 .collect::<Result<Vec<_>, _>>()?;
             RoomAction::Upgrade(version, additional_creators, desc.bang).into()
@@ -930,13 +965,14 @@ fn iamb_space(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 }
 
 fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    let mut args = desc.arg.strings()?;
+    let mut args = desc.arg.paths()?;
 
     if args.len() != 1 {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let sact = SendAction::Upload(args.remove(0), None);
+    let path = args.remove(0);
+    let sact = SendAction::Upload(path, None);
     let iact = IambAction::from(sact);
     let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
@@ -944,7 +980,7 @@ fn iamb_upload(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 }
 
 fn iamb_download(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    let mut args = desc.arg.strings()?;
+    let mut args = desc.arg.paths()?;
 
     if args.len() > 1 {
         return Result::Err(CommandError::InvalidArgument);
@@ -962,7 +998,7 @@ fn iamb_download(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult 
 }
 
 fn iamb_open(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    let mut args = desc.arg.strings()?;
+    let mut args = desc.arg.paths()?;
 
     if args.len() > 1 {
         return Result::Err(CommandError::InvalidArgument);
@@ -1097,6 +1133,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
         aliases: vec![],
         f: iamb_mentions,
     });
+    cmds.add_command(ProgramCommand {
+        name: "invites".into(),
+        aliases: vec![],
+        f: iamb_invites,
+    });
     cmds.add_command(ProgramCommand { name: "self".into(), aliases: vec![], f: iamb_self });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),
@@ -1131,12 +1172,19 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
 }
 
 /// Initialize the default command state.
-pub fn setup_commands() -> ProgramCommands {
+///
+/// Aliases are registered in the order they appear in the configuration file,
+/// which allows later definitions to possibly refer to earlier ones.
+pub fn setup_commands(aliases: &Aliases) -> Result<ProgramCommands, CommandError> {
     let mut cmds = ProgramCommands::default();
 
     add_iamb_commands(&mut cmds);
 
-    return cmds;
+    for (alias, cmd) in aliases {
+        cmds.add_alias(alias, cmd)?;
+    }
+
+    Ok(cmds)
 }
 
 #[cfg(test)]
@@ -1147,9 +1195,30 @@ mod tests {
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
 
+    fn setup_test_commands() -> ProgramCommands {
+        setup_commands(&Aliases::new()).unwrap()
+    }
+
+    #[test]
+    fn test_cmd_aliases_order() {
+        let ctx = EditContext::default();
+        let aliases = Aliases::from_iter([
+            ("c".to_string(), "chats".to_string()),
+            ("cc".to_string(), "c".to_string()),
+        ]);
+
+        let mut cmds = setup_commands(&aliases).unwrap();
+
+        let act = WindowAction::Switch(OpenTarget::Application(IambId::ChatList));
+        let expected = vec![(act.into(), ctx.clone())];
+
+        assert_eq!(cmds.input_cmd("c", ctx.clone()).unwrap(), expected);
+        assert_eq!(cmds.input_cmd("cc", ctx.clone()).unwrap(), expected);
+    }
+
     #[test]
     fn test_cmd_verify() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd(":verify", ctx.clone()).unwrap();
@@ -1184,6 +1253,17 @@ mod tests {
         let act = IambAction::Verify(VerifyAction::Confirm, "@user4:example.com/GOODDEV".into());
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
+        let res = cmds.input_cmd(":verify recover", ctx.clone());
+        assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd(":verify recover SOMESINGLEKEY", ctx.clone()).unwrap();
+        let act = IambAction::Recover("SOMESINGLEKEY".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":verify recover AAAA BBBB CCCC", ctx.clone()).unwrap();
+        let act = IambAction::Recover("AAAA BBBB CCCC".into());
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
         let res = cmds.input_cmd(":verify confirm", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
 
@@ -1196,7 +1276,7 @@ mod tests {
 
     #[test]
     fn test_cmd_join() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("join #foobar:example.com", ctx.clone()).unwrap();
@@ -1216,7 +1296,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_invalid() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room", ctx.clone());
@@ -1231,7 +1311,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_topic_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds
@@ -1262,7 +1342,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_name_invalid() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room name", ctx.clone());
@@ -1274,7 +1354,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_name_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room name set Development", ctx.clone()).unwrap();
@@ -1293,7 +1373,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_name_unset() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room name unset", ctx.clone()).unwrap();
@@ -1306,7 +1386,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_dm_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room dm set", ctx.clone()).unwrap();
@@ -1319,7 +1399,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_dm_unset() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room dm unset", ctx.clone()).unwrap();
@@ -1332,7 +1412,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_tag_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room tag set favourite", ctx.clone()).unwrap();
@@ -1401,7 +1481,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_tag_unset() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room tag unset favourite", ctx.clone()).unwrap();
@@ -1466,7 +1546,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_notification_mode_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let cmd = "room notify set mute";
@@ -1487,7 +1567,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_id_show() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room id show", ctx.clone()).unwrap();
@@ -1500,7 +1580,7 @@ mod tests {
 
     #[test]
     fn test_cmd_space_child() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let cmd = "space";
@@ -1518,7 +1598,7 @@ mod tests {
 
     #[test]
     fn test_cmd_space_child_set() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let cmd = "space child set !roomid:example.org";
@@ -1569,7 +1649,7 @@ mod tests {
 
     #[test]
     fn test_cmd_space_child_remove() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let cmd = "space child remove";
@@ -1584,7 +1664,7 @@ mod tests {
 
     #[test]
     fn test_cmd_invite() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("invite accept", ctx.clone()).unwrap();
@@ -1621,7 +1701,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_kick() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room kick @user:example.com", ctx.clone()).unwrap();
@@ -1656,7 +1736,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_ban_unban() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds
@@ -1684,7 +1764,7 @@ mod tests {
 
     #[test]
     fn test_cmd_redact() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("redact", ctx.clone()).unwrap();
@@ -1709,7 +1789,7 @@ mod tests {
 
     #[test]
     fn test_cmd_keys() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("keys import /a/b/c pword", ctx.clone()).unwrap();
@@ -1736,7 +1816,7 @@ mod tests {
 
     #[test]
     fn test_cmd_multiple_trailing() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         // Trailing arguments disallowed on commands that don't take any:
@@ -1750,7 +1830,7 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
-            .input_cmd("room version upgrade 12 @foo:example.com", ctx.clone())
+            .input_cmd("room version upgrade 12 ++creator=@foo:example.com", ctx.clone())
             .unwrap();
         let act = IambAction::Room(RoomAction::Upgrade(
             RoomVersionId::V12,
@@ -1760,7 +1840,10 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
-            .input_cmd("room version upgrade 12 @foo:example.com @bar:example.com", ctx.clone())
+            .input_cmd(
+                "room version upgrade 12 ++creator=@foo:example.com ++creator=@bar:example.com",
+                ctx.clone(),
+            )
             .unwrap();
         let act = IambAction::Room(RoomAction::Upgrade(
             RoomVersionId::V12,
@@ -1780,7 +1863,7 @@ mod tests {
 
     #[test]
     fn test_cmd_room_access() {
-        let mut cmds = setup_commands();
+        let mut cmds = setup_test_commands();
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("room access set knock", ctx.clone()).unwrap();

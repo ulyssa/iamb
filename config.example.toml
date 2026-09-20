@@ -73,6 +73,16 @@ split = [
 [macros."normal|visual"]
 "V" = "<C-W>m"
 
+[aliases]
+"c" = "chats"
+"d" = "download"
+"e" = "edit"
+"o" = "open"
+"r" = "rooms"
+"ed" = "editor"
+"ca" = "cancel"
+"red" = "redact"
+
 [dirs]
 cache = "/home/user/.cache/iamb/"
 logs = "/home/user/.local/share/iamb/logs/"

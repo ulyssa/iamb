@@ -591,14 +591,17 @@ impl Application {
 
         let info = match action {
             IambAction::ClearUnreads => {
-                let user_id = &store.application.settings.profile.user_id;
-
                 // Clear any notifications we displayed:
                 store.application.open_notifications.clear();
 
                 for room_id in store.application.sync_info.chats() {
                     if let Some(room) = store.application.rooms.get_mut(room_id) {
-                        room.fully_read_all(user_id);
+                        room.fully_read_all(
+                            room_id.to_owned(),
+                            &store.application.worker,
+                            &store.application.settings,
+                            &mut store.application.open_notifications,
+                        );
                     }
                 }
 
@@ -678,6 +681,9 @@ impl Application {
                 };
 
                 return verifications::iamb_verify_request(user_id, store).await;
+            },
+            IambAction::Recover(key) => {
+                return verifications::iamb_recover(key, store).await;
             },
         };
 
@@ -1105,7 +1111,7 @@ async fn run(
 
     // Set up the async worker thread and global store.
     let worker = ClientWorker::spawn(client.clone(), settings.clone()).await;
-    let store = ChatStore::new(worker.clone(), settings.clone());
+    let store = ChatStore::new(worker.clone(), settings.clone())?;
     let mut store = Store::new(store);
     store.completer = Box::new(IambCompleter);
 
