@@ -1237,6 +1237,14 @@ impl RoomInfo {
         }
     }
 
+    pub fn get_receipt_thread(&self, event_id: &EventId) -> Option<ReceiptThread> {
+        match self.keys.get(event_id)? {
+            EventLocation::Message(None, _) | EventLocation::State(_) => Some(ReceiptThread::Main),
+            EventLocation::Message(Some(root), _) => Some(ReceiptThread::Thread(root.clone())),
+            _ => None,
+        }
+    }
+
     /// Get the reactions and their counts for a message.
     pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize, &Option<MediaSource>)> {
         if let Some(reacts) = self.reactions.get(event_id) {
@@ -1607,14 +1615,14 @@ impl RoomInfo {
     }
 
     fn clear_receipt(&mut self, thread: &ReceiptThread, user_id: &OwnedUserId) -> Option<()> {
-        let old_event_id =
-            self.user_receipts.get(thread).and_then(|receipts| receipts.get(user_id))?;
+        let old_user_receipts = self.user_receipts.get_mut(thread);
+        let old_event_id = old_user_receipts.and_then(|rs| rs.remove(user_id))?;
         let old_thread = self.event_receipts.get_mut(thread)?;
-        let old_receipts = old_thread.get_mut(old_event_id)?;
+        let old_receipts = old_thread.get_mut(&old_event_id)?;
         old_receipts.remove(user_id);
 
         if old_receipts.is_empty() {
-            old_thread.remove(old_event_id);
+            old_thread.remove(&old_event_id);
         }
         if old_thread.is_empty() {
             self.event_receipts.remove(thread);
@@ -1639,13 +1647,21 @@ impl RoomInfo {
         }
 
         self.clear_receipt(&thread, &user_id);
+        self.event_receipts(&thread, &event_id).insert(user_id.clone());
+        self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
+    }
+
+    /// Get the users whose receipts currently point at the given event in the specified `thread`.
+    fn event_receipts(
+        &mut self,
+        thread: &ReceiptThread,
+        event_id: &EventId,
+    ) -> &mut HashSet<OwnedUserId> {
         self.event_receipts
             .entry(thread.clone())
             .or_default()
-            .entry(event_id.clone())
+            .entry(event_id.to_owned())
             .or_default()
-            .insert(user_id.clone());
-        self.user_receipts.entry(thread).or_default().insert(user_id, event_id);
     }
 
     fn receipt_key(&self, event_id: &EventId) -> Option<&MessageKey> {
@@ -1653,23 +1669,6 @@ impl RoomInfo {
             EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
             _ => None,
         }
-    }
-
-    fn latest_implicit_receipt(
-        &self,
-        thread: &ReceiptThread,
-        user_id: &UserId,
-    ) -> Option<OwnedEventId> {
-        let messages = match thread {
-            ReceiptThread::Main => &self.messages,
-            ReceiptThread::Thread(root) => self.threads.get(root)?,
-            _ => return None,
-        };
-        messages.iter().rev().find_map(|(_, message)| {
-            (message.sender == user_id)
-                .then(|| message.event.event_id().map(ToOwned::to_owned))
-                .flatten()
-        })
     }
 
     /// Whenever a user sends a message, we can consider that an effective update to their
@@ -1685,37 +1684,48 @@ impl RoomInfo {
     /// we show in the timeline that the user has now read up to the point where they sent
     /// a message.
     fn set_implicit_receipt(&mut self, user_id: OwnedUserId, event_id: OwnedEventId) {
-        let thread = match self.keys.get(&event_id) {
-            Some(EventLocation::Message(None, _)) | Some(EventLocation::State(_)) => {
-                ReceiptThread::Main
-            },
-            Some(EventLocation::Message(Some(root), _)) => ReceiptThread::Thread(root.clone()),
-            _ => return,
+        let Some(thread) = self.get_receipt_thread(&event_id) else {
+            return;
         };
-        let resolved_users: Vec<_> = self
-            .user_receipts
-            .get(&thread)
-            .into_iter()
-            .flat_map(HashMap::iter)
-            .filter(|(_, receipt_event_id)| *receipt_event_id == &event_id)
-            .map(|(receipt_user, _)| receipt_user.clone())
-            .collect();
-        for receipt_user in resolved_users {
-            if let Some(latest_event_id) = self.latest_implicit_receipt(&thread, &receipt_user) {
-                self.set_receipt(thread.clone(), receipt_user, latest_event_id);
-            }
-        }
-        if self
-            .user_receipts
-            .get(&thread)
-            .and_then(|receipts| receipts.get(&user_id))
-            .is_some_and(|old_event_id| self.receipt_key(old_event_id).is_none())
-        {
+
+        let current = self.user_receipts.get(&thread).and_then(|receipts| receipts.get(&user_id));
+        let current_key = current.and_then(|event_id| self.receipt_key(event_id));
+
+        if current.is_some() && current_key.is_none() {
+            // Do not set an implicit receipt if we have an explicit receipt that points
+            // at an event whose information we don't have, since we need it to make sure
+            // that we don't move the receipt backwards in the timeline.
+            //
+            // This event could technically be newer than the one the receipt currently
+            // points at, but we can't be sure, so just trust what the user's receipt in
+            // the room says to point at, and we'll update it once they send us a new one.
+            //
+            // This technically makes it possible for a user who previously sent room
+            // receipts and then switched to just private receipts to not have their marker
+            // moved with recent messages, but solving that would require us to force a
+            // load of the event that every user's read marker points at.
             return;
         }
+
+        // If the user's client isn't thread-aware then make sure the implicit receipt
+        // doesn't result in displaying a second read receipt after where their unthreaded
+        // receipt is currently pointing at:
+        self.clear_receipt(&ReceiptThread::Unthreaded, &user_id);
+
         self.set_receipt(thread, user_id, event_id);
     }
 
+    /// This is called whenever the user has viewed the most recent message sent to a room or
+    /// thread, so that we can update the read receipt on the homeserver.
+    ///
+    /// Note that the Matrix specification says:
+    ///
+    /// > Clients should send read receipts when there is some certainty that the event in
+    /// > question has been displayed to the user. Simply receiving an event does not provide
+    /// > enough certainty that the user has seen the event. The user SHOULD need to take some
+    /// > action such as viewing the room that the event was sent to or dismissing a notification
+    /// > in order for the event to count as “read”. Clients SHOULD NOT send read receipts for
+    /// > events sent by their own user.
     pub fn fully_read(
         &mut self,
         room_id: OwnedRoomId,
@@ -1738,7 +1748,11 @@ impl RoomInfo {
 
         let event_id = messages
             .iter()
-            .filter(|(_, msg)| msg.sender != *user_id)
+            .filter(|(_, msg)| {
+                // Handle the "do not send read receipts for our own events" part of the
+                // specification quoted above.
+                msg.sender != *user_id
+            })
             .filter(|(_, msg)| {
                 matches!(
                     msg.event,
@@ -1749,11 +1763,23 @@ impl RoomInfo {
                 )
             })
             .flat_map(|(_, msg)| msg.event.event_id())
-            .next_back();
+            .next_back()
+            .map(ToOwned::to_owned);
+
+        if let Some((_, msg)) = messages.last_key_value() &&
+            let Some(event_id) = msg.event.event_id()
+        {
+            // Always update the local receipt info for this room so that we aren't reliant
+            // on the homeserver echoing it back to us to update this and clear the trackbar:
+            self.set_receipt(thread.clone(), user_id.clone(), event_id.to_owned());
+        }
 
         if let Some(event_id) = event_id {
+            // Clear any desktop notifications for the room:
             open_notifications.remove(&room_id);
-            worker.send_receipt(room_id, thread.clone(), event_id.to_owned(), settings);
+
+            // Update the homeserver with the latest receipt:
+            worker.send_receipt(room_id, thread, event_id, settings);
         }
     }
 
@@ -1779,13 +1805,16 @@ impl RoomInfo {
         self.fully_read(room_id, ReceiptThread::Main, worker, settings, open_notifications);
     }
 
-    pub fn receipts<'a>(
+    pub fn read_event_users<'a>(
         &'a self,
-        user_id: &'a UserId,
-    ) -> impl Iterator<Item = (&'a ReceiptThread, &'a OwnedEventId)> + 'a {
-        self.user_receipts
-            .iter()
-            .filter_map(move |(t, rs)| rs.get(user_id).map(|r| (t, r)))
+        thread: ReceiptThread,
+        event_id: &'a EventId,
+    ) -> impl Iterator<Item = &'a OwnedUserId> + 'a {
+        self.event_receipts
+            .get(&thread)
+            .and_then(|rs| rs.get(event_id))
+            .map(|read| read.iter())
+            .unwrap_or_default()
     }
 
     fn get_typers(&self) -> &[OwnedUserId] {
@@ -2680,32 +2709,6 @@ pub mod tests {
             MSG2_KEY.clone(),
         );
 
-        info.insert_message(older);
-
-        assert_eq!(
-            info.user_receipts
-                .get(&ReceiptThread::Main)
-                .and_then(|receipts| receipts.get(&*TEST_USER2)),
-            Some(&*MSG5_EVID),
-        );
-    }
-
-    #[test]
-    fn test_implicit_receipt_advances_after_explicit_event_loads() {
-        let mut info = RoomInfo::default();
-        info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG2_EVID.clone());
-        let newer = mock_room_message_event(
-            RoomMessageEventContent::text_plain("newer"),
-            TEST_USER2.clone(),
-            MSG5_KEY.clone(),
-        );
-        let older = mock_room_message_event(
-            RoomMessageEventContent::text_plain("older"),
-            TEST_USER2.clone(),
-            MSG2_KEY.clone(),
-        );
-
-        info.insert_message(newer);
         info.insert_message(older);
 
         assert_eq!(

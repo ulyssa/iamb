@@ -30,7 +30,7 @@ use modalkit::editing::cursor::Cursor;
 use ratatui::symbols::line::{HORIZONTAL, THICK_VERTICAL};
 use ratatui_image::sliced::SlicedProtocol;
 
-use crate::base::{EventLocation, MessageEdits};
+use crate::base::MessageEdits;
 use crate::message::html::{StyleTree, parse_matrix_html};
 use crate::message::state::{body_cow_state, html_state};
 use crate::prelude::*;
@@ -1065,12 +1065,10 @@ impl Message {
 
     /// The read receipt thread that this message was inserted into.
     fn receipt_thread(&self, info: &RoomInfo) -> ReceiptThread {
-        match self.event.event_id().and_then(|event_id| info.keys.get(event_id)) {
-            Some(EventLocation::Message(Some(thread_root), _)) => {
-                ReceiptThread::Thread(thread_root.clone())
-            },
-            _ => ReceiptThread::Main,
-        }
+        self.event
+            .event_id()
+            .and_then(|event_id| info.get_receipt_thread(event_id))
+            .unwrap_or(ReceiptThread::Main)
     }
 
     pub fn message_column_width(
@@ -1112,13 +1110,21 @@ impl Message {
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings, width);
             let time = Some(self.timestamp.show_time());
-            let read = info
-                .event_receipts
-                .values()
-                .filter_map(|receipts| self.event.event_id().and_then(|id| receipts.get(id)))
-                .flat_map(|read| read.iter())
-                .map(|user_id| user_id.to_owned())
-                .collect();
+
+            let read = self
+                .event
+                .event_id()
+                .map(|event_id| {
+                    // Iterate over both `ReceiptThread::Unthreaded` for clients unaware
+                    // of threads, and over the appropriate `ReceiptThread::Main` or
+                    // `ReceiptThread::Thread` for ones from thread-aware clients, like
+                    // our own receipts or implicit receipts we've generated.
+                    let receipt_thread = self.receipt_thread(info);
+                    let threaded = info.read_event_users(receipt_thread, event_id);
+                    let unthreaded = info.read_event_users(ReceiptThread::Unthreaded, event_id);
+                    threaded.chain(unthreaded).map(|user_id| user_id.to_owned()).collect()
+                })
+                .unwrap_or_default();
 
             MessageFormatter {
                 settings,
@@ -1552,6 +1558,7 @@ pub mod tests {
         VideoMessageEventContent,
     };
 
+    use crate::base::EventLocation;
     use crate::tests::*;
 
     #[test]

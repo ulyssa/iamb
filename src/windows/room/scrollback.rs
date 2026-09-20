@@ -1835,4 +1835,45 @@ mod tests {
         // The terminal cursor still lands on the selected message's first line.
         assert_eq!(scrollback.term_cursor, (0, 4));
     }
+
+    #[tokio::test]
+    async fn test_draw_marks_room_read() {
+        let draw_focused_room = |read_receipt_send| {
+            async move {
+                let mut store = mock_store().await;
+                store.application.settings.tunables.read_receipt_send = read_receipt_send;
+
+                let mut scrollback = ScrollbackState::new(TEST_ROOM1_ID.clone(), None);
+                let area = Rect::new(0, 0, 60, 6);
+                let mut buffer = Buffer::empty(area);
+
+                Scrollback::new(&mut store).focus(true).room_focus(true).render(
+                    area,
+                    &mut buffer,
+                    &mut scrollback,
+                );
+
+                store
+            }
+        };
+
+        // Rendering a focused room at the latest message updates the read receipt,
+        // regardless of the value of `read_receipt_send`, which only controls whether
+        // or not it is a private or public receipt that we send to the home server.
+        for read_receipt_send in [true, false] {
+            let mut store = draw_focused_room(read_receipt_send).await;
+            let user_id = store.application.settings.profile.user_id.clone();
+            let info = store.application.get_room_info(TEST_ROOM1_ID.clone());
+
+            let receipt = info
+                .user_receipts
+                .get(&ReceiptThread::Main)
+                .and_then(|receipts| receipts.get(&user_id));
+            let exp = Some(&*MSG1_EVID);
+            assert_eq!(
+                receipt, exp,
+                "receipt not set with read_receipt_send = {read_receipt_send}"
+            );
+        }
+    }
 }
