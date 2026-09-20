@@ -1,6 +1,6 @@
 [package]
 name = "iamb"
-version = "0.0.12"
+version = "0.0.13-alpha.1"
 edition = "2024"
 authors = ["Ulyssa <git@ulyssa.dev>"]
 repository = "https://github.com/ulyssa/iamb"
@@ -145,6 +145,7 @@ assets = [
 ]
 
 [package.metadata.generate-rpm]
+version = "0.0.13_alpha.1"
 assets = [
     # Binary:
     { source = "target/release/iamb", dest = "/usr/bin/iamb", mode = "755" },
