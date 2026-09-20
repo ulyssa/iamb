@@ -258,13 +258,11 @@ async fn pinned_load_one(
     room_id: &RoomId,
     event_id: &EventId,
 ) -> Option<Message> {
-    let ev = match room.load_or_fetch_event(event_id, None).await {
-        Ok(ev) => ev,
-        Err(e) => {
-            warn!(?event_id, "failed to fetch pinned event: {e}");
-            return None;
-        },
-    };
+    let ev = room
+        .load_or_fetch_event(event_id, None)
+        .await
+        .inspect_err(|e| warn!(?event_id, "failed to fetch pinned event: {e}"))
+        .ok()?;
 
     let msg = match ev.into_raw().deserialize().ok()?.into_full_event(room_id.to_owned()) {
         AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(ev)) => ev.into(),

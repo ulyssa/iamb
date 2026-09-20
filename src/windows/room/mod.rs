@@ -203,15 +203,10 @@ pub async fn room_command(
 
             Ok(vec![(act, cmd.context.clone())])
         },
-        RoomAction::Pinned(mut cmd) => {
+        RoomAction::Pinned(cmd) => {
             let id = IambId::PinnedList(id.to_owned());
             let target = OpenTarget::Application(id);
-            let cmd = cmd.default_relation(MoveDir1D::Next);
-
-            let act = match store.application.settings.tunables.members_split {
-                Some(dir) => cmd.default_axis(dir.to_axis()).window(target, None),
-                None => cmd.switch(target),
-            };
+            let act = cmd.switch(target);
 
             Ok(vec![(act, cmd.context.clone())])
         },
@@ -775,6 +770,18 @@ impl RoomState {
         Paragraph::new(text).alignment(Alignment::Center).render(area, buf);
 
         return;
+    }
+
+    pub async fn timeline_command(
+        &mut self,
+        act: TimelineAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        match self {
+            RoomState::Chat(chat) => chat.timeline_command(act, ctx, store).await,
+            RoomState::Space(_) => Err(IambError::NoSelectedRoom.into()),
+        }
     }
 
     pub async fn message_command(

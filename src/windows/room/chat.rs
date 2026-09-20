@@ -193,17 +193,23 @@ impl ChatState {
         }
     }
 
+    pub async fn timeline_command(
+        &mut self,
+        act: TimelineAction,
+        _: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        match act {
+            TimelineAction::GotoEvent(event_id) => self.jump_to_message(event_id, store),
+        }
+    }
+
     pub async fn message_command(
         &mut self,
         act: MessageAction,
         _: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
-        // Jumping doesn't act on the selected message, so it works in an empty scrollback too.
-        if let MessageAction::Jump(event_id) = act {
-            return self.jump_to_message(event_id, store);
-        }
-
         let client = &store.application.worker.client;
 
         let settings = &store.application.settings;
@@ -421,9 +427,13 @@ impl ChatState {
                         let msg = "Cannot pin a redacted message";
                         return Err(UIError::Failure(msg.into()));
                     },
-                    event => event.event_id().map(ToOwned::to_owned),
-                }
-                .ok_or(IambError::NoSelectedMessage)?;
+                    event => {
+                        event
+                            .event_id()
+                            .map(ToOwned::to_owned)
+                            .ok_or(IambError::NoSelectedMessage)?
+                    },
+                };
 
                 let room = self.get_joined(&store.application.worker)?;
 
@@ -454,7 +464,9 @@ impl ChatState {
                         let msg = "This message is not pinned";
                         return Err(UIError::Failure(msg.into()));
                     },
-                    (true, None) => pinned.push(event_id),
+                    (true, None) => {
+                        pinned.push(event_id);
+                    },
                     (false, Some(idx)) => {
                         pinned.remove(idx);
                     },
@@ -519,7 +531,6 @@ impl ChatState {
 
                 Ok(None)
             },
-            MessageAction::Jump(_) => unreachable!("jumps are handled before selecting a message"),
             MessageAction::Replied => {
                 let Some(reply) = msg.reply_to() else {
                     let msg = "Selected message is not a reply";

@@ -335,6 +335,19 @@ impl IambWindow {
         }
     }
 
+    pub async fn timeline_command(
+        &mut self,
+        act: TimelineAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<EditInfo> {
+        if let IambWindow::Room(w) = self {
+            w.timeline_command(act, ctx, store).await
+        } else {
+            Err(IambError::NoSelectedRoom.into())
+        }
+    }
+
     pub async fn message_command(
         &mut self,
         act: MessageAction,
@@ -1661,7 +1674,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for PinnedItem {
 
                 let room = IambId::Room(self.room_id.clone(), thread);
                 let open = WindowAction::Switch(OpenTarget::Application(room));
-                let jump = IambAction::from(MessageAction::Jump(self.event_id.clone()));
+                let jump = IambAction::from(TimelineAction::GotoEvent(self.event_id.clone()));
 
                 Ok(vec![(open.into(), ctx.clone()), (jump.into(), ctx.clone())])
             },

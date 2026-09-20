@@ -627,6 +627,9 @@ impl Application {
             IambAction::Space(act) => {
                 self.screen.current_window_mut()?.space_command(act, ctx, store).await?
             },
+            IambAction::Timeline(act) => {
+                self.screen.current_window_mut()?.timeline_command(act, ctx, store).await?
+            },
             IambAction::Room(act) => {
                 let acts = self.screen.current_window_mut()?.room_command(act, ctx, store).await?;
                 self.action_prepend(acts);

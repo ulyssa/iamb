@@ -579,8 +579,6 @@ fn complete_cmdarg(
 
         "logout" => complete_iamb_logout(args, store),
 
-        "pin" | "pinned" | "unpin" => vec![],
-
         "react" if args.len() == 1 => complete_emoji(&args[0], store),
         "react" => vec![],
 
@@ -614,7 +612,8 @@ fn complete_cmdarg(
 
         // These have no arguments
         "cancel" | "chats" | "dms" | "editor" | "edit" | "forget" | "leave" | "members" |
-        "mentions" | "replied" | "reply" | "rooms" | "spaces" | "welcome" => vec![],
+        "mentions" | "pin" | "pinned" | "unpin" | "replied" | "reply" | "rooms" | "spaces" |
+        "welcome" => vec![],
 
         "abo" | "aboveleft" | "bel" | "belowright" | "hor" | "horizontal" | "lefta" |
         "leftabove" | "rightb" | "rightbelow" | "tab" | "vert" | "vertical" => {

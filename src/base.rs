@@ -86,6 +86,13 @@ pub enum VerifyAction {
     Emoji,
 }
 
+/// An action taken against a room's timeline.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum TimelineAction {
+    /// Jump to a loaded message in the scrollback.
+    GotoEvent(OwnedEventId),
+}
+
 /// An action taken against the currently selected message.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum MessageAction {
@@ -109,9 +116,6 @@ pub enum MessageAction {
     /// it doesn't recognize it. The second [bool] argument forces it to be interpreted literally
     /// when it is `true`.
     React(String, bool),
-
-    /// Jump to a loaded message in the scrollback.
-    Jump(OwnedEventId),
 
     /// Pin a message to the room.
     Pin,
@@ -586,6 +590,9 @@ pub enum IambAction {
     /// Perform an action against the homeserver.
     Homeserver(HomeserverAction),
 
+    /// Perform an action against a room's timeline.
+    Timeline(TimelineAction),
+
     /// Perform an action over room keys.
     Keys(KeysAction),
 
@@ -654,6 +661,12 @@ impl From<SendAction> for IambAction {
     }
 }
 
+impl From<TimelineAction> for IambAction {
+    fn from(act: TimelineAction) -> Self {
+        IambAction::Timeline(act)
+    }
+}
+
 impl ApplicationAction for IambAction {
     fn is_edit_sequence(&self, _: &EditContext) -> SequenceStatus {
         match self {
@@ -665,6 +678,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
+            IambAction::Timeline(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
@@ -681,6 +695,7 @@ impl ApplicationAction for IambAction {
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
+            IambAction::Timeline(..) => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
@@ -697,6 +712,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
+            IambAction::Timeline(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
@@ -713,6 +729,7 @@ impl ApplicationAction for IambAction {
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
             IambAction::OpenLink(..) => false,
+            IambAction::Timeline(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
@@ -728,6 +745,12 @@ impl From<RoomAction> for ProgramAction {
 
 impl From<SpaceAction> for ProgramAction {
     fn from(act: SpaceAction) -> Self {
+        IambAction::from(act).into()
+    }
+}
+
+impl From<TimelineAction> for ProgramAction {
+    fn from(act: TimelineAction) -> Self {
         IambAction::from(act).into()
     }
 }
@@ -2115,7 +2138,7 @@ impl Display for IambId {
                 write!(f, "iamb://members/{room_id}")
             },
             IambId::PinnedList(room_id) => {
-                write!(f, "iamb://pinned/{room_id}")
+                write!(f, "iamb://room/{room_id}/pinned")
             },
             IambId::DirectList => f.write_str("iamb://dms"),
             IambId::RoomList => f.write_str("iamb://rooms"),
@@ -2196,7 +2219,14 @@ impl Visitor<'_> for IambIdVisitor {
 
                         Ok(IambId::Room(room_id, Some(thread_root)))
                     },
-                    _ => return Err(E::custom("Invalid members window URL")),
+                    [room_id, "pinned"] => {
+                        let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
+                            return Err(E::custom("Invalid room identifier"));
+                        };
+
+                        Ok(IambId::PinnedList(room_id))
+                    },
+                    _ => return Err(E::custom("Invalid iamb window URL")),
                 }
             },
             Some("members") => {
@@ -2213,21 +2243,6 @@ impl Visitor<'_> for IambIdVisitor {
                 };
 
                 Ok(IambId::MemberList(room_id))
-            },
-            Some("pinned") => {
-                let Some(path) = url.path_segments() else {
-                    return Err(E::custom("Invalid pinned window URL"));
-                };
-
-                let &[room_id] = path.collect::<Vec<_>>().as_slice() else {
-                    return Err(E::custom("Invalid pinned window URL"));
-                };
-
-                let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
-                    return Err(E::custom("Invalid room identifier"));
-                };
-
-                Ok(IambId::PinnedList(room_id))
             },
             Some("dms") => {
                 if url.path() != "" {
@@ -2612,7 +2627,7 @@ pub mod tests {
     fn test_pinned_window_id() {
         let room_id = TEST_ROOM1_ID.clone();
         let id = IambId::PinnedList(room_id.clone());
-        let url = format!("iamb://pinned/{room_id}");
+        let url = format!("iamb://room/{room_id}/pinned");
 
         assert_eq!(id.to_string(), url);
 

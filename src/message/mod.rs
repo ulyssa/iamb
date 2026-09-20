@@ -1204,7 +1204,7 @@ impl Message {
 
         let pinned = self.event.event_id().is_some_and(|id| info.is_pinned(id));
         let label = match (self.event.is_edited(), pinned) {
-            (true, true) => Some("(edited) (pinned)"),
+            (true, true) => Some("(pinned, edited)"),
             (true, false) => Some("(edited)"),
             (false, true) => Some("(pinned)"),
             (false, false) => None,
