@@ -546,9 +546,17 @@ async fn load_initial_messages(client: Client, store: AsyncProgramStore) {
 
     // load initial cache
     for room in rooms.iter().filter(|room| !room.is_space()) {
-        // we got the room id from the client and have subscribed to the event cache, so this should
-        // only error on IO errors.
-        let (cache, _) = room.event_cache().await.expect("failed to get room cache");
+        let cache = match room.event_cache().await {
+            Ok((c, _)) => c,
+            Err(e) => {
+                // we got the room id from the client and have subscribed to the event cache,
+                // so this should only error on IO errors. Skipping here just means that we
+                // don't get any events from the cache and will fetch them from the homeserver
+                // later on when viewing the room.
+                tracing::error!(err = %e, "failed to load events from room cache");
+                continue;
+            },
+        };
 
         let events = match cache.events().await {
             Ok(events) => events,
@@ -572,9 +580,8 @@ async fn load_initial_messages(client: Client, store: AsyncProgramStore) {
 
     // This is an arbitrary limit on how much work we do in parallel to avoid
     // spawning too many tasks at startup and overwhelming the client. We
-    // should normally only surpass this limit at startup when doing an initial.
+    // should normally only surpass this limit at startup when doing an initial
     // fetch for each room.
-    // const LIMIT: usize = 15;
     const LIMIT: usize = 15;
     let permits = Semaphore::new(LIMIT);
 
