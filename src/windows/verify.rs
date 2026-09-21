@@ -101,17 +101,17 @@ impl fmt::Display for VerifyItem {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match self.request.state() {
             VerificationRequestState::Requested { .. } => {
-                write!(f, ":verify accept {}", self.request.flow_id())
+                write!(f, ":verify accept {:?}", self.request.flow_id())
             },
             VerificationRequestState::Ready { their_methods, .. }
                 if their_methods.contains(&VerificationMethod::SasV1) =>
             {
-                write!(f, ":verify emoji {}", self.request.flow_id())
+                write!(f, ":verify emoji {:?}", self.request.flow_id())
             },
             VerificationRequestState::Transitioned { verification: Verification::SasV1(sas) } => {
                 match sas.state() {
                     SasState::KeysExchanged { emojis: Some(_), .. } => {
-                        write!(f, ":verify confirm {}", self.request.flow_id())
+                        write!(f, ":verify confirm {:?}", self.request.flow_id())
                     },
                     _ => Ok(()),
                 }
@@ -119,10 +119,10 @@ impl fmt::Display for VerifyItem {
             VerificationRequestState::Transitioned { verification: Verification::QrV1(qr) } => {
                 match qr.state() {
                     QrVerificationState::Started => {
-                        write!(f, ":verify emoji {}", self.request.flow_id())
+                        write!(f, ":verify emoji {:?}", self.request.flow_id())
                     },
                     QrVerificationState::Scanned => {
-                        write!(f, ":verify confirm {}", self.request.flow_id())
+                        write!(f, ":verify confirm {:?}", self.request.flow_id())
                     },
                     _ => Ok(()),
                 }
@@ -191,7 +191,7 @@ impl ListItem<IambInfo> for VerifyItem {
                         lines.push(Line::from("    If they don't match, run:"));
                         lines.push(Line::from(""));
                         lines.push(Line::from(Span::styled(
-                            format!("        :verify mismatch {}", self.request.flow_id()),
+                            format!("        :verify mismatch {:?}", self.request.flow_id()),
                             bold,
                         )));
                         lines.push(Line::from(""));
@@ -241,7 +241,7 @@ impl ListItem<IambInfo> for VerifyItem {
                         lines.push(Line::from("    If it shows an error, run:"));
                         lines.push(Line::from(""));
                         lines.push(Line::from(Span::styled(
-                            format!("        :verify mismatch {}", self.request.flow_id()),
+                            format!("        :verify mismatch {:?}", self.request.flow_id()),
                             bold,
                         )));
                         lines.push(Line::from(""));
