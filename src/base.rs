@@ -983,6 +983,7 @@ impl EventLocation {
     fn to_message_key(&self) -> Option<&MessageKey> {
         match self {
             EventLocation::Message(_, key) => Some(key),
+            EventLocation::State(key) => Some(key),
             _ => None,
         }
     }
