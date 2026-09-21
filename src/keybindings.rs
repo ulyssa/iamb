@@ -9,7 +9,7 @@ use modalkit::env::vim::keybindings::{InputStep, VimBindings};
 use modalkit::keybindings::{EdgeEvent, EdgeRepeat, InputBindings};
 
 use crate::base::{Keybindings, MATRIX_ID_WORD};
-use crate::config::{Keys, SplitDirection};
+use crate::config::{Keys, SplitDirection, TunableValues};
 use crate::prelude::*;
 
 pub type IambStep = InputStep<IambInfo>;
@@ -19,11 +19,11 @@ fn once(key: &TerminalKey) -> (EdgeRepeat, EdgeEvent<TerminalKey, CommonKeyClass
 }
 
 /// Initialize the default keybinding state.
-pub fn setup_keybindings() -> Keybindings {
+pub fn setup_keybindings(tunables: &TunableValues) -> Keybindings {
     let mut ism = Keybindings::empty();
 
     let vim = VimBindings::default()
-        .submit_on_enter(false)
+        .submit_on_enter(!tunables.send_on_enter)
         .cursor_open(MATRIX_ID_WORD.clone());
 
     vim.setup(&mut ism);
