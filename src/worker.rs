@@ -212,6 +212,8 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
                 }
 
                 plan.push(Plan::Messages(room_id.to_owned(), message_need));
+            } else {
+                need_load.need_messages_all(room_id.clone(), message_need);
             }
         }
         if need.members {

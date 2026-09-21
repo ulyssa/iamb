@@ -2270,7 +2270,7 @@ pub struct Need {
 }
 
 /// Things that need loading for different rooms.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RoomNeeds {
     needs: HashMap<OwnedRoomId, Need>,
 }
