@@ -1,7 +1,6 @@
 //! # Windows for Matrix rooms and spaces
 use std::collections::HashSet;
 
-use matrix_sdk::RoomDisplayName;
 use matrix_sdk::notification_settings::RoomNotificationMode;
 use matrix_sdk::ruma::api::client::room::upgrade_room::v3::Request as UpgradeRoomRequest;
 use matrix_sdk::ruma::api::error::ErrorKind as ClientApiErrorKind;
@@ -19,12 +18,10 @@ use crate::base::{MemberUpdateAction, RoomField};
 use crate::config::EncryptionIndicatorLocation;
 use crate::prelude::*;
 use crate::windows::room::chat::ChatState;
-use crate::windows::room::joining::{Joining, JoiningState};
 use crate::windows::room::not_joined::{NotJoined, NotJoinedState};
 use crate::windows::room::space::{Space, SpaceState};
 
 mod chat;
-mod joining;
 mod not_joined;
 mod scrollback;
 mod space;
@@ -33,7 +30,6 @@ macro_rules! delegate {
     ($s: expr, $id: ident => $e: expr) => {
         match $s {
             RoomState::NotJoined($id) => $e,
-            RoomState::Joining($id) => $e,
             RoomState::Chat($id) => $e,
             RoomState::Space($id) => $e,
         }
@@ -93,7 +89,7 @@ pub async fn room_command(
                 },
             };
 
-            let id = IambId::Room(room_id.to_owned(), None);
+            let id = IambId::Room(room_id.to_owned().into(), None);
             let target = OpenTarget::Application(id);
             let act = cmd.switch(target);
 
@@ -635,7 +631,7 @@ pub async fn room_command(
             request.additional_creators = additional_creators;
 
             let response = worker.client.send(request).await.map_err(IambError::from)?;
-            let id = IambId::Room(response.replacement_room, None);
+            let id = IambId::Room(response.replacement_room.into(), None);
             let target = OpenTarget::Application(id);
             let act = WindowAction::Switch(target);
 
@@ -651,7 +647,6 @@ pub async fn room_command(
 /// similarly.
 pub enum RoomState {
     NotJoined(Box<NotJoinedState>),
-    Joining(Box<JoiningState>),
     Chat(Box<ChatState>),
     Space(Box<SpaceState>),
 }
@@ -659,12 +654,6 @@ pub enum RoomState {
 impl From<NotJoinedState> for RoomState {
     fn from(chat: NotJoinedState) -> Self {
         RoomState::NotJoined(Box::new(chat))
-    }
-}
-
-impl From<JoiningState> for RoomState {
-    fn from(chat: JoiningState) -> Self {
-        RoomState::Joining(Box::new(chat))
     }
 }
 
@@ -681,18 +670,7 @@ impl From<SpaceState> for RoomState {
 }
 
 impl RoomState {
-    pub fn new(
-        room: MatrixRoom,
-        thread: Option<OwnedEventId>,
-        name: RoomDisplayName,
-        tags: Option<Tags>,
-        store: &mut ProgramStore,
-    ) -> Self {
-        let room_id = room.room_id().to_owned();
-        let info = store.application.get_room_info(room_id);
-        info.name = name.to_string().into();
-        info.tags = tags;
-
+    pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
         if room.is_space() {
             SpaceState::new(room).into()
         } else {
@@ -700,63 +678,46 @@ impl RoomState {
         }
     }
 
-    pub fn join(name: String, store: &mut ProgramStore) -> Self {
-        let joining = JoiningState::new(name, store);
-        Self::from(joining)
-    }
-
-    pub fn not_joined(name: String) -> Self {
-        Self::from(NotJoinedState::new(name))
+    pub fn not_joined(alias: OwnedRoomOrAliasId, store: &mut ProgramStore) -> Self {
+        Self::from(NotJoinedState::new(alias, store))
     }
 
     pub fn window_id(&self) -> IambId {
         match self {
-            RoomState::NotJoined(nj) => IambId::NotJoined(nj.room.clone()),
-            RoomState::Joining(joining) => IambId::Joining(joining.room.clone()),
-            RoomState::Chat(chat) => IambId::Room(chat.id().to_owned(), chat.thread().cloned()),
-            RoomState::Space(space) => IambId::Room(space.id().to_owned(), None),
+            RoomState::NotJoined(nj) => IambId::Room(nj.alias().to_owned(), None),
+            RoomState::Chat(chat) => {
+                IambId::Room(chat.id().to_owned().into(), chat.thread().cloned())
+            },
+            RoomState::Space(space) => IambId::Room(space.id().to_owned().into(), None),
         }
     }
 
     pub fn room_state(&self) -> Option<MatrixRoomState> {
         match self {
-            RoomState::NotJoined(_) | RoomState::Joining(_) => None,
+            RoomState::NotJoined(_) => None,
             RoomState::Chat(chat) => Some(chat.room().state()),
             RoomState::Space(space) => Some(space.room().state()),
         }
     }
 
     pub fn refresh_room(&mut self, store: &mut ProgramStore) {
+        if let Some(room) = self.room() &&
+            room.state() == MatrixRoomState::Left
+        {
+            // room previews have more information than left rooms
+            let alias_id = if let Some(alias) = room.canonical_alias() {
+                alias.into()
+            } else {
+                room.room_id().to_owned().into()
+            };
+            *self = Self::not_joined(alias_id, store);
+        }
+
         match self {
-            RoomState::NotJoined(_) => {},
-            RoomState::Joining(joining) => {
-                let joined = joining.room.clone();
-
-                let room_id = match joining.try_recv() {
-                    None => return,
-                    Some(Ok(room_id)) => room_id.clone(),
-                    Some(Err(e)) => {
-                        // We failed to join the room, so show the NotJoined window,
-                        // and let the user try again if the error was transient:
-                        *self = NotJoinedState::failed(joined, e).into();
-                        return;
-                    },
-                };
-
-                let Ok((room, name, tags)) = store.application.worker.get_room(room_id.clone())
-                else {
-                    return;
-                };
-
-                if let Ok(alias) = OwnedRoomAliasId::try_from(joined.as_str()) {
-                    // If the `:join` was for a room alias, then track it so
-                    // we can reuse it later for `:join`/`:sp`/etc:
-                    store.application.names.insert(alias, room_id.clone());
+            RoomState::NotJoined(not_joined) => {
+                if let Some(state) = not_joined.refresh_room(store) {
+                    *self = state;
                 }
-
-                store.application.need_load.need_members(room_id);
-
-                *self = RoomState::new(room, None, name, tags, store);
             },
             RoomState::Chat(chat) => chat.refresh_room(store),
             RoomState::Space(space) => space.refresh_room(store),
@@ -820,25 +781,6 @@ impl RoomState {
         return;
     }
 
-    fn draw_left(&self, room: &MatrixRoom, area: Rect, buf: &mut Buffer, store: &mut ProgramStore) {
-        let name = match room.canonical_alias() {
-            Some(alias) => alias.to_string(),
-            None => format!("{:?}", store.application.get_room_title(room.room_id())),
-        };
-
-        let mut lines = vec![Line::from(format!("You have left {name}!"))];
-
-        if room.is_public().is_some_and(|b| b) {
-            lines.push(Line::from(format!("You can run `:join {name}` to rejoin.")));
-        }
-
-        let text = Text::from(lines);
-
-        Paragraph::new(text).alignment(Alignment::Center).render(area, buf);
-
-        return;
-    }
-
     pub async fn timeline_command(
         &mut self,
         act: TimelineAction,
@@ -878,6 +820,19 @@ impl RoomState {
         }
     }
 
+    pub async fn join_command(
+        &mut self,
+        act: JoinAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
+        if let RoomState::NotJoined(nj) = self {
+            nj.join_command(act, ctx, store).await
+        } else {
+            Err(IambError::NoSelectedSpace.into())
+        }
+    }
+
     pub async fn send_command(
         &mut self,
         act: SendAction,
@@ -893,7 +848,10 @@ impl RoomState {
 
     pub fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
         let Some(room) = self.room() else {
-            return Line::from("Unjoined Room");
+            if let RoomState::NotJoined(nj) = self {
+                return nj.get_title(store);
+            }
+            return Line::from("Unknown Room");
         };
 
         let room_id = room.room_id();
@@ -933,17 +891,14 @@ impl RoomState {
         match self {
             RoomState::Space(w) => store.application.get_room_title(w.id()).into(),
             RoomState::Chat(w) => store.application.get_room_title(w.id()).into(),
-            RoomState::NotJoined(_) => Line::from("Unjoined Room"),
-            RoomState::Joining(w) => {
-                Line::from(vec![Span::raw("Joining "), Span::raw(w.room.as_str())])
-            },
+            RoomState::NotJoined(w) => w.get_tab_title(store),
         }
     }
 
     pub fn focus_toggle(&mut self) {
         match self {
             RoomState::Chat(chat) => chat.focus_toggle(),
-            RoomState::Joining(_) | RoomState::NotJoined(_) | RoomState::Space(_) => return,
+            RoomState::NotJoined(_) | RoomState::Space(_) => return,
         }
     }
 
@@ -951,15 +906,15 @@ impl RoomState {
         match self {
             RoomState::Chat(chat) => Some(chat.room()),
             RoomState::Space(space) => Some(space.room()),
-            RoomState::Joining(_) | RoomState::NotJoined(_) => None,
+            RoomState::NotJoined(_) => None,
         }
     }
 
-    pub fn id(&self) -> Option<&RoomId> {
+    pub fn id(&mut self, store: &ProgramStore) -> Option<&RoomId> {
         match self {
             RoomState::Chat(chat) => Some(chat.id()),
             RoomState::Space(space) => Some(space.id()),
-            RoomState::Joining(_) | RoomState::NotJoined(_) => None,
+            RoomState::NotJoined(nj) => nj.room_id(store),
         }
     }
 }
@@ -1029,7 +984,6 @@ impl WindowOps<IambInfo> for RoomState {
             match room.state() {
                 MatrixRoomState::Invited => return self.draw_invite(room, area, buf, store),
                 MatrixRoomState::Knocked => return self.draw_knock(room, area, buf, store),
-                MatrixRoomState::Left => return self.draw_left(room, area, buf, store),
                 _ => (),
             }
         }
@@ -1038,11 +992,8 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::Chat(chat) => {
                 chat.draw(area, buf, focused, store);
             },
-            RoomState::Joining(state) => {
-                Joining.render(area, buf, state);
-            },
             RoomState::NotJoined(state) => {
-                NotJoined.render(area, buf, state);
+                NotJoined::new(store).render(area, buf, state);
             },
             RoomState::Space(space) => {
                 Space::new(store).focus(focused).render(area, buf, space);
@@ -1052,8 +1003,7 @@ impl WindowOps<IambInfo> for RoomState {
 
     fn dup(&self, store: &mut ProgramStore) -> Self {
         match self {
-            RoomState::Joining(w) => RoomState::join(w.room.clone(), store),
-            RoomState::NotJoined(w) => RoomState::NotJoined((*w).clone()),
+            RoomState::NotJoined(w) => RoomState::NotJoined(Box::new(w.dup())),
             RoomState::Chat(chat) => RoomState::Chat(Box::new(chat.dup(store))),
             RoomState::Space(space) => RoomState::Space(Box::new(space.dup(store))),
         }
@@ -1061,7 +1011,7 @@ impl WindowOps<IambInfo> for RoomState {
 
     fn close(&mut self, flags: CloseFlags, store: &mut ProgramStore) -> bool {
         match self {
-            RoomState::NotJoined(_) | RoomState::Joining(_) => true,
+            RoomState::NotJoined(_) => true,
             RoomState::Chat(chat) => chat.close(flags, store),
             RoomState::Space(space) => space.close(flags, store),
         }
@@ -1074,7 +1024,7 @@ impl WindowOps<IambInfo> for RoomState {
         store: &mut ProgramStore,
     ) -> IambResult<EditInfo> {
         match self {
-            RoomState::NotJoined(_) | RoomState::Joining(_) => Err(EditError::ReadOnly.into()),
+            RoomState::NotJoined(_) => Err(EditError::ReadOnly.into()),
             RoomState::Chat(chat) => chat.write(path, flags, store),
             RoomState::Space(space) => space.write(path, flags, store),
         }
@@ -1082,7 +1032,7 @@ impl WindowOps<IambInfo> for RoomState {
 
     fn get_completions(&self) -> Option<CompletionList> {
         match self {
-            RoomState::NotJoined(_) | RoomState::Joining(_) => None,
+            RoomState::NotJoined(_) => None,
             RoomState::Chat(chat) => chat.get_completions(),
             RoomState::Space(space) => space.get_completions(),
         }
@@ -1090,7 +1040,7 @@ impl WindowOps<IambInfo> for RoomState {
 
     fn get_cursor_word(&self, style: &WordStyle) -> Option<String> {
         match self {
-            RoomState::NotJoined(_) | RoomState::Joining(_) => None,
+            RoomState::NotJoined(_) => None,
             RoomState::Chat(chat) => chat.get_cursor_word(style),
             RoomState::Space(space) => space.get_cursor_word(style),
         }
@@ -1098,7 +1048,7 @@ impl WindowOps<IambInfo> for RoomState {
 
     fn get_selected_word(&self) -> Option<String> {
         match self {
-            RoomState::NotJoined(_) | RoomState::Joining(_) => None,
+            RoomState::NotJoined(_) => None,
             RoomState::Chat(chat) => chat.get_selected_word(),
             RoomState::Space(space) => space.get_selected_word(),
         }

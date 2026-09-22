@@ -122,6 +122,12 @@ fn iamb_keys(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 fn iamb_knock(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut args = desc.arg.strings()?;
 
+    if args.is_empty() {
+        let act = IambAction::from(JoinAction::Knock);
+        let step = CommandStep::Continue(act.into(), ctx.context.clone());
+        return Ok(step);
+    }
+
     if args.len() < 2 || args.len() > 3 {
         return Err(CommandError::InvalidArgument);
     }
@@ -601,8 +607,14 @@ fn iamb_welcome(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 fn iamb_join(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut args = desc.arg.filenames()?;
 
-    if args.len() != 1 {
+    if args.len() > 1 {
         return Result::Err(CommandError::InvalidArgument);
+    }
+
+    if args.is_empty() {
+        let act = IambAction::from(JoinAction::Join);
+        let step = CommandStep::Continue(act.into(), ctx.context.clone());
+        return Ok(step);
     }
 
     let open = ctx.switch(args.remove(0));
@@ -1331,8 +1343,9 @@ mod tests {
         let act = WindowAction::Switch(OpenTarget::Alternate);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
-        let res = cmds.input_cmd("join", ctx.clone());
-        assert_eq!(res, Err(CommandError::InvalidArgument));
+        let res = cmds.input_cmd("join", ctx.clone()).unwrap();
+        let act = IambAction::Join(JoinAction::Join);
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("join foo bar", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));

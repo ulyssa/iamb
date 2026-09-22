@@ -1017,7 +1017,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         return Err(err);
                     };
                     let room_id = self.room_id.clone();
-                    let id = IambId::Room(room_id, Some(root.to_owned()));
+                    let id = IambId::Room(room_id.into(), Some(root.to_owned()));
                     let open = WindowAction::Switch(OpenTarget::Application(id));
                     Ok(vec![(open.into(), ctx.clone())])
                 }

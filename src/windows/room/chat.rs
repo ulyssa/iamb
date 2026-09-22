@@ -958,7 +958,7 @@ fn open_links(msg: &Message) -> UIError<IambInfo> {
         .into_iter()
         .map(|l| {
             let url = l.1.to_string();
-            let act = IambAction::OpenLink(url.clone(), false).into();
+            let act = IambAction::OpenLink(url.clone()).into();
             MultiChoiceItem::new(l.0, url, vec![act])
         })
         .collect();

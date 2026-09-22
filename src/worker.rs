@@ -185,12 +185,17 @@ enum Plan {
     Messages(OwnedRoomId, Vec<MessageNeed>),
     Members(OwnedRoomId),
     Pinned(OwnedRoomId, Vec<OwnedEventId>),
+    RoomPreview(OwnedRoomOrAliasId),
 }
 
 async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
     let mut locked = store.lock().await;
     let ChatStore { need_load, rooms, .. } = &mut locked.application;
     let mut plan = Vec::with_capacity(need_load.rooms() * 2);
+
+    for room in need_load.preview_needs() {
+        plan.push(Plan::RoomPreview(room));
+    }
 
     for (room_id, need) in std::mem::take(need_load).into_iter() {
         if need.pinned {
@@ -255,6 +260,31 @@ async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan) {
             for (event_id, msg) in msgs {
                 info.insert_pinned(event_id, msg);
             }
+        },
+        Plan::RoomPreview(alias_id) => {
+            let via = {
+                let locked = store.lock().await;
+                locked
+                    .application
+                    .room_via
+                    .get(&alias_id)
+                    .unwrap_or(&locked.application.settings.tunables.default_via)
+                    .to_vec()
+            };
+
+            let res = client.get_room_preview(&alias_id, via).await;
+
+            let mut locked = store.lock().await;
+
+            if let Ok(preview) = &res &&
+                let Some(alias) = &preview.canonical_alias
+            {
+                locked
+                    .application
+                    .aliases
+                    .insert(alias.to_owned(), preview.room_id.clone());
+            }
+            locked.application.room_previews.insert(alias_id, (res, Instant::now()));
         },
     }
 }
@@ -652,9 +682,11 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
 
         let name = display.to_string();
         let tags = room.tags().await.unwrap_or_default();
+        let mut aliases = room.alt_aliases();
+        aliases.extend(room.canonical_alias());
 
         pinned.push((room.room_id().to_owned(), room.pinned_event_ids().unwrap_or_default()));
-        names_and_tags.push((room.room_id().to_owned(), name, tags));
+        names_and_tags.push((room.room_id().to_owned(), name, tags, aliases));
 
         if room.is_direct().await.unwrap_or_default() {
             dms.push(room);
@@ -670,8 +702,8 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     locked.application.sync_info.rooms = rooms;
     locked.application.sync_info.dms = dms;
 
-    for (room_id, name, tags) in names_and_tags {
-        locked.application.set_room_info(room_id, name, tags);
+    for (room_id, name, tags, aliases) in names_and_tags {
+        locked.application.set_room_info(room_id, name, tags, aliases);
     }
 
     for (room_id, pinned_events) in pinned {
@@ -962,7 +994,7 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
     return (reply, response);
 }
 
-pub type FetchedRoom = (MatrixRoom, RoomDisplayName, Option<Tags>);
+pub type FetchedRoom = (MatrixRoom, RoomDisplayName);
 
 pub enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
@@ -971,7 +1003,8 @@ pub enum WorkerTask {
     GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
     GetRoom(OwnedRoomId, ClientReply<IambResult<FetchedRoom>>),
     ResolveAlias(OwnedRoomAliasId, ClientReply<IambResult<OwnedRoomId>>),
-    JoinRoom(String, Vec<OwnedServerName>, ClientReply<IambResult<OwnedRoomId>>),
+    JoinRoom(OwnedRoomOrAliasId, Vec<OwnedServerName>, ClientReply<IambResult<OwnedRoomId>>),
+    CreateDM(OwnedUserId, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     TypingNotice(OwnedRoomId),
@@ -1015,6 +1048,12 @@ impl Debug for WorkerTask {
                 f.debug_tuple("WorkerTask::JoinRoom")
                     .field(s)
                     .field(via)
+                    .field(&format_args!("_"))
+                    .finish()
+            },
+            WorkerTask::CreateDM(user_id, _) => {
+                f.debug_tuple("WorkerTask::CreateDM")
+                    .field(user_id)
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -1141,7 +1180,7 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
     client
 }
 
-async fn direct_message(user: OwnedUserId, client: Client) -> IambResult<OwnedRoomId> {
+async fn direct_message(user: OwnedUserId, client: &Client) -> IambResult<OwnedRoomId> {
     if let Some(room) = client.get_dm_room(&user) {
         return Ok(room.room_id().to_owned());
     }
@@ -1163,25 +1202,17 @@ async fn direct_message(user: OwnedUserId, client: Client) -> IambResult<OwnedRo
 }
 
 async fn join_room(
-    name: String,
+    alias_id: OwnedRoomOrAliasId,
     via: Vec<OwnedServerName>,
     client: Client,
 ) -> IambResult<OwnedRoomId> {
-    if let Ok(alias_id) = OwnedRoomOrAliasId::from_str(name.as_str()) {
-        match client.join_room_by_id_or_alias(&alias_id, &via).await {
-            Ok(resp) => Ok(resp.room_id().to_owned()),
-            Err(e) => {
-                let msg = e.to_string();
-                let err = UIError::Failure(msg);
-                return Err(err);
-            },
-        }
-    } else if let Ok(user) = OwnedUserId::try_from(name.as_str()) {
-        direct_message(user, client).await
-    } else {
-        let msg = format!("{:?} is not a valid room or user name", name.as_str());
-        let err = UIError::Failure(msg);
-        return Err(err);
+    match client.join_room_by_id_or_alias(&alias_id, &via).await {
+        Ok(resp) => Ok(resp.room_id().to_owned()),
+        Err(e) => {
+            let msg = e.to_string();
+            let err = UIError::Failure(msg);
+            return Err(err);
+        },
     }
 }
 
@@ -1262,16 +1293,28 @@ impl Requester {
 
     pub fn join_room_chan(
         &self,
-        name: String,
+        alias_id: OwnedRoomOrAliasId,
         via: Vec<OwnedServerName>,
     ) -> ClientResponse<IambResult<OwnedRoomId>> {
         let (reply, response) = oneshot();
-        self.tx.send(WorkerTask::JoinRoom(name, via, reply)).unwrap();
+        self.tx.send(WorkerTask::JoinRoom(alias_id, via, reply)).unwrap();
         response
     }
 
-    pub fn join_room(&self, name: String, via: Vec<OwnedServerName>) -> IambResult<OwnedRoomId> {
-        self.join_room_chan(name, via).recv()
+    pub fn join_room(
+        &self,
+        alias_id: OwnedRoomOrAliasId,
+        via: Vec<OwnedServerName>,
+    ) -> IambResult<OwnedRoomId> {
+        self.join_room_chan(alias_id, via).recv()
+    }
+
+    pub fn create_dm(&self, user_id: OwnedUserId) -> IambResult<OwnedRoomId> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::CreateDM(user_id, reply)).unwrap();
+
+        return response.recv();
     }
 
     pub fn members(&self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
@@ -1372,10 +1415,14 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.resolve_alias(alias_id).await);
             },
-            WorkerTask::JoinRoom(name, via, reply) => {
+            WorkerTask::JoinRoom(alias_id, via, reply) => {
                 assert!(self.initialized);
                 let client = self.client.clone();
-                tokio::spawn(async move { reply.send(join_room(name, via, client).await) });
+                tokio::spawn(async move { reply.send(join_room(alias_id, via, client).await) });
+            },
+            WorkerTask::CreateDM(user_id, reply) => {
+                assert!(self.initialized);
+                reply.send(direct_message(user_id, &self.client).await);
             },
             WorkerTask::GetInviter(invited, reply) => {
                 assert!(self.initialized);
@@ -1987,9 +2034,8 @@ impl ClientWorker {
             } else {
                 room.display_name().await.map_err(IambError::from)?
             };
-            let tags = room.tags().await.map_err(IambError::from)?;
 
-            Ok((room, name, tags))
+            Ok((room, name))
         } else {
             Err(IambError::UnknownRoom(room_id).into())
         }

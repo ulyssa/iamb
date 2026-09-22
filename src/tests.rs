@@ -259,7 +259,7 @@ pub async fn mock_store() -> ProgramStore {
     let info = mock_room();
 
     store.rooms.insert(room_id.clone(), info);
-    store.names.insert(TEST_ROOM1_ALIAS.clone(), room_id);
+    store.aliases.insert(TEST_ROOM1_ALIAS.clone(), room_id);
 
     ProgramStore::new(store)
 }
