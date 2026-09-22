@@ -879,8 +879,9 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
                 *msg = new_content.into();
             },
 
-            RoomSendQueueUpdate::SendError { .. } => {
-                // XXX: Show the error to the user
+            RoomSendQueueUpdate::SendError { error, .. } => {
+                // XXX: Retry recoverable errors
+                locked.application.draw_error = Some(format!("Error sending message: {error}"));
             },
             RoomSendQueueUpdate::CancelledLocalEvent { transaction_id } => {
                 info.echo_keys.remove(&transaction_id);
