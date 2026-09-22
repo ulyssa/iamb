@@ -188,8 +188,6 @@ mod parse {
     pub fn parse_started_strings(input: &str) -> IResult<&str, (Vec<String>, &str)> {
         let (input, (mut args, mut last_arg_raw)) =
             separated_list0_last_raw(space1, parse_string).parse(input)?;
-        // let (input, mut args) = separated_list0_last_raw(space1, parse_string).parse(input)?;
-        // let last_arg_raw = todo!();
 
         let (input, end_arg) = if args.is_empty() {
             opt(parse_last_arg).parse(input)?
@@ -409,7 +407,7 @@ fn complete_iamb_create(args: Vec<String>) -> Vec<String> {
 }
 
 /// Tab completion for `:room`
-// TODO: Check whether we can get the id of the focused room to improve
+// XXX: Check whether we can get the id of the focused room to improve
 // "kick","ban","unban", ".. unset" and "dm/tag set/unset"
 fn complete_iamb_room(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     let subcmds = [
@@ -602,7 +600,7 @@ fn complete_cmdarg(
 
         "space" => complete_iamb_space(args, store),
 
-        // TODO: Check whether we can get the id of the focused message to improve completion
+        // XXX: Check whether we can get the id of the focused message to improve completion
         "unreact" if args.len() == 1 => complete_emoji(&args[0], store),
         "unreact" => vec![],
 
