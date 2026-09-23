@@ -1427,11 +1427,10 @@ impl StatefulWidget for Scrollback<'_> {
             state.viewctx.corner.text_row = *row;
         }
 
-        let mut y = area.top();
         let x = area.left();
 
-        for (key, row, txt, line_preview, includes_date_line, includes_trackbar) in
-            lines.into_iter()
+        for (y, (key, row, txt, line_preview, includes_date_line, includes_trackbar)) in
+            (area.top()..).zip(lines)
         {
             let _ = buf.set_line(x, y, &txt, area.width);
             image_previews.extend(
@@ -1445,8 +1444,6 @@ impl StatefulWidget for Scrollback<'_> {
             {
                 state.term_cursor = (x, y);
             }
-
-            y += 1;
         }
 
         let msg_width = Message::message_column_width(&state.viewctx, settings);
