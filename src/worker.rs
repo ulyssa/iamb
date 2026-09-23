@@ -165,7 +165,7 @@ pub async fn create_room(
 
 async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id: &EventId) {
     let receipts = match room
-        .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
+        .load_event_receipts(ReceiptType::Read, &ReceiptThread::Main, event_id)
         .await
     {
         Ok(receipts) => receipts,
@@ -307,7 +307,7 @@ async fn get_receipts_for_timeline_events(
     let mut msgs = vec![];
 
     for ev in events.into_iter() {
-        let event_id = ev.event_id();
+        let event_id = ev.event_id().map(ToOwned::to_owned);
         let msg = match ev.kind {
             TimelineEventKind::Decrypted(event) => {
                 match event.event.deserialize() {
@@ -351,7 +351,7 @@ async fn get_receipts_for_timeline_events(
 
         let event_id = msg.event_id();
         let receipts = match room
-            .load_event_receipts(ReceiptType::Read, ReceiptThread::Main, event_id)
+            .load_event_receipts(ReceiptType::Read, &ReceiptThread::Main, event_id)
             .await
         {
             Ok(receipts) => receipts.into_iter().map(|(u, _)| u).collect(),
