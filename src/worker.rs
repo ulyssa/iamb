@@ -323,14 +323,29 @@ async fn get_receipts_for_timeline_events(
                     },
                 }
             },
-            TimelineEventKind::UnableToDecrypt { utd_info, .. } => {
-                warn!(
-                    ?utd_info,
-                    room_id = room.room_id().as_str(),
-                    ?event_id,
-                    "Failed to decrypt event"
-                );
-                continue;
+            TimelineEventKind::UnableToDecrypt { event, utd_info, .. } => {
+                let event = match event.deserialize() {
+                    Ok(event) => {
+                        tracing::debug!(
+                            ?utd_info,
+                            room_id = room.room_id().as_str(),
+                            ?event_id,
+                            "Failed to decrypt event"
+                        );
+                        event
+                    },
+                    Err(err) => {
+                        warn!(
+                            ?utd_info,
+                            err = %err,
+                            room_id = room.room_id().as_str(),
+                            ?event_id,
+                            "Failed to deserialize undecrypted event"
+                        );
+                        continue;
+                    },
+                };
+                event.into_full_event(room.room_id().to_owned())
             },
             TimelineEventKind::PlainText { event } => {
                 let event = match event.deserialize() {
