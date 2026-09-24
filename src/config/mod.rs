@@ -573,6 +573,7 @@ impl EncryptionValues {
         &self,
         location: EncryptionIndicatorLocation,
         state: EncryptionState,
+        theme: &ThemeValues,
     ) -> Option<Span<'static>> {
         if !self.indicator_location.contains(location) {
             return None;
@@ -590,19 +591,19 @@ impl EncryptionValues {
                 EncryptionState::Encrypted,
             ) => {
                 // Green encrypted icon:
-                Span::styled(self.icon_encrypted.clone(), Style::new().fg(Color::LightGreen))
+                Span::styled(self.icon_encrypted.clone(), theme.encryption.icon_encrypted)
             },
             (
                 EncryptionIndicator::Enabled | EncryptionIndicator::OnlyUnencrypted,
                 EncryptionState::NotEncrypted,
             ) => {
                 // Red unencrypted icon:
-                Span::styled(self.icon_unencrypted.clone(), Style::new().fg(Color::Red))
+                Span::styled(self.icon_unencrypted.clone(), theme.encryption.icon_unencrypted)
             },
 
             (_, EncryptionState::Unknown) => {
                 // Yellow unknown icon:
-                Span::styled(self.icon_unknown.clone(), Style::new().fg(Color::Yellow))
+                Span::styled(self.icon_unknown.clone(), theme.encryption.icon_unknown)
             },
         };
 
@@ -1951,22 +1952,35 @@ mod tests {
             ..Default::default()
         };
         let enc = enc.values();
+        let theme = theme::ThemeValues::default();
 
         // Always shows in the title:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_some());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted, &theme)
                 .is_some()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted, &theme)
+                .is_some()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown, &theme)
+                .is_some()
+        );
 
         // Doesn't show in the prompt:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted, &theme)
                 .is_none()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown, &theme)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1979,20 +1993,33 @@ mod tests {
             ..Default::default()
         };
         let enc = enc.values();
+        let theme = theme::ThemeValues::default();
 
         // Never shows in the title or the prompt:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted, &theme)
                 .is_none()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted, &theme)
                 .is_none()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown, &theme)
+                .is_none()
+        );
     }
 
     #[test]
@@ -2005,24 +2032,37 @@ mod tests {
             ..Default::default()
         };
         let enc = enc.values();
+        let theme = theme::ThemeValues::default();
 
         // Shows in the prompt when encrypted or unknown:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_some());
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted, &theme)
+                .is_some()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown, &theme)
+                .is_some()
+        );
 
         // But is hidden when unencrypted:
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted, &theme)
                 .is_none()
         );
 
         // Doesn't show in the title:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted, &theme)
                 .is_none()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown, &theme)
+                .is_none()
+        );
     }
     #[test]
     fn test_encryption_indicator_only_unencrypted() {
@@ -2034,21 +2074,34 @@ mod tests {
             ..Default::default()
         };
         let enc = enc.values();
+        let theme = theme::ThemeValues::default();
 
         // Shows in both the prompt and title when unencrypted or unknown:
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted, &theme)
                 .is_some()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown, &theme)
                 .is_some()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted, &theme)
+                .is_some()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown, &theme)
+                .is_some()
+        );
 
         // But is hidden when encrypted:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted, &theme)
+                .is_none()
+        );
     }
 }

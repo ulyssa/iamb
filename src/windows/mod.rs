@@ -31,16 +31,6 @@ pub mod welcome;
 const MEMBER_FETCH_DEBOUNCE: Duration = Duration::from_secs(5);
 
 #[inline]
-fn bold_span(s: &str, style: Style) -> Span<'_> {
-    Span::styled(s, style.bold())
-}
-
-#[inline]
-fn bold_spans(s: &str, style: Style) -> Line<'_> {
-    bold_span(s, style).into()
-}
-
-#[inline]
 pub fn selected_style(selected: bool, style: Style) -> Style {
     if selected {
         style.add_modifier(StyleModifier::REVERSED)
@@ -53,31 +43,25 @@ fn name_and_labels<'a>(
     name: &'a str,
     unread: &UnreadInfo,
     room_membership: MatrixRoomState,
-    style: Style,
+    name_style: Style,
+    tags_style: Style,
 ) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
-    // XXX: use different colors for "mention", "notification", "muted room"
-    let name_style = if unread.is_unread() {
-        style.add_modifier(StyleModifier::BOLD)
-    } else {
-        style
-    };
-
     let name = Span::styled(name, name_style);
 
     let mut labels = vec![];
 
     match room_membership {
         MatrixRoomState::Joined => {},
-        MatrixRoomState::Left => labels.push(vec![Span::styled("Left", style)]),
-        MatrixRoomState::Banned => labels.push(vec![Span::styled("Banned", style)]),
-        MatrixRoomState::Knocked => labels.push(vec![Span::styled("Knocked", style)]),
-        MatrixRoomState::Invited => labels.push(vec![Span::styled("Invited", style)]),
+        MatrixRoomState::Left => labels.push(vec![Span::styled("Left", tags_style)]),
+        MatrixRoomState::Banned => labels.push(vec![Span::styled("Banned", tags_style)]),
+        MatrixRoomState::Knocked => labels.push(vec![Span::styled("Knocked", tags_style)]),
+        MatrixRoomState::Invited => labels.push(vec![Span::styled("Invited", tags_style)]),
     }
 
     if unread.unread_mentions > 0 {
-        labels.push(vec![Span::styled("Unread Mention", style)]);
+        labels.push(vec![Span::styled("Unread Mention", tags_style)]);
     } else if unread.is_unread() {
-        labels.push(vec![Span::styled("Unread", style)]);
+        labels.push(vec![Span::styled("Unread", tags_style)]);
     }
 
     (name, labels)
@@ -781,25 +765,24 @@ impl Window<IambInfo> for IambWindow {
     }
 
     fn get_tab_title(&self, store: &mut ProgramStore) -> Line<'_> {
-        let style = Default::default();
         match self {
-            IambWindow::DirectList(_) => bold_spans("Direct Messages", style),
-            IambWindow::RoomList(_) => bold_spans("Rooms", style),
-            IambWindow::SpaceList(_) => bold_spans("Spaces", style),
-            IambWindow::VerifyList(_) => bold_spans("Verifications", style),
-            IambWindow::Welcome(_) => bold_spans("Welcome to iamb", style),
-            IambWindow::ChatList(_) => bold_spans("DMs & Rooms", style),
-            IambWindow::UnreadList(_) => bold_spans("Unread Messages", style),
-            IambWindow::MentionsList(_) => bold_spans("Unread Mentions", style),
-            IambWindow::InvitesList(_) => bold_spans("Open Invites", style),
+            IambWindow::DirectList(_) => Line::from("Direct Messages"),
+            IambWindow::RoomList(_) => Line::from("Rooms"),
+            IambWindow::SpaceList(_) => Line::from("Spaces"),
+            IambWindow::VerifyList(_) => Line::from("Verifications"),
+            IambWindow::Welcome(_) => Line::from("Welcome to iamb"),
+            IambWindow::ChatList(_) => Line::from("DMs & Rooms"),
+            IambWindow::UnreadList(_) => Line::from("Unread Messages"),
+            IambWindow::MentionsList(_) => Line::from("Unread Mentions"),
+            IambWindow::InvitesList(_) => Line::from("Open Invites"),
 
             IambWindow::Room(w) => w.get_tab_title(store),
             IambWindow::MemberList(state, room_id, _) => {
                 let title = store.application.get_room_title(room_id.as_ref());
                 let n = state.len();
                 let v = vec![
-                    bold_span("Room Members ", style),
-                    Span::styled(format!("({n}): "), style.bold()),
+                    Span::raw("Room Members "),
+                    Span::raw(format!("({n}): ")),
                     title.into(),
                 ];
                 Line::from(v)
@@ -808,9 +791,9 @@ impl Window<IambInfo> for IambWindow {
                 let title = store.application.get_room_title(room_id.as_ref());
                 let n = state.len();
                 let v = vec![
-                    bold_span("Pinned Messages ", style),
-                    Span::styled(format!("({n}): "), style.bold()),
-                    title.into(),
+                    Span::raw("Pinned Messages "),
+                    Span::raw(format!("({n}): ")),
+                    Span::raw(title),
                 ];
                 Line::from(v)
             },
@@ -819,25 +802,27 @@ impl Window<IambInfo> for IambWindow {
 
     fn get_win_title(&self, store: &mut ProgramStore) -> Line<'_> {
         let style = store.application.settings.theme.windows.title;
-        match self {
-            IambWindow::DirectList(_) => bold_spans("Direct Messages", style),
-            IambWindow::RoomList(_) => bold_spans("Rooms", style),
-            IambWindow::SpaceList(_) => bold_spans("Spaces", style),
-            IambWindow::VerifyList(_) => bold_spans("Verifications", style),
-            IambWindow::Welcome(_) => bold_spans("Welcome to iamb", style),
-            IambWindow::ChatList(_) => bold_spans("DMs & Rooms", style),
-            IambWindow::UnreadList(_) => bold_spans("Unread Messages", style),
-            IambWindow::MentionsList(_) => bold_spans("Unread Mentions", style),
-            IambWindow::InvitesList(_) => bold_spans("Open Invites", style),
+        let default_style = store.application.settings.theme.windows.default;
 
-            IambWindow::Room(w) => w.get_title(store, style),
+        match self {
+            IambWindow::DirectList(_) => Line::styled("Direct Messages", style),
+            IambWindow::RoomList(_) => Line::styled("Rooms", style),
+            IambWindow::SpaceList(_) => Line::styled("Spaces", style),
+            IambWindow::VerifyList(_) => Line::styled("Verifications", style),
+            IambWindow::Welcome(_) => Line::styled("Welcome to iamb", style),
+            IambWindow::ChatList(_) => Line::styled("DMs & Rooms", style),
+            IambWindow::UnreadList(_) => Line::styled("Unread Messages", style),
+            IambWindow::MentionsList(_) => Line::styled("Unread Mentions", style),
+            IambWindow::InvitesList(_) => Line::styled("Open Invites", style),
+
+            IambWindow::Room(w) => w.get_title(store),
             IambWindow::MemberList(state, room_id, _) => {
                 let title = store.application.get_room_title(room_id.as_ref());
                 let n = state.len();
                 let v = vec![
-                    bold_span("Room Members ", style),
-                    Span::styled(format!("({n}): "), style.bold()),
-                    title.into(),
+                    Span::styled("Room Members ", style),
+                    Span::styled(format!("({n}): "), style),
+                    Span::styled(title, default_style),
                 ];
                 Line::from(v)
             },
@@ -845,9 +830,9 @@ impl Window<IambInfo> for IambWindow {
                 let title = store.application.get_room_title(room_id.as_ref());
                 let n = state.len();
                 let v = vec![
-                    bold_span("Pinned Messages ", style),
-                    Span::styled(format!("({n}): "), style.bold()),
-                    title.into(),
+                    Span::styled("Pinned Messages ", style),
+                    Span::styled(format!("({n}): "), style),
+                    Span::styled(title, default_style),
                 ];
                 Line::from(v)
             },
@@ -1086,25 +1071,29 @@ impl ListItem<IambInfo> for GenericRoomItem {
         _: &ViewportContext<ListCursor>,
         store: &mut ProgramStore,
     ) -> Text<'_> {
-        let style = if self.unread.is_unread() {
-            store.application.settings.theme.rooms.unread
+        let theme = &store.application.settings.theme;
+
+        let name_style = if self.unread.is_unread() {
+            theme.rooms.unread
         } else {
-            store.application.settings.theme.rooms.default
+            theme.rooms.default
         };
 
-        let style = selected_style(selected, style);
-        let (name, mut labels) = name_and_labels(&self.name, &self.unread, self.membership, style);
+        let name_style = selected_style(selected, name_style);
+        let tags_style = selected_style(selected, theme.rooms.labels);
+        let (name, mut labels) =
+            name_and_labels(&self.name, &self.unread, self.membership, name_style, tags_style);
         let mut spans = vec![name];
 
         if let Some(label) = self.room_type.text() {
-            labels.push(vec![Span::styled(label, style)]);
+            labels.push(vec![Span::styled(label, tags_style)]);
         }
 
         if let Some(tags) = &self.tags {
-            labels.extend(tags.keys().map(|t| tag_to_span(t, style)));
+            labels.extend(tags.keys().map(|t| tag_to_span(t, tags_style)));
         }
 
-        append_tags(labels, &mut spans, style);
+        append_tags(labels, &mut spans, tags_style);
         Text::from(Line::from(spans))
     }
 
@@ -1166,11 +1155,12 @@ impl ListItem<IambInfo> for MemberItem {
         let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
         let color = color.unwrap_or_else(|| super::config::user_color(user_id.as_str()));
 
+        let style = store.application.settings.theme.default;
         let style = if selected {
             // Ensure the whole item has the same color when it's selected:
-            Style::default().fg(color).add_modifier(StyleModifier::REVERSED)
+            style.fg(color).add_modifier(StyleModifier::REVERSED)
         } else {
-            Style::default()
+            style
         };
         let user_style = style.patch(super::config::user_style_from_color(color));
         let role_style = style.add_modifier(StyleModifier::BOLD);
@@ -1297,10 +1287,11 @@ impl ListItem<IambInfo> for PinnedItem {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let settings = &store.application.settings;
 
+        let style = store.application.settings.theme.default;
         let style = if selected {
-            Style::default().add_modifier(StyleModifier::REVERSED)
+            style.add_modifier(StyleModifier::REVERSED)
         } else {
-            Style::default()
+            style
         };
 
         let Some(msg) = info.get_pinned(&self.event_id) else {

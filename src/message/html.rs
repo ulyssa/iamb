@@ -253,6 +253,25 @@ impl Table {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum ThemeSelector {
+    Strong,
+    Emphasis,
+    Strikethrough,
+    Underlined,
+}
+
+impl ThemeSelector {
+    fn style(&self, settings: &ApplicationSettings) -> Style {
+        match self {
+            Self::Strong => settings.theme.messages.strong,
+            Self::Emphasis => settings.theme.messages.emphasis,
+            Self::Strikethrough => settings.theme.messages.strikethrough,
+            Self::Underlined => settings.theme.messages.underlined,
+        }
+    }
+}
+
 /// A processed HTML element that we can render to the terminal.
 #[derive(Debug, Clone)]
 pub enum StyleTreeNode {
@@ -267,6 +286,7 @@ pub enum StyleTreeNode {
     Paragraph(Box<StyleTreeNode>),
     Pre(Box<StyleTreeNode>),
     Ruler,
+    Themed(Box<StyleTreeNode>, ThemeSelector),
     Style(Box<StyleTreeNode>, Style),
     Table(Table),
     Text(Cow<'static, str>),
@@ -301,7 +321,8 @@ impl StyleTreeNode {
             StyleTreeNode::Header(child, _) |
             StyleTreeNode::Paragraph(child) |
             StyleTreeNode::Pre(child) |
-            StyleTreeNode::Style(child, _) => {
+            StyleTreeNode::Style(child, _) |
+            StyleTreeNode::Themed(child, _) => {
                 child.gather_links(urls);
             },
 
@@ -389,8 +410,8 @@ impl StyleTreeNode {
             StyleTreeNode::Image(None) => {},
             StyleTreeNode::Image(Some(alt)) => {
                 printer.commit();
-                printer.push_str("Image Alt: ", Style::default());
-                printer.push_str(alt, Style::default());
+                printer.push_str("Image Alt: ", style);
+                printer.push_str(alt, style);
                 printer.commit();
             },
             StyleTreeNode::List(children, lt) => {
@@ -470,6 +491,10 @@ impl StyleTreeNode {
                 printer.push_str(s.as_ref(), style);
             },
 
+            StyleTreeNode::Themed(child, patch) => {
+                let patch = patch.style(printer.settings());
+                child.print(printer, style.patch(patch))
+            },
             StyleTreeNode::Style(child, patch) => child.print(printer, style.patch(*patch)),
             StyleTreeNode::Sequence(children) => {
                 for child in children {
@@ -773,9 +798,7 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                 // Style change
                 "b" | "strong" => {
                     let c = c2t(&node.children.borrow(), state);
-                    let s = Style::default().add_modifier(StyleModifier::BOLD);
-
-                    StyleTreeNode::Style(c, s)
+                    StyleTreeNode::Themed(c, ThemeSelector::Strong)
                 },
                 "font" => {
                     let c = c2t(&node.children.borrow(), state);
@@ -785,9 +808,7 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                 },
                 "em" | "i" => {
                     let c = c2t(&node.children.borrow(), state);
-                    let s = Style::default().add_modifier(StyleModifier::ITALIC);
-
-                    StyleTreeNode::Style(c, s)
+                    StyleTreeNode::Themed(c, ThemeSelector::Emphasis)
                 },
                 "span" => {
                     let c = c2t(&node.children.borrow(), state);
@@ -797,15 +818,11 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                 },
                 "del" | "s" | "strike" => {
                     let c = c2t(&node.children.borrow(), state);
-                    let s = Style::default().add_modifier(StyleModifier::CROSSED_OUT);
-
-                    StyleTreeNode::Style(c, s)
+                    StyleTreeNode::Themed(c, ThemeSelector::Strikethrough)
                 },
                 "u" => {
                     let c = c2t(&node.children.borrow(), state);
-                    let s = Style::default().add_modifier(StyleModifier::UNDERLINED);
-
-                    StyleTreeNode::Style(c, s)
+                    StyleTreeNode::Themed(c, ThemeSelector::Underlined)
                 },
 
                 // Lists

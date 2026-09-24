@@ -687,11 +687,56 @@ Configure the background color for text.
 See the
 .Sx "COLORS"
 section for the supported color format.
+.It Sy modifiers
+An array of strings specifying modifiers to how the text is styled.
+Possible values are
+.Dq Sy "bold" ,
+.Dq Sy "crossed-out" ,
+.Dq Sy "dim" ,
+.Dq Sy "hidden" ,
+.Dq Sy "italic" ,
+.Dq Sy "rapid-blink" ,
+.Dq Sy "reversed" ,
+.Dq Sy "slow-blink" ,
+and
+.Dq Sy "underlined" .
+Modifier names prefixed with
+.Sy ~
+will remove the modifier if it was inherited from another default, global config, etc.
 .El
+.Pp
 Within
 .Sy theme ,
 there are several subsections for specific UI areas:
 .Bl -tag -width Ds
+.It Sy default
+The base, default style that everything else should inherit.
+.It Sy cmdbar
+For controlling how the text in the command bar is styled.
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for the command bar.
+.El
+.It Sy encryption
+For controlling how the encryption indicators are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for the encryption status indicators.
+.It Sy icon_encrypted
+Configure the styling for the encrypted indicator.
+.It Sy icon_unencrypted
+Configure the styling for the unencrypted indicator.
+.It Sy icon_unknown
+Configure the styling for the unknown encryption status indicator.
+.El
+.It Sy msgbar
+For controlling how the text in the message bar is styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for the message bar.
+.El
 .It Sy messages
 For controlling how the bodies of messages are styled.
 UI elements you can set within this subsection are:
@@ -706,6 +751,29 @@ elements in formatted message bodies.
 Configure the styling for
 .Sy "<pre>"
 elements in formatted message bodies.
+.It Sy "emphasis"
+Configure the styling for
+.Sy "<em>"
+and
+.Sy "<i>"
+elements in formatted message bodies.
+.It Sy "strikethrough"
+Configure the styling for
+.Sy "<del>" ,
+.Sy "<s>" ,
+and
+.Sy "<strike>"
+elements in formatted message bodies.
+.It Sy "strong"
+Configure the styling for
+.Sy "<strong>"
+and
+.Sy "<b>"
+elements in formatted message bodies.
+.It Sy "underlined"
+Configure the styling for
+.Sy "<u>"
+elements in formatted message bodies.
 .El
 .It Sy timeline
 For controlling how other elements within the timeline are styled.
@@ -717,6 +785,8 @@ Configure the default styling for text in the timeline.
 Configure the how the dates for messages are styled.
 .It Sy time
 Configure the how the time a message was sent is styled.
+.It Sy unread_marker
+Configure the style of the bar for marking the start of unread messages.
 .It Sy state
 Configure how the text shown for state events is styled.
 .It Sy sticker
@@ -731,6 +801,8 @@ Configure how redacted events in the timeline is styled.
 .It Sy windows
 For controlling how the windows are styled.
 .Bl -tag -width Ds
+.It Sy default
+Configure the default style for characters that draw the window border or title.
 .It Sy border
 Configure how the border characters are styled.
 .It Sy border_focused
@@ -757,17 +829,25 @@ UI elements you can set within this subsection are:
 .Bl -tag -width Ds
 .It Sy default
 Configure the default style for text in room lists.
+.It Sy labels
+Configure the style for the labels following room names in lists.
 .It Sy unread
-Configure the text for unread rooms in lists is styled.
+Configure the style for unread room names in lists.
 .El
 .El
-.Ss Example: Make code blocks a lighter gray background and state events red
+.Ss Example 1: Make code blocks a lighter gray background and state events red
 .Bd -literal -offset indent
 [theme.messages]
 code_block.background = "245"
 
 [theme.timeline]
 state.color = "cyan"
+.Ed
+.Ss Example 2: Replace default bold style in window and tab titles with italic
+.Bd -literal -offset indent
+[theme]
+tabs.title.modifiers = ["~bold", "italic"]
+windows.title.modifiers = ["~bold", "italic"]
 .Ed
 .Sh "USER OVERRIDES"
 The

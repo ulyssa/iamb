@@ -1248,6 +1248,7 @@ impl StatefulWidget for Chat<'_> {
         state.complete_pending_jump(self.store);
 
         let settings = &self.store.application.settings;
+        let theme = &settings.theme;
 
         // Determine whether we have a description to show for the message bar.
         let desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
@@ -1308,8 +1309,11 @@ impl StatefulWidget for Chat<'_> {
         }
 
         let encryption_settings = &settings.tunables.encryption;
-        let encryption_indicator = encryption_settings
-            .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
+        let encryption_indicator = encryption_settings.get_indicator(
+            EncryptionIndicatorLocation::PROMPT,
+            state.room().encryption_state(),
+            theme,
+        );
         let input_prompt = settings.tunables.input_prompt.as_deref();
         let prompt = match (self.focused, encryption_indicator, input_prompt) {
             // User has both encryption indicator and custom prompt, combine them:
@@ -1329,7 +1333,7 @@ impl StatefulWidget for Chat<'_> {
             (true, None, None) => Line::from("> "),
         };
 
-        let tbox = TextBox::new().prompt(prompt);
+        let tbox = TextBox::new().style(theme.msgbar.default).prompt(prompt);
         state
             .tbox
             .set_ignorecase(self.store.application.settings.tunables.ignorecase);

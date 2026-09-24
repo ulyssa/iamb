@@ -349,12 +349,11 @@ impl Application {
                 .show_dialog(dialogstr)
                 .show_mode(modestr)
                 .borders(true)
-                .border_style(theme.windows.border.add_modifier(StyleModifier::DIM))
-                .border_style_focused(
-                    theme.windows.border_focused.remove_modifier(StyleModifier::DIM),
-                )
-                .tab_style(theme.tabs.title.add_modifier(StyleModifier::DIM))
-                .tab_style_focused(theme.tabs.title_focused.remove_modifier(StyleModifier::DIM))
+                .border_style(theme.windows.border)
+                .border_style_focused(theme.windows.border_focused)
+                .cmdbar_style(theme.cmdbar.default)
+                .tab_style(theme.tabs.title)
+                .tab_style_focused(theme.tabs.title_focused)
                 .focus(focused);
             f.render_stateful_widget(screen, area, sstate);
 
