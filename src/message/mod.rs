@@ -223,7 +223,7 @@ impl MessageTimeStamp {
     fn show_date(self, settings: &ApplicationSettings) -> Span<'static> {
         let time = self.as_datetime().format("%A, %B %d %Y").to_string();
 
-        Span::styled(time, settings.tunables.colors.message_date.add_modifier(StyleModifier::BOLD))
+        Span::styled(time, settings.theme.timeline.date.add_modifier(StyleModifier::BOLD))
     }
 
     /// A compact date and time, for places without a date separator line.
@@ -235,7 +235,7 @@ impl MessageTimeStamp {
         let time = self.as_datetime().format("%T");
         let time = format!("  [{time}]");
 
-        Span::styled(time, settings.tunables.colors.message_time)
+        Span::styled(time, settings.theme.timeline.time)
     }
 }
 
@@ -487,15 +487,15 @@ impl MessageEvent {
     fn message_style(&self, settings: &ApplicationSettings) -> Style {
         let content = match self {
             MessageEvent::EncryptedOriginal(_) | MessageEvent::EncryptedRedacted(_) => {
-                return settings.tunables.colors.message_other;
+                return settings.theme.timeline.default;
             },
-            MessageEvent::Redacted(..) => return settings.tunables.colors.message_redacted,
-            MessageEvent::State(_) => return settings.tunables.colors.message_state,
+            MessageEvent::Redacted(..) => return settings.theme.timeline.redacted,
+            MessageEvent::State(_) => return settings.theme.timeline.state,
             MessageEvent::Original(ev, _) => &ev.content,
             MessageEvent::Local(_, _, content) => content,
-            MessageEvent::Sticker(..) => return settings.tunables.colors.message_sticker,
+            MessageEvent::Sticker(..) => return settings.theme.timeline.sticker,
             MessageEvent::Poll(..) | MessageEvent::UnstablePoll(..) => {
-                return settings.tunables.colors.message_poll;
+                return settings.theme.timeline.poll;
             },
         };
 
@@ -505,11 +505,9 @@ impl MessageEvent {
             MessageType::Emote(_) |
             MessageType::File(_) |
             MessageType::Image(_) |
-            MessageType::Video(_) => settings.tunables.colors.message_normal,
-            MessageType::Notice(_) | MessageType::ServerNotice(_) => {
-                settings.tunables.colors.message_notice
-            },
-            _ => settings.tunables.colors.message_other,
+            MessageType::Video(_) => settings.theme.messages.default,
+            MessageType::Notice(_) | MessageType::ServerNotice(_) => settings.theme.timeline.notice,
+            _ => settings.theme.messages.default,
         }
     }
 

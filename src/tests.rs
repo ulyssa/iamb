@@ -201,7 +201,6 @@ pub fn mock_tunables() -> TunableValues {
         default_split: Default::default(),
         ssl_verify: true,
         cache_policy: Default::default(),
-        colors: Colorscheme::default().values(),
     }
 }
 
@@ -224,12 +223,14 @@ pub fn mock_settings() -> ApplicationSettings {
             layout: None,
             macros: None,
             aliases: None,
+            theme: None,
         },
         tunables: mock_tunables(),
         dirs: mock_dirs(),
         layout: Default::default(),
         macros: HashMap::default(),
         aliases: Aliases::default(),
+        theme: crate::config::theme::default_theme().values().into(),
         enable_enhanced_keys: false,
     }
 }

@@ -368,7 +368,7 @@ impl StyleTreeNode {
                 }
             },
             StyleTreeNode::Code(child, _) => {
-                let style = style.patch(printer.settings().tunables.colors.codeblock_background);
+                let style = style.patch(printer.settings().theme.messages.code);
 
                 let old_style = printer.replace_base_style(style);
 
@@ -421,9 +421,11 @@ impl StyleTreeNode {
             },
             StyleTreeNode::Pre(child) => {
                 let mut subp = printer.sub(2).literal(true);
+                let code_style = style.patch(subp.settings().theme.messages.code_block);
+                let _ = subp.replace_base_style(code_style);
                 let subw = subp.width();
 
-                child.print(&mut subp, style);
+                child.print(&mut subp, code_style);
 
                 printer.commit();
                 printer.push_line(
@@ -1452,7 +1454,7 @@ pub mod tests {
     fn test_pre_tag() {
         let info = mock_room();
         let settings = mock_settings();
-        let code_style = settings.tunables.colors.codeblock_background;
+        let code_style = settings.theme.messages.code_block;
         let s = concat!(
             "<pre><code class=\"language-rust\">",
             "fn hello() -&gt; usize {\n",

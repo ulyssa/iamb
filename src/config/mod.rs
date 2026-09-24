@@ -6,6 +6,7 @@ use std::fs::File;
 use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Write as _};
 use std::process;
+use std::sync::Arc;
 
 use clap::Parser;
 use indexmap::IndexMap;
@@ -26,6 +27,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 use crate::prelude::*;
+
+pub mod theme;
 
 pub type Aliases = IndexMap<String, String>;
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
@@ -719,115 +722,6 @@ pub struct ImagePreviewProtocolValues {
     pub font_size: Option<(u16, u16)>,
 }
 
-#[derive(Clone, Deserialize, Default, Debug)]
-pub struct Colorscheme {
-    pub border: Option<Color>,
-    pub border_unfocused: Option<Color>,
-    pub window_title: Option<Color>,
-    pub tab_title: Option<Color>,
-    pub tab_title_unfocused: Option<Color>,
-    pub room_list: Option<Color>,
-    pub room_list_unread: Option<Color>,
-    pub message_time: Option<Color>,
-    pub message_date: Option<Color>,
-    pub message_normal: Option<Color>,
-    pub message_state: Option<Color>,
-    pub message_sticker: Option<Color>,
-    pub message_redacted: Option<Color>,
-    pub message_poll: Option<Color>,
-    pub message_notice: Option<Color>,
-    pub message_other: Option<Color>,
-    pub codeblock_background: Option<Color>,
-}
-
-impl Colorscheme {
-    fn merge(self, other: Self) -> Self {
-        Self {
-            border: self.border.or(other.border),
-            border_unfocused: self.border_unfocused.or(other.border_unfocused),
-            window_title: self.window_title.or(other.window_title),
-            tab_title: self.tab_title.or(other.tab_title),
-            tab_title_unfocused: self.tab_title_unfocused.or(other.tab_title_unfocused),
-            room_list: self.room_list.or(other.room_list),
-            room_list_unread: self.room_list_unread.or(other.room_list_unread),
-            message_time: self.message_time.or(other.message_time),
-            message_date: self.message_date.or(other.message_date),
-            message_normal: self.message_normal.or(other.message_normal),
-            message_state: self.message_state.or(other.message_state),
-            message_sticker: self.message_state.or(other.message_sticker),
-            message_redacted: self.message_redacted.or(other.message_redacted),
-            message_poll: self.message_poll.or(other.message_poll),
-            message_notice: self.message_notice.or(other.message_notice),
-            message_other: self.message_other.or(other.message_other),
-            codeblock_background: self.codeblock_background.or(other.codeblock_background),
-        }
-    }
-}
-
-#[derive(Clone, Deserialize)]
-pub struct ColorschemeValues {
-    pub border: Style,
-    pub border_unfocused: Style,
-    pub window_title: Style,
-    pub tab_title: Style,
-    pub tab_title_unfocused: Style,
-    pub room_list: Style,
-    pub room_list_unread: Style,
-    pub message_time: Style,
-    pub message_date: Style,
-    pub message_normal: Style,
-    pub message_state: Style,
-    pub message_sticker: Style,
-    pub message_redacted: Style,
-    pub message_poll: Style,
-    pub message_notice: Style,
-    pub message_other: Style,
-    pub codeblock_background: Style,
-}
-
-impl Colorscheme {
-    pub fn values(self) -> ColorschemeValues {
-        let border = self.border.map(Into::into).unwrap_or_default();
-        let border_unfocused = self.border_unfocused.map(Into::into).unwrap_or(border);
-        let window_title = self.window_title.map(Into::into).unwrap_or_default();
-        let tab_title = self.tab_title.map(Into::into).unwrap_or_default();
-        let tab_title_unfocused = self.tab_title_unfocused.map(Into::into).unwrap_or(tab_title);
-        let room_list = self.room_list.map(Into::into).unwrap_or_default();
-        let room_list_unread = self.room_list_unread.map(Into::into).unwrap_or(room_list);
-        let message_time = self.message_time.map(Into::into).unwrap_or_default();
-        let message_date = self.message_date.map(Into::into).unwrap_or_default();
-        let message_normal = self.message_normal.map(Into::into).unwrap_or_default();
-        let message_state = self.message_state.map(Into::into).unwrap_or(message_normal);
-        let message_sticker = self.message_sticker.map(Into::into).unwrap_or(message_normal);
-        let message_redacted = self.message_redacted.map(Into::into).unwrap_or(message_normal);
-        let message_poll = self.message_poll.map(Into::into).unwrap_or(message_normal);
-        let message_notice = self.message_notice.map(Into::into).unwrap_or(message_state);
-        let message_other = self.message_other.map(Into::into).unwrap_or(message_normal);
-        let codeblock_background =
-            Style::new().bg(self.codeblock_background.unwrap_or(Color::Indexed(236)));
-
-        ColorschemeValues {
-            border,
-            border_unfocused,
-            window_title,
-            tab_title,
-            tab_title_unfocused,
-            room_list,
-            room_list_unread,
-            message_time,
-            message_date,
-            message_normal,
-            message_state,
-            message_sticker,
-            message_redacted,
-            message_poll,
-            message_notice,
-            message_other,
-            codeblock_background,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct SortValues {
     pub chats: Vec<SortColumn<SortFieldRoom>>,
@@ -942,7 +836,6 @@ pub struct TunableValues {
     pub default_split: SplitDirection,
     pub ssl_verify: bool,
     pub cache_policy: MediaRetentionPolicy,
-    pub colors: ColorschemeValues,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -998,8 +891,6 @@ pub struct Tunables {
     pub members_split: Option<SplitDirection>,
     pub default_split: Option<SplitDirection>,
     pub ssl_verify: Option<bool>,
-    #[serde(default)]
-    pub colors: Colorscheme,
     pub cache_policy: Option<MediaRetentionPolicy>,
 }
 
@@ -1055,7 +946,6 @@ impl Tunables {
             default_split: self.default_split.or(other.default_split),
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
             cache_policy: self.cache_policy.or(other.cache_policy),
-            colors: self.colors.merge(other.colors),
         }
     }
 
@@ -1102,7 +992,6 @@ impl Tunables {
             default_split: self.default_split.unwrap_or_default(),
             ssl_verify: self.ssl_verify.unwrap_or(true),
             cache_policy: self.cache_policy.unwrap_or_default(),
-            colors: self.colors.values(),
         }
     }
 }
@@ -1278,6 +1167,7 @@ pub struct ProfileConfig {
     pub password_file: Option<PathBuf>,
     pub url: Option<Url>,
     pub settings: Option<Tunables>,
+    pub theme: Option<theme::Theme>,
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
@@ -1293,6 +1183,7 @@ pub struct IambConfig {
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
     pub aliases: Option<Aliases>,
+    pub theme: Option<theme::Theme>,
 }
 
 impl IambConfig {
@@ -1321,6 +1212,7 @@ pub struct ApplicationSettings {
     pub sqlite_cache_dir: PathBuf,
     pub profile_name: String,
     pub profile: ProfileConfig,
+    pub theme: Arc<theme::ThemeValues>,
     pub tunables: TunableValues,
     pub dirs: DirectoryValues,
     pub layout: Layout,
@@ -1375,6 +1267,7 @@ impl ApplicationSettings {
             layout,
             macros,
             aliases,
+            theme,
         } = config;
 
         validate_profile_names(&profiles);
@@ -1428,6 +1321,10 @@ impl ApplicationSettings {
         let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
         let dirs = dirs.values();
 
+        let theme = theme.unwrap_or_default().merge(theme::default_theme());
+        let theme = profile.theme.take().unwrap_or_default().merge(theme);
+        let theme = Arc::new(theme.values());
+
         // Create directories
         dirs.create_dir_all()?;
 
@@ -1472,6 +1369,7 @@ impl ApplicationSettings {
             sqlite_cache_dir,
             profile_name,
             profile,
+            theme,
             tunables,
             dirs,
             layout,
@@ -1677,17 +1575,52 @@ mod tests {
         assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
         assert_eq!(res.users, Some(HashMap::new()));
+    }
 
+    #[test]
+    fn test_parse_user_colors() {
+        let expect = |color| UserDisplayTunables { color: Some(color), name: Some("Tim".into()) };
+
+        // Unprefixed color:
         let res: Tunables = serde_json::from_str(
             "{\"users\": {\"@a:b.c\": {\"color\": \"black\", \"name\": \"Tim\"}}}",
         )
         .unwrap();
         assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
-        let users = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(Color::Black),
-            name: Some("Tim".into()),
-        })];
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::Black))];
+        assert_eq!(res.users, Some(users.into_iter().collect()));
+
+        // Color with `light-` prefix:
+        let res: Tunables = serde_json::from_str(
+            "{\"users\": {\"@a:b.c\": {\"color\": \"light-red\", \"name\": \"Tim\"}}}",
+        )
+        .unwrap();
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::LightRed))];
+        assert_eq!(res.users, Some(users.into_iter().collect()));
+
+        // Color name with `light-` prefix:
+        let res: Tunables = serde_json::from_str(
+            "{\"users\": {\"@a:b.c\": {\"color\": \"light-red\", \"name\": \"Tim\"}}}",
+        )
+        .unwrap();
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::LightRed))];
+        assert_eq!(res.users, Some(users.into_iter().collect()));
+
+        // Color name with `light` prefix, no hyphen:
+        let res: Tunables = serde_json::from_str(
+            "{\"users\": {\"@a:b.c\": {\"color\": \"lightblue\", \"name\": \"Tim\"}}}",
+        )
+        .unwrap();
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::LightBlue))];
+        assert_eq!(res.users, Some(users.into_iter().collect()));
+
+        // Hex color name:
+        let res: Tunables = serde_json::from_str(
+            "{\"users\": {\"@a:b.c\": {\"color\": \"#ff55bb\", \"name\": \"Tim\"}}}",
+        )
+        .unwrap();
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::Rgb(0xff, 0x55, 0xbb)))];
         assert_eq!(res.users, Some(users.into_iter().collect()));
     }
 
@@ -1990,6 +1923,7 @@ mod tests {
             layout,
             macros,
             aliases,
+            theme,
         } = &config;
 
         // There should be an example object for each top-level field.
@@ -2000,6 +1934,7 @@ mod tests {
         assert!(layout.is_some());
         assert!(macros.is_some());
         assert!(aliases.is_some());
+        assert!(theme.is_some());
     }
 
     #[test]

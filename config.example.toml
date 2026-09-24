@@ -32,12 +32,6 @@ username_display = "username"
 indicator = "only-encrypted"
 indicator_location = "title|prompt"
 
-[settings.colors]
-message_state = "cyan"
-message_redacted = "245" # light gray
-# commented out because some terminals don't support truecolor
-#room_list_unread = "#ff55bb" # pink
-
 [settings.image_preview]
 protocol = { type = "sixel", filter = "Nearest" }
 size = { "width" = 66, "height" = 10 }
@@ -94,3 +88,9 @@ split = [
 cache = "/home/user/.cache/iamb/"
 logs = "/home/user/.local/share/iamb/logs/"
 downloads = "/home/user/Downloads/"
+
+[theme]
+timeline.state.color = "cyan"
+timeline.redacted.color = "245" # light gray
+# How to use truecolor for terminals that support it:
+# rooms.unread.color = "#ff55bb" # pink

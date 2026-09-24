@@ -132,12 +132,6 @@ Specifying this object will replace the upstream defaults and possibly lead to u
 Possible keys and their effect are documented at:
 .br
 .Lk https://docs.rs/matrix-sdk/latest/matrix_sdk/media/struct.MediaRetentionPolicy.html#fields
-.It Sy colors
-Change the colors of different elements in
-.Sy iamb .
-See
-.Sx "COLORSCHEME"
-for details on the format.
 .It Sy default_markup
 Controls how text in the message bar is interpreted by default.
 Possible values are
@@ -371,11 +365,14 @@ and
 Both can be used via
 .Dq Sy title|prompt .
 .El
-.Sh COLORSCHEME
+.Sh COLORS
 The
-.Sy settings.colors
-subsection allows configuring the appearance of many elements.
-All settings take a color value that is either a named color, an 8-bit color value or a hex value.
+.Sy settings.users
+and
+.Sy theme
+subsections allows configuring the appearance of many elements.
+For settings that take a color value, you can use either a named color, an 8-bit color value or a hex value.
+.Pp
 The named colors are:
 .Dq Sy black ,
 .Dq Sy red ,
@@ -400,82 +397,6 @@ The hex value is given as
 .Dq Sy #RRGGBB .
 If the terminal does not support truecolor, all hex colors will fall back to the default text color.
 All values must be given as a string.
-.Bl -tag -width Ds
-.It Sy border
-The border of the focused buffer.
-Defaults to the terminal foreground color.
-.It Sy border_unfocused
-The border of all unfocused buffers.
-Defaults to
-.Sy border .
-Note that this value is dimmed before use.
-.It Sy window_title
-The text at the top-left of the border.
-Defaults to the terminal foreground color.
-Note that this value is dimmed for unfocused buffers.
-.It Sy tab_title
-The active entry in the tab list.
-Defaults to the terminal foreground color.
-.It Sy tab_title_unfocused
-The inactive entries in the tab list.
-Defaults to
-.Sy tab_title .
-Note that this value is dimmed before use.
-.It Sy room_list
-Entry in a room list like the
-.Dq Sy :chats
-window.
-Defaults to the terminal foreground color.
-.It Sy room_list_unread
-Unread entry in a room list.
-Defaults to
-.Sy room_list .
-.It Sy message_time
-The timestamp to the right of messages.
-Defaults to the terminal foreground color.
-.It Sy message_date
-The date divider between different days in the message scrollback.
-Defaults to the terminal foreground color.
-Note that this value is used in bold with might make it brighter on some terminals.
-.It Sy message_normal
-The text color for text messages.
-Defaults to the terminal foreground color.
-.It Sy message_state
-The text color for state events like users joining rooms.
-Defaults to
-.Sy message_normal .
-.It Sy message_sticker
-The text color for stickers.
-Defaults to
-.Sy message_normal .
-.It Sy message_redacted
-The text color for redacted (deleted) messages.
-Defaults to
-.Sy message_normal .
-.It Sy message_poll
-The text color for polls.
-Defaults to
-.Sy message_normal .
-.It Sy message_notice
-The text color for automated messages.
-Defaults to
-.Sy message_state .
-.It Sy message_other
-The text color for other (mostly unsupported) message types.
-Defaults to
-.Sy message_normal .
-.It Sy codeblock_background
-Background color for code blocks in messages.
-Defaults to
-.Dq Sy 236
-(a dark shade of gray).
-.El
-.Ss Example: Make the code background a lighter gray and change the color of state events.
-.Bd -literal -offset indent
-[settings.colors]
-codeblock_background = "245"
-message_state = "cyan"
-.Ed
 .Sh IMAGE PREVIEWS
 The
 .Sy settings.image_preview
@@ -741,6 +662,104 @@ Whether to set the title of the terminal window to
 .Dq Sy iamb (<user_id>) .
 Defaults to true.
 .El
+.Sh "THEME OVERRIDES"
+The
+.Sy theme
+subsection allows you to override the colors used for different parts of the user interface.
+Individual, stylable UI elements have the following properties:
+.Bl -tag -width Ds
+.It Sy color
+Configure the foreground color for text.
+See the
+.Sx "COLORS"
+section for the supported color format.
+.It Sy background
+Configure the background color for text.
+See the
+.Sx "COLORS"
+section for the supported color format.
+.El
+Within
+.Sy theme ,
+there are several subsections for specific UI areas:
+.Bl -tag -width Ds
+.It Sy messages
+For controlling how the bodies of messages are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for messages.
+.It Sy code
+Configure the styling for
+.Sy "<code>"
+elements in formatted message bodies.
+.It Sy "code_block"
+Configure the styling for
+.Sy "<pre>"
+elements in formatted message bodies.
+.El
+.It Sy timeline
+For controlling how other elements within the timeline are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for text in the timeline.
+.It Sy date
+Configure the how the dates for messages are styled.
+.It Sy time
+Configure the how the time a message was sent is styled.
+.It Sy state
+Configure how the text shown for state events is styled.
+.It Sy sticker
+Configure how any text shown for stickers is styled.
+.It Sy poll
+Configure how the text in polls is styled.
+.It Sy notice
+Configure how server notices is styled.
+.It Sy redacted
+Configure how redacted events in the timeline is styled.
+.El
+.It Sy windows
+For controlling how the windows are styled.
+.Bl -tag -width Ds
+.It Sy border
+Configure how the border characters are styled.
+.It Sy border_focused
+Configure how the border characters for focused window are styled.
+.It Sy title
+Configure how the window titles are styled.
+.El
+.It Sy tabs
+For controlling how tabs are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy title
+Configure how tab titles are styled.
+.It Sy title_focused
+Configure how the title of the focused tab is styled.
+.El
+.It Sy rooms
+For controlling how lists of rooms like
+.Sy :unreads
+or
+.Sy :chats
+are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default style for text in room lists.
+.It Sy unread
+Configure the text for unread rooms in lists is styled.
+.El
+.El
+.Ss Example: Make code blocks a lighter gray background and state events red
+.Bd -literal -offset indent
+[theme.messages]
+code_block.background = "245"
+
+[theme.timeline]
+state.color = "cyan"
+.Ed
 .Sh "USER OVERRIDES"
 The
 .Sy settings.users
@@ -753,9 +772,9 @@ and are typically written as inline tables containing the following keys:
 Change the display name of the user.
 .It Sy color
 Change the color the user is shown as.
-See the introduction of
-.Sx "COLORSCHEME"
-for the supported color format.
+See the
+.Sx "COLORS"
+section for the supported color format.
 .El
 .Ss Example 1: Override how @ada:example.com appears in chat
 .Bd -literal -offset indent

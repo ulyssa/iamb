@@ -818,7 +818,7 @@ impl Window<IambInfo> for IambWindow {
     }
 
     fn get_win_title(&self, store: &mut ProgramStore) -> Line<'_> {
-        let style = store.application.settings.tunables.colors.window_title;
+        let style = store.application.settings.theme.windows.title;
         match self {
             IambWindow::DirectList(_) => bold_spans("Direct Messages", style),
             IambWindow::RoomList(_) => bold_spans("Rooms", style),
@@ -1087,9 +1087,9 @@ impl ListItem<IambInfo> for GenericRoomItem {
         store: &mut ProgramStore,
     ) -> Text<'_> {
         let style = if self.unread.is_unread() {
-            store.application.settings.tunables.colors.room_list_unread
+            store.application.settings.theme.rooms.unread
         } else {
-            store.application.settings.tunables.colors.room_list
+            store.application.settings.theme.rooms.default
         };
 
         let style = selected_style(selected, style);
