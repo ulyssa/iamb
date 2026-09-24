@@ -368,7 +368,13 @@ impl StyleTreeNode {
                 }
             },
             StyleTreeNode::Code(child, _) => {
+                let style = style.patch(printer.settings().theme.messages.code);
+
+                let old_style = printer.replace_base_style(style);
+
                 child.print(printer, style);
+
+                printer.replace_base_style(old_style);
             },
             StyleTreeNode::Header(child, level) => {
                 let style = style.add_modifier(StyleModifier::BOLD);
@@ -415,9 +421,11 @@ impl StyleTreeNode {
             },
             StyleTreeNode::Pre(child) => {
                 let mut subp = printer.sub(2).literal(true);
+                let code_style = style.patch(subp.settings().theme.messages.code_block);
+                let _ = subp.replace_base_style(code_style);
                 let subw = subp.width();
 
-                child.print(&mut subp, style);
+                child.print(&mut subp, code_style);
 
                 printer.commit();
                 printer.push_line(
@@ -1446,6 +1454,7 @@ pub mod tests {
     fn test_pre_tag() {
         let info = mock_room();
         let settings = mock_settings();
+        let code_style = settings.theme.messages.code_block;
         let s = concat!(
             "<pre><code class=\"language-rust\">",
             "fn hello() -&gt; usize {\n",
@@ -1469,19 +1478,19 @@ pub mod tests {
             text.lines[1],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("fn"),
-                Span::raw(" "),
-                Span::raw("hello"),
-                Span::raw("("),
-                Span::raw(")"),
-                Span::raw(" "),
-                Span::raw("-"),
-                Span::raw(">"),
-                Span::raw(" "),
-                Span::raw("usize"),
-                Span::raw(" "),
-                Span::raw("{"),
-                Span::raw("  "),
+                Span::styled("fn", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("hello", code_style),
+                Span::styled("(", code_style),
+                Span::styled(")", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("-", code_style),
+                Span::styled(">", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("usize", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("{", code_style),
+                Span::styled("  ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1489,13 +1498,13 @@ pub mod tests {
             text.lines[2],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw(" "),
-                Span::raw("   "),
-                Span::raw("/"),
-                Span::raw("/"),
-                Span::raw(" "),
-                Span::raw("weired"),
-                Span::raw("          "),
+                Span::styled(" ", code_style),
+                Span::styled("   ", code_style),
+                Span::styled("/", code_style),
+                Span::styled("/", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("weired", code_style),
+                Span::styled("          ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1503,12 +1512,12 @@ pub mod tests {
             text.lines[3],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("    "),
-                Span::raw("return"),
-                Span::raw(" "),
-                Span::raw("5"),
-                Span::raw(";"),
-                Span::raw("          "),
+                Span::styled("    ", code_style),
+                Span::styled("return", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("5", code_style),
+                Span::styled(";", code_style),
+                Span::styled("          ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1516,8 +1525,8 @@ pub mod tests {
             text.lines[4],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("}"),
-                Span::raw(" ".repeat(22)),
+                Span::styled("}", code_style),
+                Span::styled(" ".repeat(22), code_style),
                 Span::raw(line::VERTICAL)
             ])
         );

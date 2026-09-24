@@ -332,6 +332,8 @@ impl Application {
             term.clear()?;
         }
 
+        let theme = store.application.settings.theme.clone();
+
         term.draw(|f| {
             let area = f.area();
 
@@ -347,9 +349,12 @@ impl Application {
                 .show_dialog(dialogstr)
                 .show_mode(modestr)
                 .borders(true)
-                .border_style(Style::default().add_modifier(StyleModifier::DIM))
-                .tab_style(Style::default().add_modifier(StyleModifier::DIM))
-                .tab_style_focused(Style::default().remove_modifier(StyleModifier::DIM))
+                .border_style(theme.windows.border.add_modifier(StyleModifier::DIM))
+                .border_style_focused(
+                    theme.windows.border_focused.remove_modifier(StyleModifier::DIM),
+                )
+                .tab_style(theme.tabs.title.add_modifier(StyleModifier::DIM))
+                .tab_style_focused(theme.tabs.title_focused.remove_modifier(StyleModifier::DIM))
                 .focus(focused);
             f.render_stateful_widget(screen, area, sstate);
 

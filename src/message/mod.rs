@@ -117,14 +117,6 @@ const fn span_static(s: &'static str) -> Span<'static> {
     }
 }
 
-const BOLD_STYLE: Style = Style {
-    fg: None,
-    bg: None,
-    add_modifier: StyleModifier::BOLD,
-    sub_modifier: StyleModifier::empty(),
-    underline_color: None,
-};
-
 const TIME_GUTTER: usize = 12;
 const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
@@ -228,10 +220,10 @@ impl MessageTimeStamp {
         dt1.date_naive() == dt2.date_naive()
     }
 
-    fn show_date(self) -> Span<'static> {
+    fn show_date(self, settings: &ApplicationSettings) -> Span<'static> {
         let time = self.as_datetime().format("%A, %B %d %Y").to_string();
 
-        Span::styled(time, BOLD_STYLE)
+        Span::styled(time, settings.theme.timeline.date.add_modifier(StyleModifier::BOLD))
     }
 
     /// A compact date and time, for places without a date separator line.
@@ -239,11 +231,11 @@ impl MessageTimeStamp {
         self.as_datetime().format("%Y-%m-%d %H:%M").to_string()
     }
 
-    fn show_time(self) -> Span<'static> {
+    fn show_time(self, settings: &ApplicationSettings) -> Span<'static> {
         let time = self.as_datetime().format("%T");
         let time = format!("  [{time}]");
 
-        Span::raw(time)
+        Span::styled(time, settings.theme.timeline.time)
     }
 }
 
@@ -490,6 +482,33 @@ impl MessageEvent {
 
     pub fn filename(&self) -> Option<String> {
         self.msgtype().and_then(content_filename)
+    }
+
+    fn message_style(&self, settings: &ApplicationSettings) -> Style {
+        let content = match self {
+            MessageEvent::EncryptedOriginal(_) | MessageEvent::EncryptedRedacted(_) => {
+                return settings.theme.timeline.default;
+            },
+            MessageEvent::Redacted(..) => return settings.theme.timeline.redacted,
+            MessageEvent::State(_) => return settings.theme.timeline.state,
+            MessageEvent::Original(ev, _) => &ev.content,
+            MessageEvent::Local(_, _, content) => content,
+            MessageEvent::Sticker(..) => return settings.theme.timeline.sticker,
+            MessageEvent::Poll(..) | MessageEvent::UnstablePoll(..) => {
+                return settings.theme.timeline.poll;
+            },
+        };
+
+        match &content.msgtype {
+            MessageType::Text(_) |
+            MessageType::Audio(_) |
+            MessageType::Emote(_) |
+            MessageType::File(_) |
+            MessageType::Image(_) |
+            MessageType::Video(_) => settings.theme.messages.default,
+            MessageType::Notice(_) | MessageType::ServerNotice(_) => settings.theme.timeline.notice,
+            _ => settings.theme.messages.default,
+        }
     }
 
     fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
@@ -819,7 +838,7 @@ impl<'a> MessageFormatter<'a> {
         let reply_style = if settings.tunables.message_user_color {
             style.patch(settings.get_user_color(&msg.sender))
         } else {
-            style
+            style.patch(msg.event.message_style(settings))
         };
 
         let width = self.width();
@@ -932,14 +951,13 @@ impl<'a> MessageFormatter<'a> {
         protos
     }
 
-    fn push_thread_reply_count(&mut self, len: usize, text: &mut Text<'a>) {
+    fn push_thread_reply_count(&mut self, len: usize, text: &mut Text<'a>, style: Style) {
         if len == 0 {
             return;
         }
 
         // If we have threaded replies to this message, show how many.
         let plural = len != 1;
-        let style = Style::default();
         let mut threaded =
             printer::TextPrinter::new(self.width(), style, self.settings, self.info).literal(true);
         let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
@@ -1055,7 +1073,7 @@ impl Message {
     }
 
     fn get_render_style(&self, selected: bool, settings: &ApplicationSettings) -> Style {
-        let mut style = Style::default();
+        let mut style = self.event.message_style(settings);
 
         if selected {
             style = style.add_modifier(StyleModifier::REVERSED)
@@ -1133,7 +1151,7 @@ impl Message {
         settings: &'a ApplicationSettings,
     ) -> MessageFormatter<'a> {
         let orig = width;
-        let date = self.show_date(prev).then(|| self.timestamp.show_date());
+        let date = self.show_date(prev).then(|| self.timestamp.show_date(settings));
         let trackbar = self.show_trackbar(prev, info, settings);
         let user_gutter = settings.tunables.user_gutter_width;
 
@@ -1143,7 +1161,7 @@ impl Message {
             let cols = MessageColumns::Four;
             let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings, width);
-            let time = Some(self.timestamp.show_time());
+            let time = Some(self.timestamp.show_time(settings));
 
             let read = self
                 .event
@@ -1176,7 +1194,7 @@ impl Message {
             let cols = MessageColumns::Three;
             let fill = width - user_gutter - TIME_GUTTER;
             let user = self.show_sender(prev, true, info, settings, width);
-            let time = Some(self.timestamp.show_time());
+            let time = Some(self.timestamp.show_time(settings));
             let read = Vec::new();
 
             MessageFormatter {
@@ -1323,7 +1341,7 @@ impl Message {
         }
 
         if let Some(thread) = self.event.event_id().and_then(|id| info.get_thread(Some(id))) {
-            fmt.push_thread_reply_count(thread.len(), &mut text);
+            fmt.push_thread_reply_count(thread.len(), &mut text, style);
         }
 
         (text, protos)

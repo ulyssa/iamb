@@ -178,7 +178,7 @@ pub fn mock_tunables() -> TunableValues {
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
-            color: Some(UserColor(Color::Black)),
+            color: Some(Color::Black),
             name: Some("USER 5".into()),
         })]
         .into_iter()
@@ -224,12 +224,14 @@ pub fn mock_settings() -> ApplicationSettings {
             layout: None,
             macros: None,
             aliases: None,
+            theme: None,
         },
         tunables: mock_tunables(),
         dirs: mock_dirs(),
         layout: Default::default(),
         macros: HashMap::default(),
         aliases: Aliases::default(),
+        theme: crate::config::theme::default_theme().values().into(),
         enable_enhanced_keys: false,
     }
 }
