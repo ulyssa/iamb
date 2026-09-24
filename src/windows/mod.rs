@@ -802,7 +802,7 @@ impl Window<IambInfo> for IambWindow {
 
     fn get_win_title(&self, store: &mut ProgramStore) -> Line<'_> {
         let style = store.application.settings.theme.windows.title;
-        let default_style = store.application.settings.theme.windows.title;
+        let default_style = store.application.settings.theme.windows.default;
 
         match self {
             IambWindow::DirectList(_) => Line::styled("Direct Messages", style),

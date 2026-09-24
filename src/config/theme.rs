@@ -357,6 +357,7 @@ struct ThemeRooms {
     #[serde(default)]
     labels: Stylable,
 
+    // XXX: use different colors for "mention", "notification", "muted room"
     #[serde(default)]
     unread: Stylable,
 }

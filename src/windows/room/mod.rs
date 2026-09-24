@@ -892,15 +892,16 @@ impl RoomState {
     }
 
     pub fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
+        let theme = &store.application.settings.theme;
+        let default_style = theme.windows.default;
+        let title_style = theme.windows.title;
+
         let Some(room) = self.room() else {
-            return Line::from("Unjoined Room");
+            return Line::styled("Unjoined Room", title_style);
         };
 
         let room_id = room.room_id();
         let title = store.application.get_room_title(room_id);
-        let theme = &store.application.settings.theme;
-        let default_style = store.application.settings.theme.default;
-        let title_style = theme.windows.title;
         let mut spans = vec![];
 
         let encryption_settings = &store.application.settings.tunables.encryption;
@@ -910,7 +911,7 @@ impl RoomState {
             theme,
         );
         spans.extend(encryption_indicator);
-        spans.push(Span::raw(" "));
+        spans.push(Span::styled(" ", default_style));
 
         if let RoomState::Chat(chat) = self &&
             chat.thread().is_some()
@@ -927,7 +928,7 @@ impl RoomState {
                 spans.push(Span::styled(")", default_style));
             },
             _ => {
-                spans.push(" ".into());
+                spans.push(Span::styled(" ", default_style));
             },
         }
 
