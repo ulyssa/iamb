@@ -223,7 +223,7 @@ impl MessageTimeStamp {
     fn show_date(self, settings: &ApplicationSettings) -> Span<'static> {
         let time = self.as_datetime().format("%A, %B %d %Y").to_string();
 
-        Span::styled(time, settings.theme.timeline.date.add_modifier(StyleModifier::BOLD))
+        Span::styled(time, settings.theme.timeline.date)
     }
 
     /// A compact date and time, for places without a date separator line.
@@ -745,7 +745,7 @@ impl<'a> MessageFormatter<'a> {
     #[inline]
     fn push_spans(&mut self, prev_line: Line<'a>, style: Style, text: &mut Text<'a>) {
         if std::mem::take(&mut self.trackbar) {
-            let trackbar_style = Style::default().add_modifier(StyleModifier::DIM);
+            let trackbar_style = self.settings.theme.timeline.unread_marker;
             text.lines
                 .push(Line::from(Span::styled(HORIZONTAL.repeat(self.orig), trackbar_style)));
         }
