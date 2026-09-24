@@ -836,6 +836,7 @@ pub struct TunableValues {
     pub default_split: SplitDirection,
     pub ssl_verify: bool,
     pub cache_policy: MediaRetentionPolicy,
+    pub send_on_enter: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -892,6 +893,7 @@ pub struct Tunables {
     pub default_split: Option<SplitDirection>,
     pub ssl_verify: Option<bool>,
     pub cache_policy: Option<MediaRetentionPolicy>,
+    pub send_on_enter: Option<bool>,
 }
 
 impl Tunables {
@@ -946,6 +948,7 @@ impl Tunables {
             default_split: self.default_split.or(other.default_split),
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
             cache_policy: self.cache_policy.or(other.cache_policy),
+            send_on_enter: self.send_on_enter.or(other.send_on_enter),
         }
     }
 
@@ -992,6 +995,7 @@ impl Tunables {
             default_split: self.default_split.unwrap_or_default(),
             ssl_verify: self.ssl_verify.unwrap_or(true),
             cache_policy: self.cache_policy.unwrap_or_default(),
+            send_on_enter: self.send_on_enter.unwrap_or(true),
         }
     }
 }

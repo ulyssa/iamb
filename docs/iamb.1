@@ -165,7 +165,7 @@ Reject a knock from the specified user to the currently focused room, and ban th
 .It Sy ":knock reject [user] [reason]"
 Reject a knock from the specified user to the currently focused room with an optional reason.
 .It Sy ":knock send [room] [reason]"
-Send an invitation to a user to join the currently focused room with an optional reason.
+Send a request to join a room with an optional reason.
 .It Sy ":leave"
 Leave the currently focused room.
 .It Sy ":members"
@@ -261,7 +261,7 @@ Delete the room's canonical alias.
 Show the room's canonical alias, if any is set.
 .It Sy ":room history show"
 Show the history visibility setting for the current room.
-.It Sy ":room history set [mode]" .\" TODO: get options
+.It Sy ":room history set [mode]" .\" XXX: get options
 Set the history visibility for the current room.
 Valid modes are
 .Dq invited

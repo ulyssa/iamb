@@ -66,6 +66,11 @@ Configure the directories to use for data, logs, and more.
 See
 .Sx DIRECTORIES
 for the possible values you can set in this object.
+.It Sy aliases
+Configure custom aliases for existing commands.
+See
+.Sx "CUSTOM COMMAND ALIASES"
+for the precise syntax.
 .El
 .Sh PROFILES
 These options are configured as fields in the
@@ -267,6 +272,10 @@ A message must be sent to the room before marking it read.
 Defines whether or not read confirmations are displayed.
 .It Sy request_timeout
 Defines the maximum time per request in seconds.
+.It Sy send_on_enter
+If
+.Sy true
+(the default), pressing enter in insert mode will send the message instead of inserting a linebreak.
 .It Sy sort
 Configures how to sort the lists shown in windows like
 .Sy :rooms

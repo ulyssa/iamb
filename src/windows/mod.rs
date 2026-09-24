@@ -55,7 +55,7 @@ fn name_and_labels<'a>(
     room_membership: MatrixRoomState,
     style: Style,
 ) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
-    // TODO: use different colors for "mention", "notification", "muted room"
+    // XXX: use different colors for "mention", "notification", "muted room"
     let name_style = if unread.is_unread() {
         style.add_modifier(StyleModifier::BOLD)
     } else {

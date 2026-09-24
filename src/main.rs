@@ -288,7 +288,7 @@ impl Application {
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend)?;
 
-        let mut bindings = crate::keybindings::setup_keybindings();
+        let mut bindings = crate::keybindings::setup_keybindings(&settings.tunables);
         settings.setup(&mut bindings);
         let bindings = KeyManager::new(bindings);
 

@@ -949,21 +949,13 @@ impl From<IambError> for UIError<IambInfo> {
     }
 }
 
-impl ApplicationError for IambError {}
-
-/// Status for tracking how much room scrollback we've fetched.
-#[derive(Default)]
-pub enum RoomFetchStatus {
-    /// Room history has been completely fetched.
-    Done,
-
-    /// More room history can be fetched.
-    HaveMore(String),
-
-    /// We have not yet started fetching history for this room.
-    #[default]
-    NotStarted,
+impl From<matrix_sdk::event_cache::EventCacheError> for IambError {
+    fn from(value: matrix_sdk::event_cache::EventCacheError) -> Self {
+        Self::from(matrix_sdk::Error::from(value))
+    }
 }
+
+impl ApplicationError for IambError {}
 
 /// Indicates where an [EventId] lives in the [ChatStore].
 #[derive(Clone)]
@@ -991,6 +983,7 @@ impl EventLocation {
     fn to_message_key(&self) -> Option<&MessageKey> {
         match self {
             EventLocation::Message(_, key) => Some(key),
+            EventLocation::State(key) => Some(key),
             _ => None,
         }
     }
@@ -1202,8 +1195,8 @@ pub struct RoomInfo {
     /// Whether the scrollback for this room is currently being fetched.
     pub fetching: bool,
 
-    /// Where to continue fetching from when we continue loading scrollback history.
-    pub fetch_id: RoomFetchStatus,
+    /// Whether all messages are loaded.
+    pub reached_timeline_start: bool,
 
     /// The time that we last fetched scrollback for this room.
     pub fetch_last: Option<Instant>,
@@ -1241,7 +1234,7 @@ impl Default for RoomInfo {
             reactions: Default::default(),
             threads: Default::default(),
             fetching: Default::default(),
-            fetch_id: Default::default(),
+            reached_timeline_start: false,
             fetch_last: Default::default(),
             users_typing: Default::default(),
             display_names: Default::default(),
@@ -2277,7 +2270,7 @@ pub struct Need {
 }
 
 /// Things that need loading for different rooms.
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct RoomNeeds {
     needs: HashMap<OwnedRoomId, Need>,
 }

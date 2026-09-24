@@ -15,7 +15,6 @@ use modalkit_ratatui::ScrollActions;
 use ratatui_image::sliced::{SignedPosition, SlicedImage};
 use regex::Regex;
 
-use crate::base::RoomFetchStatus;
 use crate::message::MessageCursor;
 use crate::prelude::*;
 
@@ -198,12 +197,8 @@ impl ScrollbackState {
     }
 
     fn need_more_messages(&self, info: &RoomInfo) -> bool {
-        match info.fetch_id {
-            // Don't fetch if we've already hit the end of history.
-            RoomFetchStatus::Done => return false,
-            // Fetch at least once if we're viewing a room.
-            RoomFetchStatus::NotStarted => return true,
-            _ => {},
+        if info.reached_timeline_start {
+            return false;
         }
 
         let first_key = self.get_thread(info).and_then(|t| t.first_key_value()).map(|(k, _)| k);
@@ -1432,11 +1427,10 @@ impl StatefulWidget for Scrollback<'_> {
             state.viewctx.corner.text_row = *row;
         }
 
-        let mut y = area.top();
         let x = area.left();
 
-        for (key, row, txt, line_preview, includes_date_line, includes_trackbar) in
-            lines.into_iter()
+        for (y, (key, row, txt, line_preview, includes_date_line, includes_trackbar)) in
+            (area.top()..).zip(lines)
         {
             let _ = buf.set_line(x, y, &txt, area.width);
             image_previews.extend(
@@ -1450,8 +1444,6 @@ impl StatefulWidget for Scrollback<'_> {
             {
                 state.term_cursor = (x, y);
             }
-
-            y += 1;
         }
 
         let msg_width = Message::message_column_width(&state.viewctx, settings);
