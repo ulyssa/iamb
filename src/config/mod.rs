@@ -1,9 +1,7 @@
 //! # Logic for loading and validating application configuration
 
-use std::collections::hash_map::DefaultHasher;
 use std::env;
 use std::fs::File;
-use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Write as _};
 use std::process;
 use std::sync::Arc;
@@ -73,34 +71,6 @@ const DEFAULT_LOG_LEVEL: &str = if cfg!(feature = "max_level_error") {
 } else {
     "warn"
 };
-
-const COLORS: [Color; 13] = [
-    Color::Blue,
-    Color::Cyan,
-    Color::Green,
-    Color::LightBlue,
-    Color::LightGreen,
-    Color::LightCyan,
-    Color::LightMagenta,
-    Color::LightRed,
-    Color::LightYellow,
-    Color::Magenta,
-    Color::Red,
-    Color::Reset,
-    Color::Yellow,
-];
-
-pub fn user_color(user: &str) -> Color {
-    let mut hasher = DefaultHasher::new();
-    user.hash(&mut hasher);
-    let color = hasher.finish() as usize % COLORS.len();
-
-    COLORS[color]
-}
-
-pub fn user_style_from_color(color: Color) -> Style {
-    Style::default().fg(color).add_modifier(StyleModifier::BOLD)
-}
 
 fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
@@ -1428,9 +1398,7 @@ impl ApplicationSettings {
             .map(|user| (user.color, user.name.as_ref().and_then(|s| s.chars().next())))
             .unwrap_or_default();
 
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
-
+        let style = self.theme.users.style(user_id.as_str(), color);
         let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
 
         Span::styled(String::from(c), style)
@@ -1452,18 +1420,18 @@ impl ApplicationSettings {
             .users
             .get(user_id)
             .and_then(|user| user.color)
-            .unwrap_or_else(|| user_color(user_id.as_str()))
+            .unwrap_or_else(|| self.theme.users.color(user_id.as_str()))
     }
 
     pub fn get_user_style(&self, user_id: &UserId) -> Style {
-        user_style_from_color(self.get_user_color(user_id))
+        let (color, _) = self.get_user_overrides(user_id);
+        self.theme.users.style(user_id.as_str(), color)
     }
 
     pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
         let (color, name) = self.get_user_overrides(user_id);
 
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
+        let style = self.theme.users.style(user_id.as_str(), color);
         let name = match (name, &self.tunables.username_display) {
             (Some(name), _) => name,
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),

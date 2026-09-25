@@ -1,4 +1,7 @@
 //! # Logic for parsing styling configuration into [Style].
+use std::collections::hash_map::DefaultHasher;
+use std::hash::{Hash, Hasher};
+
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer};
@@ -39,6 +42,24 @@ pub fn default_theme() -> Theme {
         rooms: ThemeRooms {
             unread: Stylable::with_modifiers(StyleModifier::BOLD),
             ..Default::default()
+        },
+        users: ThemeUsers {
+            colors: Some(vec![
+                Color::Blue,
+                Color::Cyan,
+                Color::Green,
+                Color::LightBlue,
+                Color::LightGreen,
+                Color::LightCyan,
+                Color::LightMagenta,
+                Color::LightRed,
+                Color::LightYellow,
+                Color::Magenta,
+                Color::Red,
+                Color::Reset,
+                Color::Yellow,
+            ]),
+            stylable: Stylable::with_modifiers(StyleModifier::BOLD),
         },
         ..Default::default()
     }
@@ -213,6 +234,10 @@ pub struct Theme {
     #[serde(default)]
     tabs: ThemeTabs,
 
+    /// Configuration for styling users.
+    #[serde(default)]
+    users: ThemeUsers,
+
     /// Configuration for styling windows.
     #[serde(default)]
     windows: ThemeWindows,
@@ -229,6 +254,7 @@ impl Theme {
             tabs: self.tabs.merge(other.tabs),
             timeline: self.timeline.merge(other.timeline),
             rooms: self.rooms.merge(other.rooms),
+            users: self.users.merge(other.users),
             windows: self.windows.merge(other.windows),
         }
     }
@@ -245,6 +271,7 @@ impl Theme {
             timeline: self.timeline.values(base),
             rooms: self.rooms.values(base),
             tabs: self.tabs.values(base),
+            users: self.users.values(base),
             windows: self.windows.values(base),
         }
     }
@@ -275,6 +302,9 @@ pub struct ThemeValues {
 
     /// Styling for rendering tabs.
     pub tabs: ThemeTabsValues,
+
+    /// Styling for rendering users.
+    pub users: ThemeUsersValues,
 
     /// Styling for rendering windows.
     pub windows: ThemeWindowsValues,
@@ -655,6 +685,63 @@ pub struct ThemeWindowsValues {
     pub border: Style,
     pub border_focused: Style,
     pub title: Style,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ThemeUsers {
+    colors: Option<Vec<Color>>,
+    #[serde(flatten)]
+    stylable: Stylable,
+}
+
+impl ThemeUsers {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            colors: self.colors.or(other.colors),
+            stylable: self.stylable.merge(other.stylable),
+        }
+    }
+
+    fn values(self, base: Style) -> ThemeUsersValues {
+        let colors = self.colors.unwrap_or_default();
+        let style = base.patch(self.stylable);
+
+        ThemeUsersValues { colors, style }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ThemeUsersValues {
+    colors: Vec<Color>,
+    style: Style,
+}
+
+impl ThemeUsersValues {
+    pub fn color(&self, user_id: &str) -> Color {
+        if self.colors.is_empty() {
+            return self.style.fg.unwrap_or(Color::Reset);
+        }
+
+        let mut hasher = DefaultHasher::new();
+        user_id.hash(&mut hasher);
+        let color = hasher.finish() as usize % self.colors.len();
+        self.colors[color]
+    }
+
+    pub fn style(&self, user_id: &str, explicit: Option<Color>) -> Style {
+        let style = self.style;
+
+        if let Some(c) = explicit {
+            // Use explicit color from config file:
+            style.fg(c)
+        } else if self.colors.is_empty() {
+            // User has explicitly set an empty array:
+            style
+        } else {
+            // Hash on user ID to pick a color from the array:
+            style.fg(self.color(user_id))
+        }
+    }
 }
 
 #[cfg(test)]

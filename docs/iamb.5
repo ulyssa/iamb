@@ -809,6 +809,25 @@ Configure how server notices is styled.
 .It Sy redacted
 Configure how redacted events in the timeline is styled.
 .El
+.It Sy users
+For controlling how usernames and identifiers are styled.
+.Pp
+In addition to the common
+.Sy color ,
+.Sy background ,
+and
+.Sy modifiers
+properties, you can also specify a
+.Sy colors
+array for providing a broad palette of colors from which to style usernames.
+.Pp
+By default, this is a selection of 13 standard ANSI colors that should look okay on both light and dark backgrounds.
+You can set this array to
+.Sy "[]"
+to force all usernames to use the value in
+.Sy color
+or its inherited value from
+.Sy "theme.default" .
 .It Sy windows
 For controlling how the windows are styled.
 .Bl -tag -width Ds
