@@ -17,6 +17,50 @@ fn can_join_restricted(summary: &RestrictedSummary, sync_info: &SyncInfo) -> boo
         .any(|room_id| summary.allowed_room_ids.iter().any(|allowed| allowed == room_id))
 }
 
+fn preview_join_rule(
+    preview: &RoomPreview,
+    store: &ProgramStore,
+) -> (&'static str, Option<&'static str>) {
+    match &preview.join_rule {
+        Some(JoinRuleSummary::Public) => ("This room is public.", Some(":join")),
+        Some(JoinRuleSummary::Knock) => ("This room is knock-only.", Some(":knock")),
+        Some(JoinRuleSummary::Invite) => ("This room is invite-only.", None),
+        Some(JoinRuleSummary::Restricted(summary)) => {
+            if can_join_restricted(summary, &store.application.sync_info) {
+                ("This room is restricted to members of a room you are in.", Some(":join"))
+            } else {
+                ("This room is restricted to members of a room you are not in.", None)
+            }
+        },
+        Some(JoinRuleSummary::KnockRestricted(summary)) => {
+            if can_join_restricted(summary, &store.application.sync_info) {
+                (
+                    "This room is knock-restricted to members of a room you are in.",
+                    Some(":knock"),
+                )
+            } else {
+                ("This room is knock-restricted to members of a room you are not in.", None)
+            }
+        },
+        _ => ("Room join rules unknown. Try `:join` or `:knock` to join this room.", None),
+    }
+}
+
+fn preview_state(
+    preview: &RoomPreview,
+    store: &ProgramStore,
+) -> (&'static str, Option<&'static str>) {
+    match preview.state {
+        Some(MatrixRoomState::Invited) => {
+            ("You have been invited to join this room.", Some(":invite accept"))
+        },
+        Some(MatrixRoomState::Knocked) => ("You have knocked on this room.", None),
+        Some(MatrixRoomState::Banned) => ("You have been banned from this room.", None),
+        Some(MatrixRoomState::Joined) => ("You have already joined this room.", None),
+        Some(MatrixRoomState::Left) | None => preview_join_rule(preview, store),
+    }
+}
+
 pub struct NotJoinedState {
     alias: OwnedRoomOrAliasId,
     /// The resolved [`alias`](`Self::alias`).
@@ -227,6 +271,13 @@ impl StatefulWidget for NotJoined<'_> {
     type State = NotJoinedState;
 
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
+        // Ensure the whole window receives the default timeline styling:
+        let theme = &self.store.application.settings.theme;
+        let default_style = theme.timeline.default;
+        let err_style = default_style.fg(Color::Red);
+        buffer.set_style(area, default_style);
+
+        // Save the top-left corner for indicating cursor placement:
         state.term_cursor = (area.left(), area.top());
 
         let mut lines = vec![];
@@ -260,57 +311,7 @@ impl StatefulWidget for NotJoined<'_> {
 
                 lines.push(Line::raw(""));
 
-                let (status, join_cmd) = match preview.state {
-                    Some(MatrixRoomState::Invited) => {
-                        ("You have been invited to join this room.", Some(":invite accept"))
-                    },
-                    Some(MatrixRoomState::Knocked) => ("You have knocked on this room.", None),
-                    Some(MatrixRoomState::Banned) => ("You have been banned from this room.", None),
-                    Some(MatrixRoomState::Joined) => ("You have already joined this room.", None),
-                    Some(MatrixRoomState::Left) | None => {
-                        match &preview.join_rule {
-                            Some(JoinRuleSummary::Public) => {
-                                ("This room is public.", Some(":join"))
-                            },
-                            Some(JoinRuleSummary::Knock) => {
-                                ("This room is knock-only.", Some(":knock"))
-                            },
-                            Some(JoinRuleSummary::Invite) => ("This room is invite-only.", None),
-                            Some(JoinRuleSummary::Restricted(summary)) => {
-                                if can_join_restricted(summary, &self.store.application.sync_info) {
-                                    (
-                                        "This room is restricted to members of a room you are in.",
-                                        Some(":join"),
-                                    )
-                                } else {
-                                    (
-                                        "This room is restricted to members of a room you are not in.",
-                                        None,
-                                    )
-                                }
-                            },
-                            Some(JoinRuleSummary::KnockRestricted(summary)) => {
-                                if can_join_restricted(summary, &self.store.application.sync_info) {
-                                    (
-                                        "This room is knock-restricted to members of a room you are in.",
-                                        Some(":knock"),
-                                    )
-                                } else {
-                                    (
-                                        "This room is knock-restricted to members of a room you are not in.",
-                                        None,
-                                    )
-                                }
-                            },
-                            _ => {
-                                (
-                                    "Room join rules unknown. Try `:join` or `:knock` to join this room.",
-                                    None,
-                                )
-                            },
-                        }
-                    },
-                };
+                let (status, join_cmd) = preview_state(preview, self.store);
 
                 lines.push(Line::raw(status));
                 if let Some(join_cmd) = join_cmd {
@@ -322,15 +323,13 @@ impl StatefulWidget for NotJoined<'_> {
                 }
             },
             Some((Err(matrix_sdk::Error::InsufficientData), _)) => {
-                let style = Style::default().fg(Color::Red);
                 lines.push(Line::from(Span::styled(
                     "This room doesn't exist or room previews are disabled",
-                    style,
+                    err_style,
                 )));
             },
             Some((Err(err), _)) => {
-                let style = Style::default().fg(Color::Red);
-                lines.push(Line::from(Span::styled(err.to_string(), style)));
+                lines.push(Line::from(Span::styled(err.to_string(), err_style)));
             },
             None => {
                 self.store.application.need_load.need_preview(state.alias().to_owned());
@@ -344,8 +343,7 @@ impl StatefulWidget for NotJoined<'_> {
         }
 
         if let Some(err) = &state.err {
-            let style = Style::default().fg(Color::Red);
-            lines.push(Line::from(Span::styled(err.as_str(), style)));
+            lines.push(Line::from(Span::styled(err.as_str(), err_style)));
         }
 
         Paragraph::new(Text::from(lines))
