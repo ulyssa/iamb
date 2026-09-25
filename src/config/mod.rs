@@ -886,7 +886,9 @@ impl Tunables {
             ignorecase: self.ignorecase.or(other.ignorecase),
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
-            message_formatted_display: self.message_formatted_display.or(other.message_formatted_display),
+            message_formatted_display: self
+                .message_formatted_display
+                .or(other.message_formatted_display),
             message_shortcode_display: self
                 .message_shortcode_display
                 .or(other.message_shortcode_display),
