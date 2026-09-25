@@ -1165,18 +1165,21 @@ impl ListItem<IambInfo> for MemberItem {
         let info = store.application.rooms.get_or_default(self.room_id.clone());
         let user_id = self.member.user_id();
 
-        let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
-        let color = color.unwrap_or_else(|| super::config::user_color(user_id.as_str()));
+        let theme = &store.application.settings.theme;
 
-        let style = store.application.settings.theme.default;
+        let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
+        let user_style = theme.users.style(user_id.as_str(), color);
+        let color = user_style.fg.unwrap_or(Color::Reset);
+
         let style = if selected {
-            // Ensure the whole item has the same color when it's selected:
-            style.fg(color).add_modifier(StyleModifier::REVERSED)
+            // Ensure the whole item has the same color as `user_style` when it's selected:
+            theme.default.fg(color).add_modifier(StyleModifier::REVERSED)
         } else {
-            style
+            theme.default
         };
-        let user_style = style.patch(super::config::user_style_from_color(color));
+
         let role_style = style.add_modifier(StyleModifier::BOLD);
+        let user_style = style.patch(user_style);
 
         let mut spans = vec![];
         let mut tags = vec![];

@@ -50,10 +50,6 @@ lazy_static! {
     };
 }
 
-pub fn user_style(user: &str) -> Style {
-    user_style_from_color(user_color(user))
-}
-
 pub fn mock_room1_message(
     content: RoomMessageEventContent,
     sender: OwnedUserId,
