@@ -9,6 +9,7 @@ pub use std::str::FromStr;
 pub use std::sync::Arc;
 pub use std::time::{Duration, Instant};
 
+pub use matrix_sdk::room_preview::RoomPreview;
 pub use matrix_sdk::ruma::events::AnySyncStateEvent;
 pub use matrix_sdk::ruma::events::receipt::ReceiptThread;
 pub use matrix_sdk::ruma::events::relation::Thread;
@@ -78,6 +79,7 @@ pub use crate::base::{
     IambId,
     IambInfo,
     IambResult,
+    JoinAction,
     MessageAction,
     ProgramAction,
     ProgramContext,

@@ -2545,6 +2545,7 @@ dependencies = [
  "nom 8.0.0",
  "notify-rust",
  "open",
+ "percent-encoding",
  "pretty_assertions",
  "ratatui",
  "ratatui-image",

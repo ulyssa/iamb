@@ -261,7 +261,7 @@ fn complete_users(input: &str, store: &ChatStore) -> Vec<String> {
 
 /// Tab completion for Matrix identifiers (usernames, room aliases, etc.)
 fn complete_matrix_names(input: &str, store: &ChatStore) -> Vec<String> {
-    let list = store.names.complete(input);
+    let list = store.aliases.complete(input);
     if !list.is_empty() {
         return list.into_iter().map(|i| i.to_string()).collect();
     }
@@ -276,7 +276,7 @@ fn complete_matrix_names(input: &str, store: &ChatStore) -> Vec<String> {
 
 /// Tab completion for known room aliases and ids.
 fn complete_room_alias_or_id(input: &str, store: &ChatStore) -> Vec<String> {
-    let list = store.names.complete(input);
+    let list = store.aliases.complete(input);
     if !list.is_empty() {
         return list.into_iter().map(|i| i.to_string()).collect();
     }
@@ -722,7 +722,7 @@ fn complete_msgbar(
             }
 
             store
-                .names
+                .aliases
                 .complete(id.as_ref())
                 .into_iter()
                 .map(|i| format!("[{}]", i))

@@ -189,8 +189,9 @@ impl StatefulWidget for Space<'_> {
     type State = SpaceState;
 
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
-        let ChatStore { rooms, names, worker, settings, collator, .. } =
-            &mut self.store.application;
+        let ChatStore {
+            rooms, aliases: names, worker, settings, collator, ..
+        } = &mut self.store.application;
         state.set_ignorecase(settings.tunables.ignorecase);
 
         let mut empty_message = None;
@@ -207,11 +208,10 @@ impl StatefulWidget for Space<'_> {
                     let mut items = members
                         .into_iter()
                         .filter_map(|id| {
-                            let (room, _, tags) = worker.get_room(id.clone()).ok()?;
-                            let room_info = std::sync::Arc::new((room, tags));
+                            let (room, _) = worker.get_room(id.clone()).ok()?;
 
                             if id != state.room_id {
-                                Some(GenericRoomItem::new(&room_info.0, rooms, names))
+                                Some(GenericRoomItem::new(&room, rooms, names))
                             } else {
                                 None
                             }

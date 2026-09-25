@@ -13,7 +13,7 @@ use std::fmt::{self};
 use feruca::Collator;
 use matrix_sdk::room::RoomMember;
 use matrix_sdk::ruma::events::room::member::MembershipState;
-use matrix_sdk::ruma::{RoomAliasId, assign};
+use matrix_sdk::ruma::{RoomAliasId, RoomOrAliasId, assign};
 use modalkit::editing::completion::CompletionMap;
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
@@ -242,7 +242,7 @@ fn room_prompt(
 ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
     match act {
         PromptAction::Submit => {
-            let room = IambId::Room(room_id.to_owned(), None);
+            let room = IambId::Room(room_id.to_owned().into(), None);
             let open = WindowAction::Switch(OpenTarget::Application(room));
             let acts = vec![(open.into(), ctx.clone())];
 
@@ -352,7 +352,7 @@ impl IambWindow {
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         let id = match self {
-            IambWindow::Room(state) => state.id(),
+            IambWindow::Room(state) => state.id(store),
             IambWindow::MemberList(_, room_id, _) => Some(&**room_id),
             IambWindow::PinnedList(_, room_id, _) => Some(&**room_id),
 
@@ -370,6 +370,19 @@ impl IambWindow {
             room_command(id, act, ctx, store).await
         } else {
             return Err(IambError::NoSelectedRoomOrSpace.into());
+        }
+    }
+
+    pub async fn join_command(
+        &mut self,
+        act: JoinAction,
+        ctx: ProgramContext,
+        store: &mut ProgramStore,
+    ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
+        if let IambWindow::Room(w) = self {
+            w.join_command(act, ctx, store).await
+        } else {
+            return Err(IambError::NoSelectedRoom.into());
         }
     }
 
@@ -472,7 +485,7 @@ impl WindowOps<IambInfo> for IambWindow {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
         let ChatStore {
             collator,
-            names,
+            aliases,
             rooms,
             settings,
             sync_info,
@@ -490,7 +503,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 let mut items = sync_info
                     .dms
                     .iter()
-                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, names))
+                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, aliases))
                     .collect::<Vec<_>>();
                 let fields = &settings.tunables.sort.dms;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
@@ -563,7 +576,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 let mut items = sync_info
                     .rooms
                     .iter()
-                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, names))
+                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, aliases))
                     .collect::<Vec<_>>();
                 let fields = &settings.tunables.sort.rooms;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
@@ -583,7 +596,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .chain(sync_info.dms.iter())
-                    .map(|room| GenericRoomItem::new(room, rooms, names))
+                    .map(|room| GenericRoomItem::new(room, rooms, aliases))
                     .collect::<Vec<_>>();
 
                 let fields = &settings.tunables.sort.chats;
@@ -604,7 +617,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .chain(sync_info.dms.iter())
-                    .map(|room| GenericRoomItem::new(room, rooms, names))
+                    .map(|room| GenericRoomItem::new(room, rooms, aliases))
                     .filter(RoomLikeItem::is_unread)
                     .collect::<Vec<_>>();
 
@@ -626,7 +639,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .chain(sync_info.dms.iter())
-                    .map(|room| GenericRoomItem::new(room, rooms, names))
+                    .map(|room| GenericRoomItem::new(room, rooms, aliases))
                     .filter(RoomLikeItem::has_mention)
                     .collect::<Vec<_>>();
 
@@ -648,7 +661,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .chain(sync_info.dms.iter())
-                    .map(|room| GenericRoomItem::new(room, rooms, names))
+                    .map(|room| GenericRoomItem::new(room, rooms, aliases))
                     .filter(RoomLikeItem::is_invite)
                     .collect::<Vec<_>>();
 
@@ -669,7 +682,7 @@ impl WindowOps<IambInfo> for IambWindow {
                 let mut items = sync_info
                     .spaces
                     .iter()
-                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, names))
+                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, aliases))
                     .collect::<Vec<_>>();
 
                 let fields = &settings.tunables.sort.spaces;
@@ -854,21 +867,28 @@ impl Window<IambInfo> for IambWindow {
 
     fn open(id: IambId, store: &mut ProgramStore) -> IambResult<Self> {
         match id {
-            IambId::Room(room_id, thread) => {
-                let (room, name, tags) = store.application.worker.get_room(room_id)?;
-                let room = RoomState::new(room, thread, name, tags, store);
+            IambId::Room(alias_id, thread) => {
+                let alias: &RoomOrAliasId = &alias_id;
+                let room_id = match <&RoomId>::try_from(alias) {
+                    Ok(room_id) => room_id,
+                    Err(alias) => {
+                        if let Some(room_id) = store.application.aliases.get(alias) {
+                            room_id
+                        } else {
+                            return Ok(RoomState::not_joined(alias_id, store).into());
+                        }
+                    },
+                };
 
-                if let Some(room_id) = room.id() {
+                if let Some(room) = store.application.worker.client.get_room(room_id) {
                     store.application.need_load.need_members(room_id.to_owned());
+
+                    let room = RoomState::new(room, thread, store);
+
+                    return Ok(room.into());
                 }
 
-                return Ok(room.into());
-            },
-            IambId::Joining(name) => {
-                return Ok(RoomState::join(name, store).into());
-            },
-            IambId::NotJoined(name) => {
-                return Ok(RoomState::not_joined(name).into());
+                return Ok(RoomState::not_joined(alias_id, store).into());
             },
             IambId::DirectList => {
                 let list = RoomListState::new(IambBufferId::DirectList, vec![]);
@@ -933,13 +953,28 @@ impl Window<IambInfo> for IambWindow {
     }
 
     fn find(name: String, store: &mut ProgramStore) -> IambResult<Self> {
-        if let Some(room) = store.application.names.get(&name) {
-            let id = IambId::Room(room.clone(), None);
-            IambWindow::open(id, store)
+        let room_alias = if let Ok(alias) = <&RoomAliasId>::try_from(name.as_str()) {
+            if let Some(room_id) = store.application.aliases.get(alias) {
+                room_id.to_owned().into()
+            } else {
+                alias.to_owned().into()
+            }
+        } else if let Ok(room_id) = <&RoomId>::try_from(name.as_str()) {
+            room_id.to_owned().into()
+        } else if let Ok(user_id) = <&UserId>::try_from(name.as_str()) {
+            if let Some(dm) = store.application.worker.client.get_dm_room(user_id) {
+                dm.room_id().to_owned().into()
+            } else {
+                store.application.worker.create_dm(user_id.to_owned())?.into()
+            }
         } else {
-            let room = RoomState::join(name, store);
-            Ok(room.into())
-        }
+            // XXX: support passing matrix uris to `:join`
+
+            return Err(UIError::Failure("Could not parse room identifier".to_string()));
+        };
+
+        let id = IambId::Room(room_alias, None);
+        IambWindow::open(id, store)
     }
 
     fn posn(index: usize, _: &mut ProgramStore) -> IambResult<Self> {
@@ -1348,7 +1383,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for PinnedItem {
                     .and_then(|(thread, _)| thread)
                     .map(ToOwned::to_owned);
 
-                let room = IambId::Room(self.room_id.clone(), thread);
+                let room = IambId::Room(self.room_id.clone().into(), thread);
                 let open = WindowAction::Switch(OpenTarget::Application(room));
                 let jump = IambAction::from(TimelineAction::GotoEvent(self.event_id.clone()));
 

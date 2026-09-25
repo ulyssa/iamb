@@ -44,11 +44,11 @@ use modalkit::env::vim::command::{CommandContext, VimCommand, VimCommandMachine}
 use modalkit::env::vim::keybindings::VimMachine;
 use modalkit::errors::UIResult;
 use modalkit::keybindings::SequenceStatus;
+use percent_encoding::{NON_ALPHANUMERIC, percent_decode, percent_encode};
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
-use url::form_urlencoded;
 
 use crate::message::poll::{
     Poll,
@@ -543,6 +543,16 @@ pub enum RoomAction {
     SetUnread(bool),
 }
 
+/// An action that joins  a room.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum JoinAction {
+    /// Join the focused room.
+    Join,
+
+    /// Knock on the focused room.
+    Knock,
+}
+
 /// An action that sends a message to a room.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SendAction {
@@ -618,11 +628,14 @@ pub enum IambAction {
     /// Perform an action on the current space.
     Space(SpaceAction),
 
-    /// Open a URL (and specify whether to join linked matrix rooms).
-    OpenLink(String, bool),
+    /// Open a URL.
+    OpenLink(String),
 
     /// Perform an action on the currently focused room.
     Room(RoomAction),
+
+    /// Join the focused room preview.
+    Join(JoinAction),
 
     /// Send a message to the currently focused room.
     Send(SendAction),
@@ -674,6 +687,12 @@ impl From<RoomAction> for IambAction {
     }
 }
 
+impl From<JoinAction> for IambAction {
+    fn from(act: JoinAction) -> Self {
+        IambAction::Join(act)
+    }
+}
+
 impl From<SendAction> for IambAction {
     fn from(act: SendAction) -> Self {
         IambAction::Send(act)
@@ -702,6 +721,7 @@ impl ApplicationAction for IambAction {
             IambAction::Verify(..) => SequenceStatus::Break,
             IambAction::VerifyRequest(..) => SequenceStatus::Break,
             IambAction::Recover(..) => SequenceStatus::Break,
+            IambAction::Join(..) => SequenceStatus::Break,
         }
     }
 
@@ -720,6 +740,7 @@ impl ApplicationAction for IambAction {
             IambAction::Verify(..) => SequenceStatus::Atom,
             IambAction::VerifyRequest(..) => SequenceStatus::Atom,
             IambAction::Recover(..) => SequenceStatus::Atom,
+            IambAction::Join(..) => SequenceStatus::Atom,
         }
     }
 
@@ -738,6 +759,7 @@ impl ApplicationAction for IambAction {
             IambAction::Verify(..) => SequenceStatus::Ignore,
             IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
             IambAction::Recover(..) => SequenceStatus::Ignore,
+            IambAction::Join(..) => SequenceStatus::Ignore,
         }
     }
 
@@ -756,6 +778,7 @@ impl ApplicationAction for IambAction {
             IambAction::Verify(..) => false,
             IambAction::VerifyRequest(..) => false,
             IambAction::Recover(..) => false,
+            IambAction::Join(..) => false,
         }
     }
 }
@@ -2273,6 +2296,7 @@ pub struct Need {
 #[derive(Default, Debug)]
 pub struct RoomNeeds {
     needs: HashMap<OwnedRoomId, Need>,
+    previews: HashSet<OwnedRoomOrAliasId>,
 }
 
 impl RoomNeeds {
@@ -2308,6 +2332,16 @@ impl RoomNeeds {
             .extend(message_needs);
     }
 
+    /// Request the load of a room preview.
+    pub fn need_preview(&mut self, room: OwnedRoomOrAliasId) {
+        self.previews.insert(room);
+    }
+
+    /// Return all requested room previews
+    pub fn preview_needs(&mut self) -> impl Iterator<Item = OwnedRoomOrAliasId> {
+        std::mem::take(&mut self.previews).into_iter()
+    }
+
     pub fn rooms(&self) -> usize {
         self.needs.len()
     }
@@ -2333,8 +2367,17 @@ pub struct ChatStore {
     /// Map of joined rooms.
     pub rooms: CompletionMap<OwnedRoomId, RoomInfo>,
 
-    /// Map of room names.
-    pub names: CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
+    /// Map of loaded room previews with their fetch time
+    pub room_previews:
+        HashMap<OwnedRoomOrAliasId, (Result<RoomPreview, matrix_sdk::Error>, Instant)>,
+
+    /// Cache of encountered `via` parameters in room links.
+    ///
+    /// This is stored here because this data is lost in the conversion to [IambId].
+    pub room_via: HashMap<OwnedRoomOrAliasId, Vec<OwnedServerName>>,
+
+    /// Map of room aliases.
+    pub aliases: CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
 
     /// Presence information for other users.
     pub presences: CompletionMap<OwnedUserId, PresenceState>,
@@ -2391,8 +2434,10 @@ impl ChatStore {
             emojis: emoji_map(),
 
             collator: Default::default(),
-            names: Default::default(),
+            aliases: Default::default(),
             rooms: Default::default(),
+            room_previews: Default::default(),
+            room_via: Default::default(),
             presences: Default::default(),
             verifications: Default::default(),
             need_load: Default::default(),
@@ -2438,7 +2483,17 @@ impl ChatStore {
     }
 
     /// Set the name and tags for a room.
-    pub fn set_room_info(&mut self, room_id: OwnedRoomId, name: String, tags: Option<Tags>) {
+    pub fn set_room_info(
+        &mut self,
+        room_id: OwnedRoomId,
+        name: String,
+        tags: Option<Tags>,
+        aliases: Vec<OwnedRoomAliasId>,
+    ) {
+        for alias in aliases {
+            self.aliases.insert(alias, room_id.clone());
+        }
+
         let info = self.rooms.get_or_default(room_id);
         info.name = name.into();
         info.tags = tags;
@@ -2451,13 +2506,7 @@ impl ApplicationStore for ChatStore {}
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IambId {
     /// A Matrix room, with an optional thread to show.
-    Room(OwnedRoomId, Option<OwnedEventId>),
-
-    /// A Matrix room that we're currently in the middle of joining.
-    Joining(String),
-
-    /// A Matrix room that we haven't joined, and aren't currently joining.
-    NotJoined(String),
+    Room(OwnedRoomOrAliasId, Option<OwnedEventId>),
 
     /// The `:dms` window.
     DirectList,
@@ -2493,38 +2542,16 @@ pub enum IambId {
     InvitesList,
 }
 
-/// Encode the room name for a [IambId::Joining] or [IambId::NotJoined] window URL.
-///
-/// Note that since these names come straight from the user's argument to `:join`,
-/// they are likely room aliases containing characters like `#` that we should
-/// escape before putting them into the URL, so we can later reparse it. They can
-/// technically contain anything that the user tried to pass to `:join`.
-fn room_query(room: &str) -> String {
-    form_urlencoded::Serializer::new(String::new())
-        .append_pair("room", room)
-        .finish()
-}
-
-/// Pull the room name back out of the query parameter for `iamb://joining` or
-/// `iamb://not-joined`.
-fn query_room(url: &Url) -> Option<String> {
-    url.query_pairs().find_map(|(k, v)| (k == "room").then(|| v.into_owned()))
-}
-
 impl Display for IambId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IambId::Room(room_id, None) => {
-                write!(f, "iamb://room/{room_id}")
+            IambId::Room(alias, None) => {
+                let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
+                write!(f, "iamb://room/{}", encoded)
             },
-            IambId::Room(room_id, Some(thread)) => {
-                write!(f, "iamb://room/{room_id}/threads/{thread}")
-            },
-            IambId::Joining(room) => {
-                write!(f, "iamb://joining?{}", room_query(room))
-            },
-            IambId::NotJoined(room) => {
-                write!(f, "iamb://not-joined?{}", room_query(room))
+            IambId::Room(alias, Some(thread)) => {
+                let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
+                write!(f, "iamb://room/{}/threads/{thread}", encoded)
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -2594,16 +2621,18 @@ impl Visitor<'_> for IambIdVisitor {
                 };
 
                 match *path.collect::<Vec<_>>().as_slice() {
-                    [room_id] => {
-                        let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
-                            return Err(E::custom("Invalid room identifier"));
+                    [alias] => {
+                        let decoded = percent_decode(alias.as_bytes()).decode_utf8_lossy();
+                        let Ok(room_id) = OwnedRoomOrAliasId::try_from(decoded.as_ref()) else {
+                            return Err(E::custom(format!("Invalid room identifier: {decoded:?}")));
                         };
 
                         Ok(IambId::Room(room_id, None))
                     },
-                    [room_id, "threads", thread_root] => {
-                        let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
-                            return Err(E::custom("Invalid room identifier"));
+                    [alias, "threads", thread_root] => {
+                        let decoded = percent_decode(alias.as_bytes()).decode_utf8_lossy();
+                        let Ok(room_id) = OwnedRoomOrAliasId::try_from(decoded.as_ref()) else {
+                            return Err(E::custom("Invalid room identifier: {decoded:?}"));
                         };
 
                         let Ok(thread_root) = OwnedEventId::try_from(thread_root) else {
@@ -2621,20 +2650,6 @@ impl Visitor<'_> for IambIdVisitor {
                     },
                     _ => return Err(E::custom("Invalid iamb window URL")),
                 }
-            },
-            Some("joining") => {
-                let Some(room) = query_room(&url) else {
-                    return Err(E::custom("iamb://joining requires a room parameter"));
-                };
-
-                Ok(IambId::Joining(room))
-            },
-            Some("not-joined") => {
-                let Some(room) = query_room(&url) else {
-                    return Err(E::custom("iamb://not-joined requires a room parameter"));
-                };
-
-                Ok(IambId::NotJoined(room))
             },
             Some("members") => {
                 let Some(path) = url.path_segments() else {
@@ -2800,7 +2815,9 @@ impl IambBufferId {
     pub fn to_window(&self) -> Option<IambId> {
         let id = match self {
             IambBufferId::Command(_) => return None,
-            IambBufferId::Room(room, thread, _) => IambId::Room(room.clone(), thread.clone()),
+            IambBufferId::Room(room, thread, _) => {
+                IambId::Room(room.clone().into(), thread.clone())
+            },
             IambBufferId::DirectList => IambId::DirectList,
             IambBufferId::MemberList(room) => IambId::MemberList(room.clone()),
             IambBufferId::PinnedList(room) => IambId::PinnedList(room.clone()),
@@ -3132,35 +3149,6 @@ pub mod tests {
     }
 
     #[test]
-    fn test_unjoined_window_ids() {
-        // Room names come from the user can contain characters that need escaping:
-        for name in [
-            "#foo:example.com",
-            "!abc123:example.com",
-            "@user:example.com",
-            "a b&c=d?e#f",
-        ] {
-            for id in [IambId::Joining(name.into()), IambId::NotJoined(name.into())] {
-                let json = serde_json::to_string(&id).unwrap();
-                assert_eq!(serde_json::from_str::<IambId>(&json).unwrap(), id);
-            }
-        }
-
-        assert_eq!(
-            IambId::Joining("#foo:example.com".into()).to_string(),
-            "iamb://joining?room=%23foo%3Aexample.com"
-        );
-        assert_eq!(
-            IambId::NotJoined("#foo:example.com".into()).to_string(),
-            "iamb://not-joined?room=%23foo%3Aexample.com"
-        );
-
-        // A window URL without a room name isn't valid and wasn't written by us:
-        assert!(serde_json::from_str::<IambId>("\"iamb://joining\"").is_err());
-        assert!(serde_json::from_str::<IambId>("\"iamb://not-joined\"").is_err());
-    }
-
-    #[test]
     fn test_need_load() {
         let room_id = TEST_ROOM1_ID.clone();
 
@@ -3215,6 +3203,20 @@ pub mod tests {
         assert_eq!(thread, None);
         assert_eq!(key, &*MSG3_KEY);
         assert!(info.get_message_location(&unloaded).is_none());
+    }
+
+    #[test]
+    fn test_alias_window_id() {
+        let room_id = TEST_ROOM1_ALIAS.clone();
+        let id = IambId::Room(room_id.into(), None);
+
+        // Hash gets replaced during encoding:
+        let exp = "iamb://room/%23room1%3Aexample%2Ecom";
+        assert_eq!(id.to_string(), exp);
+
+        // Percent encoding turns back into hash during decoding:
+        let parsed: IambId = serde_json::from_str(&format!("{exp:?}")).unwrap();
+        assert_eq!(parsed, id);
     }
 
     #[test]
