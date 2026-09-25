@@ -158,6 +158,7 @@ pub fn mock_tunables() -> TunableValues {
         input_prompt: None,
         log_level: "warn".into(),
         max_log_files: 7,
+        message_html_display: true,
         message_shortcode_display: false,
         normal_after_send: true,
         proxy: Proxy::default().values(),

@@ -15,6 +15,7 @@ ignorecase = false
 input_prompt = "❯ "
 log_level = "warn"
 members_split = "vertical"
+message_html_display = true
 message_shortcode_display = false
 open_command = ["my-open", "--file"]
 reaction_display = true

@@ -774,6 +774,7 @@ pub struct TunableValues {
     pub ignorecase: bool,
     pub log_level: String,
     pub max_log_files: usize,
+    pub message_html_display: bool,
     pub message_shortcode_display: bool,
     pub normal_after_send: bool,
     pub proxy: ProxyValues,
@@ -834,6 +835,7 @@ pub struct Tunables {
     pub ignorecase: Option<bool>,
     pub log_level: Option<String>,
     pub max_log_files: Option<usize>,
+    pub message_html_display: Option<bool>,
     pub message_shortcode_display: Option<bool>,
     pub normal_after_send: Option<bool>,
     pub reaction_display: Option<bool>,
@@ -884,6 +886,7 @@ impl Tunables {
             ignorecase: self.ignorecase.or(other.ignorecase),
             log_level: self.log_level.or(other.log_level),
             max_log_files: self.max_log_files.or(other.max_log_files),
+            message_html_display: self.message_html_display.or(other.message_html_display),
             message_shortcode_display: self
                 .message_shortcode_display
                 .or(other.message_shortcode_display),
@@ -935,6 +938,7 @@ impl Tunables {
             log_level: self.log_level.unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_owned()),
             ignorecase: self.ignorecase.unwrap_or(false),
             max_log_files: self.max_log_files.unwrap_or(7),
+            message_html_display: self.message_html_display.unwrap_or(true),
             message_shortcode_display: self.message_shortcode_display.unwrap_or(false),
             normal_after_send: self.normal_after_send.unwrap_or(false),
             reaction_display: self.reaction_display.unwrap_or(true),
