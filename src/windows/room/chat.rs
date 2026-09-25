@@ -1340,8 +1340,10 @@ impl StatefulWidget for Chat<'_> {
         tbox.render(textarea, buf, &mut state.tbox);
 
         // Render the message scrollback.
+        let scrollback_style = self.store.application.settings.theme.timeline.default;
         let scrollback_focused = state.focus.is_scrollback() && self.focused;
         let scrollback = Scrollback::new(self.store)
+            .style(scrollback_style)
             .focus(scrollback_focused)
             .room_focus(self.focused);
         scrollback.render(scrollarea, buf, &mut state.scrollback);

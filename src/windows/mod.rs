@@ -481,6 +481,9 @@ impl WindowOps<IambInfo> for IambWindow {
             ..
         } = &mut store.application;
 
+        let default_list_style = settings.theme.default;
+        let default_rooms_style = settings.theme.rooms.default;
+
         match self {
             IambWindow::Room(state) => state.draw(area, buf, focused, store),
             IambWindow::DirectList(state) => {
@@ -499,6 +502,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("No direct messages yet!")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_rooms_style)
                     .render(area, buf, state);
             },
             IambWindow::MemberList(state, room_id, last_fetch) => {
@@ -524,6 +528,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("No users here yet!")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_list_style)
                     .render(area, buf, state);
             },
             IambWindow::PinnedList(state, room_id, last_fetch) => {
@@ -551,6 +556,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("No pinned messages in this room")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_list_style)
                     .render(area, buf, state);
             },
             IambWindow::RoomList(state) => {
@@ -569,6 +575,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("You haven't joined any rooms yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_rooms_style)
                     .render(area, buf, state);
             },
             IambWindow::ChatList(state) => {
@@ -589,6 +596,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("You do not have rooms or dms yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_rooms_style)
                     .render(area, buf, state);
             },
             IambWindow::UnreadList(state) => {
@@ -610,6 +618,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("You do not have any unreads yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_rooms_style)
                     .render(area, buf, state);
             },
             IambWindow::MentionsList(state) => {
@@ -631,6 +640,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("You do not have any unread mentions yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_rooms_style)
                     .render(area, buf, state);
             },
             IambWindow::InvitesList(state) => {
@@ -652,6 +662,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("You do not have any open invites")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_rooms_style)
                     .render(area, buf, state);
             },
             IambWindow::SpaceList(state) => {
@@ -671,6 +682,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("You haven't joined any spaces yet")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_rooms_style)
                     .render(area, buf, state);
             },
             IambWindow::VerifyList(state) => {
@@ -693,6 +705,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .empty_message("No in-progress verifications")
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
+                    .style(default_list_style)
                     .render(area, buf, state);
             },
             IambWindow::Welcome(state) => state.draw(area, buf, focused, store),

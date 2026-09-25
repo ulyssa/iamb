@@ -3793,9 +3793,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.28"
+version = "0.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b8a62517886d7f5d7b476ac8458805073df47941d99861de81347861f4d03d3e"
+checksum = "74f52c73943f474277b3151ed970ca26457547d62fafe92d0f2806344ed9a733"
 dependencies = [
  "anymap2",
  "arboard",
@@ -3817,9 +3817,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit-ratatui"
-version = "0.0.28"
+version = "0.0.29"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2fd45bce81ff69f3cb2126b0d59aafe74c3982a2f8be68f49dc14f3c7c180629"
+checksum = "09874ea261c8c7859483de20f71b9e9e3c71b71f31d1b07d30a207ea633441c6"
 dependencies = [
  "crossterm 0.29.0",
  "intervaltree",

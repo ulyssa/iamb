@@ -257,6 +257,9 @@ struct Application {
     /// State for the Matrix client, editing, etc.
     store: AsyncProgramStore,
 
+    /// Clone of the currently selected theme.
+    theme: Arc<ThemeValues>,
+
     /// UI state (open tabs, command bar, etc.) to use when rendering.
     screen: ScreenState<IambWindow, IambInfo>,
 
@@ -287,6 +290,7 @@ impl Application {
     ) -> IambResult<Application> {
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend)?;
+        let theme = settings.theme.clone();
 
         let mut bindings = crate::keybindings::setup_keybindings(&settings.tunables);
         settings.setup(&mut bindings);
@@ -305,6 +309,7 @@ impl Application {
             store,
             worker,
             terminal,
+            theme,
             bindings,
             actstack,
             screen,
@@ -427,7 +432,8 @@ impl Application {
                             self.handle_info(info);
                         },
                         Err(e) => {
-                            self.screen.push_error(e);
+                            drop(store);
+                            self.handle_error(e);
                         },
                     }
                 },
@@ -457,7 +463,8 @@ impl Application {
                             self.handle_info(info);
                         },
                         Err(e) => {
-                            self.screen.push_error(e);
+                            drop(store);
+                            self.handle_error(e);
                         },
                     }
                 },
@@ -829,13 +836,17 @@ impl Application {
     fn handle_info(&mut self, info: InfoMessage) {
         match info {
             InfoMessage::Message(info) => {
-                self.screen.push_info(info);
+                self.screen.push_message(info, self.theme.cmdbar.info);
             },
             InfoMessage::Pager(text) => {
                 let pager = Box::new(Pager::new(text, vec![]));
                 self.bindings.run_dialog(pager);
             },
         }
+    }
+
+    fn handle_error(&mut self, err: impl ToString) {
+        self.screen.push_message(err, self.theme.cmdbar.error);
     }
 
     pub async fn run(&mut self) -> Result<(), std::io::Error> {
@@ -871,7 +882,7 @@ impl Application {
                         continue;
                     },
                     Err(e) => {
-                        self.screen.push_error(e);
+                        self.handle_error(e);
 
                         // Skip processing any more keypress Actions until the next key.
                         keyskip = true;
