@@ -493,22 +493,42 @@ pub struct ThemeMessageBarValues {
 struct ThemeCommandBar {
     #[serde(default)]
     default: Stylable,
+
+    #[serde(default)]
+    prompt: Stylable,
+
+    #[serde(default)]
+    info: Stylable,
+
+    #[serde(default)]
+    error: Stylable,
 }
 
 impl ThemeCommandBar {
     fn merge(self, other: Self) -> Self {
-        Self { default: self.default.merge(other.default) }
+        Self {
+            default: self.default.merge(other.default),
+            prompt: self.prompt.merge(other.prompt),
+            info: self.info.merge(other.info),
+            error: self.error.merge(other.error),
+        }
     }
 
     fn values(self, base: Style) -> ThemeCommandBarValues {
         let default = base.patch(self.default);
-        ThemeCommandBarValues { default }
+        let prompt = default.patch(self.prompt);
+        let info = default.patch(self.info);
+        let error = default.patch(self.error);
+        ThemeCommandBarValues { default, prompt, info, error }
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct ThemeCommandBarValues {
     pub default: Style,
+    pub prompt: Style,
+    pub info: Style,
+    pub error: Style,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
