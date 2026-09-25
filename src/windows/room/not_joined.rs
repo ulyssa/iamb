@@ -34,10 +34,7 @@ fn preview_join_rule(
         },
         Some(JoinRuleSummary::KnockRestricted(summary)) => {
             if can_join_restricted(summary, &store.application.sync_info) {
-                (
-                    "This room is knock-restricted to members of a room you are in.",
-                    Some(":knock"),
-                )
+                ("This room is knock-restricted to members of a room you are in.", Some(":knock"))
             } else {
                 ("This room is knock-restricted to members of a room you are not in.", None)
             }

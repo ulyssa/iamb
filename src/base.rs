@@ -44,6 +44,7 @@ use modalkit::env::vim::command::{CommandContext, VimCommand, VimCommandMachine}
 use modalkit::env::vim::keybindings::VimMachine;
 use modalkit::errors::UIResult;
 use modalkit::keybindings::SequenceStatus;
+use percent_encoding::{NON_ALPHANUMERIC, percent_decode, percent_encode};
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
@@ -2544,11 +2545,13 @@ pub enum IambId {
 impl Display for IambId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IambId::Room(room_id, None) => {
-                write!(f, "iamb://room/{room_id}")
+            IambId::Room(alias, None) => {
+                let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
+                write!(f, "iamb://room/{}", encoded)
             },
-            IambId::Room(room_id, Some(thread)) => {
-                write!(f, "iamb://room/{room_id}/threads/{thread}")
+            IambId::Room(alias, Some(thread)) => {
+                let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
+                write!(f, "iamb://room/{}/threads/{thread}", encoded)
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -2618,23 +2621,25 @@ impl Visitor<'_> for IambIdVisitor {
                 };
 
                 match *path.collect::<Vec<_>>().as_slice() {
-                    [room_id] => {
-                        let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
-                            return Err(E::custom("Invalid room identifier"));
+                    [alias] => {
+                        let decoded = percent_decode(alias.as_bytes()).decode_utf8_lossy();
+                        let Ok(room_id) = OwnedRoomOrAliasId::try_from(decoded.as_ref()) else {
+                            return Err(E::custom(format!("Invalid room identifier: {decoded:?}")));
                         };
 
-                        Ok(IambId::Room(room_id.into(), None))
+                        Ok(IambId::Room(room_id, None))
                     },
-                    [room_id, "threads", thread_root] => {
-                        let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
-                            return Err(E::custom("Invalid room identifier"));
+                    [alias, "threads", thread_root] => {
+                        let decoded = percent_decode(alias.as_bytes()).decode_utf8_lossy();
+                        let Ok(room_id) = OwnedRoomOrAliasId::try_from(decoded.as_ref()) else {
+                            return Err(E::custom("Invalid room identifier: {decoded:?}"));
                         };
 
                         let Ok(thread_root) = OwnedEventId::try_from(thread_root) else {
                             return Err(E::custom("Invalid thread root identifier"));
                         };
 
-                        Ok(IambId::Room(room_id.into(), Some(thread_root)))
+                        Ok(IambId::Room(room_id, Some(thread_root)))
                     },
                     [room_id, "pinned"] => {
                         let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
@@ -3198,6 +3203,20 @@ pub mod tests {
         assert_eq!(thread, None);
         assert_eq!(key, &*MSG3_KEY);
         assert!(info.get_message_location(&unloaded).is_none());
+    }
+
+    #[test]
+    fn test_alias_window_id() {
+        let room_id = TEST_ROOM1_ALIAS.clone();
+        let id = IambId::Room(room_id.into(), None);
+
+        // Hash gets replaced during encoding:
+        let exp = "iamb://room/%23room1%3Aexample%2Ecom";
+        assert_eq!(id.to_string(), exp);
+
+        // Percent encoding turns back into hash during decoding:
+        let parsed: IambId = serde_json::from_str(&format!("{exp:?}")).unwrap();
+        assert_eq!(parsed, id);
     }
 
     #[test]
