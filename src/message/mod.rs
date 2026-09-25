@@ -1401,7 +1401,7 @@ impl Message {
         }
 
         if let Some(html) = &self.html &&
-            settings.tunables.message_html_display
+            settings.tunables.message_formatted_display
         {
             text += html.to_text(width, style, settings, info);
         } else {
@@ -2052,11 +2052,11 @@ pub mod tests {
         };
 
         // By default, the formatted HTML body is rendered.
-        assert!(settings.tunables.message_html_display);
+        assert!(settings.tunables.message_formatted_display);
         assert_eq!(render(&settings), "hello <world>");
 
         // When disabled, the plain text body is shown exactly as it was sent.
-        settings.tunables.message_html_display = false;
+        settings.tunables.message_formatted_display = false;
         assert_eq!(render(&settings), "**hello** <world>");
     }
 }
