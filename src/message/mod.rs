@@ -1400,7 +1400,9 @@ impl Message {
             text += wrapped_text(filename, width, style);
         }
 
-        if let Some(html) = &self.html {
+        if let Some(html) = &self.html &&
+            settings.tunables.message_formatted_display
+        {
             text += html.to_text(width, style, settings, info);
         } else {
             let mut msg = self.event.body();
@@ -2021,5 +2023,40 @@ pub mod tests {
         info.user_receipts.remove(&ReceiptThread::Thread(root));
         info.set_receipt(ReceiptThread::Main, user_id, MSG1_EVID.clone());
         assert!(!msg.show_trackbar(Some(&prev), &info, &settings));
+    }
+
+    #[test]
+    fn test_show_msg_html_display() {
+        let mut settings = mock_settings();
+        let previews = PreviewManager::new(&settings);
+        let info = mock_room();
+
+        let content = RoomMessageEventContent::text_html(
+            "**hello** <world>",
+            "<strong>hello</strong> &lt;world&gt;",
+        );
+        let msg = mock_room1_message(content, TEST_USER1.clone(), MSG1_KEY.clone());
+
+        let render = |settings: &ApplicationSettings| -> String {
+            let (text, _) = msg.show_msg(60, Style::default(), settings, &previews, &info);
+
+            let s: String = text
+                .lines
+                .iter()
+                .flat_map(|line| line.spans.iter())
+                .map(|span| span.content.as_ref())
+                .collect();
+
+            // The HTML renderer pads lines out to the full width.
+            s.trim_end().to_string()
+        };
+
+        // By default, the formatted HTML body is rendered.
+        assert!(settings.tunables.message_formatted_display);
+        assert_eq!(render(&settings), "hello <world>");
+
+        // When disabled, the plain text body is shown exactly as it was sent.
+        settings.tunables.message_formatted_display = false;
+        assert_eq!(render(&settings), "**hello** <world>");
     }
 }
