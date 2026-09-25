@@ -555,7 +555,11 @@ impl ScrollbackState {
 
 impl WindowOps<IambInfo> for ScrollbackState {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
-        Scrollback::new(store).focus(focused).render(area, buf, self)
+        let scrollback_style = store.application.settings.theme.timeline.default;
+        Scrollback::new(store)
+            .style(scrollback_style)
+            .focus(focused)
+            .render(area, buf, self)
     }
 
     fn dup(&self, _: &mut ProgramStore) -> Self {
@@ -1257,13 +1261,25 @@ fn render_jump_to_recent(area: Rect, buf: &mut Buffer, focused: bool) -> Rect {
 
 pub struct Scrollback<'a> {
     room_focused: bool,
+    style: Style,
     focused: bool,
     store: &'a mut ProgramStore,
 }
 
 impl<'a> Scrollback<'a> {
     pub fn new(store: &'a mut ProgramStore) -> Self {
-        Scrollback { room_focused: false, focused: false, store }
+        Scrollback {
+            room_focused: false,
+            focused: false,
+            style: Style::default(),
+            store,
+        }
+    }
+
+    /// Set the default style for the cells within the room scrollback.
+    pub fn style(mut self, style: Style) -> Self {
+        self.style = style;
+        self
     }
 
     /// Indicate whether the room window is currently focused, regardless of whether the scrollback
@@ -1284,6 +1300,10 @@ impl StatefulWidget for Scrollback<'_> {
     type State = ScrollbackState;
 
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
+        // Ensure the whole area gets the style, even where we don't write characters:
+        buf.set_style(area, self.style);
+
+        // Keep track of the upper left corner for setting the cursor location:
         state.term_cursor = (area.left(), area.top());
 
         let info = self.store.application.rooms.get_or_default(state.room_id.clone());
@@ -1427,11 +1447,10 @@ impl StatefulWidget for Scrollback<'_> {
             state.viewctx.corner.text_row = *row;
         }
 
-        let mut y = area.top();
         let x = area.left();
 
-        for (key, row, txt, line_preview, includes_date_line, includes_trackbar) in
-            lines.into_iter()
+        for (y, (key, row, txt, line_preview, includes_date_line, includes_trackbar)) in
+            (area.top()..).zip(lines)
         {
             let _ = buf.set_line(x, y, &txt, area.width);
             image_previews.extend(
@@ -1445,8 +1464,6 @@ impl StatefulWidget for Scrollback<'_> {
             {
                 state.term_cursor = (x, y);
             }
-
-            y += 1;
         }
 
         let msg_width = Message::message_column_width(&state.viewctx, settings);

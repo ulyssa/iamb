@@ -847,40 +847,47 @@ impl RoomState {
     }
 
     pub fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
+        let theme = &store.application.settings.theme;
+        let default_style = theme.windows.default;
+        let title_style = theme.windows.title;
+
         let Some(room) = self.room() else {
             if let RoomState::NotJoined(nj) = self {
                 return nj.get_title(store);
+            } else {
+                return Line::styled("Unknown Room", title_style);
             }
-            return Line::from("Unknown Room");
         };
 
         let room_id = room.room_id();
         let title = store.application.get_room_title(room_id);
-        let style = Style::default().add_modifier(StyleModifier::BOLD);
         let mut spans = vec![];
 
         let encryption_settings = &store.application.settings.tunables.encryption;
-        let encryption_indicator = encryption_settings
-            .get_indicator(EncryptionIndicatorLocation::TITLE, room.encryption_state());
+        let encryption_indicator = encryption_settings.get_indicator(
+            EncryptionIndicatorLocation::TITLE,
+            room.encryption_state(),
+            theme,
+        );
         spans.extend(encryption_indicator);
-        spans.push(Span::raw(" "));
+        spans.push(Span::styled(" ", default_style));
 
         if let RoomState::Chat(chat) = self &&
             chat.thread().is_some()
         {
-            spans.push("Thread in ".into());
+            spans.push(Span::styled("Thread in ", default_style));
         }
 
-        spans.push(Span::styled(title, style));
+        spans.push(Span::styled(title, title_style));
 
         match room.topic() {
             Some(desc) if !desc.is_empty() => {
-                spans.push(" (".into());
-                spans.push(desc.into());
-                spans.push(")".into());
+                spans.push(Span::styled(" (", default_style));
+                spans.push(Span::styled(desc, default_style));
+                spans.push(Span::styled(")", default_style));
             },
             _ => {
-                spans.push(" ".into());
+                spans.push(Span::styled(" ", default_style));
             },
         }
 

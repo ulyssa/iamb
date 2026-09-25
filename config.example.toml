@@ -88,3 +88,10 @@ split = [
 cache = "/home/user/.cache/iamb/"
 logs = "/home/user/.local/share/iamb/logs/"
 downloads = "/home/user/Downloads/"
+
+[theme]
+timeline.state.color = "cyan"
+timeline.redacted.color = "245" # light gray
+timeline.redacted.modifiers = ["bold"] # make redacted messages bold
+# How to use truecolor for terminals that support it:
+# rooms.unread.color = "#ff55bb" # pink

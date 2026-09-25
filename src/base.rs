@@ -2857,7 +2857,6 @@ pub mod tests {
     use ratatui::style::Color;
     use serde_json::{Map, Value};
 
-    use crate::config::user_style_from_color;
     use crate::tests::*;
 
     fn mock_room_message_event(
@@ -3070,6 +3069,7 @@ pub mod tests {
     fn test_typing_spans() {
         let mut info = RoomInfo::default();
         let settings = mock_settings();
+        let theme = &settings.theme;
 
         let users0 = vec![];
         let users1 = vec![TEST_USER1.clone()];
@@ -3103,7 +3103,7 @@ pub mod tests {
         assert_eq!(
             info.get_typing_spans(&settings),
             Line::from(vec![
-                Span::styled("@user1:example.com", user_style("@user1:example.com")),
+                Span::styled("@user1:example.com", theme.users.style("@user1:example.com", None)),
                 Span::from(" is typing...")
             ])
         );
@@ -3114,9 +3114,9 @@ pub mod tests {
         assert_eq!(
             info.get_typing_spans(&settings),
             Line::from(vec![
-                Span::styled("@user1:example.com", user_style("@user1:example.com")),
+                Span::styled("@user1:example.com", theme.users.style("@user1:example.com", None)),
                 Span::raw(" and "),
-                Span::styled("@user2:example.com", user_style("@user2:example.com")),
+                Span::styled("@user2:example.com", theme.users.style("@user2:example.com", None)),
                 Span::raw(" are typing...")
             ])
         );
@@ -3137,7 +3137,7 @@ pub mod tests {
         assert_eq!(
             info.get_typing_spans(&settings),
             Line::from(vec![
-                Span::styled("USER 5", user_style_from_color(Color::Black)),
+                Span::styled("USER 5", Style::default().fg(Color::Black).bold()),
                 Span::from(" is typing...")
             ])
         );

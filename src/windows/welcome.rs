@@ -1,6 +1,6 @@
 //! Welcome Window
 
-use modalkit_ratatui::textbox::TextBoxState;
+use modalkit_ratatui::textbox::{TextBox, TextBoxState};
 
 use crate::prelude::*;
 
@@ -45,9 +45,12 @@ impl TerminalCursor for WelcomeState {
 }
 
 impl WindowOps<IambInfo> for WelcomeState {
-    fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
+    fn draw(&mut self, area: Rect, buf: &mut Buffer, _: bool, store: &mut ProgramStore) {
         self.tbox.set_ignorecase(store.application.settings.tunables.ignorecase);
-        self.tbox.draw(area, buf, focused, store)
+
+        // Render textbox:
+        let style = store.application.settings.theme.default;
+        TextBox::new().style(style).render(area, buf, &mut self.tbox)
     }
 
     fn dup(&self, store: &mut ProgramStore) -> Self {

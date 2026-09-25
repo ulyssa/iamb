@@ -253,6 +253,25 @@ impl Table {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum ThemeSelector {
+    Strong,
+    Emphasis,
+    Strikethrough,
+    Underlined,
+}
+
+impl ThemeSelector {
+    fn style(&self, settings: &ApplicationSettings) -> Style {
+        match self {
+            Self::Strong => settings.theme.messages.strong,
+            Self::Emphasis => settings.theme.messages.emphasis,
+            Self::Strikethrough => settings.theme.messages.strikethrough,
+            Self::Underlined => settings.theme.messages.underlined,
+        }
+    }
+}
+
 /// A processed HTML element that we can render to the terminal.
 #[derive(Debug, Clone)]
 pub enum StyleTreeNode {
@@ -267,6 +286,7 @@ pub enum StyleTreeNode {
     Paragraph(Box<StyleTreeNode>),
     Pre(Box<StyleTreeNode>),
     Ruler,
+    Themed(Box<StyleTreeNode>, ThemeSelector),
     Style(Box<StyleTreeNode>, Style),
     Table(Table),
     Text(Cow<'static, str>),
@@ -301,7 +321,8 @@ impl StyleTreeNode {
             StyleTreeNode::Header(child, _) |
             StyleTreeNode::Paragraph(child) |
             StyleTreeNode::Pre(child) |
-            StyleTreeNode::Style(child, _) => {
+            StyleTreeNode::Style(child, _) |
+            StyleTreeNode::Themed(child, _) => {
                 child.gather_links(urls);
             },
 
@@ -368,7 +389,13 @@ impl StyleTreeNode {
                 }
             },
             StyleTreeNode::Code(child, _) => {
+                let style = style.patch(printer.settings().theme.messages.code);
+
+                let old_style = printer.replace_base_style(style);
+
                 child.print(printer, style);
+
+                printer.replace_base_style(old_style);
             },
             StyleTreeNode::Header(child, level) => {
                 let style = style.add_modifier(StyleModifier::BOLD);
@@ -383,8 +410,8 @@ impl StyleTreeNode {
             StyleTreeNode::Image(None) => {},
             StyleTreeNode::Image(Some(alt)) => {
                 printer.commit();
-                printer.push_str("Image Alt: ", Style::default());
-                printer.push_str(alt, Style::default());
+                printer.push_str("Image Alt: ", style);
+                printer.push_str(alt, style);
                 printer.commit();
             },
             StyleTreeNode::List(children, lt) => {
@@ -415,9 +442,11 @@ impl StyleTreeNode {
             },
             StyleTreeNode::Pre(child) => {
                 let mut subp = printer.sub(2).literal(true);
+                let code_style = style.patch(subp.settings().theme.messages.code_block);
+                let _ = subp.replace_base_style(code_style);
                 let subw = subp.width();
 
-                child.print(&mut subp, style);
+                child.print(&mut subp, code_style);
 
                 printer.commit();
                 printer.push_line(
@@ -462,6 +491,10 @@ impl StyleTreeNode {
                 printer.push_str(s.as_ref(), style);
             },
 
+            StyleTreeNode::Themed(child, patch) => {
+                let patch = patch.style(printer.settings());
+                child.print(printer, style.patch(patch))
+            },
             StyleTreeNode::Style(child, patch) => child.print(printer, style.patch(*patch)),
             StyleTreeNode::Sequence(children) => {
                 for child in children {
@@ -765,9 +798,7 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                 // Style change
                 "b" | "strong" => {
                     let c = c2t(&node.children.borrow(), state);
-                    let s = Style::default().add_modifier(StyleModifier::BOLD);
-
-                    StyleTreeNode::Style(c, s)
+                    StyleTreeNode::Themed(c, ThemeSelector::Strong)
                 },
                 "font" => {
                     let c = c2t(&node.children.borrow(), state);
@@ -777,9 +808,7 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                 },
                 "em" | "i" => {
                     let c = c2t(&node.children.borrow(), state);
-                    let s = Style::default().add_modifier(StyleModifier::ITALIC);
-
-                    StyleTreeNode::Style(c, s)
+                    StyleTreeNode::Themed(c, ThemeSelector::Emphasis)
                 },
                 "span" => {
                     let c = c2t(&node.children.borrow(), state);
@@ -789,15 +818,11 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                 },
                 "del" | "s" | "strike" => {
                     let c = c2t(&node.children.borrow(), state);
-                    let s = Style::default().add_modifier(StyleModifier::CROSSED_OUT);
-
-                    StyleTreeNode::Style(c, s)
+                    StyleTreeNode::Themed(c, ThemeSelector::Strikethrough)
                 },
                 "u" => {
                     let c = c2t(&node.children.borrow(), state);
-                    let s = Style::default().add_modifier(StyleModifier::UNDERLINED);
-
-                    StyleTreeNode::Style(c, s)
+                    StyleTreeNode::Themed(c, ThemeSelector::Underlined)
                 },
 
                 // Lists
@@ -1446,6 +1471,7 @@ pub mod tests {
     fn test_pre_tag() {
         let info = mock_room();
         let settings = mock_settings();
+        let code_style = settings.theme.messages.code_block;
         let s = concat!(
             "<pre><code class=\"language-rust\">",
             "fn hello() -&gt; usize {\n",
@@ -1469,19 +1495,19 @@ pub mod tests {
             text.lines[1],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("fn"),
-                Span::raw(" "),
-                Span::raw("hello"),
-                Span::raw("("),
-                Span::raw(")"),
-                Span::raw(" "),
-                Span::raw("-"),
-                Span::raw(">"),
-                Span::raw(" "),
-                Span::raw("usize"),
-                Span::raw(" "),
-                Span::raw("{"),
-                Span::raw("  "),
+                Span::styled("fn", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("hello", code_style),
+                Span::styled("(", code_style),
+                Span::styled(")", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("-", code_style),
+                Span::styled(">", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("usize", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("{", code_style),
+                Span::styled("  ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1489,13 +1515,13 @@ pub mod tests {
             text.lines[2],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw(" "),
-                Span::raw("   "),
-                Span::raw("/"),
-                Span::raw("/"),
-                Span::raw(" "),
-                Span::raw("weired"),
-                Span::raw("          "),
+                Span::styled(" ", code_style),
+                Span::styled("   ", code_style),
+                Span::styled("/", code_style),
+                Span::styled("/", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("weired", code_style),
+                Span::styled("          ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1503,12 +1529,12 @@ pub mod tests {
             text.lines[3],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("    "),
-                Span::raw("return"),
-                Span::raw(" "),
-                Span::raw("5"),
-                Span::raw(";"),
-                Span::raw("          "),
+                Span::styled("    ", code_style),
+                Span::styled("return", code_style),
+                Span::styled(" ", code_style),
+                Span::styled("5", code_style),
+                Span::styled(";", code_style),
+                Span::styled("          ", code_style),
                 Span::raw(line::VERTICAL)
             ])
         );
@@ -1516,8 +1542,8 @@ pub mod tests {
             text.lines[4],
             Line::from(vec![
                 Span::raw(line::VERTICAL),
-                Span::raw("}"),
-                Span::raw(" ".repeat(22)),
+                Span::styled("}", code_style),
+                Span::styled(" ".repeat(22), code_style),
                 Span::raw(line::VERTICAL)
             ])
         );

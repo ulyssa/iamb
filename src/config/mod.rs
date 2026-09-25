@@ -1,11 +1,10 @@
 //! # Logic for loading and validating application configuration
 
-use std::collections::hash_map::DefaultHasher;
 use std::env;
 use std::fs::File;
-use std::hash::{Hash, Hasher};
 use std::io::{BufReader, BufWriter, Write as _};
 use std::process;
+use std::sync::Arc;
 
 use clap::Parser;
 use indexmap::IndexMap;
@@ -26,6 +25,8 @@ use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
 use crate::prelude::*;
+
+pub mod theme;
 
 pub type Aliases = IndexMap<String, String>;
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
@@ -70,34 +71,6 @@ const DEFAULT_LOG_LEVEL: &str = if cfg!(feature = "max_level_error") {
 } else {
     "warn"
 };
-
-const COLORS: [Color; 13] = [
-    Color::Blue,
-    Color::Cyan,
-    Color::Green,
-    Color::LightBlue,
-    Color::LightGreen,
-    Color::LightCyan,
-    Color::LightMagenta,
-    Color::LightRed,
-    Color::LightYellow,
-    Color::Magenta,
-    Color::Red,
-    Color::Reset,
-    Color::Yellow,
-];
-
-pub fn user_color(user: &str) -> Color {
-    let mut hasher = DefaultHasher::new();
-    user.hash(&mut hasher);
-    let color = hasher.finish() as usize % COLORS.len();
-
-    COLORS[color]
-}
-
-pub fn user_style_from_color(color: Color) -> Style {
-    Style::default().fg(color).add_modifier(StyleModifier::BOLD)
-}
 
 fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
@@ -228,7 +201,6 @@ macro_rules! deserialize_str_with_visitor {
 
 deserialize_str_with_visitor!(Keys, KeysVisitor);
 deserialize_str_with_visitor!(VimModes, VimModesVisitor);
-deserialize_str_with_visitor!(UserColor, UserColorVisitor);
 deserialize_str_with_visitor!(EncryptionIndicatorLocation, EncryptionIndicatorLocationVisitor);
 deserialize_str_with_visitor!(NotifyVia, NotifyViaVisitor);
 deserialize_str_with_visitor!(ProxyUrl, ProxyUrlVisitor);
@@ -290,44 +262,6 @@ impl Visitor<'_> for VimModesVisitor {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct UserColor(pub Color);
-pub struct UserColorVisitor;
-
-impl Visitor<'_> for UserColorVisitor {
-    type Value = UserColor;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-        formatter.write_str("a valid color")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: SerdeError,
-    {
-        match value {
-            "none" => Ok(UserColor(Color::Reset)),
-            "red" => Ok(UserColor(Color::Red)),
-            "black" => Ok(UserColor(Color::Black)),
-            "green" => Ok(UserColor(Color::Green)),
-            "yellow" => Ok(UserColor(Color::Yellow)),
-            "blue" => Ok(UserColor(Color::Blue)),
-            "magenta" => Ok(UserColor(Color::Magenta)),
-            "cyan" => Ok(UserColor(Color::Cyan)),
-            "gray" => Ok(UserColor(Color::Gray)),
-            "dark-gray" => Ok(UserColor(Color::DarkGray)),
-            "light-red" => Ok(UserColor(Color::LightRed)),
-            "light-green" => Ok(UserColor(Color::LightGreen)),
-            "light-yellow" => Ok(UserColor(Color::LightYellow)),
-            "light-blue" => Ok(UserColor(Color::LightBlue)),
-            "light-magenta" => Ok(UserColor(Color::LightMagenta)),
-            "light-cyan" => Ok(UserColor(Color::LightCyan)),
-            "white" => Ok(UserColor(Color::White)),
-            _ => Err(E::custom("Could not parse color")),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Session {
     access_token: String,
@@ -364,7 +298,7 @@ impl From<MatrixSession> for Session {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 pub struct UserDisplayTunables {
-    pub color: Option<UserColor>,
+    pub color: Option<Color>,
     pub name: Option<String>,
 }
 
@@ -609,6 +543,7 @@ impl EncryptionValues {
         &self,
         location: EncryptionIndicatorLocation,
         state: EncryptionState,
+        theme: &ThemeValues,
     ) -> Option<Span<'static>> {
         if !self.indicator_location.contains(location) {
             return None;
@@ -626,19 +561,19 @@ impl EncryptionValues {
                 EncryptionState::Encrypted,
             ) => {
                 // Green encrypted icon:
-                Span::styled(self.icon_encrypted.clone(), Style::new().fg(Color::LightGreen))
+                Span::styled(self.icon_encrypted.clone(), theme.encryption.icon_encrypted)
             },
             (
                 EncryptionIndicator::Enabled | EncryptionIndicator::OnlyUnencrypted,
                 EncryptionState::NotEncrypted,
             ) => {
                 // Red unencrypted icon:
-                Span::styled(self.icon_unencrypted.clone(), Style::new().fg(Color::Red))
+                Span::styled(self.icon_unencrypted.clone(), theme.encryption.icon_unencrypted)
             },
 
             (_, EncryptionState::Unknown) => {
                 // Yellow unknown icon:
-                Span::styled(self.icon_unknown.clone(), Style::new().fg(Color::Yellow))
+                Span::styled(self.icon_unknown.clone(), theme.encryption.icon_unknown)
             },
         };
 
@@ -1207,6 +1142,7 @@ pub struct ProfileConfig {
     pub password_file: Option<PathBuf>,
     pub url: Option<Url>,
     pub settings: Option<Tunables>,
+    pub theme: Option<theme::Theme>,
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
@@ -1222,6 +1158,7 @@ pub struct IambConfig {
     pub layout: Option<Layout>,
     pub macros: Option<Macros>,
     pub aliases: Option<Aliases>,
+    pub theme: Option<theme::Theme>,
 }
 
 impl IambConfig {
@@ -1250,6 +1187,7 @@ pub struct ApplicationSettings {
     pub sqlite_cache_dir: PathBuf,
     pub profile_name: String,
     pub profile: ProfileConfig,
+    pub theme: Arc<theme::ThemeValues>,
     pub tunables: TunableValues,
     pub dirs: DirectoryValues,
     pub layout: Layout,
@@ -1304,6 +1242,7 @@ impl ApplicationSettings {
             layout,
             macros,
             aliases,
+            theme,
         } = config;
 
         validate_profile_names(&profiles);
@@ -1357,6 +1296,10 @@ impl ApplicationSettings {
         let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
         let dirs = dirs.values();
 
+        let theme = theme.unwrap_or_default().merge(theme::default_theme());
+        let theme = profile.theme.take().unwrap_or_default().merge(theme);
+        let theme = Arc::new(theme.values());
+
         // Create directories
         dirs.create_dir_all()?;
 
@@ -1401,6 +1344,7 @@ impl ApplicationSettings {
             sqlite_cache_dir,
             profile_name,
             profile,
+            theme,
             tunables,
             dirs,
             layout,
@@ -1451,17 +1395,10 @@ impl ApplicationSettings {
             .tunables
             .users
             .get(user_id)
-            .map(|user| {
-                (
-                    user.color.as_ref().map(|c| c.0),
-                    user.name.as_ref().and_then(|s| s.chars().next()),
-                )
-            })
+            .map(|user| (user.color, user.name.as_ref().and_then(|s| s.chars().next())))
             .unwrap_or_default();
 
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
-
+        let style = self.theme.users.style(user_id.as_str(), color);
         let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
 
         Span::styled(String::from(c), style)
@@ -1474,7 +1411,7 @@ impl ApplicationSettings {
         self.tunables
             .users
             .get(user_id)
-            .map(|user| (user.color.as_ref().map(|c| c.0), user.name.clone().map(Cow::Owned)))
+            .map(|user| (user.color, user.name.clone().map(Cow::Owned)))
             .unwrap_or_default()
     }
 
@@ -1482,19 +1419,19 @@ impl ApplicationSettings {
         self.tunables
             .users
             .get(user_id)
-            .and_then(|user| user.color.as_ref().map(|c| c.0))
-            .unwrap_or_else(|| user_color(user_id.as_str()))
+            .and_then(|user| user.color)
+            .unwrap_or_else(|| self.theme.users.color(user_id.as_str()))
     }
 
     pub fn get_user_style(&self, user_id: &UserId) -> Style {
-        user_style_from_color(self.get_user_color(user_id))
+        let (color, _) = self.get_user_overrides(user_id);
+        self.theme.users.style(user_id.as_str(), color)
     }
 
     pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
         let (color, name) = self.get_user_overrides(user_id);
 
-        let color = color.unwrap_or_else(|| user_color(user_id.as_str()));
-        let style = user_style_from_color(color);
+        let style = self.theme.users.style(user_id.as_str(), color);
         let name = match (name, &self.tunables.username_display) {
             (Some(name), _) => name,
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
@@ -1559,13 +1496,13 @@ mod tests {
     fn test_merge_users() {
         let a = None;
         let b = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Red)),
+            color: Some(Color::Red),
             name: Some("Hello".into()),
         })]
         .into_iter()
         .collect::<HashMap<_, _>>();
         let c = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Green)),
+            color: Some(Color::Green),
             name: Some("World".into()),
         })]
         .into_iter()
@@ -1611,17 +1548,52 @@ mod tests {
         assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
         assert_eq!(res.users, Some(HashMap::new()));
+    }
 
+    #[test]
+    fn test_parse_user_colors() {
+        let expect = |color| UserDisplayTunables { color: Some(color), name: Some("Tim".into()) };
+
+        // Unprefixed color:
         let res: Tunables = serde_json::from_str(
             "{\"users\": {\"@a:b.c\": {\"color\": \"black\", \"name\": \"Tim\"}}}",
         )
         .unwrap();
         assert_eq!(res.typing_notice_send, None);
         assert_eq!(res.typing_notice_display, None);
-        let users = vec![(user_id!("@a:b.c").to_owned(), UserDisplayTunables {
-            color: Some(UserColor(Color::Black)),
-            name: Some("Tim".into()),
-        })];
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::Black))];
+        assert_eq!(res.users, Some(users.into_iter().collect()));
+
+        // Color with `light-` prefix:
+        let res: Tunables = serde_json::from_str(
+            "{\"users\": {\"@a:b.c\": {\"color\": \"light-red\", \"name\": \"Tim\"}}}",
+        )
+        .unwrap();
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::LightRed))];
+        assert_eq!(res.users, Some(users.into_iter().collect()));
+
+        // Color name with `light-` prefix:
+        let res: Tunables = serde_json::from_str(
+            "{\"users\": {\"@a:b.c\": {\"color\": \"light-red\", \"name\": \"Tim\"}}}",
+        )
+        .unwrap();
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::LightRed))];
+        assert_eq!(res.users, Some(users.into_iter().collect()));
+
+        // Color name with `light` prefix, no hyphen:
+        let res: Tunables = serde_json::from_str(
+            "{\"users\": {\"@a:b.c\": {\"color\": \"lightblue\", \"name\": \"Tim\"}}}",
+        )
+        .unwrap();
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::LightBlue))];
+        assert_eq!(res.users, Some(users.into_iter().collect()));
+
+        // Hex color name:
+        let res: Tunables = serde_json::from_str(
+            "{\"users\": {\"@a:b.c\": {\"color\": \"#ff55bb\", \"name\": \"Tim\"}}}",
+        )
+        .unwrap();
+        let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::Rgb(0xff, 0x55, 0xbb)))];
         assert_eq!(res.users, Some(users.into_iter().collect()));
     }
 
@@ -1924,6 +1896,7 @@ mod tests {
             layout,
             macros,
             aliases,
+            theme,
         } = &config;
 
         // There should be an example object for each top-level field.
@@ -1934,6 +1907,7 @@ mod tests {
         assert!(layout.is_some());
         assert!(macros.is_some());
         assert!(aliases.is_some());
+        assert!(theme.is_some());
     }
 
     #[test]
@@ -1946,22 +1920,35 @@ mod tests {
             ..Default::default()
         };
         let enc = enc.values();
+        let theme = theme::ThemeValues::default();
 
         // Always shows in the title:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_some());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted, &theme)
                 .is_some()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted, &theme)
+                .is_some()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown, &theme)
+                .is_some()
+        );
 
         // Doesn't show in the prompt:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted, &theme)
                 .is_none()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown, &theme)
+                .is_none()
+        );
     }
 
     #[test]
@@ -1974,20 +1961,33 @@ mod tests {
             ..Default::default()
         };
         let enc = enc.values();
+        let theme = theme::ThemeValues::default();
 
         // Never shows in the title or the prompt:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted, &theme)
                 .is_none()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted, &theme)
                 .is_none()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown, &theme)
+                .is_none()
+        );
     }
 
     #[test]
@@ -2000,24 +2000,37 @@ mod tests {
             ..Default::default()
         };
         let enc = enc.values();
+        let theme = theme::ThemeValues::default();
 
         // Shows in the prompt when encrypted or unknown:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_some());
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted, &theme)
+                .is_some()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown, &theme)
+                .is_some()
+        );
 
         // But is hidden when unencrypted:
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted, &theme)
                 .is_none()
         );
 
         // Doesn't show in the title:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted, &theme)
                 .is_none()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown, &theme)
+                .is_none()
+        );
     }
     #[test]
     fn test_encryption_indicator_only_unencrypted() {
@@ -2029,21 +2042,34 @@ mod tests {
             ..Default::default()
         };
         let enc = enc.values();
+        let theme = theme::ThemeValues::default();
 
         // Shows in both the prompt and title when unencrypted or unknown:
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, NotEncrypted, &theme)
                 .is_some()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown).is_some());
         assert!(
-            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted)
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Unknown, &theme)
                 .is_some()
         );
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown).is_some());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, NotEncrypted, &theme)
+                .is_some()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Unknown, &theme)
+                .is_some()
+        );
 
         // But is hidden when encrypted:
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted).is_none());
-        assert!(enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted).is_none());
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::TITLE, Encrypted, &theme)
+                .is_none()
+        );
+        assert!(
+            enc.get_indicator(EncryptionIndicatorLocation::PROMPT, Encrypted, &theme)
+                .is_none()
+        );
     }
 }

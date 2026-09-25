@@ -1248,6 +1248,7 @@ impl StatefulWidget for Chat<'_> {
         state.complete_pending_jump(self.store);
 
         let settings = &self.store.application.settings;
+        let theme = &settings.theme;
 
         // Determine whether we have a description to show for the message bar.
         let desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
@@ -1308,8 +1309,11 @@ impl StatefulWidget for Chat<'_> {
         }
 
         let encryption_settings = &settings.tunables.encryption;
-        let encryption_indicator = encryption_settings
-            .get_indicator(EncryptionIndicatorLocation::PROMPT, state.room().encryption_state());
+        let encryption_indicator = encryption_settings.get_indicator(
+            EncryptionIndicatorLocation::PROMPT,
+            state.room().encryption_state(),
+            theme,
+        );
         let input_prompt = settings.tunables.input_prompt.as_deref();
         let prompt = match (self.focused, encryption_indicator, input_prompt) {
             // User has both encryption indicator and custom prompt, combine them:
@@ -1329,15 +1333,17 @@ impl StatefulWidget for Chat<'_> {
             (true, None, None) => Line::from("> "),
         };
 
-        let tbox = TextBox::new().prompt(prompt);
+        let tbox = TextBox::new().style(theme.msgbar.default).prompt(prompt);
         state
             .tbox
             .set_ignorecase(self.store.application.settings.tunables.ignorecase);
         tbox.render(textarea, buf, &mut state.tbox);
 
         // Render the message scrollback.
+        let scrollback_style = self.store.application.settings.theme.timeline.default;
         let scrollback_focused = state.focus.is_scrollback() && self.focused;
         let scrollback = Scrollback::new(self.store)
+            .style(scrollback_style)
             .focus(scrollback_focused)
             .room_focus(self.focused);
         scrollback.render(scrollarea, buf, &mut state.scrollback);
@@ -1378,7 +1384,7 @@ fn extract_mentions(content: &TextMessageEventContent) -> Mentions {
 }
 
 fn extract_mentions_str(html: &str) -> Mentions {
-    let re = Regex::new(r#"<a href="(https://matrix.to/#/@[^"]*:[^"]*)">"#).unwrap();
+    let re = Regex::new(r#"<a href="(https://matrix.to/#/@[^"]*:[^"]*)"[^>]*>"#).unwrap();
 
     let user_ids = re.captures_iter(html).filter_map(|capture| {
         let link = capture.get(1)?.as_str();
@@ -1518,6 +1524,13 @@ mod tests {
         let res =
             mentions_in(r#"<a href="https://matrix.to/#/@user:example.com?via=example.com">u</a>"#);
         assert_eq!(res, vec!["@user:example.com"]);
+    }
+
+    #[test]
+    fn test_extract_mentions_title() {
+        let twim = r#"<a href="https://matrix.to/#/@this-week-in:matrix.org" title="@this-week-in:matrix.org">TWIM</a>"#;
+        let res = mentions_in(twim);
+        assert_eq!(res, vec!["@this-week-in:matrix.org"]);
     }
 
     #[test]

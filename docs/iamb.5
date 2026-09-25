@@ -71,6 +71,11 @@ Configure custom aliases for existing commands.
 See
 .Sx "CUSTOM COMMAND ALIASES"
 for the precise syntax.
+.It Sy theme
+Configure the colors used for different parts of the interface.
+See
+.Sx "THEME OVERRIDES"
+for the possible values you can set in this object.
 .El
 .Sh PROFILES
 These options are configured as fields in the
@@ -374,6 +379,38 @@ and
 Both can be used via
 .Dq Sy title|prompt .
 .El
+.Sh COLORS
+The
+.Sy settings.users
+and
+.Sy theme
+subsections allows configuring the appearance of many elements.
+For settings that take a color value, you can use either a named color, an 8-bit color value or a hex value.
+.Pp
+The named colors are:
+.Dq Sy black ,
+.Dq Sy red ,
+.Dq Sy green ,
+.Dq Sy yellow ,
+.Dq Sy blue ,
+.Dq Sy magenta ,
+.Dq Sy cyan ,
+.Dq Sy gray ,
+.Dq Sy dark-gray ,
+.Dq Sy light-red ,
+.Dq Sy light-green ,
+.Dq Sy light-yellow ,
+.Dq Sy light-blue ,
+.Dq Sy light-magenta ,
+.Dq Sy light-cyan ,
+.Dq Sy white ,
+and
+.Dq Sy reset .
+The 8-bit ANSI color must in the range of 0 to 255 where the first 16 colors correspond to the named colors.
+The hex value is given as
+.Dq Sy #RRGGBB .
+If the terminal does not support truecolor, all hex colors will fall back to the default text color.
+All values must be given as a string.
 .Sh IMAGE PREVIEWS
 The
 .Sy settings.image_preview
@@ -639,6 +676,209 @@ Whether to set the title of the terminal window to
 .Dq Sy iamb (<user_id>) .
 Defaults to true.
 .El
+.Sh "THEME OVERRIDES"
+The
+.Sy theme
+subsection allows you to override the colors used for different parts of the user interface.
+Individual, stylable UI elements have the following properties:
+.Bl -tag -width Ds
+.It Sy color
+Configure the foreground color for text.
+See the
+.Sx "COLORS"
+section for the supported color format.
+.It Sy background
+Configure the background color for text.
+See the
+.Sx "COLORS"
+section for the supported color format.
+.It Sy modifiers
+An array of strings specifying modifiers to how the text is styled.
+Possible values are
+.Dq Sy "bold" ,
+.Dq Sy "crossed-out" ,
+.Dq Sy "dim" ,
+.Dq Sy "hidden" ,
+.Dq Sy "italic" ,
+.Dq Sy "rapid-blink" ,
+.Dq Sy "reversed" ,
+.Dq Sy "slow-blink" ,
+and
+.Dq Sy "underlined" .
+Modifier names prefixed with
+.Sy ~
+will remove the modifier if it was inherited from another default, global config, etc.
+.El
+.Pp
+Within
+.Sy theme ,
+there are several subsections for specific UI areas:
+.Bl -tag -width Ds
+.It Sy default
+The base, default style that everything else should inherit.
+.It Sy cmdbar
+For controlling how the text in the command bar is styled.
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for the command bar.
+.It Sy prompt
+Configure the styling for the prompt in the command bar.
+.It Sy error
+Configure the styling for error messages shown in the command bar.
+.It Sy info
+Configure the styling for info messages shown in the command bar.
+.El
+.It Sy encryption
+For controlling how the encryption indicators are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for the encryption status indicators.
+.It Sy icon_encrypted
+Configure the styling for the encrypted indicator.
+.It Sy icon_unencrypted
+Configure the styling for the unencrypted indicator.
+.It Sy icon_unknown
+Configure the styling for the unknown encryption status indicator.
+.El
+.It Sy msgbar
+For controlling how the text in the message bar is styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for the message bar.
+.El
+.It Sy messages
+For controlling how the bodies of messages are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for messages.
+.It Sy code
+Configure the styling for
+.Sy "<code>"
+elements in formatted message bodies.
+.It Sy "code_block"
+Configure the styling for
+.Sy "<pre>"
+elements in formatted message bodies.
+.It Sy "emphasis"
+Configure the styling for
+.Sy "<em>"
+and
+.Sy "<i>"
+elements in formatted message bodies.
+.It Sy "strikethrough"
+Configure the styling for
+.Sy "<del>" ,
+.Sy "<s>" ,
+and
+.Sy "<strike>"
+elements in formatted message bodies.
+.It Sy "strong"
+Configure the styling for
+.Sy "<strong>"
+and
+.Sy "<b>"
+elements in formatted message bodies.
+.It Sy "underlined"
+Configure the styling for
+.Sy "<u>"
+elements in formatted message bodies.
+.El
+.It Sy timeline
+For controlling how other elements within the timeline are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default styling for text in the timeline.
+.It Sy date
+Configure the how the dates for messages are styled.
+.It Sy time
+Configure the how the time a message was sent is styled.
+.It Sy unread_marker
+Configure the style of the bar for marking the start of unread messages.
+.It Sy state
+Configure how the text shown for state events is styled.
+.It Sy sticker
+Configure how any text shown for stickers is styled.
+.It Sy poll
+Configure how the text in polls is styled.
+.It Sy notice
+Configure how server notices is styled.
+.It Sy redacted
+Configure how redacted events in the timeline is styled.
+.El
+.It Sy users
+For controlling how usernames and identifiers are styled.
+.Pp
+In addition to the common
+.Sy color ,
+.Sy background ,
+and
+.Sy modifiers
+properties, you can also specify a
+.Sy colors
+array for providing a broad palette of colors from which to style usernames.
+.Pp
+By default, this is a selection of 13 standard ANSI colors that should look okay on both light and dark backgrounds.
+You can set this array to
+.Sy "[]"
+to force all usernames to use the value in
+.Sy color
+or its inherited value from
+.Sy "theme.default" .
+.It Sy windows
+For controlling how the windows are styled.
+.Bl -tag -width Ds
+.It Sy default
+Configure the default style for characters that draw the window border or title.
+.It Sy border
+Configure how the border characters are styled.
+.It Sy border_focused
+Configure how the border characters for focused window are styled.
+.It Sy title
+Configure how the window titles are styled.
+.El
+.It Sy tabs
+For controlling how tabs are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy title
+Configure how tab titles are styled.
+.It Sy title_focused
+Configure how the title of the focused tab is styled.
+.El
+.It Sy rooms
+For controlling how lists of rooms like
+.Sy :unreads
+or
+.Sy :chats
+are styled.
+UI elements you can set within this subsection are:
+.Bl -tag -width Ds
+.It Sy default
+Configure the default style for text in room lists.
+.It Sy labels
+Configure the style for the labels following room names in lists.
+.It Sy unread
+Configure the style for unread room names in lists.
+.El
+.El
+.Ss Example 1: Make code blocks a lighter gray background and state events red
+.Bd -literal -offset indent
+[theme.messages]
+code_block.background = "245"
+
+[theme.timeline]
+state.color = "cyan"
+.Ed
+.Ss Example 2: Replace default bold style in window and tab titles with italic
+.Bd -literal -offset indent
+[theme]
+tabs.title.modifiers = ["~bold", "italic"]
+windows.title.modifiers = ["~bold", "italic"]
+.Ed
 .Sh "USER OVERRIDES"
 The
 .Sy settings.users
@@ -651,25 +891,9 @@ and are typically written as inline tables containing the following keys:
 Change the display name of the user.
 .It Sy color
 Change the color the user is shown as.
-Possible values are:
-.Dq Sy black ,
-.Dq Sy blue ,
-.Dq Sy cyan ,
-.Dq Sy dark-gray ,
-.Dq Sy gray ,
-.Dq Sy green ,
-.Dq Sy light-blue ,
-.Dq Sy light-cyan ,
-.Dq Sy light-green ,
-.Dq Sy light-magenta ,
-.Dq Sy light-red ,
-.Dq Sy light-yellow ,
-.Dq Sy magenta ,
-.Dq Sy none ,
-.Dq Sy red ,
-.Dq Sy white ,
-and
-.Dq Sy yellow .
+See the
+.Sx "COLORS"
+section for the supported color format.
 .El
 .Ss Example 1: Override how @ada:example.com appears in chat
 .Bd -literal -offset indent
