@@ -1384,7 +1384,7 @@ fn extract_mentions(content: &TextMessageEventContent) -> Mentions {
 }
 
 fn extract_mentions_str(html: &str) -> Mentions {
-    let re = Regex::new(r#"<a href="(https://matrix.to/#/@[^"]*:[^"]*)">"#).unwrap();
+    let re = Regex::new(r#"<a href="(https://matrix.to/#/@[^"]*:[^"]*)"[^>]*>"#).unwrap();
 
     let user_ids = re.captures_iter(html).filter_map(|capture| {
         let link = capture.get(1)?.as_str();
@@ -1524,6 +1524,13 @@ mod tests {
         let res =
             mentions_in(r#"<a href="https://matrix.to/#/@user:example.com?via=example.com">u</a>"#);
         assert_eq!(res, vec!["@user:example.com"]);
+    }
+
+    #[test]
+    fn test_extract_mentions_title() {
+        let twim = r#"<a href="https://matrix.to/#/@this-week-in:matrix.org" title="@this-week-in:matrix.org">TWIM</a>"#;
+        let res = mentions_in(twim);
+        assert_eq!(res, vec!["@this-week-in:matrix.org"]);
     }
 
     #[test]
