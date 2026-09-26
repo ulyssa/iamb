@@ -318,6 +318,8 @@ impl Application {
                 .cmdbar_style(theme.cmdbar.default)
                 .tab_style(theme.tabs.title)
                 .tab_style_focused(theme.tabs.title_focused)
+                .completion_style(theme.completion.default)
+                .completion_style_selected(theme.completion.selected)
                 .focus(focused);
             f.render_stateful_widget(screen, area, sstate);
 

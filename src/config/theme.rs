@@ -34,6 +34,21 @@ pub fn default_theme() -> Theme {
             title: Stylable::with_modifiers(StyleModifier::BOLD),
             ..Default::default()
         },
+        completion: ThemeCompletion {
+            default: Stylable {
+                color: Some(Color::Reset),
+                background: Some(Color::Reset),
+                modifiers: vec![
+                    ModifierChange::Remove(StyleModifier::all()),
+                    ModifierChange::Insert(StyleModifier::REVERSED),
+                ],
+            },
+            selected: Stylable {
+                color: Some(Color::Yellow),
+                background: Some(Color::Black),
+                modifiers: vec![ModifierChange::Remove(StyleModifier::all())],
+            },
+        },
         timeline: ThemeTimeline {
             date: Stylable::with_modifiers(StyleModifier::BOLD),
             unread_marker: Stylable::with_modifiers(StyleModifier::DIM),
@@ -241,6 +256,10 @@ pub struct Theme {
     /// Configuration for styling windows.
     #[serde(default)]
     windows: ThemeWindows,
+
+    /// Configuration for the completion menu.
+    #[serde(default)]
+    completion: ThemeCompletion,
 }
 
 impl Theme {
@@ -256,6 +275,7 @@ impl Theme {
             rooms: self.rooms.merge(other.rooms),
             users: self.users.merge(other.users),
             windows: self.windows.merge(other.windows),
+            completion: self.completion.merge(other.completion),
         }
     }
 
@@ -273,6 +293,7 @@ impl Theme {
             tabs: self.tabs.values(base),
             users: self.users.values(base),
             windows: self.windows.values(base),
+            completion: self.completion.values(base),
         }
     }
 }
@@ -308,6 +329,9 @@ pub struct ThemeValues {
 
     /// Styling for rendering windows.
     pub windows: ThemeWindowsValues,
+
+    /// Styling for the completion menu.
+    pub completion: ThemeCompletionValues,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -642,6 +666,37 @@ pub struct ThemeTimelineValues {
     pub notice: Style,
     pub redacted: Style,
     pub unread_marker: Style,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ThemeCompletion {
+    #[serde(default)]
+    default: Stylable,
+
+    #[serde(default)]
+    selected: Stylable,
+}
+
+impl ThemeCompletion {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            default: self.default.merge(other.default),
+            selected: self.selected.merge(other.selected),
+        }
+    }
+
+    fn values(self, base: Style) -> ThemeCompletionValues {
+        let default = base.patch(self.default);
+        let selected = base.patch(self.selected);
+
+        ThemeCompletionValues { default, selected }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ThemeCompletionValues {
+    pub default: Style,
+    pub selected: Style,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
