@@ -8,6 +8,7 @@ use matrix_sdk::notification_settings::{
     NotificationSettings,
     RoomNotificationMode,
 };
+use matrix_sdk::ruma::events::room::message::Relation;
 use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, AnySyncTimelineEvent};
 use matrix_sdk::ruma::serde::Raw;
 
@@ -304,7 +305,8 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
                     format!("[Unknown message type: {:?}]", &message.msgtype)
                 },
             };
-            Some(body)
+            let is_thread = matches!(message.relates_to, Some(Relation::Thread(_)));
+            Some(thread_notification_body(body, is_thread))
         },
         AnyMessageLikeEventContent::Sticker(_) => Some(format!("{sender_name} sent a sticker.")),
         AnyMessageLikeEventContent::PollStart(_) |
@@ -315,6 +317,25 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
             Some(format!("{sender_name} closed a poll."))
         },
         _ => None,
+    }
+}
+
+fn thread_notification_body(body: String, is_thread: bool) -> String {
+    if is_thread {
+        format!("Thread: {body}")
+    } else {
+        body
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::thread_notification_body;
+
+    #[test]
+    fn thread_messages_are_identified_in_notifications() {
+        assert_eq!(thread_notification_body("hello".into(), true), "Thread: hello");
+        assert_eq!(thread_notification_body("hello".into(), false), "hello");
     }
 }
 
