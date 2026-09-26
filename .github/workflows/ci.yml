@@ -45,6 +45,7 @@ jobs:
       with:
         github_token: ${{ secrets.GITHUB_TOKEN }}
         reporter: 'github-check'
+        clippy_flags: --all-targets -- -D warnings
     - name: Run tests
       run: cargo test --locked
 

@@ -328,6 +328,16 @@ fn thread_notification_body(body: String, is_thread: bool) -> String {
     }
 }
 
+fn truncate(s: String) -> String {
+    static MAX_LENGTH: usize = 5000;
+    if s.graphemes(true).count() > MAX_LENGTH {
+        let truncated: String = s.graphemes(true).take(MAX_LENGTH).collect();
+        truncated + "..."
+    } else {
+        s
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::thread_notification_body;
@@ -336,15 +346,5 @@ mod tests {
     fn thread_messages_are_identified_in_notifications() {
         assert_eq!(thread_notification_body("hello".into(), true), "Thread: hello");
         assert_eq!(thread_notification_body("hello".into(), false), "hello");
-    }
-}
-
-fn truncate(s: String) -> String {
-    static MAX_LENGTH: usize = 5000;
-    if s.graphemes(true).count() > MAX_LENGTH {
-        let truncated: String = s.graphemes(true).take(MAX_LENGTH).collect();
-        truncated + "..."
-    } else {
-        s
     }
 }
