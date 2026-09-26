@@ -230,6 +230,8 @@ pub fn mock_settings() -> ApplicationSettings {
         aliases: Aliases::default(),
         theme: crate::config::theme::default_theme().values().into(),
         enable_enhanced_keys: false,
+        log_level_handle: None,
+        load_file: SettingsFile::Toml("/dev/null".into()),
     }
 }
 
