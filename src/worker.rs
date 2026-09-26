@@ -7,6 +7,7 @@ use std::fmt::{Debug, Formatter};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
 use futures::StreamExt;
+use futures::future::join_all;
 use futures::stream::FuturesUnordered;
 use gethostname::gethostname;
 use matrix_sdk::OwnedServerName;
@@ -88,7 +89,6 @@ use tracing::{Instrument as _, error, warn};
 
 use crate::base::{CreateRoomFlags, CreateRoomType, EchoLocation, MessageNeed};
 use crate::config::ProxyUrl;
-use crate::message::MessageId;
 use crate::notifications::register_notifications;
 use crate::prelude::*;
 use crate::preview::{PreviewKind, PreviewManager};
@@ -186,6 +186,7 @@ enum Plan {
     Members(OwnedRoomId),
     Pinned(OwnedRoomId, Vec<OwnedEventId>),
     RoomPreview(OwnedRoomOrAliasId),
+    Events(OwnedRoomId, Vec<OwnedEventId>),
 }
 
 async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
@@ -224,6 +225,9 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
         if need.members {
             plan.push(Plan::Members(room_id.to_owned()));
         }
+        if !need.events.is_empty() {
+            plan.push(Plan::Events(room_id, need.events));
+        }
     }
 
     return plan;
@@ -251,6 +255,18 @@ async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan) {
             let res = members_load(client, &room_id).await;
             let mut locked = store.lock().await;
             members_insert(room_id, res, locked.deref_mut());
+        },
+        Plan::Events(room_id, events) => {
+            let Some(room) = client.get_room(&room_id) else {
+                warn!(room_id = room_id.as_str(), "Room not found in cache");
+                return;
+            };
+
+            let res = events_load(&room, events).await;
+            let mut locked = store.lock().await;
+            let ChatStore { rooms, settings, previews, presences, .. } = &mut locked.application;
+            let info = rooms.get_or_default(room_id.clone());
+            insert_msgs_and_receipts(res, info, presences, previews, settings);
         },
         Plan::Pinned(room_id, event_ids) => {
             let msgs = pinned_load(client, &room_id, event_ids).await;
@@ -567,6 +583,33 @@ fn member_active(state: &MembershipState) -> bool {
     matches!(state, MembershipState::Invite | MembershipState::Join)
 }
 
+async fn events_load(
+    room: &MatrixRoom,
+    events: Vec<OwnedEventId>,
+) -> Vec<(AnyTimelineEvent, Vec<OwnedUserId>)> {
+    let results = join_all(
+        events
+            .into_iter()
+            .map(async |event_id| room.load_or_fetch_event(&event_id, None).await),
+    )
+    .await;
+
+    let events = results
+        .into_iter()
+        .filter_map(|res| {
+            match res {
+                Ok(ev) => Some(ev),
+                Err(e) => {
+                    tracing::warn!(room_id = room.room_id().as_str(), "failed to load event: {e}");
+                    None
+                },
+            }
+        })
+        .collect();
+
+    get_receipts_for_timeline_events(room, events).await
+}
+
 fn members_insert(
     room_id: OwnedRoomId,
     res: IambResult<Vec<RoomMember>>,
@@ -642,7 +685,10 @@ async fn load_initial_messages(client: Client, store: AsyncProgramStore) {
                 let (reached_start, msgs) = match load_older_one(room).await {
                     Ok(v) => v,
                     Err(e) => {
-                        tracing::warn!(room_id = ?room.room_id(), "failed to paginate cached events: {e}");
+                        tracing::warn!(
+                            room_id = room.room_id().as_str(),
+                            "failed to paginate cached events: {e}"
+                        );
                         return;
                     },
                 };

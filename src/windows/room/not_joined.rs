@@ -119,7 +119,7 @@ impl NotJoinedState {
 
         store.application.need_load.need_members(room.room_id().to_owned());
 
-        Some(RoomState::new(room, None, store))
+        Some(RoomState::new(room, RoomView::Main, store))
     }
 
     pub fn dup(&self) -> Self {

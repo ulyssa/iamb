@@ -783,6 +783,7 @@ pub struct TunableValues {
     pub read_receipt_send: bool,
     pub read_receipt_trigger: ReadReceiptTrigger,
     pub read_receipt_display: bool,
+    pub message_time_display: bool,
     pub request_timeout: u64,
     pub sort: SortValues,
     pub state_event_display: bool,
@@ -848,6 +849,7 @@ pub struct Tunables {
     pub sync_delay_ms: Option<u64>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
+    pub message_time_display: Option<bool>,
     pub username_display: Option<UserDisplayStyle>,
     pub message_user_color: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_register")]
@@ -900,6 +902,7 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_trigger: self.read_receipt_trigger.or(other.read_receipt_trigger),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
+            message_time_display: self.message_time_display.or(other.message_time_display),
             request_timeout: self.request_timeout.or(other.request_timeout),
             state_event_display: self.state_event_display.or(other.state_event_display),
             sync_delay_ms: self.sync_delay_ms.or(other.sync_delay_ms),
@@ -928,7 +931,7 @@ impl Tunables {
         }
     }
 
-    fn values(self) -> TunableValues {
+    pub fn values(self) -> TunableValues {
         TunableValues {
             encryption: self.encryption.values(),
             proxy: self.proxy.unwrap_or_default().values(),
@@ -948,6 +951,7 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_trigger: self.read_receipt_trigger.unwrap_or_default(),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
+            message_time_display: self.message_time_display.unwrap_or(true),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             state_event_display: self.state_event_display.unwrap_or(true),
             sync_delay_ms: self.sync_delay_ms.unwrap_or(DEFAULT_SYNC_FREQUENCY),
