@@ -285,9 +285,11 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
                 MessageType::File(_) => {
                     format!("{sender_name} sent a file.")
                 },
-                MessageType::Image(_) => {
-                    format!("{sender_name} sent an image.")
-                },
+                MessageType::Image(content) => image_notification_body(
+                    sender_name,
+                    &content.body,
+                    content.filename.as_deref(),
+                ),
                 MessageType::Location(_) => {
                     format!("{sender_name} sent their location.")
                 },
@@ -315,6 +317,38 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
             Some(format!("{sender_name} closed a poll."))
         },
         _ => None,
+    }
+}
+
+fn image_notification_body(sender_name: &str, body: &str, filename: Option<&str>) -> String {
+    match filename {
+        Some(filename) if filename != body => body.to_owned(),
+        _ => format!("{sender_name} sent an image."),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::image_notification_body;
+
+    #[test]
+    fn image_caption_is_shown_when_distinct_from_filename() {
+        assert_eq!(
+            image_notification_body("Alice", "Sunset", Some("photo.jpg")),
+            "Sunset"
+        );
+    }
+
+    #[test]
+    fn image_filename_keeps_generic_notification() {
+        assert_eq!(
+            image_notification_body("Alice", "photo.jpg", Some("photo.jpg")),
+            "Alice sent an image."
+        );
+        assert_eq!(
+            image_notification_body("Alice", "photo.jpg", None),
+            "Alice sent an image."
+        );
     }
 }
 
