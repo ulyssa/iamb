@@ -46,7 +46,7 @@ pub fn default_theme() -> Theme {
             selected: Stylable {
                 color: Some(Color::Yellow),
                 background: Some(Color::Black),
-                modifiers: vec![ModifierChange::Remove(StyleModifier::all())],
+                modifiers: vec![ModifierChange::Remove(StyleModifier::REVERSED)],
             },
         },
         timeline: ThemeTimeline {
@@ -687,7 +687,7 @@ impl ThemeCompletion {
 
     fn values(self, base: Style) -> ThemeCompletionValues {
         let default = base.patch(self.default);
-        let selected = base.patch(self.selected);
+        let selected = default.patch(self.selected);
 
         ThemeCompletionValues { default, selected }
     }
