@@ -278,15 +278,25 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
     match event.original_content()? {
         AnyMessageLikeEventContent::RoomMessage(message) => {
             let body = match message.msgtype {
-                MessageType::Audio(_) => {
-                    format!("{sender_name} sent an audio file.")
-                },
-                MessageType::Emote(content) => content.body,
-                MessageType::File(_) => {
-                    format!("{sender_name} sent a file.")
-                },
-                MessageType::Image(content) => image_notification_body(
+                MessageType::Audio(content) => attachment_notification_body(
                     sender_name,
+                    "Audio",
+                    "an audio file",
+                    &content.body,
+                    content.filename.as_deref(),
+                ),
+                MessageType::Emote(content) => content.body,
+                MessageType::File(content) => attachment_notification_body(
+                    sender_name,
+                    "File",
+                    "a file",
+                    &content.body,
+                    content.filename.as_deref(),
+                ),
+                MessageType::Image(content) => attachment_notification_body(
+                    sender_name,
+                    "Image",
+                    "an image",
                     &content.body,
                     content.filename.as_deref(),
                 ),
@@ -296,9 +306,13 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
                 MessageType::Notice(content) => content.body,
                 MessageType::ServerNotice(content) => content.body,
                 MessageType::Text(content) => content.body,
-                MessageType::Video(_) => {
-                    format!("{sender_name} sent a video.")
-                },
+                MessageType::Video(content) => attachment_notification_body(
+                    sender_name,
+                    "Video",
+                    "a video",
+                    &content.body,
+                    content.filename.as_deref(),
+                ),
                 MessageType::VerificationRequest(_) => {
                     format!("{sender_name} sent a verification request.")
                 },
@@ -320,33 +334,61 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
     }
 }
 
-fn image_notification_body(sender_name: &str, body: &str, filename: Option<&str>) -> String {
+fn attachment_notification_body(
+    sender_name: &str,
+    label: &str,
+    attachment: &str,
+    body: &str,
+    filename: Option<&str>,
+) -> String {
     match filename {
-        Some(filename) if filename != body => body.to_owned(),
-        _ => format!("{sender_name} sent an image."),
+        Some(filename) if filename != body => format!("{label}: {body}"),
+        _ => format!("{sender_name} sent {attachment}."),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::image_notification_body;
+    use super::attachment_notification_body;
 
     #[test]
-    fn image_caption_is_shown_when_distinct_from_filename() {
+    fn attachment_caption_is_labeled_when_distinct_from_filename() {
         assert_eq!(
-            image_notification_body("Alice", "Sunset", Some("photo.jpg")),
-            "Sunset"
+            attachment_notification_body(
+                "Alice",
+                "Image",
+                "an image",
+                "Sunset",
+                Some("photo.jpg")
+            ),
+            "Image: Sunset"
+        );
+        assert_eq!(
+            attachment_notification_body(
+                "Alice",
+                "File",
+                "a file",
+                "Quarterly report",
+                Some("report.pdf")
+            ),
+            "File: Quarterly report"
         );
     }
 
     #[test]
-    fn image_filename_keeps_generic_notification() {
+    fn attachment_filename_keeps_generic_notification() {
         assert_eq!(
-            image_notification_body("Alice", "photo.jpg", Some("photo.jpg")),
+            attachment_notification_body(
+                "Alice",
+                "Image",
+                "an image",
+                "photo.jpg",
+                Some("photo.jpg")
+            ),
             "Alice sent an image."
         );
         assert_eq!(
-            image_notification_body("Alice", "photo.jpg", None),
+            attachment_notification_body("Alice", "Image", "an image", "photo.jpg", None),
             "Alice sent an image."
         );
     }
