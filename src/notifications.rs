@@ -280,25 +280,17 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
         AnyMessageLikeEventContent::RoomMessage(message) => {
             let is_thread = matches!(message.relates_to, Some(Relation::Thread(_)));
             let body = match message.msgtype {
-                MessageType::Audio(_) => {
-                    format!("{sender_name} sent an audio file.")
-                },
+                MessageType::Audio(content) => attachment_notification_body(sender_name, "Audio", "an audio file", &content.body, content.filename.as_deref()),
                 MessageType::Emote(content) => content.body,
-                MessageType::File(_) => {
-                    format!("{sender_name} sent a file.")
-                },
-                MessageType::Image(_) => {
-                    format!("{sender_name} sent an image.")
-                },
+                MessageType::File(content) => attachment_notification_body(sender_name, "File", "a file", &content.body, content.filename.as_deref()),
+                MessageType::Image(content) => attachment_notification_body(sender_name, "Image", "an image", &content.body, content.filename.as_deref()),
                 MessageType::Location(_) => {
                     format!("{sender_name} sent their location.")
                 },
                 MessageType::Notice(content) => content.body,
                 MessageType::ServerNotice(content) => content.body,
                 MessageType::Text(content) => content.body,
-                MessageType::Video(_) => {
-                    format!("{sender_name} sent a video.")
-                },
+                MessageType::Video(content) => attachment_notification_body(sender_name, "Video", "a video", &content.body, content.filename.as_deref()),
                 MessageType::VerificationRequest(_) => {
                     format!("{sender_name} sent a verification request.")
                 },
@@ -317,6 +309,13 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
             Some(format!("{sender_name} closed a poll."))
         },
         _ => None,
+    }
+}
+
+fn attachment_notification_body(sender_name: &str, label: &str, attachment: &str, body: &str, filename: Option<&str>) -> String {
+    match filename {
+        Some(filename) if filename != body => format!("{label}: {body}"),
+        _ => format!("{sender_name} sent {attachment}."),
     }
 }
 
@@ -340,7 +339,13 @@ fn truncate(s: String) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::thread_notification_body;
+    use super::{attachment_notification_body, thread_notification_body};
+
+    #[test]
+    fn attachment_caption_is_labeled() {
+        assert_eq!(attachment_notification_body("Alice", "Image", "an image", "Sunset", Some("photo.jpg")), "Image: Sunset");
+        assert_eq!(attachment_notification_body("Alice", "Image", "an image", "photo.jpg", Some("photo.jpg")), "Alice sent an image.");
+    }
 
     #[test]
     fn thread_messages_are_identified_in_notifications() {
