@@ -1396,16 +1396,24 @@ impl ApplicationSettings {
         Ok(())
     }
 
-    pub fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
-        let (color, c) = self
+    pub fn get_user_char_span(&self, user_id: &UserId, info: &RoomInfo) -> Span<'_> {
+        let (color, configured_name) = self
             .tunables
             .users
             .get(user_id)
-            .map(|user| (user.color, user.name.as_ref().and_then(|s| s.chars().next())))
+            .map(|user| (user.color, user.name.as_deref()))
             .unwrap_or_default();
 
         let style = self.theme.users.style(user_id.as_str(), color);
-        let c = c.unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
+        let c = configured_name
+            .and_then(|name| name.chars().next())
+            .or_else(|| {
+                info.display_names
+                    .get(user_id)
+                    .and_then(|name| name.chars().next())
+                    .filter(char::is_ascii)
+            })
+            .unwrap_or_else(|| user_id.localpart().chars().next().unwrap_or(' '));
 
         Span::styled(String::from(c), style)
     }
