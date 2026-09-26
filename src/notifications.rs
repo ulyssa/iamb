@@ -278,6 +278,7 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
 
     match event.original_content()? {
         AnyMessageLikeEventContent::RoomMessage(message) => {
+            let is_thread = matches!(message.relates_to, Some(Relation::Thread(_)));
             let body = match message.msgtype {
                 MessageType::Audio(_) => {
                     format!("{sender_name} sent an audio file.")
@@ -305,7 +306,6 @@ pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) 
                     format!("[Unknown message type: {:?}]", &message.msgtype)
                 },
             };
-            let is_thread = matches!(message.relates_to, Some(Relation::Thread(_)));
             Some(thread_notification_body(body, is_thread))
         },
         AnyMessageLikeEventContent::Sticker(_) => Some(format!("{sender_name} sent a sticker.")),
