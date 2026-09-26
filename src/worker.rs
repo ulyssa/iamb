@@ -1157,6 +1157,7 @@ async fn create_client_inner(
             None,
         )
         .request_config(req_config)
+        .with_threading_support(matrix_sdk::ThreadingSupport::Enabled { with_subscriptions: false })
         .with_encryption_settings(DEFAULT_ENCRYPTION_SETTINGS);
 
     let builder = if let Some(url) = homeserver {

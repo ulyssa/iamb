@@ -567,7 +567,7 @@ How to sort the
 .Sy :rooms
 window.
 Defaults to
-.Sy ["favorite",\ "lowpriority",\ "unread",\ "name"] .
+.Sy ["favorite",\ "invite",\ "lowpriority",\ "mentions",\ "notifications",\ "recent",\ "name"] .
 .It Sy chats
 How to sort the
 .Sy :chats
@@ -614,7 +614,11 @@ Sort rooms by alphabetically ascending server name from the room alias.
 This will fall back to the server from the room identifier if there is
 no canonical alias for the room.
 .It Sy unread
-Put unread rooms before other rooms.
+Put rooms with unread messages before other rooms.
+.It Sy notifications
+Put rooms with unread notifications before other rooms.
+.It Sy mentions
+Put rooms with unread mentions before other rooms.
 .It Sy recent
 Sort rooms by most recent message timestamp.
 .It Sy invite
@@ -868,8 +872,28 @@ UI elements you can set within this subsection are:
 Configure the default style for text in room lists.
 .It Sy labels
 Configure the style for the labels following room names in lists.
+.It Sy notification
+Configure how rooms with unread notifications are displayed.
+.Bl -tag -width Ds
+.It Sy number
+Configure the style of the number showing how many unread notifications a room has.
+.It Sy name
+Configure the style for rooms with unread notifications.
+.It Sy labels
+Configure the style for the labels of rooms with unread notifications.
+.El
+.It Sy mention
+Configure how rooms with unread mentions are displayed.
+Accepts the same values as
+.Sy notification .
 .It Sy unread
-Configure the style for unread room names in lists.
+Configure how rooms with unread muted messages are displayed.
+Accepts the same values as
+.Sy notification .
+.It Sy marked_unread .
+Configure how rooms that are manually marked as unread are displayed.
+Accepts the same values as
+.Sy notification .
 .El
 .El
 .Ss Example 1: Make code blocks a lighter gray background and state events red
