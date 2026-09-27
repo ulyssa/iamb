@@ -777,7 +777,12 @@ impl Completer<IambInfo> for IambCompleter {
     ) -> Vec<String> {
         match content {
             IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
-            IambBufferId::Command(CommandType::Search) => vec![],
+            IambBufferId::Command(
+                CommandType::Application |
+                CommandType::Content |
+                CommandType::Search |
+                CommandType::Shell,
+            ) => vec![],
             IambBufferId::Room(room_id, _, RoomFocus::MessageBar) => {
                 complete_msgbar(text, cursor, store, room_id)
             },
