@@ -184,6 +184,7 @@ fn text_to_html(input: &str) -> Option<String> {
     options.extension.autolink = true;
     options.extension.shortcodes = true;
     options.extension.strikethrough = true;
+    options.extension.table = true;
     options.parse.broken_link_callback = Some(Arc::new(broken_link_handler));
     options.render.hardbreaks = true;
     markdown_to_html(input, &options).into()
