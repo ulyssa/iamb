@@ -2,6 +2,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use ratatui::widgets::BorderType;
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer};
@@ -11,7 +12,15 @@ use crate::prelude::*;
 pub fn default_theme() -> Theme {
     Theme {
         messages: ThemeMessages {
+            blockquote: LineStylable {
+                line: Some(LineName::Thick),
+                stylable: Stylable::fg(Color::Indexed(236)),
+            },
             code: Stylable::bg(Color::Indexed(236)),
+            code_block: LineStylable {
+                line: Some(LineName::Plain),
+                stylable: Stylable::default(),
+            },
             emphasis: Stylable::with_modifiers(StyleModifier::ITALIC),
             strikethrough: Stylable::with_modifiers(StyleModifier::CROSSED_OUT),
             strong: Stylable::with_modifiers(StyleModifier::BOLD),
@@ -29,8 +38,8 @@ pub fn default_theme() -> Theme {
             title_focused: Stylable::without_modifiers(StyleModifier::DIM),
         },
         windows: ThemeWindows {
-            border: Stylable::with_modifiers(StyleModifier::DIM),
-            border_focused: Stylable::without_modifiers(StyleModifier::DIM),
+            border: Stylable::with_modifiers(StyleModifier::DIM).into(),
+            border_focused: Stylable::without_modifiers(StyleModifier::DIM).into(),
             title: Stylable::with_modifiers(StyleModifier::BOLD),
             ..Default::default()
         },
@@ -77,6 +86,57 @@ pub fn default_theme() -> Theme {
             stylable: Stylable::with_modifiers(StyleModifier::BOLD),
         },
         ..Default::default()
+    }
+}
+
+/// Internal variant to get lowercase, hyphenated config options.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LineName {
+    #[default]
+    Plain,
+    Rounded,
+    Double,
+    Thick,
+    DoubleDashedLight,
+    DoubleDashedHeavy,
+    TripleDashedLight,
+    TripleDashedHeavy,
+    QuadrupleDashedLight,
+    QuadrupleDashedHeavy,
+}
+
+impl LineName {
+    pub fn to_table_set(&self) -> &'static ratatui::symbols::line::Set<'static> {
+        match self {
+            Self::Plain => &ratatui::symbols::line::NORMAL,
+            Self::Rounded => &ratatui::symbols::line::ROUNDED,
+            Self::Double => &ratatui::symbols::line::DOUBLE,
+            Self::Thick => &ratatui::symbols::line::THICK,
+            Self::DoubleDashedLight => &ratatui::symbols::line::LIGHT_DOUBLE_DASHED,
+            Self::DoubleDashedHeavy => &ratatui::symbols::line::HEAVY_DOUBLE_DASHED,
+            Self::TripleDashedLight => &ratatui::symbols::line::LIGHT_TRIPLE_DASHED,
+            Self::TripleDashedHeavy => &ratatui::symbols::line::HEAVY_TRIPLE_DASHED,
+            Self::QuadrupleDashedLight => &ratatui::symbols::line::LIGHT_QUADRUPLE_DASHED,
+            Self::QuadrupleDashedHeavy => &ratatui::symbols::line::HEAVY_QUADRUPLE_DASHED,
+        }
+    }
+}
+
+impl From<LineName> for BorderType {
+    fn from(name: LineName) -> Self {
+        match name {
+            LineName::Plain => Self::Plain,
+            LineName::Rounded => Self::Rounded,
+            LineName::Double => Self::Double,
+            LineName::Thick => Self::Thick,
+            LineName::DoubleDashedLight => Self::LightDoubleDashed,
+            LineName::DoubleDashedHeavy => Self::HeavyDoubleDashed,
+            LineName::TripleDashedLight => Self::LightTripleDashed,
+            LineName::TripleDashedHeavy => Self::HeavyTripleDashed,
+            LineName::QuadrupleDashedLight => Self::LightQuadrupleDashed,
+            LineName::QuadrupleDashedHeavy => Self::HeavyQuadrupleDashed,
+        }
     }
 }
 
@@ -216,6 +276,29 @@ impl From<Stylable> for Style {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+struct LineStylable {
+    #[serde(rename = "line")]
+    line: Option<LineName>,
+    #[serde(flatten)]
+    stylable: Stylable,
+}
+
+impl LineStylable {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            line: self.line.or(other.line),
+            stylable: self.stylable.merge(other.stylable),
+        }
+    }
+}
+
+impl From<Stylable> for LineStylable {
+    fn from(stylable: Stylable) -> Self {
+        Self { stylable, line: None }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Theme {
     /// Default styling when others aren't specified.
     #[serde(default)]
@@ -340,10 +423,19 @@ struct ThemeMessages {
     default: Stylable,
 
     #[serde(default)]
+    blockquote: LineStylable,
+
+    #[serde(default)]
     code: Stylable,
 
     #[serde(default)]
-    code_block: Stylable,
+    code_block: LineStylable,
+
+    #[serde(default)]
+    ruler: LineStylable,
+
+    #[serde(default)]
+    table: LineStylable,
 
     #[serde(default)]
     emphasis: Stylable,
@@ -362,8 +454,11 @@ impl ThemeMessages {
     fn merge(self, other: Self) -> Self {
         Self {
             default: self.default.merge(other.default),
+            blockquote: self.blockquote.merge(other.blockquote),
             code: self.code.merge(other.code),
             code_block: self.code_block.merge(other.code_block),
+            ruler: self.ruler.merge(other.ruler),
+            table: self.table.merge(other.table),
             emphasis: self.emphasis.merge(other.emphasis),
             strong: self.strong.merge(other.strong),
             strikethrough: self.strikethrough.merge(other.strikethrough),
@@ -373,17 +468,33 @@ impl ThemeMessages {
 
     fn values(self, base: Style) -> ThemeMessagesValues {
         let default = base.patch(self.default);
-        let code = default.patch(self.code);
-        let code_block = code.patch(self.code_block);
+        let blockquote = default.patch(self.blockquote.stylable);
+        let ruler = default.patch(self.ruler.stylable);
+        let table = default.patch(self.table.stylable);
         let emphasis = default.patch(self.emphasis);
         let strong = default.patch(self.strong);
         let strikethrough = default.patch(self.strikethrough);
         let underlined = default.patch(self.underlined);
 
+        let code = default.patch(self.code);
+        let code_block = code.patch(self.code_block.stylable);
+
+        let blockquote_line = self.blockquote.line.unwrap_or_default();
+        let code_block_line = self.code_block.line.unwrap_or_default().into();
+        let ruler_line = self.ruler.line.unwrap_or_default();
+        let table_line = self.table.line.unwrap_or_default();
+
         ThemeMessagesValues {
             default,
+            blockquote,
+            blockquote_line,
             code,
             code_block,
+            code_block_line,
+            ruler,
+            ruler_line,
+            table,
+            table_line,
             emphasis,
             strong,
             strikethrough,
@@ -395,8 +506,15 @@ impl ThemeMessages {
 #[derive(Clone, Debug, Default)]
 pub struct ThemeMessagesValues {
     pub default: Style,
+    pub blockquote: Style,
+    pub blockquote_line: LineName,
     pub code: Style,
     pub code_block: Style,
+    pub code_block_line: BorderType,
+    pub ruler: Style,
+    pub ruler_line: LineName,
+    pub table: Style,
+    pub table_line: LineName,
     pub emphasis: Style,
     pub strong: Style,
     pub strikethrough: Style,
@@ -549,6 +667,9 @@ struct ThemeCommandBar {
     default: Stylable,
 
     #[serde(default)]
+    completions: Stylable,
+
+    #[serde(default)]
     prompt: Stylable,
 
     #[serde(default)]
@@ -562,6 +683,7 @@ impl ThemeCommandBar {
     fn merge(self, other: Self) -> Self {
         Self {
             default: self.default.merge(other.default),
+            completions: self.completions.merge(other.completions),
             prompt: self.prompt.merge(other.prompt),
             info: self.info.merge(other.info),
             error: self.error.merge(other.error),
@@ -570,16 +692,18 @@ impl ThemeCommandBar {
 
     fn values(self, base: Style) -> ThemeCommandBarValues {
         let default = base.patch(self.default);
+        let completions = default.patch(self.completions);
         let prompt = default.patch(self.prompt);
         let info = default.patch(self.info);
         let error = default.patch(self.error);
-        ThemeCommandBarValues { default, prompt, info, error }
+        ThemeCommandBarValues { default, completions, prompt, info, error }
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct ThemeCommandBarValues {
     pub default: Style,
+    pub completions: Style,
     pub prompt: Style,
     pub info: Style,
     pub error: Style,
@@ -705,10 +829,10 @@ struct ThemeWindows {
     default: Stylable,
 
     #[serde(default)]
-    border: Stylable,
+    border: LineStylable,
 
     #[serde(default)]
-    border_focused: Stylable,
+    border_focused: LineStylable,
 
     #[serde(default)]
     title: Stylable,
@@ -726,11 +850,21 @@ impl ThemeWindows {
 
     fn values(self, base: Style) -> ThemeWindowsValues {
         let default = base.patch(self.default);
-        let border = default.patch(self.border);
-        let border_focused = border.patch(self.border_focused);
+        let border = default.patch(self.border.stylable);
+        let border_focused = border.patch(self.border_focused.stylable);
         let title = default.patch(self.title);
+        let border_line: BorderType = self.border.line.unwrap_or_default().into();
+        let border_focused_line =
+            self.border_focused.line.map(BorderType::from).unwrap_or(border_line);
 
-        ThemeWindowsValues { default, border, border_focused, title }
+        ThemeWindowsValues {
+            default,
+            border,
+            border_line,
+            border_focused,
+            border_focused_line,
+            title,
+        }
     }
 }
 
@@ -738,7 +872,9 @@ impl ThemeWindows {
 pub struct ThemeWindowsValues {
     pub default: Style,
     pub border: Style,
+    pub border_line: BorderType,
     pub border_focused: Style,
+    pub border_focused_line: BorderType,
     pub title: Style,
 }
 
@@ -824,5 +960,20 @@ mod tests {
         assert_eq!(values.windows.border, Style::default().fg(Color::Green).bold());
         assert_eq!(values.windows.border_focused, Style::default().fg(Color::Green).not_bold());
         assert_eq!(values.windows.title, Style::default().fg(Color::Red).bold());
+    }
+
+    #[test]
+    fn test_border_names() {
+        let res: LineName = serde_json::from_str(r#""plain""#).unwrap();
+        assert_eq!(res, LineName::Plain);
+
+        let res: LineName = serde_json::from_str(r#""rounded""#).unwrap();
+        assert_eq!(res, LineName::Rounded);
+
+        let res: LineName = serde_json::from_str(r#""double-dashed-light""#).unwrap();
+        assert_eq!(res, LineName::DoubleDashedLight);
+
+        let res: LineName = serde_json::from_str(r#""double-dashed-heavy""#).unwrap();
+        assert_eq!(res, LineName::DoubleDashedHeavy);
     }
 }

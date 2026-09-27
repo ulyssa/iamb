@@ -133,6 +133,8 @@ impl fmt::Display for VerifyItem {
 }
 
 impl ListItem<IambInfo> for VerifyItem {
+    type Section = &'static str;
+
     fn show(
         &self,
         selected: bool,

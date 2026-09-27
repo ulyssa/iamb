@@ -717,6 +717,35 @@ Modifier names prefixed with
 will remove the modifier if it was inherited from another default, global config, etc.
 .El
 .Pp
+Some special UI elements also have additional properties available:
+.Bl -tag -width Ds
+.It Sy line
+For UI elements that draw a block, such as
+.Sy "theme.windows.border" ,
+.Sy "theme.windows.border_focused" ,
+.Sy "theme.messages.code_block" ,
+or
+.Sy "theme.messages.table" ,
+you can specify what characters should be used to draw the bounding line.
+.Pp
+Possible values are
+.Dq Sy "plain" ,
+.Dq Sy "rounded" ,
+.Dq Sy "double" ,
+.Dq Sy "thick" ,
+.Dq Sy "double-dashed-light" ,
+.Dq Sy "double-dashed-heavy" ,
+.Dq Sy "triple-dashed-light" ,
+.Dq Sy "triple-dashed-heavy" ,
+.Dq Sy "quadruple-dashed-light" ,
+and
+.Dq Sy "quadruple-dashed-heavy" .
+.It Sy colors
+For UI elements that can use multiple colors, like
+.Sy "theme.users"
+for usernames, you can specify an array of colors that make up the pallete to pick from.
+.El
+.Pp
 Within
 .Sy theme ,
 there are several subsections for specific UI areas:
@@ -730,6 +759,8 @@ For controlling how the text in the command bar is styled.
 Configure the default styling for the command bar.
 .It Sy prompt
 Configure the styling for the prompt in the command bar.
+.It Sy completions
+Configure the styling for displaying possible command bar completions.
 .It Sy error
 Configure the styling for error messages shown in the command bar.
 .It Sy info
@@ -761,6 +792,10 @@ UI elements you can set within this subsection are:
 .Bl -tag -width Ds
 .It Sy default
 Configure the default styling for messages.
+.It Sy "blockquote"
+Configure the styling for the line used for indenting
+.Sy "<blockquote>"
+elements in formatted message bodies.
 .It Sy code
 Configure the styling for
 .Sy "<code>"
@@ -775,6 +810,10 @@ Configure the styling for
 and
 .Sy "<i>"
 elements in formatted message bodies.
+.It Sy "ruler"
+Configure the styling for the line used for drawing
+.Sy "<ruler>"
+elements in formatted message bodies.
 .It Sy "strikethrough"
 Configure the styling for
 .Sy "<del>" ,
@@ -787,6 +826,10 @@ Configure the styling for
 .Sy "<strong>"
 and
 .Sy "<b>"
+elements in formatted message bodies.
+.It Sy "table"
+Configure the styling for the line used for drawing the cells for
+.Sy "<table>"
 elements in formatted message bodies.
 .It Sy "underlined"
 Configure the styling for

@@ -1113,6 +1113,8 @@ impl Display for GenericRoomItem {
 }
 
 impl ListItem<IambInfo> for GenericRoomItem {
+    type Section = &'static str;
+
     fn show(
         &self,
         selected: bool,
@@ -1189,6 +1191,8 @@ impl Display for MemberItem {
 }
 
 impl ListItem<IambInfo> for MemberItem {
+    type Section = &'static str;
+
     fn show(
         &self,
         selected: bool,
@@ -1329,6 +1333,8 @@ impl Display for PinnedItem {
 }
 
 impl ListItem<IambInfo> for PinnedItem {
+    type Section = &'static str;
+
     fn show(
         &self,
         selected: bool,

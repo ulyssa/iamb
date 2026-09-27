@@ -18,13 +18,10 @@ use html5ever::tendril::{StrTendril, TendrilSink};
 use html5ever::{local_name, ns};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use matrix_sdk::OwnedServerName;
-use ratatui::symbols::line;
 
 use crate::message::printer::TextPrinter;
 use crate::prelude::*;
 use crate::util::{join_cell_text, space_text};
-
-const QUOTE_COLOR: Color = Color::Indexed(236);
 
 /// Generate bullet points from a [ListStyle].
 pub struct BulletIterator {
@@ -162,6 +159,9 @@ impl Table {
 
         let mut nrows = 0;
 
+        let line_style = style.patch(settings.theme.messages.table);
+        let line = settings.theme.messages.table_line.to_table_set();
+
         if let Some(caption) = &self.caption {
             let subw = width.saturating_sub(6);
             let mut printer =
@@ -181,26 +181,26 @@ impl Table {
 
                 for (i, w) in cell_widths.iter().enumerate() {
                     let cross = match (nrows, i) {
-                        (0, 0) => line::TOP_LEFT,
-                        (0, _) => line::HORIZONTAL_DOWN,
-                        (_, 0) => line::VERTICAL_RIGHT,
-                        (_, _) => line::CROSS,
+                        (0, 0) => line.top_left,
+                        (0, _) => line.horizontal_down,
+                        (_, 0) => line.vertical_right,
+                        (_, _) => line.cross,
                     };
 
                     ruler.push_str(cross);
 
                     for _ in 0..*w {
-                        ruler.push_str(line::HORIZONTAL);
+                        ruler.push_str(line.horizontal);
                     }
                 }
 
                 if nrows == 0 {
-                    ruler.push_str(line::TOP_RIGHT);
+                    ruler.push_str(line.top_right);
                 } else {
-                    ruler.push_str(line::VERTICAL_LEFT);
+                    ruler.push_str(line.vertical_left);
                 }
 
-                text.lines.push(Line::from(vec![Span::styled(ruler, style)]));
+                text.lines.push(Line::from(vec![Span::styled(ruler, line_style)]));
 
                 let cells = cell_widths
                     .iter()
@@ -221,7 +221,7 @@ impl Table {
                     })
                     .collect();
 
-                let joined = join_cell_text(cells, Span::styled(line::VERTICAL, style), style);
+                let joined = join_cell_text(cells, Span::styled(line.vertical, line_style), style);
                 text.lines.extend(joined.lines);
 
                 nrows += 1;
@@ -233,20 +233,20 @@ impl Table {
 
             for (i, w) in cell_widths.iter().enumerate() {
                 let cross = if i == 0 {
-                    line::BOTTOM_LEFT
+                    line.bottom_left
                 } else {
-                    line::HORIZONTAL_UP
+                    line.horizontal_up
                 };
 
                 ruler.push_str(cross);
 
                 for _ in 0..*w {
-                    ruler.push_str(line::HORIZONTAL);
+                    ruler.push_str(line.horizontal);
                 }
             }
 
-            ruler.push_str(line::BOTTOM_RIGHT);
-            text.lines.push(Line::from(vec![Span::styled(ruler, style)]));
+            ruler.push_str(line.bottom_right);
+            text.lines.push(Line::from(vec![Span::styled(ruler, line_style)]));
         }
 
         text
@@ -377,13 +377,16 @@ impl StyleTreeNode {
                 printer.push_span_nobreak(span);
             },
             StyleTreeNode::Blockquote(child) => {
+                let quote_style = style.patch(printer.settings().theme.messages.blockquote);
+                let quote =
+                    printer.settings().theme.messages.blockquote_line.to_table_set().vertical;
+
                 let mut subp = printer.sub(3);
                 child.print(&mut subp, style);
 
                 for mut line in subp.finish() {
                     line.spans.insert(0, Span::styled(" ", style));
-                    line.spans
-                        .insert(0, Span::styled(line::THICK_VERTICAL, style.fg(QUOTE_COLOR)));
+                    line.spans.insert(0, Span::styled(quote, quote_style));
                     line.spans.insert(0, Span::styled(" ", style));
                     printer.push_line(line);
                 }
@@ -445,30 +448,31 @@ impl StyleTreeNode {
                 let code_style = style.patch(subp.settings().theme.messages.code_block);
                 let _ = subp.replace_base_style(code_style);
                 let subw = subp.width();
+                let border = subp.settings().theme.messages.code_block_line.to_border_set();
 
                 child.print(&mut subp, code_style);
 
                 printer.commit();
                 printer.push_line(
                     vec![
-                        Span::styled(line::TOP_LEFT, style),
-                        Span::styled(line::HORIZONTAL.repeat(subw), style),
-                        Span::styled(line::TOP_RIGHT, style),
+                        Span::styled(border.top_left, style),
+                        Span::styled(border.horizontal_top.repeat(subw), style),
+                        Span::styled(border.top_right, style),
                     ]
                     .into(),
                 );
 
                 for mut line in subp.finish() {
-                    line.spans.insert(0, Span::styled(line::VERTICAL, style));
-                    line.spans.push(Span::styled(line::VERTICAL, style));
+                    line.spans.insert(0, Span::styled(border.vertical_left, style));
+                    line.spans.push(Span::styled(border.vertical_right, style));
                     printer.push_line(line);
                 }
 
                 printer.push_line(
                     vec![
-                        Span::styled(line::BOTTOM_LEFT, style),
-                        Span::styled(line::HORIZONTAL.repeat(subw), style),
-                        Span::styled(line::BOTTOM_RIGHT, style),
+                        Span::styled(border.bottom_left, style),
+                        Span::styled(border.horizontal_bottom.repeat(subw), style),
+                        Span::styled(border.bottom_right, style),
                     ]
                     .into(),
                 );
@@ -476,8 +480,11 @@ impl StyleTreeNode {
                 printer.commit();
             },
             StyleTreeNode::Ruler => {
+                let style = style.patch(printer.settings().theme.messages.ruler);
+                let line = printer.settings().theme.messages.ruler_line.to_table_set().horizontal;
+
                 for _ in 0..width {
-                    printer.push_str(line::HORIZONTAL, style);
+                    printer.push_str(line, style);
                 }
             },
             StyleTreeNode::Table(table) => {
@@ -921,6 +928,7 @@ pub fn parse_matrix_html(s: &str) -> StyleTree {
 pub mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
+    use ratatui::symbols::line;
     use unicode_width::UnicodeWidthStr;
 
     use crate::tests::{mock_room, mock_settings};
@@ -1149,7 +1157,7 @@ pub mod tests {
         let s = "<blockquote>Hello world!</blockquote>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(10, Style::default(), &settings, &info);
-        let style = Style::new().fg(QUOTE_COLOR);
+        let style = Style::new().fg(Color::Indexed(236));
         assert_eq!(text.lines.len(), 2);
         assert_eq!(
             text.lines[0],
