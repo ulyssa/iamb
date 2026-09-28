@@ -131,7 +131,7 @@ pub fn mock_room() -> RoomInfo {
     let mut room = RoomInfo::default();
     room.name = Some("Watercooler Discussion".into());
     room.keys = mock_keys();
-    *room.get_thread_mut(None) = mock_messages();
+    *room.get_messages_mut(None) = mock_messages();
 
     let user_id = TEST_USER2.clone();
     let name = "User 2";

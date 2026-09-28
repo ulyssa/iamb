@@ -14,7 +14,7 @@ use matrix_sdk::AuthSession;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
-use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
+use matrix_sdk::deserialized_responses::{ThreadSummaryStatus, TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_cache::DecryptionRetryRequest;
 use matrix_sdk::event_handler::Ctx;
@@ -116,7 +116,7 @@ const RECEIPT_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 type ReceiptKey = (OwnedRoomId, ReceiptThread, ReceiptType);
 type ReceiptUpdate = (OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId);
 
-type MessageAndReceipts = (AnyTimelineEvent, ReceiptThread, Vec<OwnedUserId>);
+type MessageAndReceipts = (AnyTimelineEvent, ThreadSummaryStatus, ReceiptThread, Vec<OwnedUserId>);
 type MessageFetchResult = IambResult<(bool, Vec<MessageAndReceipts>)>;
 
 fn initial_devname() -> String {
@@ -462,7 +462,7 @@ async fn get_receipts_for_timeline_events(
             },
         };
 
-        msgs.push((msg, thread, receipts));
+        msgs.push((msg, ev.thread_summary, thread, receipts));
     }
 
     if !redecryption_requests.is_empty() {
@@ -505,7 +505,7 @@ fn insert_msgs_and_receipts(
     previews: &mut PreviewManager,
     settings: &ApplicationSettings,
 ) {
-    for (msg, thread, receipts) in msgs {
+    for (msg, thread_summary, thread, receipts) in msgs {
         let sender = msg.sender().to_owned();
         let _ = presences.get_or_default(sender);
 
@@ -515,25 +515,25 @@ fn insert_msgs_and_receipts(
 
         match msg {
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
-                info.insert_encrypted(msg);
+                info.insert_encrypted(msg, thread_summary);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
-                info.insert_with_preview(msg, settings, previews);
+                info.insert_with_preview(msg, thread_summary, settings, previews);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
                 info.insert_reaction_with_preview(ev, settings, previews);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
-                info.insert_sticker_with_preview(ev, settings, previews);
+                info.insert_sticker_with_preview(ev, thread_summary, settings, previews);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomRedaction(..)) => {
                 // ignoring redaction events because we get them bundled with the redacted event
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollStart(ev)) => {
-                info.insert_poll_start(ev, &settings.user_id);
+                info.insert_poll_start(ev, &settings.user_id, thread_summary);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::UnstablePollStart(ev)) => {
-                info.insert_unstable_poll_start(ev, &settings.user_id);
+                info.insert_unstable_poll_start(ev, &settings.user_id, thread_summary);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollResponse(ev)) => {
                 if let MessageLikeEvent::Original(ev) = ev {
@@ -977,7 +977,9 @@ fn insert_local_echo(
                     // XXX: Show echo on edited message
                     return Ok(());
                 },
-                Some(Relation::Thread(Thread { event_id, .. })) => Some(event_id.to_owned()),
+                Some(Relation::Thread(ThreadRelation { event_id, .. })) => {
+                    Some(event_id.to_owned())
+                },
                 _ => None,
             };
 
@@ -989,7 +991,7 @@ fn insert_local_echo(
             info.echo_keys
                 .insert(transaction_id, EchoLocation::Message(thread.clone(), key.clone()));
 
-            let thread = info.get_thread_mut(thread);
+            let thread = info.get_messages_mut(thread);
             thread.insert(key, msg);
         },
         LocalEchoContent::Redaction { .. } => {
@@ -1044,7 +1046,7 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
                     continue;
                 };
 
-                let Some(msg) = info.get_thread_mut(thread).get_mut(&key) else {
+                let Some(msg) = info.get_messages_mut(thread).get_mut(&key) else {
                     tracing::debug!(?transaction_id, "replaced local echo not found");
                     continue;
                 };
@@ -1070,7 +1072,7 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
                     let location = std::mem::replace(location, EchoLocation::Replaced(event_id));
 
                     if let EchoLocation::Message(thread, key) = location {
-                        info.get_thread_mut(thread).remove(&key);
+                        info.get_messages_mut(thread).remove(&key);
                     }
                 }
             },
@@ -1805,7 +1807,12 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_with_preview(full_ev, settings, previews);
+                    info.insert_with_preview(
+                        full_ev,
+                        ThreadSummaryStatus::Unknown,
+                        settings,
+                        previews,
+                    );
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1857,7 +1864,12 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_sticker_with_preview(full_ev, settings, previews);
+                    info.insert_sticker_with_preview(
+                        full_ev,
+                        ThreadSummaryStatus::Unknown,
+                        settings,
+                        previews,
+                    );
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1908,7 +1920,11 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_poll_start(full_ev, &settings.user_id);
+                    info.insert_poll_start(
+                        full_ev,
+                        &settings.user_id,
+                        ThreadSummaryStatus::Unknown,
+                    );
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1933,7 +1949,11 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_unstable_poll_start(full_ev, &settings.user_id);
+                    info.insert_unstable_poll_start(
+                        full_ev,
+                        &settings.user_id,
+                        ThreadSummaryStatus::Unknown,
+                    );
 
                     update_event_receipts(info, &room, event_id).await;
                 }

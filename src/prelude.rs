@@ -12,7 +12,7 @@ pub use std::time::{Duration, Instant};
 pub use matrix_sdk::room_preview::RoomPreview;
 pub use matrix_sdk::ruma::events::AnySyncStateEvent;
 pub use matrix_sdk::ruma::events::receipt::ReceiptThread;
-pub use matrix_sdk::ruma::events::relation::Thread;
+pub use matrix_sdk::ruma::events::relation::Thread as ThreadRelation;
 pub use matrix_sdk::ruma::events::room::MediaSource;
 pub use matrix_sdk::ruma::events::room::encrypted::Relation as EncryptedRelation;
 pub use matrix_sdk::ruma::events::room::message::{
