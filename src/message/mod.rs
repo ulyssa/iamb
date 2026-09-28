@@ -90,10 +90,6 @@ impl Messages {
         Self::new(ReceiptThread::Main)
     }
 
-    pub fn thread(root: OwnedEventId) -> Self {
-        Self::new(ReceiptThread::Thread(root))
-    }
-
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
         let mut msg = msg.into();
         if let MessageEvent::Original(ev, edits) = &mut msg.event {
@@ -421,7 +417,7 @@ fn redaction_reason_event(ev: SyncRoomRedactionEvent) -> Option<String> {
 fn has_reply_fallback(relation: Option<&Relation<RoomMessageEventContentWithoutRelation>>) -> bool {
     matches!(
         relation,
-        Some(Relation::Reply(_) | Relation::Thread(Thread { in_reply_to: Some(_), .. }))
+        Some(Relation::Reply(_) | Relation::Thread(ThreadRelation { in_reply_to: Some(_), .. }))
     )
 }
 
@@ -1022,6 +1018,7 @@ impl<'a> MessageFormatter<'a> {
     }
 }
 
+#[derive(Clone)]
 pub struct Message {
     pub event: MessageEvent,
     pub sender: OwnedUserId,
@@ -1059,7 +1056,7 @@ impl Message {
             MessageEvent::Sticker(ev, ..) => {
                 return match &ev.content.relates_to {
                     Some(Relation::Reply(reply)) => Some(reply.in_reply_to.event_id.clone()),
-                    Some(Relation::Thread(Thread {
+                    Some(Relation::Thread(ThreadRelation {
                         in_reply_to: Some(in_reply_to),
                         is_falling_back: false,
                         ..
@@ -1073,7 +1070,7 @@ impl Message {
 
         match &content.relates_to {
             Some(Relation::Reply(reply)) => Some(reply.in_reply_to.event_id.clone()),
-            Some(Relation::Thread(Thread {
+            Some(Relation::Thread(ThreadRelation {
                 in_reply_to: Some(in_reply_to),
                 is_falling_back: false,
                 ..
@@ -1097,7 +1094,7 @@ impl Message {
         };
 
         match &content.relates_to {
-            Some(Relation::Thread(Thread {
+            Some(Relation::Thread(ThreadRelation {
                 event_id,
                 in_reply_to: Some(in_reply_to),
                 is_falling_back: true,
@@ -1389,8 +1386,9 @@ impl Message {
             protos.extend(react_protos);
         }
 
-        if let Some(thread) = self.event.event_id().and_then(|id| info.get_thread(Some(id))) {
-            fmt.push_thread_reply_count(thread.len(), &mut text, style);
+        if let Some(thread) = self.event.event_id().and_then(|id| info.get_thread(id)) {
+            let len = thread.summary.as_ref().map(|s| s.num_replies).unwrap_or_default();
+            fmt.push_thread_reply_count(thread.len().max(len as usize), &mut text, style);
         }
 
         (text, protos)
@@ -1714,15 +1712,15 @@ pub mod tests {
         assert!(has_reply_fallback(Some(&reply)));
 
         let thread_reply: Relation<RoomMessageEventContentWithoutRelation> =
-            Relation::Thread(Thread::reply(root.clone(), target.clone()));
+            Relation::Thread(ThreadRelation::reply(root.clone(), target.clone()));
         assert!(has_reply_fallback(Some(&thread_reply)));
 
         let thread_fallback: Relation<RoomMessageEventContentWithoutRelation> =
-            Relation::Thread(Thread::plain(root.clone(), target));
+            Relation::Thread(ThreadRelation::plain(root.clone(), target));
         assert!(has_reply_fallback(Some(&thread_fallback)));
 
         let thread_without_fallback: Relation<RoomMessageEventContentWithoutRelation> =
-            Relation::Thread(Thread::without_fallback(root));
+            Relation::Thread(ThreadRelation::without_fallback(root));
         assert!(!has_reply_fallback(Some(&thread_without_fallback)));
         assert!(!has_reply_fallback(None));
     }

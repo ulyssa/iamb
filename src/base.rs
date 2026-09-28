@@ -6,6 +6,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use emojis::Emoji;
 use matrix_sdk::Client;
+use matrix_sdk::deserialized_responses::{ThreadSummary, ThreadSummaryStatus};
 use matrix_sdk::ruma::events::poll::start::PollStartEvent;
 use matrix_sdk::ruma::events::poll::unstable_start::{
     UnstablePollStartEvent,
@@ -1392,6 +1393,38 @@ bitflags::bitflags! {
     }
 }
 
+pub struct Thread {
+    messages: Messages,
+
+    root: Option<Message>,
+    // TODO: check access
+    pub(crate) summary: Option<ThreadSummary>,
+}
+
+impl Thread {
+    fn new(root: OwnedEventId) -> Self {
+        Self {
+            messages: Messages::new(ReceiptThread::Thread(root)),
+            root: None,
+            summary: None,
+        }
+    }
+}
+
+impl Deref for Thread {
+    type Target = Messages;
+
+    fn deref(&self) -> &Self::Target {
+        &self.messages
+    }
+}
+
+impl DerefMut for Thread {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        &mut self.messages
+    }
+}
+
 /// Information about room's the user's joined.
 pub struct RoomInfo {
     /// The display name for this room.
@@ -1426,7 +1459,7 @@ pub struct RoomInfo {
     pub unloaded_unstable_polls: HashMap<OwnedEventId, UnloadedUnstablePoll>,
 
     /// A map of message identifiers to thread replies.
-    threads: HashMap<OwnedEventId, Messages>,
+    threads: HashMap<OwnedEventId, Thread>,
 
     /// Whether the scrollback for this room is currently being fetched.
     pub fetching: bool,
@@ -1494,22 +1527,26 @@ impl Default for RoomInfo {
 }
 
 impl RoomInfo {
-    pub fn get_thread(&self, root: Option<&EventId>) -> Option<&Messages> {
-        if let Some(thread_root) = root {
-            self.threads.get(thread_root)
+    pub fn get_messages(&self, thread_root: Option<&EventId>) -> Option<&Messages> {
+        if let Some(thread_root) = thread_root {
+            self.threads.get(thread_root).map(Deref::deref)
         } else {
             Some(&self.messages)
         }
     }
 
-    pub fn get_thread_mut(&mut self, root: Option<OwnedEventId>) -> &mut Messages {
-        if let Some(thread_root) = root {
+    pub fn get_messages_mut(&mut self, thread_root: Option<OwnedEventId>) -> &mut Messages {
+        if let Some(thread_root) = thread_root {
             self.threads
                 .entry(thread_root.clone())
-                .or_insert_with(|| Messages::thread(thread_root))
+                .or_insert_with(|| Thread::new(thread_root))
         } else {
             &mut self.messages
         }
+    }
+
+    pub fn get_thread(&self, root: &EventId) -> Option<&Thread> {
+        self.threads.get(root)
     }
 
     /// Get the event for the last message in a thread (or the thread root if there are no
@@ -1641,7 +1678,7 @@ impl RoomInfo {
         let key = loc.to_message_key()?;
         let root = loc.to_thread_root();
 
-        self.get_thread(root)?.get(key)
+        self.get_messages(root)?.get(key)
     }
 
     /// Get an event for an identifier as mutable.
@@ -1651,7 +1688,7 @@ impl RoomInfo {
         let key = loc.to_message_key()?;
         let root = loc.to_thread_root();
 
-        self.get_thread_mut(root.map(ToOwned::to_owned)).get_mut(key)
+        self.get_messages_mut(root.map(ToOwned::to_owned)).get_mut(key)
     }
 
     /// Map an event identifier to its [`MessageKey`] and thread root.
@@ -1679,7 +1716,7 @@ impl RoomInfo {
     pub fn get_message(&self, message_id: &MessageId) -> Option<&Message> {
         let (root, key) = self.get_message_thread_key(message_id)?;
 
-        self.get_thread(root)?.get(key)
+        self.get_messages(root)?.get(key)
     }
 
     /// Get an event for an identifier as mutable.
@@ -1689,7 +1726,7 @@ impl RoomInfo {
         let root = root.map(ToOwned::to_owned);
         let key = key.to_owned();
 
-        self.get_thread_mut(root).get_mut(&key)
+        self.get_messages_mut(root).get_mut(&key)
     }
 
     pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
@@ -1703,7 +1740,7 @@ impl RoomInfo {
                 let edit_key = edit_key.clone();
                 let msg_loc = self.keys.get(msg_event_id).cloned();
                 if let Some(EventLocation::Message(thread, msg_key)) = msg_loc {
-                    if let Some(msg) = self.get_thread_mut(thread).get_mut(&msg_key) {
+                    if let Some(msg) = self.get_messages_mut(thread).get_mut(&msg_key) {
                         msg.remove_edit(&edit_key);
                     }
                 } else {
@@ -1760,14 +1797,25 @@ impl RoomInfo {
         event_id: OwnedEventId,
         thread_root: Option<OwnedEventId>,
         message: Message,
+        thread_summary: ThreadSummaryStatus,
     ) {
         let sender = message.sender.clone();
+
+        if let ThreadSummaryStatus::Some(thread_summary) = thread_summary {
+            let thread = self
+                .threads
+                .entry(event_id.clone())
+                .or_insert_with(|| Thread::new(event_id.clone()));
+
+            thread.root = Some(message.clone());
+            thread.summary = Some(thread_summary);
+        }
 
         let key = MessageKey { ts: message.timestamp, id: event_id.clone().into() };
         let loc = EventLocation::Message(thread_root.clone(), key.clone());
         self.keys.insert(event_id.clone(), loc);
 
-        let thread = self.get_thread_mut(thread_root);
+        let thread = self.get_messages_mut(thread_root);
         thread.insert_message(key, message);
         self.set_implicit_receipt(sender, event_id);
     }
@@ -1778,6 +1826,7 @@ impl RoomInfo {
         event_id: OwnedEventId,
         thread_root: Option<OwnedEventId>,
         message: Message,
+        thread_summary: ThreadSummaryStatus,
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
     ) {
@@ -1787,7 +1836,7 @@ impl RoomInfo {
             }
         }
 
-        self.insert_msglike(event_id, thread_root, message);
+        self.insert_msglike(event_id, thread_root, message, thread_summary);
     }
 
     /// Insert a reaction to a message.
@@ -1812,6 +1861,7 @@ impl RoomInfo {
     pub fn insert_sticker(
         &mut self,
         sticker: StickerEvent,
+        thread_summary: ThreadSummaryStatus,
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
     ) {
@@ -1820,7 +1870,7 @@ impl RoomInfo {
             MessageLikeEvent::Original(OriginalMessageLikeEvent {
                 content:
                     StickerEventContent {
-                        relates_to: Some(Relation::Thread(Thread { event_id, .. })),
+                        relates_to: Some(Relation::Thread(ThreadRelation { event_id, .. })),
                         ..
                     },
                 ..
@@ -1828,7 +1878,14 @@ impl RoomInfo {
             _ => None,
         };
 
-        self.insert_msglike_with_preview(event_id, thread_root, sticker.into(), settings, previews);
+        self.insert_msglike_with_preview(
+            event_id,
+            thread_root,
+            sticker.into(),
+            thread_summary,
+            settings,
+            previews,
+        );
     }
 
     /// Insert a reaction to a message.
@@ -1858,7 +1915,12 @@ impl RoomInfo {
     }
 
     /// Insert the start of a poll.
-    pub fn insert_poll_start(&mut self, poll: PollStartEvent, own_user_id: &UserId) {
+    pub fn insert_poll_start(
+        &mut self,
+        poll: PollStartEvent,
+        own_user_id: &UserId,
+        thread_summary: ThreadSummaryStatus,
+    ) {
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
             ts: poll.origin_server_ts().into(),
@@ -1895,7 +1957,7 @@ impl RoomInfo {
                     }
                 } else {
                     let thread_root = match &ev.content.relates_to {
-                        Some(Relation::Thread(Thread { event_id, .. })) => {
+                        Some(Relation::Thread(ThreadRelation { event_id, .. })) => {
                             Some(event_id.to_owned())
                         },
                         _ => None,
@@ -1907,13 +1969,13 @@ impl RoomInfo {
                     );
                     let msg = Message::new(msg, ev.sender, ev.origin_server_ts.into());
 
-                    self.insert_msglike(event_id, thread_root, msg);
+                    self.insert_msglike(event_id, thread_root, msg, thread_summary);
                 }
             },
             MessageLikeEvent::Redacted(ev) => {
                 let message: Message = ev.into();
 
-                self.insert_msglike(event_id, None, message);
+                self.insert_msglike(event_id, None, message, thread_summary);
             },
         }
     }
@@ -1923,6 +1985,7 @@ impl RoomInfo {
         &mut self,
         poll: UnstablePollStartEvent,
         own_user_id: &UserId,
+        thread_summary: ThreadSummaryStatus,
     ) {
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
@@ -1935,8 +1998,9 @@ impl RoomInfo {
                 match ev.content {
                     UnstablePollStartEventContent::New(content) => {
                         let thread_root = match &content.relates_to {
-                            Some(RelationWithoutReplacement::Thread(Thread {
-                                event_id, ..
+                            Some(RelationWithoutReplacement::Thread(ThreadRelation {
+                                event_id,
+                                ..
                             })) => Some(event_id.to_owned()),
                             _ => None,
                         };
@@ -1954,7 +2018,7 @@ impl RoomInfo {
                         );
                         let msg = Message::new(msg, ev.sender, ev.origin_server_ts.into());
 
-                        self.insert_msglike(event_id, thread_root, msg);
+                        self.insert_msglike(event_id, thread_root, msg, thread_summary);
                     },
                     UnstablePollStartEventContent::Replacement(content) => {
                         let loc = EventLocation::Poll(
@@ -1986,7 +2050,7 @@ impl RoomInfo {
             MessageLikeEvent::Redacted(ev) => {
                 let message: Message = ev.into();
 
-                self.insert_msglike(event_id, None, message);
+                self.insert_msglike(event_id, None, message, thread_summary);
             },
         }
     }
@@ -2054,7 +2118,7 @@ impl RoomInfo {
 
         if let Some(EventLocation::Message(thread, key)) = msg_loc {
             // The edited message is already loaded in cache
-            let Some(msg) = self.get_thread_mut(thread).get_mut(&key) else {
+            let Some(msg) = self.get_messages_mut(thread).get_mut(&key) else {
                 return;
             };
             msg.insert_edit(edit_key.clone(), replacement.new_content);
@@ -2077,28 +2141,34 @@ impl RoomInfo {
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
         let event_id = msg.event_id().to_owned();
 
-        self.insert_msglike(event_id, None, msg.into());
+        self.insert_msglike(event_id, None, msg.into(), ThreadSummaryStatus::None);
     }
 
     /// Inserts events that couldn't be decrypted into the scrollback.
-    pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
+    pub fn insert_encrypted(
+        &mut self,
+        msg: RoomEncryptedEvent,
+        thread_summary: ThreadSummaryStatus,
+    ) {
         let event_id = msg.event_id().to_owned();
 
-        let thread_root = if let Some(EncryptedRelation::Thread(Thread { event_id, .. })) =
-            msg.as_original().and_then(|ev| ev.content.relates_to.as_ref())
-        {
-            Some(event_id.to_owned())
-        } else {
-            None
-        };
+        let thread_root =
+            if let Some(EncryptedRelation::Thread(ThreadRelation { event_id, .. })) =
+                msg.as_original().and_then(|ev| ev.content.relates_to.as_ref())
+            {
+                Some(event_id.to_owned())
+            } else {
+                None
+            };
 
-        self.insert_msglike(event_id, thread_root, msg.into());
+        self.insert_msglike(event_id, thread_root, msg.into(), thread_summary);
     }
 
     /// Insert a new message event, and prepare for image-preview if it has an image attachment.
     pub fn insert_message(
         &mut self,
         ev: RoomMessageEvent,
+        thread_summary: ThreadSummaryStatus,
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
     ) {
@@ -2109,14 +2179,21 @@ impl RoomInfo {
                 self.insert_edit(ev, repl, settings, previews);
                 return;
             },
-            Some(Relation::Thread(Thread { event_id, .. })) => Some(event_id.to_owned()),
+            Some(Relation::Thread(ThreadRelation { event_id, .. })) => Some(event_id.to_owned()),
             _ => None,
         };
         let mut message: Message = ev.into();
         if let Some(edits) = self.unloaded_edits.remove(&event_id) {
             message.set_edits(edits);
         }
-        self.insert_msglike_with_preview(event_id, thread_root, message, settings, previews);
+        self.insert_msglike_with_preview(
+            event_id,
+            thread_root,
+            message,
+            thread_summary,
+            settings,
+            previews,
+        );
     }
 
     /// Indicates whether this room has unread messages.
@@ -2264,8 +2341,8 @@ impl RoomInfo {
         let user_id = &settings.user_id;
 
         let messages = match &thread {
-            ReceiptThread::Main => self.get_thread(None),
-            ReceiptThread::Thread(root) => self.get_thread(Some(root)),
+            ReceiptThread::Main => self.get_messages(None),
+            ReceiptThread::Thread(root) => self.get_messages(Some(root)),
             _ => None,
         };
 
@@ -3238,7 +3315,7 @@ pub mod tests {
             MSG5_KEY.clone(),
         );
 
-        info.insert_message(event, &settings, &mut previews);
+        info.insert_message(event, ThreadSummaryStatus::Unknown, &settings, &mut previews);
 
         assert_eq!(
             info.user_receipts
@@ -3270,8 +3347,8 @@ pub mod tests {
             MSG2_KEY.clone(),
         );
 
-        info.insert_message(newer, &settings, &mut previews);
-        info.insert_message(older, &settings, &mut previews);
+        info.insert_message(newer, ThreadSummaryStatus::Unknown, &settings, &mut previews);
+        info.insert_message(older, ThreadSummaryStatus::Unknown, &settings, &mut previews);
 
         assert_eq!(
             info.user_receipts
@@ -3332,8 +3409,8 @@ pub mod tests {
             MSG5_KEY.clone(),
         );
 
-        info.insert_message(older, &settings, &mut previews);
-        info.insert_message(newer, &settings, &mut previews);
+        info.insert_message(older, ThreadSummaryStatus::Unknown, &settings, &mut previews);
+        info.insert_message(newer, ThreadSummaryStatus::Unknown, &settings, &mut previews);
         info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG2_EVID.clone());
 
         assert_eq!(
@@ -3356,7 +3433,7 @@ pub mod tests {
             MSG2_KEY.clone(),
         );
 
-        info.insert_message(older, &settings, &mut previews);
+        info.insert_message(older, ThreadSummaryStatus::Unknown, &settings, &mut previews);
 
         assert_eq!(
             info.user_receipts

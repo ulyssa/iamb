@@ -163,7 +163,7 @@ impl ScrollbackState {
     }
 
     pub fn get_thread<'a>(&self, info: &'a RoomInfo) -> Option<&'a Messages> {
-        info.get_thread(self.thread.as_deref())
+        info.get_messages(self.thread.as_deref())
     }
 
     pub fn messages<'a>(

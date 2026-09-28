@@ -424,7 +424,7 @@ impl ChatState {
                                 Some(EchoLocation::Replaced(id)) => id,
                                 Some(EchoLocation::Message(thread, orig_key)) => {
                                     let Some(MessageEvent::Local(_, handle, _)) = info
-                                        .get_thread(thread.as_deref())
+                                        .get_messages(thread.as_deref())
                                         .and_then(|thread| thread.get(orig_key))
                                         .map(|msg| &msg.event)
                                     else {
