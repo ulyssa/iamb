@@ -589,6 +589,10 @@ window.
 Defaults to the
 .Sy rooms
 value.
+.It Sy space
+How to sort rooms in a space.
+Defaults to
+.Sy ["spaceorder"] .
 .It Sy members
 How to sort the
 .Sy :members
@@ -619,6 +623,11 @@ Put unread rooms before other rooms.
 Sort rooms by most recent message timestamp.
 .It Sy invite
 Put invites before other rooms.
+.El
+The available values for sorting space members are the same as for sorting rooms with the addition:
+.Bl -tag -width Ds
+.It Sy spaceorder
+Sort rooms according to the order defined by the space admins.
 .El
 .Pp
 The available values for sorting users are:

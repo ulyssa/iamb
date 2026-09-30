@@ -23,7 +23,7 @@ use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
+use crate::base::{SortColumn, SortFieldRoom, SortFieldSpace, SortFieldUser, SortOrder};
 use crate::prelude::*;
 
 pub mod theme;
@@ -56,6 +56,9 @@ const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
     SortColumn(SortFieldRoom::Unread, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
+
+const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 1] =
+    [SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending)];
 
 const DEFAULT_ENABLE_TITLE: bool = true;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
@@ -700,6 +703,7 @@ pub struct SortValues {
     pub rooms: Vec<SortColumn<SortFieldRoom>>,
     pub spaces: Vec<SortColumn<SortFieldRoom>>,
     pub members: Vec<SortColumn<SortFieldUser>>,
+    pub space: Vec<SortColumn<SortFieldSpace>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -709,6 +713,7 @@ pub struct SortOverrides {
     pub rooms: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub spaces: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub members: Option<Vec<SortColumn<SortFieldUser>>>,
+    pub space: Option<Vec<SortColumn<SortFieldSpace>>>,
 }
 
 impl SortOverrides {
@@ -719,6 +724,7 @@ impl SortOverrides {
             rooms: profile.rooms.or(global.rooms),
             spaces: profile.spaces.or(global.spaces),
             members: profile.members.or(global.members),
+            space: profile.space.or(global.space),
         }
     }
 
@@ -728,8 +734,9 @@ impl SortOverrides {
         let dms = self.dms.unwrap_or_else(|| rooms.clone());
         let spaces = self.spaces.unwrap_or_else(|| rooms.clone());
         let members = self.members.unwrap_or_else(|| Vec::from(DEFAULT_MEMBERS_SORT));
+        let space = self.space.unwrap_or_else(|| Vec::from(DEFAULT_SPACE_SORT));
 
-        SortValues { rooms, members, chats, dms, spaces }
+        SortValues { rooms, members, chats, dms, spaces, space }
     }
 }
 

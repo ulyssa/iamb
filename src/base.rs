@@ -255,6 +255,13 @@ pub enum SortFieldRoom {
     Invite,
 }
 
+/// Fields that space children can be sorted by.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SortFieldSpace {
+    Room(SortFieldRoom),
+    SpaceOrder,
+}
+
 /// Fields that users can be sorted by.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SortFieldUser {
@@ -324,6 +331,52 @@ impl Visitor<'_> for SortRoomVisitor {
             _ => {
                 let msg = format!("Unknown sort field: {value:?}");
                 return Err(E::custom(msg));
+            },
+        };
+
+        Ok(SortColumn(field, order))
+    }
+}
+
+impl<'de> Deserialize<'de> for SortColumn<SortFieldSpace> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SortSpaceVisitor)
+    }
+}
+
+/// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
+struct SortSpaceVisitor;
+
+impl Visitor<'_> for SortSpaceVisitor {
+    type Value = SortColumn<SortFieldSpace>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid field for sorting space children")
+    }
+
+    fn visit_str<E>(self, mut value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        if value.is_empty() {
+            return Err(E::custom("Invalid sort field"));
+        }
+
+        let order = if value.starts_with('~') {
+            value = &value[1..];
+            SortOrder::Descending
+        } else {
+            SortOrder::Ascending
+        };
+
+        let field = match value {
+            "spaceorder" => SortFieldSpace::SpaceOrder,
+            _ => {
+                let room_column = SortRoomVisitor.visit_str(value)?;
+                SortFieldSpace::Room(room_column.0)
             },
         };
 

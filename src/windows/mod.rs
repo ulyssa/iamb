@@ -1527,13 +1527,13 @@ mod tests {
     use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, room_alias_id, server_name};
 
     #[derive(Debug, Eq, PartialEq)]
-    struct TestRoomItem {
-        room_id: OwnedRoomId,
-        tags: Vec<TagName>,
-        alias: Option<OwnedRoomAliasId>,
-        name: &'static str,
-        unread: UnreadInfo,
-        invite: bool,
+    pub(super) struct TestRoomItem {
+        pub room_id: OwnedRoomId,
+        pub tags: Vec<TagName>,
+        pub alias: Option<OwnedRoomAliasId>,
+        pub name: &'static str,
+        pub unread: UnreadInfo,
+        pub invite: bool,
     }
 
     impl RoomLikeItem for &TestRoomItem {

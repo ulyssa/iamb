@@ -1,12 +1,14 @@
 //! Window for Matrix spaces
 
+use feruca::Collator;
 use matrix_sdk::ruma::OwnedSpaceChildOrder;
 use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use modalkit_ratatui::list::{List, ListState};
 
+use crate::base::{SortColumn, SortFieldRoom, SortFieldSpace, SortOrder, SpaceInfo};
 use crate::prelude::*;
-use crate::windows::{GenericRoomItem, RoomLikeItem, room_fields_cmp};
+use crate::windows::{GenericRoomItem, RoomLikeItem, room_cmp};
 
 /// State needed for rendering [Space].
 pub struct SpaceState {
@@ -199,9 +201,9 @@ impl StatefulWidget for Space<'_> {
         } = &mut self.store.application;
         let default_rooms_style = settings.theme.rooms.default;
 
-        let mut items = spaces
-            .entry(state.room_id.clone())
-            .or_default()
+        let info = spaces.entry(state.room_id.clone()).or_default();
+
+        let mut items = info
             .children
             .keys()
             .map(|id| {
@@ -213,8 +215,8 @@ impl StatefulWidget for Space<'_> {
             })
             .collect::<Vec<_>>();
 
-        let fields = &settings.tunables.sort.rooms;
-        items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+        let fields = &settings.tunables.sort.space;
+        items.sort_by(|a, b| space_fields_cmp(a, b, fields, collator, info));
 
         state.list.set(items);
         state.set_ignorecase(settings.tunables.ignorecase);
@@ -225,5 +227,146 @@ impl StatefulWidget for Space<'_> {
             .focus(self.focused)
             .style(default_rooms_style)
             .render(area, buffer, &mut state.list)
+    }
+}
+
+fn space_child_cmp<T: RoomLikeItem>(
+    a: &T,
+    b: &T,
+    field: &SortFieldSpace,
+    collator: &mut Collator,
+    space: &SpaceInfo,
+) -> Ordering {
+    match field {
+        SortFieldSpace::Room(field) => room_cmp(a, b, field, collator),
+        SortFieldSpace::SpaceOrder => {
+            let (Some(a_child), Some(b_child)) =
+                (space.children.get(a.room_id()), space.children.get(b.room_id()))
+            else {
+                // This should never happen since we got both room ids from the space info, but fall
+                // back to room id order anyway and hope for the best.
+                return room_cmp(a, b, &SortFieldRoom::RoomId, collator);
+            };
+
+            match (a_child.0.order.as_ref(), b_child.0.order.as_ref()) {
+                (Some(a), Some(b)) => a.cmp(b),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => (a_child.1, a.room_id()).cmp(&(b_child.1, b.room_id())),
+            }
+        },
+    }
+}
+
+/// Compare two space children according the configured sort criteria.
+fn space_fields_cmp<T: RoomLikeItem>(
+    a: &T,
+    b: &T,
+    fields: &[SortColumn<SortFieldSpace>],
+    collator: &mut Collator,
+    space: &SpaceInfo,
+) -> Ordering {
+    for SortColumn(field, order) in fields {
+        match (space_child_cmp(a, b, field, collator, space), order) {
+            (Ordering::Equal, _) => continue,
+            (o, SortOrder::Ascending) => return o,
+            (o, SortOrder::Descending) => return o.reverse(),
+        }
+    }
+
+    // Break ties on space order.
+    space_child_cmp(a, b, &SortFieldSpace::SpaceOrder, collator, space)
+}
+
+#[cfg(test)]
+mod tests {
+    use matrix_sdk::ruma::{assign, server_name};
+
+    use crate::windows::tests::TestRoomItem;
+
+    use super::*;
+
+    #[test]
+    fn test_sort_space_children() {
+        let mut collator = Collator::default();
+        let collator = &mut collator;
+        let server = server_name!("example.com");
+
+        let room1 = TestRoomItem {
+            room_id: RoomId::new_v1(server).to_owned(),
+            name: "1",
+            alias: None,
+            tags: vec![],
+            unread: Default::default(),
+            invite: false,
+        };
+        let room2 = TestRoomItem {
+            room_id: RoomId::new_v1(server).to_owned(),
+            name: "2",
+            alias: None,
+            tags: vec![],
+            unread: Default::default(),
+            invite: false,
+        };
+        let room3 = TestRoomItem {
+            room_id: RoomId::new_v1(server).to_owned(),
+            name: "3",
+            alias: None,
+            tags: vec![],
+            unread: Default::default(),
+            invite: false,
+        };
+        let room4 = TestRoomItem {
+            room_id: RoomId::new_v1(server).to_owned(),
+            name: "4",
+            alias: None,
+            tags: vec![],
+            unread: Default::default(),
+            invite: false,
+        };
+
+        let space = SpaceInfo {
+            children: [
+                (
+                    room1.room_id.clone(),
+                    (
+                        assign!(SpaceChildEventContent::new(vec![]), {
+                            order: Some("b".try_into().unwrap())
+                        }),
+                        MilliSecondsSinceUnixEpoch(5.try_into().unwrap()),
+                    ),
+                ),
+                (
+                    room2.room_id.clone(),
+                    (
+                        assign!(SpaceChildEventContent::new(vec![]), {
+                            order: Some("a".try_into().unwrap())
+                        }),
+                        MilliSecondsSinceUnixEpoch(6.try_into().unwrap()),
+                    ),
+                ),
+                (
+                    room3.room_id.clone(),
+                    (
+                        SpaceChildEventContent::new(vec![]),
+                        MilliSecondsSinceUnixEpoch(7.try_into().unwrap()),
+                    ),
+                ),
+                (
+                    room4.room_id.clone(),
+                    (
+                        SpaceChildEventContent::new(vec![]),
+                        MilliSecondsSinceUnixEpoch(4.try_into().unwrap()),
+                    ),
+                ),
+            ]
+            .into(),
+        };
+
+        // Sort by space order
+        let mut rooms = vec![&room1, &room2, &room3, &room4];
+        let fields = &[SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending)];
+        rooms.sort_by(|a, b| space_fields_cmp(a, b, fields, collator, &space));
+        assert_eq!(rooms, vec![&room2, &room1, &room4, &room3]);
     }
 }
