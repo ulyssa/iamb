@@ -201,7 +201,17 @@ fn room_cmp<T: RoomLikeItem>(
         },
         SortFieldRoom::Invite => {
             // sort invites before other rooms.
-            b.is_invite().cmp(&a.is_invite())
+            let a = a.membership() == MatrixRoomState::Invited;
+            let b = b.membership() == MatrixRoomState::Invited;
+
+            b.cmp(&a)
+        },
+        SortFieldRoom::Joined => {
+            // sort joined rooms before other rooms.
+            let a = a.membership() == MatrixRoomState::Joined;
+            let b = b.membership() == MatrixRoomState::Joined;
+
+            b.cmp(&a)
         },
     }
 }
@@ -282,7 +292,7 @@ trait RoomLikeItem {
     fn recent_ts(&self) -> Option<&MessageTimeStamp>;
     fn alias(&self) -> Option<&RoomAliasId>;
     fn name(&self) -> &str;
-    fn is_invite(&self) -> bool;
+    fn membership(&self) -> MatrixRoomState;
     fn has_mention(&self) -> bool;
 }
 
@@ -714,7 +724,7 @@ impl WindowOps<IambInfo> for IambWindow {
                     .iter()
                     .chain(sync_info.dms.iter())
                     .map(|room| GenericRoomItem::new(room, rooms, aliases))
-                    .filter(RoomLikeItem::is_invite)
+                    .filter(|item| item.membership() == MatrixRoomState::Invited)
                     .collect::<Vec<_>>();
 
                 let fields = &settings.tunables.sort.chats;
@@ -1197,8 +1207,8 @@ impl RoomLikeItem for GenericRoomItem {
         &self.name
     }
 
-    fn is_invite(&self) -> bool {
-        self.membership == MatrixRoomState::Invited
+    fn membership(&self) -> MatrixRoomState {
+        self.membership
     }
 
     fn has_mention(&self) -> bool {
@@ -1525,7 +1535,7 @@ mod tests {
         alias: Option<OwnedRoomAliasId>,
         name: &'static str,
         unread: UnreadInfo,
-        invite: bool,
+        membership: MatrixRoomState,
     }
 
     impl RoomLikeItem for &TestRoomItem {
@@ -1553,8 +1563,8 @@ mod tests {
             self.unread.is_unread()
         }
 
-        fn is_invite(&self) -> bool {
-            self.invite
+        fn membership(&self) -> MatrixRoomState {
+            self.membership
         }
 
         fn has_mention(&self) -> bool {
@@ -1592,7 +1602,7 @@ mod tests {
             alias: Some(room_alias_id!("#room1:example.com").to_owned()),
             name: "Z",
             unread: UnreadInfo::default(),
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         let room2 = TestRoomItem {
@@ -1601,7 +1611,7 @@ mod tests {
             alias: Some(room_alias_id!("#a:example.com").to_owned()),
             name: "Unnamed Room",
             unread: UnreadInfo::default(),
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         let room3 = TestRoomItem {
@@ -1610,7 +1620,7 @@ mod tests {
             alias: None,
             name: "Cool Room",
             unread: UnreadInfo::default(),
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         // Sort by Name ascending.
@@ -1664,7 +1674,7 @@ mod tests {
                 unread_notifications: 0,
                 unread_mentions: 0,
             },
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         let room2 = TestRoomItem {
@@ -1679,7 +1689,7 @@ mod tests {
                 unread_notifications: 0,
                 unread_mentions: 0,
             },
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         let room3 = TestRoomItem {
@@ -1694,7 +1704,7 @@ mod tests {
                 unread_notifications: 0,
                 unread_mentions: 0,
             },
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         // Sort by Recent ascending.
@@ -1722,7 +1732,7 @@ mod tests {
             alias: None,
             name: "Old room 1",
             unread: UnreadInfo::default(),
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         let room2 = TestRoomItem {
@@ -1731,7 +1741,7 @@ mod tests {
             alias: None,
             name: "Old room 2",
             unread: UnreadInfo::default(),
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         let room3 = TestRoomItem {
@@ -1740,7 +1750,7 @@ mod tests {
             alias: None,
             name: "New Fancy Room",
             unread: UnreadInfo::default(),
-            invite: true,
+            membership: MatrixRoomState::Invited,
         };
 
         // Sort invites first
@@ -1776,7 +1786,7 @@ mod tests {
             alias: None,
             name: "Room E",
             unread: UnreadInfo::default(),
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         // Alias and V1 room ID agree:
@@ -1786,7 +1796,7 @@ mod tests {
             alias: Some(room_alias_id!("#name:a.com").to_owned()),
             name: "Room D",
             unread: UnreadInfo::default(),
-            invite: false,
+            membership: MatrixRoomState::Joined,
         };
 
         // Alias, V2 room id:
@@ -1796,7 +1806,7 @@ mod tests {
             alias: Some(room_alias_id!("#alias:b.com").to_owned()),
             name: "Room C",
             unread: UnreadInfo::default(),
-            invite: true,
+            membership: MatrixRoomState::Invited,
         };
 
         // Alias and V2 room ID disagree, alias is used:
@@ -1806,7 +1816,7 @@ mod tests {
             alias: Some(room_alias_id!("#alias:a.com").to_owned()),
             name: "Room B",
             unread: UnreadInfo::default(),
-            invite: true,
+            membership: MatrixRoomState::Invited,
         };
 
         // No alias and V2 room ID:
@@ -1816,7 +1826,7 @@ mod tests {
             alias: None,
             name: "Room A",
             unread: UnreadInfo::default(),
-            invite: true,
+            membership: MatrixRoomState::Invited,
         };
 
         // Sort servers first ascending, name tie breaks:
