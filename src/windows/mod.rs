@@ -16,7 +16,6 @@ use matrix_sdk::room::RoomMember;
 use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::room::RoomType as MatrixRoomType;
 use matrix_sdk::ruma::{RoomAliasId, RoomOrAliasId, assign};
-use modalkit::editing::completion::CompletionMap;
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 
@@ -537,7 +536,6 @@ impl WindowOps<IambInfo> for IambWindow {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
         let ChatStore {
             collator,
-            aliases,
             rooms,
             settings,
             sync_info,
@@ -555,7 +553,12 @@ impl WindowOps<IambInfo> for IambWindow {
                 let mut items = sync_info
                     .dms
                     .iter()
-                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, aliases))
+                    .map(|room| {
+                        GenericRoomItem::new_unspecified(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let fields = &settings.tunables.sort.dms;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
@@ -628,7 +631,12 @@ impl WindowOps<IambInfo> for IambWindow {
                 let mut items = sync_info
                     .rooms
                     .iter()
-                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, aliases))
+                    .map(|room| {
+                        GenericRoomItem::new_unspecified(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                        )
+                    })
                     .collect::<Vec<_>>();
                 let fields = &settings.tunables.sort.rooms;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
@@ -648,7 +656,9 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .chain(sync_info.dms.iter())
-                    .map(|room| GenericRoomItem::new(room, rooms, aliases))
+                    .map(|room| {
+                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                    })
                     .collect::<Vec<_>>();
 
                 let fields = &settings.tunables.sort.chats;
@@ -669,7 +679,9 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .chain(sync_info.dms.iter())
-                    .map(|room| GenericRoomItem::new(room, rooms, aliases))
+                    .map(|room| {
+                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                    })
                     .filter(RoomLikeItem::is_unread)
                     .collect::<Vec<_>>();
 
@@ -691,7 +703,9 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .chain(sync_info.dms.iter())
-                    .map(|room| GenericRoomItem::new(room, rooms, aliases))
+                    .map(|room| {
+                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                    })
                     .filter(RoomLikeItem::has_mention)
                     .collect::<Vec<_>>();
 
@@ -713,7 +727,9 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .chain(sync_info.dms.iter())
-                    .map(|room| GenericRoomItem::new(room, rooms, aliases))
+                    .map(|room| {
+                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                    })
                     .filter(RoomLikeItem::is_invite)
                     .collect::<Vec<_>>();
 
@@ -734,7 +750,12 @@ impl WindowOps<IambInfo> for IambWindow {
                 let mut items = sync_info
                     .spaces
                     .iter()
-                    .map(|room| GenericRoomItem::new_unspecified(room, rooms, aliases))
+                    .map(|room| {
+                        GenericRoomItem::new_unspecified(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                        )
+                    })
                     .collect::<Vec<_>>();
 
                 let fields = &settings.tunables.sort.spaces;
@@ -1076,22 +1097,13 @@ pub struct GenericRoomItem {
 }
 
 impl GenericRoomItem {
-    pub fn new_unspecified(
-        room: &MatrixRoom,
-        rooms: &mut CompletionMap<OwnedRoomId, RoomInfo>,
-        aliases: &mut CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
-    ) -> Self {
+    pub fn new_unspecified(room: &MatrixRoom, info: &RoomInfo) -> Self {
         let room_id = room.room_id().to_owned();
 
-        let info = rooms.get_or_default(room_id.to_owned());
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
         let unread = info.unreads(room);
         let tags = info.tags.clone();
-
-        if let Some(alias) = &alias {
-            aliases.insert(alias.to_owned(), room_id.to_owned());
-        }
 
         Self {
             name,
@@ -1104,11 +1116,7 @@ impl GenericRoomItem {
         }
     }
 
-    pub fn new(
-        room: &MatrixRoom,
-        rooms: &mut CompletionMap<OwnedRoomId, RoomInfo>,
-        names: &mut CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
-    ) -> Self {
+    pub fn new(room: &MatrixRoom, info: &RoomInfo) -> Self {
         let room_type = if room.is_space() {
             RoomType::Space
         } else if room.is_dm() {
@@ -1117,7 +1125,7 @@ impl GenericRoomItem {
             RoomType::Room
         };
 
-        assign!(Self::new_unspecified(room, rooms, names), { room_type })
+        assign!(Self::new_unspecified(room, info), { room_type })
     }
 
     /// Create for a room the client doesn't know about.

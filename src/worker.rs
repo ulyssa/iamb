@@ -6,12 +6,13 @@
 use std::fmt::{Debug, Formatter};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
-use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use futures::{FutureExt as _, StreamExt};
 use gethostname::gethostname;
 use matrix_sdk::OwnedServerName;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::config::{RequestConfig, SyncSettings};
+use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
 use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
@@ -55,6 +56,7 @@ use matrix_sdk::ruma::events::room::member::{MembershipState, OriginalSyncRoomMe
 use matrix_sdk::ruma::events::room::name::RoomNameEventContent;
 use matrix_sdk::ruma::events::room::pinned_events::SyncRoomPinnedEventsEvent;
 use matrix_sdk::ruma::events::room::redaction::OriginalSyncRoomRedactionEvent;
+use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::sticker::StickerEventContent;
 use matrix_sdk::ruma::events::typing::SyncTypingEvent;
 use matrix_sdk::ruma::events::{
@@ -950,6 +952,70 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
     }
 }
 
+#[tracing::instrument(skip_all)]
+async fn load_space_children(client: &Client, store: &AsyncProgramStore) {
+    let spaces = client.joined_space_rooms();
+    let results: Vec<_> = spaces
+        .iter()
+        .map(|room| {
+            room.get_state_events_static::<SpaceChildEventContent>()
+                .map(move |res| (res, room))
+        })
+        .collect::<FuturesUnordered<_>>()
+        .collect()
+        .await;
+
+    let mut all_events = vec![];
+    for (res, room) in results {
+        let events = match res {
+            Ok(events) => events,
+            Err(e) => {
+                tracing::warn!(room_id=?room.room_id(), "Unable to load space children: {e}");
+                continue;
+            },
+        };
+        for ev in events {
+            let RawSyncOrStrippedState::Sync(ev) = ev else {
+                // this case should not happen because we only loaded joined rooms
+                continue;
+            };
+
+            let ev = match ev.deserialize() {
+                Ok(ev) => ev,
+                Err(e) => {
+                    tracing::warn!(room_id=?room.room_id(), "Unable to deserialize space child event: {e}");
+                    continue;
+                },
+            };
+
+            all_events.push((room, ev));
+        }
+    }
+
+    let mut locked = store.lock().await;
+    for (room, ev) in all_events {
+        let room_id = room.room_id().to_owned();
+        let info = locked.application.spaces.entry(room_id).or_default();
+        match ev {
+            SyncStateEvent::Original(ev) => {
+                info.children.insert(ev.state_key, (ev.content, ev.origin_server_ts));
+            },
+            SyncStateEvent::Redacted(ev) => {
+                info.children.remove(&ev.state_key);
+            },
+        }
+    }
+}
+
+async fn load_space_children_forever(client: &Client, store: &AsyncProgramStore) {
+    let mut interval = tokio::time::interval(Duration::from_secs(15));
+
+    loop {
+        load_space_children(client, store).await;
+        interval.tick().await;
+    }
+}
+
 pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result<(), MatrixError> {
     // Perform an initial, lazily-loaded sync.
     let mut room = RoomEventFilter::default();
@@ -1529,6 +1595,27 @@ impl ClientWorker {
         );
 
         let _ = self.client.add_event_handler(
+            |ev: SyncStateEvent<SpaceChildEventContent>,
+             room: MatrixRoom,
+             store: Ctx<AsyncProgramStore>| {
+                async move {
+                    let room_id = room.room_id().to_owned();
+                    let mut locked = store.lock().await;
+
+                    let info = locked.application.spaces.entry(room_id).or_default();
+                    match ev {
+                        SyncStateEvent::Original(ev) => {
+                            info.children.insert(ev.state_key, (ev.content, ev.origin_server_ts));
+                        },
+                        SyncStateEvent::Redacted(ev) => {
+                            info.children.remove(&ev.state_key);
+                        },
+                    }
+                }
+            },
+        );
+
+        let _ = self.client.add_event_handler(
             |ev: SyncMessageLikeEvent<RoomMessageEventContent>,
              room: MatrixRoom,
              client: Client,
@@ -1948,7 +2035,9 @@ impl ClientWorker {
                 let room = refresh_rooms_forever(&client, &store);
                 let notifications = register_notifications(&client, &settings, &store);
                 let sendqueue = subscribe_sendqueue_forever(&client, &store);
-                let ((), (), (), (), ()) = tokio::join!(load, room, rcpt, notifications, sendqueue);
+                let spaces = load_space_children_forever(&client, &store);
+                let ((), (), (), (), (), ()) =
+                    tokio::join!(load, room, rcpt, notifications, sendqueue, spaces);
             }
         })
         .into();

@@ -8,8 +8,6 @@ use modalkit_ratatui::list::{List, ListState};
 use crate::prelude::*;
 use crate::windows::{GenericRoomItem, RoomLikeItem, room_fields_cmp};
 
-const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
-
 /// State needed for rendering [Space].
 pub struct SpaceState {
     room_id: OwnedRoomId,
@@ -191,7 +189,7 @@ impl StatefulWidget for Space<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
         let ChatStore {
             rooms,
-            aliases,
+            spaces,
             worker,
             settings,
             collator,
@@ -199,57 +197,33 @@ impl StatefulWidget for Space<'_> {
             room_previews,
             ..
         } = &mut self.store.application;
+        let default_rooms_style = settings.theme.rooms.default;
+
+        let mut items = spaces
+            .entry(state.room_id.clone())
+            .or_default()
+            .children
+            .keys()
+            .map(|id| {
+                if let Some(room) = worker.client.get_room(id) {
+                    GenericRoomItem::new(&room, rooms.get_or_default(id.to_owned()))
+                } else {
+                    GenericRoomItem::new_unknown(id.to_owned(), room_previews, need_load)
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let fields = &settings.tunables.sort.rooms;
+        items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+
+        state.list.set(items);
         state.set_ignorecase(settings.tunables.ignorecase);
 
-        let mut empty_message = None;
-        let need_fetch = match state.last_fetch {
-            Some(i) => i.elapsed() >= SPACE_HIERARCHY_DEBOUNCE,
-            None => true,
-        };
-
-        if need_fetch {
-            let res = worker.space_members(state.room_id.clone());
-
-            match res {
-                Ok(members) => {
-                    let mut items = members
-                        .into_iter()
-                        .filter_map(|id| {
-                            if id == state.room_id {
-                                return None;
-                            }
-
-                            if let Some(room) = worker.client.get_room(&id) {
-                                GenericRoomItem::new(&room, rooms, aliases)
-                            } else {
-                                GenericRoomItem::new_unknown(id, room_previews, need_load)
-                            }
-                            .into()
-                        })
-                        .collect::<Vec<_>>();
-                    let fields = &settings.tunables.sort.rooms;
-                    items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
-
-                    state.list.set(items);
-                    state.last_fetch = Some(Instant::now());
-                },
-                Err(e) => {
-                    let lines = vec![
-                        Line::from("Unable to fetch space room hierarchy:"),
-                        Span::styled(e.to_string(), Style::default().fg(Color::Red)).into(),
-                    ];
-
-                    empty_message = Text::from(lines).into();
-                },
-            }
-        }
-
-        let mut list = List::new(self.store).focus(self.focused);
-
-        if let Some(text) = empty_message {
-            list = list.empty_message(text);
-        }
-
-        list.render(area, buffer, &mut state.list)
+        List::new(self.store)
+            .empty_message("This space is empty")
+            .empty_alignment(Alignment::Center)
+            .focus(self.focused)
+            .style(default_rooms_style)
+            .render(area, buffer, &mut state.list)
     }
 }

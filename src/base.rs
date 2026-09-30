@@ -25,6 +25,7 @@ use matrix_sdk::ruma::events::room::redaction::{
     OriginalSyncRoomRedactionEvent,
     SyncRoomRedactionEvent,
 };
+use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::sticker::{StickerEvent, StickerEventContent};
 use matrix_sdk::ruma::events::{MessageLikeEvent, OriginalMessageLikeEvent};
 use matrix_sdk::ruma::presence::PresenceState;
@@ -2178,6 +2179,13 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
     return emojis;
 }
 
+/// Information about spaces the user's joined.
+#[derive(Default)]
+pub struct SpaceInfo {
+    /// The space child events with content and `origin_server_ts`.
+    pub children: HashMap<OwnedRoomId, (SpaceChildEventContent, MilliSecondsSinceUnixEpoch)>,
+}
+
 /// Information gathered during server syncs about joined rooms.
 #[derive(Default)]
 pub struct SyncInfo {
@@ -2308,6 +2316,9 @@ pub struct ChatStore {
     /// This is stored here because this data is lost in the conversion to [IambId].
     pub room_via: HashMap<OwnedRoomOrAliasId, Vec<OwnedServerName>>,
 
+    /// Map of joined spaces.
+    pub spaces: HashMap<OwnedRoomId, SpaceInfo>,
+
     /// Map of room aliases.
     pub aliases: CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
 
@@ -2370,6 +2381,7 @@ impl ChatStore {
             rooms: Default::default(),
             room_previews: Default::default(),
             room_via: Default::default(),
+            spaces: Default::default(),
             presences: Default::default(),
             verifications: Default::default(),
             need_load: Default::default(),
