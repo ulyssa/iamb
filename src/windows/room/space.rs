@@ -190,7 +190,14 @@ impl StatefulWidget for Space<'_> {
 
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
         let ChatStore {
-            rooms, aliases: names, worker, settings, collator, ..
+            rooms,
+            aliases,
+            worker,
+            settings,
+            collator,
+            need_load,
+            room_previews,
+            ..
         } = &mut self.store.application;
         state.set_ignorecase(settings.tunables.ignorecase);
 
@@ -208,13 +215,16 @@ impl StatefulWidget for Space<'_> {
                     let mut items = members
                         .into_iter()
                         .filter_map(|id| {
-                            let (room, _) = worker.get_room(id.clone()).ok()?;
-
-                            if id != state.room_id {
-                                Some(GenericRoomItem::new(&room, rooms, names))
-                            } else {
-                                None
+                            if id == state.room_id {
+                                return None;
                             }
+
+                            if let Some(room) = worker.client.get_room(&id) {
+                                GenericRoomItem::new(&room, rooms, aliases)
+                            } else {
+                                GenericRoomItem::new_unknown(id, room_previews, need_load)
+                            }
+                            .into()
                         })
                         .collect::<Vec<_>>();
                     let fields = &settings.tunables.sort.rooms;
