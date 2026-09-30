@@ -8,17 +8,19 @@
 //! where we have the message bar and room ID easily accessible and resettable.
 
 use std::cmp::Ord;
-use std::fmt::{self};
+use std::fmt::{self, Write as _};
 
 use feruca::Collator;
+use matrix_sdk::RoomHeroWithProfile;
 use matrix_sdk::room::RoomMember;
 use matrix_sdk::ruma::events::room::member::MembershipState;
+use matrix_sdk::ruma::room::RoomType as MatrixRoomType;
 use matrix_sdk::ruma::{RoomAliasId, RoomOrAliasId, assign};
 use modalkit::editing::completion::CompletionMap;
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 
-use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder, UnreadInfo};
+use crate::base::{RoomNeeds, SortColumn, SortFieldRoom, SortFieldUser, SortOrder, UnreadInfo};
 use crate::prelude::*;
 use crate::windows::room::{RoomState, room_command};
 use crate::windows::verify::VerifyItem;
@@ -29,6 +31,7 @@ pub mod verify;
 pub mod welcome;
 
 const MEMBER_FETCH_DEBOUNCE: Duration = Duration::from_secs(5);
+const ROOM_PREVIEW_DEBOUNCE: Duration = Duration::from_secs(15);
 
 #[inline]
 pub fn selected_style(selected: bool, style: Style) -> Style {
@@ -37,6 +40,55 @@ pub fn selected_style(selected: bool, style: Style) -> Style {
     } else {
         style
     }
+}
+
+fn heroes_to_name(heroes: &[RoomHeroWithProfile]) -> String {
+    let mut text = String::new();
+    let mut first = true;
+
+    for hero in heroes {
+        if !first {
+            text.push_str(", ");
+        }
+
+        if let Some(name) = &hero.display_name {
+            text.push_str(name);
+        } else {
+            text.push_str(hero.user_id.as_str());
+        }
+
+        first = false;
+    }
+
+    text
+}
+
+/// Manual implementation of [this algorithm](https://spec.matrix.org/latest/client-server-api/#calculating-the-display-name-for-a-room) for room name generation.
+fn room_name_from_preview(preview: &RoomPreview) -> Cow<'_, str> {
+    if let Some(name) = &preview.name {
+        return Cow::Borrowed(name);
+    }
+
+    if let Some(alias) = &preview.canonical_alias {
+        return Cow::Borrowed(alias.as_str());
+    }
+
+    let Some(heroes) = &preview.heroes else {
+        return Cow::Borrowed("Empty Room");
+    };
+    let mut name = heroes_to_name(heroes);
+    let member_count = preview.num_active_members.unwrap_or(preview.num_joined_members);
+
+    if heroes.len() as u64 + 1 >= member_count {
+        return Cow::Owned(name);
+    }
+
+    if member_count > 1 {
+        let _ = write!(&mut name, ", and {} others", member_count - heroes.len() as u64);
+        return Cow::Owned(name);
+    }
+
+    format!("Empty Room (was {name})").into()
 }
 
 fn name_and_labels<'a>(
@@ -52,7 +104,7 @@ fn name_and_labels<'a>(
 
     match room_membership {
         MatrixRoomState::Joined => {},
-        MatrixRoomState::Left => labels.push(vec![Span::styled("Left", tags_style)]),
+        MatrixRoomState::Left => labels.push(vec![Span::styled("Unjoined", tags_style)]),
         MatrixRoomState::Banned => labels.push(vec![Span::styled("Banned", tags_style)]),
         MatrixRoomState::Knocked => labels.push(vec![Span::styled("Knocked", tags_style)]),
         MatrixRoomState::Invited => labels.push(vec![Span::styled("Invited", tags_style)]),
@@ -1027,7 +1079,7 @@ impl GenericRoomItem {
     pub fn new_unspecified(
         room: &MatrixRoom,
         rooms: &mut CompletionMap<OwnedRoomId, RoomInfo>,
-        names: &mut CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
+        aliases: &mut CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
     ) -> Self {
         let room_id = room.room_id().to_owned();
 
@@ -1038,7 +1090,7 @@ impl GenericRoomItem {
         let tags = info.tags.clone();
 
         if let Some(alias) = &alias {
-            names.insert(alias.to_owned(), room_id.to_owned());
+            aliases.insert(alias.to_owned(), room_id.to_owned());
         }
 
         Self {
@@ -1066,6 +1118,55 @@ impl GenericRoomItem {
         };
 
         assign!(Self::new_unspecified(room, rooms, names), { room_type })
+    }
+
+    /// Create for a room the client doesn't know about.
+    pub fn new_unknown(
+        room_id: OwnedRoomId,
+        room_previews: &HashMap<
+            OwnedRoomOrAliasId,
+            (Result<RoomPreview, matrix_sdk::Error>, Instant),
+        >,
+        need_load: &mut RoomNeeds,
+    ) -> Self {
+        let alias_id: OwnedRoomOrAliasId = room_id.clone().into();
+
+        let preview = room_previews.get(&alias_id);
+        if preview.is_none_or(|(_, fetched)| fetched.elapsed() > ROOM_PREVIEW_DEBOUNCE) {
+            need_load.need_preview(alias_id);
+        }
+
+        let Some((Ok(preview), _)) = preview else {
+            return Self {
+                name: room_id.to_string(),
+                room_id,
+                alias: None,
+                tags: None,
+                membership: MatrixRoomState::Left,
+                unread: Default::default(),
+                room_type: RoomType::Unspecified,
+            };
+        };
+
+        let name = room_name_from_preview(preview).into_owned();
+        let membership = preview.state.unwrap_or(MatrixRoomState::Left);
+        let room_type = if Some(MatrixRoomType::Space) == preview.room_type {
+            RoomType::Space
+        } else if Some(true) == preview.is_direct {
+            RoomType::DM
+        } else {
+            RoomType::Room
+        };
+
+        Self {
+            room_id,
+            name,
+            alias: preview.canonical_alias.clone(),
+            tags: None,
+            membership,
+            unread: Default::default(),
+            room_type,
+        }
     }
 }
 

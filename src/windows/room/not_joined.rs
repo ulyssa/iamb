@@ -3,10 +3,9 @@ use matrix_sdk::ruma::room::{JoinRuleSummary, RestrictedSummary};
 
 use crate::base::{HomeserverAction, SyncInfo};
 use crate::prelude::*;
+use crate::windows::ROOM_PREVIEW_DEBOUNCE;
 use crate::windows::room::RoomState;
 use crate::worker::ClientResponse;
-
-const ROOM_PREVIEW_DEBOUNCE: Duration = Duration::from_secs(15);
 
 fn can_join_restricted(summary: &RestrictedSummary, sync_info: &SyncInfo) -> bool {
     sync_info
