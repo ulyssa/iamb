@@ -21,6 +21,7 @@ use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 
 use crate::base::{RoomNeeds, SortColumn, SortFieldRoom, SortFieldUser, SortOrder, UnreadInfo};
 use crate::prelude::*;
+use crate::resolve_mxid;
 use crate::windows::room::{RoomState, room_command};
 use crate::windows::verify::VerifyItem;
 use crate::windows::welcome::WelcomeState;
@@ -1050,9 +1051,13 @@ impl Window<IambInfo> for IambWindow {
             } else {
                 store.application.worker.create_dm(user_id.to_owned())?.into()
             }
+        } else if let Ok(uri) = MatrixUri::parse(name.as_str()) {
+            let id = resolve_mxid(store, uri.id().to_owned(), uri.via().to_owned())?;
+            return IambWindow::open(id, store);
+        } else if let Ok(uri) = MatrixToUri::parse(name.as_str()) {
+            let id = resolve_mxid(store, uri.id().to_owned(), uri.via().to_owned())?;
+            return IambWindow::open(id, store);
         } else {
-            // XXX: support passing matrix uris to `:join`
-
             return Err(UIError::Failure("Could not parse room identifier".to_string()));
         };
 
