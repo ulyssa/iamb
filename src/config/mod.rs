@@ -1,5 +1,6 @@
 //! # Logic for loading and validating application configuration
 
+use std::collections::HashSet;
 use std::env;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write as _};
@@ -802,7 +803,7 @@ pub struct TunableValues {
     pub message_user_color: bool,
     pub default_register: Option<Register>,
     pub default_room: Option<String>,
-    pub default_via: Vec<OwnedServerName>,
+    pub default_via: HashSet<OwnedServerName>,
     pub open_command: Option<Vec<String>>,
     pub mouse: Mouse,
     pub notifications: Notifications,
@@ -965,7 +966,11 @@ impl Tunables {
             message_user_color: self.message_user_color.unwrap_or(false),
             default_register: self.default_register,
             default_room: self.default_room,
-            default_via: self.default_via.unwrap_or_else(|| vec![DEFAULT_VIA_SERVER.clone()]),
+            default_via: self
+                .default_via
+                .unwrap_or_else(|| vec![DEFAULT_VIA_SERVER.clone()])
+                .into_iter()
+                .collect(),
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),

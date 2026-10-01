@@ -153,7 +153,7 @@ pub fn mock_tunables() -> TunableValues {
         ignorecase: false,
         default_register: None,
         default_room: None,
-        default_via: vec![],
+        default_via: Default::default(),
         encryption: Encryption::default().values(),
         input_prompt: None,
         log_level: "warn".into(),
