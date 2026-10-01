@@ -86,6 +86,19 @@ Export and encrypt keys to
 .It Sy ":keys import [path] [passphrase]"
 Import and decrypt keys from
 .Pa path .
+Passphrases containing spaces or command metacharacters should be quoted.
+Inside double quotes, escape
+.Ql \
+and
+.Ql "
+with a backslash.
+For unquoted arguments, escape spaces,
+.Ql \ ,
+.Ql # ,
+.Ql % ,
+.Ql | ,
+and
+.Ql " .
 .It Sy ":verify"
 View a list of ongoing E2EE verifications.
 .It Sy ":verify accept [key]"
