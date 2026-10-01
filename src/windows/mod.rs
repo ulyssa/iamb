@@ -19,7 +19,16 @@ use matrix_sdk::ruma::{RoomAliasId, RoomOrAliasId, assign};
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 
-use crate::base::{RoomNeeds, SortColumn, SortFieldRoom, SortFieldUser, SortOrder, UnreadInfo};
+use crate::base::{
+    RoomNeeds,
+    SortColumn,
+    SortFieldRoom,
+    SortFieldUser,
+    SortOrder,
+    SpaceInfo,
+    UnreadInfo,
+};
+use crate::config::theme::ThemeRoomsValues;
 use crate::prelude::*;
 use crate::resolve_mxid;
 use crate::windows::room::{RoomState, room_command};
@@ -39,6 +48,32 @@ pub fn selected_style(selected: bool, style: Style) -> Style {
         style.add_modifier(StyleModifier::REVERSED)
     } else {
         style
+    }
+}
+
+/// Returns the number span with width 4 and the style for name and tags.
+fn unreads_and_style(
+    unread: &UnreadInfo,
+    theme: &ThemeRoomsValues,
+) -> (Span<'static>, Style, Style) {
+    let (value, style) = if unread.unread_mentions > 0 {
+        (unread.unread_mentions + unread.unread_notifications, &theme.mention)
+    } else if unread.unread_notifications > 0 {
+        (unread.unread_notifications, &theme.notification)
+    } else if unread.unread_messages > 0 {
+        (unread.unread_messages, &theme.unread)
+    } else {
+        return (Span::styled("    ", theme.default), theme.default, theme.labels);
+    };
+
+    if unread.unread_mark {
+        let style = &theme.marked_unread;
+
+        (Span::styled("  U ", style.number), style.name, style.labels)
+    } else if value > 99 {
+        (Span::styled("99+ ", style.number), style.name, style.labels)
+    } else {
+        (Span::styled(format!(" {:2} ", value), style.number), style.name, style.labels)
     }
 }
 
@@ -195,6 +230,14 @@ fn room_cmp<T: RoomLikeItem>(
             // Sort true (unread) before false (read)
             b.is_unread().cmp(&a.is_unread())
         },
+        SortFieldRoom::Notifications => {
+            // Sort true (unread) before false (read)
+            b.has_notification().cmp(&a.has_notification())
+        },
+        SortFieldRoom::Mentions => {
+            // Sort true (unread) before false (read)
+            b.has_mention().cmp(&a.has_mention())
+        },
         SortFieldRoom::Recent => {
             // sort larger timestamps towards the top.
             some_cmp(a.recent_ts(), b.recent_ts(), |a, b| b.cmp(a))
@@ -289,11 +332,12 @@ trait RoomLikeItem {
     fn room_id(&self) -> &RoomId;
     fn has_tag(&self, tag: TagName) -> bool;
     fn is_unread(&self) -> bool;
+    fn has_notification(&self) -> bool;
+    fn has_mention(&self) -> bool;
     fn recent_ts(&self) -> Option<&MessageTimeStamp>;
     fn alias(&self) -> Option<&RoomAliasId>;
     fn name(&self) -> &str;
     fn membership(&self) -> MatrixRoomState;
-    fn has_mention(&self) -> bool;
 }
 
 #[inline]
@@ -552,8 +596,10 @@ impl WindowOps<IambInfo> for IambWindow {
             sync_info,
             verifications,
             worker,
+            spaces,
             ..
         } = &mut store.application;
+        let client = &worker.client;
 
         let default_list_style = settings.theme.default;
         let default_rooms_style = settings.theme.rooms.default;
@@ -568,6 +614,8 @@ impl WindowOps<IambInfo> for IambWindow {
                         GenericRoomItem::new_unspecified(
                             room,
                             rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
                         )
                     })
                     .collect::<Vec<_>>();
@@ -646,6 +694,8 @@ impl WindowOps<IambInfo> for IambWindow {
                         GenericRoomItem::new_unspecified(
                             room,
                             rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
                         )
                     })
                     .collect::<Vec<_>>();
@@ -668,7 +718,12 @@ impl WindowOps<IambInfo> for IambWindow {
                     .iter()
                     .chain(sync_info.dms.iter())
                     .map(|room| {
-                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                        GenericRoomItem::new(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
+                        )
                     })
                     .collect::<Vec<_>>();
 
@@ -691,7 +746,12 @@ impl WindowOps<IambInfo> for IambWindow {
                     .iter()
                     .chain(sync_info.dms.iter())
                     .map(|room| {
-                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                        GenericRoomItem::new(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
+                        )
                     })
                     .filter(RoomLikeItem::is_unread)
                     .collect::<Vec<_>>();
@@ -715,7 +775,12 @@ impl WindowOps<IambInfo> for IambWindow {
                     .iter()
                     .chain(sync_info.dms.iter())
                     .map(|room| {
-                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                        GenericRoomItem::new(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
+                        )
                     })
                     .filter(RoomLikeItem::has_mention)
                     .collect::<Vec<_>>();
@@ -739,7 +804,12 @@ impl WindowOps<IambInfo> for IambWindow {
                     .iter()
                     .chain(sync_info.dms.iter())
                     .map(|room| {
-                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                        GenericRoomItem::new(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
+                        )
                     })
                     .filter(|item| item.membership() == MatrixRoomState::Invited)
                     .collect::<Vec<_>>();
@@ -765,6 +835,8 @@ impl WindowOps<IambInfo> for IambWindow {
                         GenericRoomItem::new_unspecified(
                             room,
                             rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
                         )
                     })
                     .collect::<Vec<_>>();
@@ -1112,13 +1184,28 @@ pub struct GenericRoomItem {
 }
 
 impl GenericRoomItem {
-    pub fn new_unspecified(room: &MatrixRoom, info: &RoomInfo) -> Self {
+    pub fn new_unspecified(
+        room: &MatrixRoom,
+        info: &RoomInfo,
+        client: &Client,
+        spaces: &HashMap<OwnedRoomId, SpaceInfo>,
+    ) -> Self {
         let room_id = room.room_id().to_owned();
 
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(room);
+        let mut unread = info.unreads(room);
         let tags = info.tags.clone();
+
+        if room.is_space() &&
+            let Some(space_info) = spaces.get(&room_id)
+        {
+            for child in space_info.children.keys() {
+                if let Some(child) = client.get_room(child) {
+                    unread += info.unreads(&child);
+                }
+            }
+        }
 
         Self {
             name,
@@ -1131,7 +1218,12 @@ impl GenericRoomItem {
         }
     }
 
-    pub fn new(room: &MatrixRoom, info: &RoomInfo) -> Self {
+    pub fn new(
+        room: &MatrixRoom,
+        info: &RoomInfo,
+        client: &Client,
+        spaces: &HashMap<OwnedRoomId, SpaceInfo>,
+    ) -> Self {
         let room_type = if room.is_space() {
             RoomType::Space
         } else if room.is_dm() {
@@ -1140,7 +1232,7 @@ impl GenericRoomItem {
             RoomType::Room
         };
 
-        assign!(Self::new_unspecified(room, info), { room_type })
+        assign!(Self::new_unspecified(room, info, client, spaces), { room_type })
     }
 
     /// Create for a room the client doesn't know about.
@@ -1203,12 +1295,10 @@ impl RoomLikeItem for GenericRoomItem {
     }
 
     fn is_unread(&self) -> bool {
-        // XXX: check space children for space
         self.unread.is_unread()
     }
 
     fn recent_ts(&self) -> Option<&MessageTimeStamp> {
-        // XXX: check space children for space
         self.unread.latest()
     }
 
@@ -1225,8 +1315,11 @@ impl RoomLikeItem for GenericRoomItem {
     }
 
     fn has_mention(&self) -> bool {
-        // XXX: check space children for space
         self.unread.has_mention()
+    }
+
+    fn has_notification(&self) -> bool {
+        self.unread.has_notification()
     }
 }
 
@@ -1247,17 +1340,13 @@ impl ListItem<IambInfo> for GenericRoomItem {
     ) -> Text<'_> {
         let theme = &store.application.settings.theme;
 
-        let name_style = if self.unread.is_unread() {
-            theme.rooms.unread
-        } else {
-            theme.rooms.default
-        };
-
+        let (unreads, name_style, tags_style) = unreads_and_style(&self.unread, &theme.rooms);
         let name_style = selected_style(selected, name_style);
-        let tags_style = selected_style(selected, theme.rooms.labels);
+        let tags_style = selected_style(selected, tags_style);
+
         let (name, mut labels) =
             name_and_labels(&self.name, &self.unread, self.membership, name_style, tags_style);
-        let mut spans = vec![name];
+        let mut spans = vec![unreads, name];
 
         if let Some(label) = self.room_type.text() {
             labels.push(vec![Span::styled(label, tags_style)]);
@@ -1573,15 +1662,19 @@ mod tests {
         }
 
         fn is_unread(&self) -> bool {
-            self.unread.is_unread()
+            self.unread.unread_messages > 0
+        }
+
+        fn has_notification(&self) -> bool {
+            self.unread.unread_notifications > 0
+        }
+
+        fn has_mention(&self) -> bool {
+            self.unread.unread_mentions > 0
         }
 
         fn membership(&self) -> MatrixRoomState {
             self.membership
-        }
-
-        fn has_mention(&self) -> bool {
-            false
         }
     }
 

@@ -50,12 +50,14 @@ const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
     SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
 ];
 
-const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 6] = [
+const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 8] = [
     SortColumn(SortFieldRoom::Favorite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Invite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::LowPriority, SortOrder::Ascending),
-    SortColumn(SortFieldRoom::Unread, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Mentions, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Notifications, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Joined, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Recent, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 
@@ -1676,7 +1678,7 @@ mod tests {
     #[test]
     fn test_parse_default_rooms_sort() {
         let sort: Vec<SortColumn<SortFieldRoom>> =
-            serde_json::from_str(r#"["favorite","invite","lowpriority","unread","joined","name"]"#)
+            serde_json::from_str(r#"["favorite","invite","lowpriority","mentions","notifications","joined","recent","name"]"#)
                 .unwrap();
         assert_eq!(sort.as_slice(), &DEFAULT_ROOM_SORT[..]);
     }
