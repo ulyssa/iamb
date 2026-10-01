@@ -31,7 +31,7 @@ async fn maybe_autostart(request: &VerificationRequest) -> Result<(), matrix_sdk
     Ok(())
 }
 
-pub async fn handle_request(
+pub(crate) async fn handle_request(
     flow_id: String,
     other_user_id: OwnedUserId,
     other_device_id: OwnedDeviceId,
@@ -59,7 +59,7 @@ pub async fn handle_request(
     store.lock().await.application.verifications.insert(flow_id, request);
 }
 
-pub async fn handle_ready(
+pub(crate) async fn handle_ready(
     flow_id: String,
     other_user_id: OwnedUserId,
     client: Client,
@@ -83,7 +83,7 @@ pub async fn handle_ready(
     store.lock().await.application.verifications.insert(flow_id, request);
 }
 
-pub async fn handle_start(flow_id: String, other_user_id: OwnedUserId, client: Client) {
+pub(crate) async fn handle_start(flow_id: String, other_user_id: OwnedUserId, client: Client) {
     match client.encryption().get_verification(&other_user_id, &flow_id).await {
         Some(Verification::SasV1(sas)) => {
             tracing::debug!("accepting SAS verification flow");
@@ -100,7 +100,7 @@ pub async fn handle_start(flow_id: String, other_user_id: OwnedUserId, client: C
     }
 }
 
-pub async fn iamb_verify(
+pub(crate) async fn iamb_verify(
     act: VerifyAction,
     flow_id: String,
     store: &ProgramStore,
@@ -197,7 +197,7 @@ pub async fn iamb_verify(
     }
 }
 
-pub async fn iamb_verify_request(
+pub(crate) async fn iamb_verify_request(
     user_id: &UserId,
     store: &mut ProgramStore,
 ) -> IambResult<EditInfo> {
@@ -219,7 +219,7 @@ pub async fn iamb_verify_request(
     Ok(Some(InfoMessage::from(info)))
 }
 
-pub async fn iamb_recover(key: String, store: &ProgramStore) -> IambResult<EditInfo> {
+pub(crate) async fn iamb_recover(key: String, store: &ProgramStore) -> IambResult<EditInfo> {
     let client = &store.application.worker.client;
 
     client

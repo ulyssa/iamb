@@ -1076,7 +1076,7 @@ fn iamb_logout(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
-pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
+pub(crate) fn add_iamb_commands(cmds: &mut ProgramCommands) {
     cmds.add_command(ProgramCommand {
         name: "cancel".into(),
         aliases: vec![],
@@ -1231,7 +1231,7 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
 ///
 /// Aliases are registered in the order they appear in the configuration file,
 /// which allows later definitions to possibly refer to earlier ones.
-pub fn setup_commands(aliases: &Aliases) -> Result<ProgramCommands, CommandError> {
+pub(crate) fn setup_commands(aliases: &Aliases) -> Result<ProgramCommands, CommandError> {
     let mut cmds = ProgramCommands::default();
 
     add_iamb_commands(&mut cmds);

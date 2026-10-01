@@ -20,7 +20,7 @@ use regex::{Regex, RegexBuilder};
 
 use crate::prelude::*;
 
-pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) {
+pub(crate) fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) {
     match cow {
         Cow::Borrowed(s) => {
             let s1 = Cow::Borrowed(&s[idx..]);
@@ -36,7 +36,7 @@ pub fn split_cow(cow: Cow<'_, str>, idx: usize) -> (Cow<'_, str>, Cow<'_, str>) 
         },
     }
 }
-pub fn take_width(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usize), Cow<'_, str>) {
+pub(crate) fn take_width(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usize), Cow<'_, str>) {
     // Find where to split the line.
     let mut cur_width = 0;
 
@@ -62,7 +62,10 @@ pub fn take_width(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usize), Cow<
     ((s0, cur_width), s1)
 }
 
-pub fn take_width_grapheme(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usize), Cow<'_, str>) {
+pub(crate) fn take_width_grapheme(
+    s: Cow<'_, str>,
+    width: usize,
+) -> ((Cow<'_, str>, usize), Cow<'_, str>) {
     let mut cur_width = 0;
     let idx = UnicodeSegmentation::grapheme_indices(s.as_ref(), true)
         .find_map(|(i, graph)| {
@@ -80,7 +83,7 @@ pub fn take_width_grapheme(s: Cow<'_, str>, width: usize) -> ((Cow<'_, str>, usi
     ((s0, cur_width), s1)
 }
 
-pub struct WrappedLinesIterator<'a> {
+pub(crate) struct WrappedLinesIterator<'a> {
     iter: std::vec::IntoIter<Cow<'a, str>>,
     curr: Option<Cow<'a, str>>,
     width: usize,
@@ -126,14 +129,14 @@ impl<'a> Iterator for WrappedLinesIterator<'a> {
     }
 }
 
-pub fn wrap<'a, T>(input: T, width: usize) -> WrappedLinesIterator<'a>
+pub(crate) fn wrap<'a, T>(input: T, width: usize) -> WrappedLinesIterator<'a>
 where
     T: Into<Cow<'a, str>>,
 {
     WrappedLinesIterator::new(input, width)
 }
 
-pub fn wrapped_text<'a, T>(s: T, width: usize, style: Style) -> Text<'a>
+pub(crate) fn wrapped_text<'a, T>(s: T, width: usize, style: Style) -> Text<'a>
 where
     T: Into<Cow<'a, str>>,
 {
@@ -149,19 +152,23 @@ where
     return text;
 }
 
-pub fn space(width: usize) -> String {
+pub(crate) fn space(width: usize) -> String {
     " ".repeat(width)
 }
 
-pub fn space_span(width: usize, style: Style) -> Span<'static> {
+pub(crate) fn space_span(width: usize, style: Style) -> Span<'static> {
     Span::styled(space(width), style)
 }
 
-pub fn space_text(width: usize, style: Style) -> Text<'static> {
+pub(crate) fn space_text(width: usize, style: Style) -> Text<'static> {
     space_span(width, style).into()
 }
 
-pub fn join_cell_text<'a>(texts: Vec<(Text<'a>, usize)>, join: Span<'a>, style: Style) -> Text<'a> {
+pub(crate) fn join_cell_text<'a>(
+    texts: Vec<(Text<'a>, usize)>,
+    join: Span<'a>,
+    style: Style,
+) -> Text<'a> {
     let height = texts.iter().map(|t| t.0.height()).max().unwrap_or(0);
     let mut text = Text::from(vec![Line::from(vec![join.clone()]); height]);
 
@@ -187,28 +194,28 @@ fn replace_emoji_in_grapheme(grapheme: &str) -> String {
         .unwrap_or_else(|| grapheme.to_owned())
 }
 
-pub fn replace_emojis_in_str(s: &str) -> String {
+pub(crate) fn replace_emojis_in_str(s: &str) -> String {
     let graphemes = s.graphemes(true);
     graphemes.map(replace_emoji_in_grapheme).collect()
 }
 
-pub fn replace_emojis_in_span(span: &mut Span) {
+pub(crate) fn replace_emojis_in_span(span: &mut Span) {
     span.content = Cow::Owned(replace_emojis_in_str(span.content.as_ref()))
 }
 
-pub fn replace_emojis_in_line(line: &mut Line) {
+pub(crate) fn replace_emojis_in_line(line: &mut Line) {
     for span in &mut line.spans {
         replace_emojis_in_span(span);
     }
 }
 
 /// Compile a search pattern, optionally ignoring case.
-pub fn compile_search(pattern: &str, case_insensitive: bool) -> Result<Regex, regex::Error> {
+pub(crate) fn compile_search(pattern: &str, case_insensitive: bool) -> Result<Regex, regex::Error> {
     RegexBuilder::new(pattern).case_insensitive(case_insensitive).build()
 }
 
 /// Set up the terminal for drawing the TUI, and getting additional info.
-pub fn setup_tty(settings: &ApplicationSettings) -> std::io::Result<()> {
+pub(crate) fn setup_tty(settings: &ApplicationSettings) -> std::io::Result<()> {
     // Enable raw mode and enter the alternate screen.
     crossterm::terminal::enable_raw_mode()?;
     crossterm::execute!(stdout(), EnterAlternateScreen)?;
@@ -236,7 +243,7 @@ pub fn setup_tty(settings: &ApplicationSettings) -> std::io::Result<()> {
 }
 
 // Do our best to reverse what we did in setup_tty() when we exit or crash.
-pub fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
+pub(crate) fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
     // The keyboard enhancement flags were pushed onto the alternate screen's
     // stack, which the terminal keeps separate from the main screen's, so they
     // have to be popped before LeaveAlternateScreen below.
@@ -267,12 +274,12 @@ pub fn restore_tty(enable_enhanced_keys: bool, enable_mouse: bool) {
 /// on exit, which drops us back to the main screen without iamb knowing, and the
 /// TUI then draws over the user's scrollback. Suspending around the child keeps
 /// the alternate screen entries and exits balanced.
-pub struct SuspendedTty<'a> {
+pub(crate) struct SuspendedTty<'a> {
     settings: &'a ApplicationSettings,
 }
 
 impl<'a> SuspendedTty<'a> {
-    pub fn new(settings: &'a ApplicationSettings) -> Self {
+    pub(crate) fn new(settings: &'a ApplicationSettings) -> Self {
         restore_tty(settings.enable_enhanced_keys, settings.tunables.mouse.enabled);
 
         SuspendedTty { settings }
@@ -288,7 +295,7 @@ impl Drop for SuspendedTty<'_> {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]

@@ -21,7 +21,7 @@ const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
 };
 
 /// Handle for an open notification that should be closed when the user views it.
-pub struct NotificationHandle(
+pub(crate) struct NotificationHandle(
     #[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
     Option<notify_rust::NotificationHandle>,
 );
@@ -35,7 +35,7 @@ impl Drop for NotificationHandle {
     }
 }
 
-pub async fn register_notifications(
+pub(crate) async fn register_notifications(
     client: &Client,
     settings: &ApplicationSettings,
     store: &AsyncProgramStore,
@@ -234,7 +234,7 @@ async fn is_visible_room(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
     is_focused(&locked) && is_open(&mut locked, room_id)
 }
 
-pub async fn parse_full_notification(
+pub(crate) async fn parse_full_notification(
     event: Raw<AnySyncTimelineEvent>,
     room: MatrixRoom,
     show_body: bool,
@@ -271,7 +271,10 @@ pub async fn parse_full_notification(
     return Ok((summary, body, server_ts));
 }
 
-pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) -> Option<String> {
+pub(crate) fn event_notification_body(
+    event: &AnySyncTimelineEvent,
+    sender_name: &str,
+) -> Option<String> {
     let AnySyncTimelineEvent::MessageLike(event) = event else {
         return None;
     };

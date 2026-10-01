@@ -9,7 +9,7 @@ use serde::{Deserialize, Deserializer};
 
 use crate::prelude::*;
 
-pub fn default_theme() -> Theme {
+pub(crate) fn default_theme() -> Theme {
     Theme {
         messages: ThemeMessages {
             blockquote: LineStylable {
@@ -92,7 +92,7 @@ pub fn default_theme() -> Theme {
 /// Internal variant to get lowercase, hyphenated config options.
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
-pub enum LineName {
+pub(crate) enum LineName {
     #[default]
     Plain,
     Rounded,
@@ -107,7 +107,7 @@ pub enum LineName {
 }
 
 impl LineName {
-    pub fn to_table_set(&self) -> &'static ratatui::symbols::line::Set<'static> {
+    pub(crate) fn to_table_set(&self) -> &'static ratatui::symbols::line::Set<'static> {
         match self {
             Self::Plain => &ratatui::symbols::line::NORMAL,
             Self::Rounded => &ratatui::symbols::line::ROUNDED,
@@ -299,7 +299,7 @@ impl From<Stylable> for LineStylable {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct Theme {
+pub(crate) struct Theme {
     /// Default styling when others aren't specified.
     #[serde(default)]
     default: Stylable,
@@ -346,7 +346,7 @@ pub struct Theme {
 }
 
 impl Theme {
-    pub fn merge(self, other: Self) -> Self {
+    pub(crate) fn merge(self, other: Self) -> Self {
         Self {
             default: self.default.merge(other.default),
             cmdbar: self.cmdbar.merge(other.cmdbar),
@@ -362,7 +362,7 @@ impl Theme {
         }
     }
 
-    pub fn values(self) -> ThemeValues {
+    pub(crate) fn values(self) -> ThemeValues {
         let base = Style::from(self.default);
 
         ThemeValues {
@@ -382,7 +382,7 @@ impl Theme {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeValues {
+pub(crate) struct ThemeValues {
     /// Styling to use when nothing more specific applies.
     pub default: Style,
 
@@ -408,7 +408,7 @@ pub struct ThemeValues {
     pub tabs: ThemeTabsValues,
 
     /// Styling for rendering users.
-    pub users: ThemeUsersValues,
+    pub(crate) users: ThemeUsersValues,
 
     /// Styling for rendering windows.
     pub windows: ThemeWindowsValues,
@@ -504,7 +504,7 @@ impl ThemeMessages {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeMessagesValues {
+pub(crate) struct ThemeMessagesValues {
     pub default: Style,
     pub blockquote: Style,
     pub blockquote_line: LineName,
@@ -553,7 +553,7 @@ impl ThemeRooms {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeRoomsValues {
+pub(crate) struct ThemeRoomsValues {
     pub default: Style,
     pub labels: Style,
     pub unread: Style,
@@ -585,7 +585,7 @@ impl ThemeTabs {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeTabsValues {
+pub(crate) struct ThemeTabsValues {
     pub title: Style,
     pub title_focused: Style,
 }
@@ -631,7 +631,7 @@ impl ThemeEncryption {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeEncryptionValues {
+pub(crate) struct ThemeEncryptionValues {
     pub default: Style,
     pub icon_encrypted: Style,
     pub icon_unencrypted: Style,
@@ -657,7 +657,7 @@ impl ThemeMessageBar {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeMessageBarValues {
+pub(crate) struct ThemeMessageBarValues {
     pub default: Style,
 }
 
@@ -701,7 +701,7 @@ impl ThemeCommandBar {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeCommandBarValues {
+pub(crate) struct ThemeCommandBarValues {
     pub default: Style,
     pub completions: Style,
     pub prompt: Style,
@@ -780,7 +780,7 @@ impl ThemeTimeline {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeTimelineValues {
+pub(crate) struct ThemeTimelineValues {
     pub default: Style,
     pub date: Style,
     pub time: Style,
@@ -818,7 +818,7 @@ impl ThemeCompletion {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeCompletionValues {
+pub(crate) struct ThemeCompletionValues {
     pub default: Style,
     pub selected: Style,
 }
@@ -869,7 +869,7 @@ impl ThemeWindows {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeWindowsValues {
+pub(crate) struct ThemeWindowsValues {
     pub default: Style,
     pub border: Style,
     pub border_line: BorderType,
@@ -902,13 +902,13 @@ impl ThemeUsers {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ThemeUsersValues {
+pub(crate) struct ThemeUsersValues {
     colors: Vec<Color>,
     style: Style,
 }
 
 impl ThemeUsersValues {
-    pub fn color(&self, user_id: &str) -> Color {
+    pub(crate) fn color(&self, user_id: &str) -> Color {
         if self.colors.is_empty() {
             return self.style.fg.unwrap_or(Color::Reset);
         }
@@ -919,7 +919,7 @@ impl ThemeUsersValues {
         self.colors[color]
     }
 
-    pub fn style(&self, user_id: &str, explicit: Option<Color>) -> Style {
+    pub(crate) fn style(&self, user_id: &str, explicit: Option<Color>) -> Style {
         let style = self.style;
 
         if let Some(c) = explicit {

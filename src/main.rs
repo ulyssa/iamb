@@ -247,7 +247,7 @@ struct Application {
 }
 
 impl Application {
-    pub async fn new(
+    pub(crate) async fn new(
         settings: ApplicationSettings,
         store: AsyncProgramStore,
         initial_room: Option<(MatrixId, Vec<OwnedServerName>)>,
@@ -820,7 +820,7 @@ impl Application {
         self.screen.push_message(err, self.theme.cmdbar.error);
     }
 
-    pub async fn run(&mut self) -> Result<(), std::io::Error> {
+    pub(crate) async fn run(&mut self) -> Result<(), std::io::Error> {
         self.terminal.clear()?;
 
         let store = self.store.clone();

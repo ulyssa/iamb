@@ -45,10 +45,10 @@ mod html;
 mod printer;
 mod state;
 
-pub mod poll;
+pub(crate) mod poll;
 
-pub use self::compose::{text_to_message, text_to_text_message_event_content};
-pub use self::html::TreeGenState;
+pub(crate) use self::compose::{text_to_message, text_to_text_message_event_content};
+pub(crate) use self::html::TreeGenState;
 
 type ProtocolPreview<'a> = (&'a SlicedProtocol, u16, u16);
 
@@ -57,12 +57,12 @@ type ProtocolPreview<'a> = (&'a SlicedProtocol, u16, u16);
 /// Note that the ordering of the fields is important here, so that the derived
 /// `Ord` trait will sort by timestamp first, and then sort by the message ID.
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone)]
-pub struct MessageKey {
+pub(crate) struct MessageKey {
     pub ts: MessageTimeStamp,
     pub id: MessageId,
 }
 
-pub struct Messages(BTreeMap<MessageKey, Message>, pub ReceiptThread);
+pub(crate) struct Messages(BTreeMap<MessageKey, Message>, pub ReceiptThread);
 
 impl Deref for Messages {
     type Target = BTreeMap<MessageKey, Message>;
@@ -79,19 +79,19 @@ impl DerefMut for Messages {
 }
 
 impl Messages {
-    pub fn new(thread: ReceiptThread) -> Self {
+    pub(crate) fn new(thread: ReceiptThread) -> Self {
         Self(Default::default(), thread)
     }
 
-    pub fn main() -> Self {
+    pub(crate) fn main() -> Self {
         Self::new(ReceiptThread::Main)
     }
 
-    pub fn thread(root: OwnedEventId) -> Self {
+    pub(crate) fn thread(root: OwnedEventId) -> Self {
         Self::new(ReceiptThread::Thread(root))
     }
 
-    pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
+    pub(crate) fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
         let mut msg = msg.into();
         if let MessageEvent::Original(ev, edits) = &mut msg.event {
             strip_reply_fallback(&mut ev.content.msgtype);
@@ -174,13 +174,13 @@ fn placeholder_frame(
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
-pub enum MessageId {
+pub(crate) enum MessageId {
     Origin(OwnedEventId),
     Local(OwnedTransactionId),
 }
 
 impl MessageId {
-    pub fn as_origin(&self) -> Option<&EventId> {
+    pub(crate) fn as_origin(&self) -> Option<&EventId> {
         match self {
             Self::Origin(id) => Some(id),
             _ => None,
@@ -195,7 +195,7 @@ impl From<OwnedEventId> for MessageId {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum TimeStampIntError {
+pub(crate) enum TimeStampIntError {
     #[error("Integer conversion error: {0}")]
     IntError(#[from] std::num::TryFromIntError),
 
@@ -204,7 +204,7 @@ pub enum TimeStampIntError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
-pub struct MessageTimeStamp(pub MilliSecondsSinceUnixEpoch);
+pub(crate) struct MessageTimeStamp(pub MilliSecondsSinceUnixEpoch);
 
 impl MessageTimeStamp {
     fn as_datetime(self) -> DateTime<LocalTz> {
@@ -227,7 +227,7 @@ impl MessageTimeStamp {
     }
 
     /// A compact date and time, for places without a date separator line.
-    pub fn show_datetime(self) -> String {
+    pub(crate) fn show_datetime(self) -> String {
         self.as_datetime().format("%Y-%m-%d %H:%M").to_string()
     }
 
@@ -267,7 +267,7 @@ impl TryFrom<usize> for MessageTimeStamp {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct MessageCursor {
+pub(crate) struct MessageCursor {
     /// When timestamp is None, the corner is determined by moving backwards from
     /// the most recently received message.
     pub timestamp: Option<MessageKey>,
@@ -277,16 +277,16 @@ pub struct MessageCursor {
 }
 
 impl MessageCursor {
-    pub fn new(timestamp: MessageKey, text_row: usize) -> Self {
+    pub(crate) fn new(timestamp: MessageKey, text_row: usize) -> Self {
         MessageCursor { timestamp: Some(timestamp), text_row }
     }
 
     /// Get a cursor that refers to the most recent message.
-    pub fn latest() -> Self {
+    pub(crate) fn latest() -> Self {
         MessageCursor::default()
     }
 
-    pub fn to_key<'a>(&'a self, thread: &'a Messages) -> Option<&'a MessageKey> {
+    pub(crate) fn to_key<'a>(&'a self, thread: &'a Messages) -> Option<&'a MessageKey> {
         if let Some(ref key) = self.timestamp {
             Some(key)
         } else {
@@ -294,7 +294,7 @@ impl MessageCursor {
         }
     }
 
-    pub fn from_cursor(cursor: &Cursor, thread: &Messages) -> Option<Self> {
+    pub(crate) fn from_cursor(cursor: &Cursor, thread: &Messages) -> Option<Self> {
         let ev_hash = cursor.get_x();
         let ev_term = OwnedEventId::try_from("$").ok()?.into();
 
@@ -315,7 +315,7 @@ impl MessageCursor {
         thread.range(start..).next().map(|(key, _)| Self::from(key.clone()))
     }
 
-    pub fn to_cursor(&self, thread: &Messages) -> Option<Cursor> {
+    pub(crate) fn to_cursor(&self, thread: &Messages) -> Option<Cursor> {
         let key = self.to_key(thread)?;
 
         let y = usize::try_from(&key.ts).ok()?;
@@ -367,7 +367,7 @@ fn redaction_reason_event(ev: SyncRoomRedactionEvent) -> Option<String> {
     ev.content.reason
 }
 
-pub fn strip_reply_fallback(msgtype: &mut MessageType) {
+pub(crate) fn strip_reply_fallback(msgtype: &mut MessageType) {
     let MessageType::Text(content) = msgtype else {
         return;
     };
@@ -402,7 +402,7 @@ fn content_html(msgtype: &MessageType) -> Option<StyleTree> {
 }
 
 #[derive(Clone, Debug)]
-pub enum MessageEvent {
+pub(crate) enum MessageEvent {
     EncryptedOriginal(Box<OriginalRoomEncryptedEvent>),
     EncryptedRedacted(Box<RedactedRoomEncryptedEvent>),
     Original(Box<OriginalRoomMessageEvent>, MessageEdits),
@@ -415,7 +415,7 @@ pub enum MessageEvent {
 }
 
 impl MessageEvent {
-    pub fn event_id(&self) -> Option<&EventId> {
+    pub(crate) fn event_id(&self) -> Option<&EventId> {
         let event_id = match self {
             MessageEvent::EncryptedOriginal(ev) => ev.event_id.as_ref(),
             MessageEvent::EncryptedRedacted(ev) => ev.event_id.as_ref(),
@@ -431,7 +431,7 @@ impl MessageEvent {
         Some(event_id)
     }
 
-    pub fn msgtype(&self) -> Option<&MessageType> {
+    pub(crate) fn msgtype(&self) -> Option<&MessageType> {
         match self {
             MessageEvent::Original(ev, edits) => {
                 edits
@@ -450,7 +450,7 @@ impl MessageEvent {
         }
     }
 
-    pub fn body(&self) -> Cow<'_, str> {
+    pub(crate) fn body(&self) -> Cow<'_, str> {
         match self {
             MessageEvent::EncryptedOriginal(_) => "[Unable to decrypt message]".into(),
             MessageEvent::Original(ev, edits) => {
@@ -472,7 +472,7 @@ impl MessageEvent {
         }
     }
 
-    pub fn html(&self) -> Option<StyleTree> {
+    pub(crate) fn html(&self) -> Option<StyleTree> {
         if let MessageEvent::State(ev) = self {
             return Some(html_state(ev));
         }
@@ -480,7 +480,7 @@ impl MessageEvent {
         self.msgtype().and_then(content_html)
     }
 
-    pub fn filename(&self) -> Option<String> {
+    pub(crate) fn filename(&self) -> Option<String> {
         self.msgtype().and_then(content_filename)
     }
 
@@ -973,7 +973,7 @@ impl<'a> MessageFormatter<'a> {
     }
 }
 
-pub struct Message {
+pub(crate) struct Message {
     pub event: MessageEvent,
     pub sender: OwnedUserId,
     pub timestamp: MessageTimeStamp,
@@ -994,14 +994,18 @@ fn is_after_read_marker(prev: Option<&Message>, marker: Option<&OwnedEventId>) -
 }
 
 impl Message {
-    pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
+    pub(crate) fn new(
+        event: MessageEvent,
+        sender: OwnedUserId,
+        timestamp: MessageTimeStamp,
+    ) -> Self {
         let html = event.html();
         let downloaded = false;
 
         Message { event, sender, timestamp, downloaded, html }
     }
 
-    pub fn reply_to(&self) -> Option<OwnedEventId> {
+    pub(crate) fn reply_to(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
@@ -1036,7 +1040,7 @@ impl Message {
     }
 
     /// Return the thread root if this is the first message in the thread.
-    pub fn thread_root(&self) -> Option<OwnedEventId> {
+    pub(crate) fn thread_root(&self) -> Option<OwnedEventId> {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
@@ -1060,7 +1064,7 @@ impl Message {
         }
     }
 
-    pub fn image_preview(&self) -> Option<&MediaSource> {
+    pub(crate) fn image_preview(&self) -> Option<&MediaSource> {
         if let Some(MessageType::Image(c)) = self.event.msgtype() {
             return Some(&c.source);
         }
@@ -1091,7 +1095,7 @@ impl Message {
         return style;
     }
 
-    pub fn show_date(&self, prev: Option<&Message>) -> bool {
+    pub(crate) fn show_date(&self, prev: Option<&Message>) -> bool {
         let Some(prev) = prev else { return true };
 
         !prev.timestamp.same_day(self.timestamp)
@@ -1101,7 +1105,7 @@ impl Message {
     ///
     /// Each thread keeps its own marker, so the rule only shows up in the view
     /// whose messages the marker belongs to.
-    pub fn show_trackbar(
+    pub(crate) fn show_trackbar(
         &self,
         prev: Option<&Message>,
         info: &RoomInfo,
@@ -1123,7 +1127,7 @@ impl Message {
             .unwrap_or(ReceiptThread::Main)
     }
 
-    pub fn message_column_width(
+    pub(crate) fn message_column_width(
         viewctx: &ViewportContext<MessageCursor>,
         settings: &ApplicationSettings,
     ) -> usize {
@@ -1253,7 +1257,7 @@ impl Message {
     /// Render the message as a [Text] object for the terminal.
     ///
     /// This will also get the image preview Protocol with an x/y offset.
-    pub fn show_with_preview<'a>(
+    pub(crate) fn show_with_preview<'a>(
         &'a self,
         prev: Option<&Message>,
         selected: bool,
@@ -1347,7 +1351,7 @@ impl Message {
         (text, protos)
     }
 
-    pub fn show<'a>(
+    pub(crate) fn show<'a>(
         &'a self,
         prev: Option<&Message>,
         selected: bool,
@@ -1460,13 +1464,13 @@ impl Message {
         }
     }
 
-    pub fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
+    pub(crate) fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
         self.event.redact(redaction);
         self.html = None;
         self.downloaded = false;
     }
 
-    pub fn set_edits(&mut self, new_edits: MessageEdits) {
+    pub(crate) fn set_edits(&mut self, new_edits: MessageEdits) {
         if let MessageEvent::Original(orig, edits) = &mut self.event {
             *edits = new_edits;
 
@@ -1482,7 +1486,7 @@ impl Message {
         }
     }
 
-    pub fn insert_edit(
+    pub(crate) fn insert_edit(
         &mut self,
         key: MessageKey,
         mut edit: RoomMessageEventContentWithoutRelation,
@@ -1495,7 +1499,7 @@ impl Message {
         }
     }
 
-    pub fn remove_edit(&mut self, key: &MessageKey) {
+    pub(crate) fn remove_edit(&mut self, key: &MessageKey) {
         let MessageEvent::Original(orig_content, edits) = &mut self.event else {
             return;
         };
@@ -1632,7 +1636,7 @@ impl Display for Message {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use matrix_sdk::ruma::events::room::ImageInfo;

@@ -13,7 +13,7 @@ fn bold(s: impl Into<Cow<'static, str>>) -> StyleTreeNode {
     StyleTreeNode::Style(Box::new(text), bold)
 }
 
-pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
+pub(crate) fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
     let event = match ev.content_change() {
         AnyStateEventContentChange::PolicyRuleRoom(StateEventContentChange::Original {
             content,
@@ -429,7 +429,7 @@ pub fn body_cow_state(ev: &AnySyncStateEvent) -> Cow<'static, str> {
     return Cow::Owned(event);
 }
 
-pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
+pub(crate) fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
     let children = match ev.content_change() {
         AnyStateEventContentChange::PolicyRuleRoom(StateEventContentChange::Original {
             content,

@@ -9,17 +9,17 @@ use crate::prelude::*;
 const BLACK_ON_WHITE: Style = Style::new().fg(Color::Black).bg(Color::White);
 
 #[derive(Clone)]
-pub struct VerifyItem {
+pub(crate) struct VerifyItem {
     request: VerificationRequest,
     show_help: bool,
 }
 
 impl VerifyItem {
-    pub fn new(request: VerificationRequest) -> Self {
+    pub(crate) fn new(request: VerificationRequest) -> Self {
         Self { request, show_help: false }
     }
 
-    pub fn show_help(&mut self) {
+    pub(crate) fn show_help(&mut self) {
         self.show_help = true;
     }
 }

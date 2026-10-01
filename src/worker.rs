@@ -118,7 +118,7 @@ fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
 }
 
-pub async fn create_room(
+pub(crate) async fn create_room(
     client: &Client,
     room_alias_name: Option<String>,
     rt: CreateRoomType,
@@ -1022,7 +1022,10 @@ async fn load_space_children_forever(client: &Client, store: &AsyncProgramStore)
     }
 }
 
-pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result<(), MatrixError> {
+pub(crate) async fn do_first_sync(
+    client: &Client,
+    store: &AsyncProgramStore,
+) -> Result<(), MatrixError> {
     // Perform an initial, lazily-loaded sync.
     let mut room = RoomEventFilter::default();
     room.lazy_load_options = LazyLoadOptions::Enabled { include_redundant_members: false };
@@ -1048,21 +1051,21 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
 }
 
 #[derive(Debug)]
-pub enum LoginStyle {
+pub(crate) enum LoginStyle {
     SessionRestore(MatrixSession),
     Password(String),
     SingleSignOn,
 }
 
-pub struct ClientResponse<T>(Receiver<T>);
-pub struct ClientReply<T>(SyncSender<T>);
+pub(crate) struct ClientResponse<T>(Receiver<T>);
+pub(crate) struct ClientReply<T>(SyncSender<T>);
 
 impl<T> ClientResponse<T> {
     fn recv(self) -> T {
         self.0.recv().expect("failed to receive response from client thread")
     }
 
-    pub fn try_recv(&self) -> Option<T> {
+    pub(crate) fn try_recv(&self) -> Option<T> {
         self.0.try_recv().ok()
     }
 }
@@ -1083,7 +1086,7 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
 
 pub type FetchedRoom = (MatrixRoom, RoomDisplayName);
 
-pub enum WorkerTask {
+pub(crate) enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     Logout(String, ClientReply<IambResult<EditInfo>>),
@@ -1243,7 +1246,7 @@ async fn create_client_inner(
     builder.build().await
 }
 
-pub async fn create_client(settings: &ApplicationSettings) -> Client {
+pub(crate) async fn create_client(settings: &ApplicationSettings) -> Client {
     let account = &settings.profile;
     let res = match create_client_inner(&account.url, settings).await {
         Err(ClientBuildError::AutoDiscovery(_)) => {
@@ -1304,14 +1307,14 @@ async fn join_room(
 }
 
 #[derive(Clone)]
-pub struct Requester {
+pub(crate) struct Requester {
     pub client: Client,
     pub tx: UnboundedSender<WorkerTask>,
     pub receipts: UnboundedSender<ReceiptUpdate>,
 }
 
 impl Requester {
-    pub fn init(&self, store: AsyncProgramStore) {
+    pub(crate) fn init(&self, store: AsyncProgramStore) {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::Init(store, reply)).unwrap();
@@ -1319,7 +1322,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn send_receipt(
+    pub(crate) fn send_receipt(
         &self,
         room: OwnedRoomId,
         thread: ReceiptThread,
@@ -1338,7 +1341,7 @@ impl Requester {
             .inspect_err(|_| tracing::warn!("Read receipt worker is no longer running"));
     }
 
-    pub fn login(&self, style: LoginStyle) -> IambResult<EditInfo> {
+    pub(crate) fn login(&self, style: LoginStyle) -> IambResult<EditInfo> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::Login(style, reply)).unwrap();
@@ -1346,7 +1349,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn logout(&self, user_id: String) -> IambResult<EditInfo> {
+    pub(crate) fn logout(&self, user_id: String) -> IambResult<EditInfo> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::Logout(user_id, reply)).unwrap();
@@ -1354,7 +1357,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn get_inviter(&self, invite: MatrixRoom) -> IambResult<Option<RoomMember>> {
+    pub(crate) fn get_inviter(&self, invite: MatrixRoom) -> IambResult<Option<RoomMember>> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::GetInviter(invite, reply)).unwrap();
@@ -1362,7 +1365,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn get_room(&self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
+    pub(crate) fn get_room(&self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::GetRoom(room_id, reply)).unwrap();
@@ -1370,7 +1373,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn resolve_alias(&self, alias_id: OwnedRoomAliasId) -> IambResult<OwnedRoomId> {
+    pub(crate) fn resolve_alias(&self, alias_id: OwnedRoomAliasId) -> IambResult<OwnedRoomId> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::ResolveAlias(alias_id, reply)).unwrap();
@@ -1378,7 +1381,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn join_room_chan(
+    pub(crate) fn join_room_chan(
         &self,
         alias_id: OwnedRoomOrAliasId,
         via: Vec<OwnedServerName>,
@@ -1388,7 +1391,7 @@ impl Requester {
         response
     }
 
-    pub fn join_room(
+    pub(crate) fn join_room(
         &self,
         alias_id: OwnedRoomOrAliasId,
         via: Vec<OwnedServerName>,
@@ -1396,7 +1399,7 @@ impl Requester {
         self.join_room_chan(alias_id, via).recv()
     }
 
-    pub fn create_dm(&self, user_id: OwnedUserId) -> IambResult<OwnedRoomId> {
+    pub(crate) fn create_dm(&self, user_id: OwnedUserId) -> IambResult<OwnedRoomId> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::CreateDM(user_id, reply)).unwrap();
@@ -1404,7 +1407,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn members(&self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
+    pub(crate) fn members(&self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::Members(room_id, reply)).unwrap();
@@ -1412,7 +1415,7 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn space_members(&self, space: OwnedRoomId) -> IambResult<Vec<OwnedRoomId>> {
+    pub(crate) fn space_members(&self, space: OwnedRoomId) -> IambResult<Vec<OwnedRoomId>> {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::SpaceMembers(space, reply)).unwrap();
@@ -1420,11 +1423,11 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn typing_notice(&self, room_id: OwnedRoomId) {
+    pub(crate) fn typing_notice(&self, room_id: OwnedRoomId) {
         self.tx.send(WorkerTask::TypingNotice(room_id)).unwrap();
     }
 
-    pub fn load_image(
+    pub(crate) fn load_image(
         &self,
         source: MediaSource,
         kind: PreviewKind,
@@ -1438,7 +1441,7 @@ impl Requester {
     }
 }
 
-pub struct ClientWorker {
+pub(crate) struct ClientWorker {
     initialized: bool,
     settings: ApplicationSettings,
     client: Client,
@@ -1453,7 +1456,7 @@ pub struct ClientWorker {
 }
 
 impl ClientWorker {
-    pub async fn spawn(client: Client, settings: ApplicationSettings) -> Requester {
+    pub(crate) async fn spawn(client: Client, settings: ApplicationSettings) -> Requester {
         let (tx, rx) = unbounded_channel();
         let (receipt_tx, receipt_rx) = unbounded_channel();
 

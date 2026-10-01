@@ -6,12 +6,12 @@ use crate::prelude::*;
 
 const WELCOME_TEXT: &str = include_str!("welcome.md");
 
-pub struct WelcomeState {
+pub(crate) struct WelcomeState {
     tbox: TextBoxState<IambInfo>,
 }
 
 impl WelcomeState {
-    pub fn new(store: &mut ProgramStore) -> Self {
+    pub(crate) fn new(store: &mut ProgramStore) -> Self {
         let buf = store.buffers.load_str(IambBufferId::Welcome, WELCOME_TEXT);
         let mut tbox = TextBoxState::new(buf);
         tbox.set_readonly(true);

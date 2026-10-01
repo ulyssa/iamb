@@ -24,7 +24,7 @@ use crate::prelude::*;
 use crate::util::{join_cell_text, space_text};
 
 /// Generate bullet points from a [ListStyle].
-pub struct BulletIterator {
+pub(crate) struct BulletIterator {
     style: ListStyle,
     pos: usize,
     len: usize,
@@ -63,7 +63,7 @@ impl Iterator for BulletIterator {
 
 /// Whether this list is ordered or unordered.
 #[derive(Clone, Copy, Debug)]
-pub enum ListStyle {
+pub(crate) enum ListStyle {
     Ordered,
     Unordered,
 }
@@ -78,19 +78,19 @@ pub type StyleTreeChildren = Vec<StyleTreeNode>;
 
 /// Type of contents in a table cell.
 #[derive(Debug, Clone, Copy)]
-pub enum CellType {
+pub(crate) enum CellType {
     Data,
     Header,
 }
 
 /// A collection of cells for a single row in a table.
 #[derive(Debug, Clone)]
-pub struct TableRow {
+pub(crate) struct TableRow {
     cells: Vec<(CellType, StyleTreeNode)>,
 }
 
 impl TableRow {
-    pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
+    pub(crate) fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
         for (_, cell) in &self.cells {
             cell.gather_links(urls);
         }
@@ -103,12 +103,12 @@ impl TableRow {
 
 /// A collection of rows in a table.
 #[derive(Debug, Clone)]
-pub struct TableSection {
+pub(crate) struct TableSection {
     rows: Vec<TableRow>,
 }
 
 impl TableSection {
-    pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
+    pub(crate) fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
         for row in &self.rows {
             row.gather_links(urls);
         }
@@ -121,7 +121,7 @@ impl TableSection {
 
 /// A table.
 #[derive(Debug, Clone)]
-pub struct Table {
+pub(crate) struct Table {
     caption: Option<Box<StyleTreeNode>>,
     sections: Vec<TableSection>,
 }
@@ -131,7 +131,7 @@ impl Table {
         self.sections.iter().map(TableSection::columns).max().unwrap_or(0)
     }
 
-    pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
+    pub(crate) fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
         for section in &self.sections {
             section.gather_links(urls);
         }
@@ -254,7 +254,7 @@ impl Table {
 }
 
 #[derive(Debug, Clone)]
-pub enum ThemeSelector {
+pub(crate) enum ThemeSelector {
     Strong,
     Emphasis,
     Strikethrough,
@@ -274,7 +274,7 @@ impl ThemeSelector {
 
 /// A processed HTML element that we can render to the terminal.
 #[derive(Debug, Clone)]
-pub enum StyleTreeNode {
+pub(crate) enum StyleTreeNode {
     Anchor(Box<StyleTreeNode>, char, Url),
     Blockquote(Box<StyleTreeNode>),
     Break,
@@ -298,7 +298,7 @@ pub enum StyleTreeNode {
 }
 
 impl StyleTreeNode {
-    pub fn to_text<'a>(
+    pub(crate) fn to_text<'a>(
         &'a self,
         width: usize,
         style: Style,
@@ -310,7 +310,7 @@ impl StyleTreeNode {
         printer.finish()
     }
 
-    pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
+    pub(crate) fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
         match self {
             StyleTreeNode::Anchor(_, c, url) => {
                 urls.push((*c, url.clone()));
@@ -364,7 +364,7 @@ impl StyleTreeNode {
         }
     }
 
-    pub fn print<'a>(&'a self, printer: &mut TextPrinter<'a>, style: Style) {
+    pub(crate) fn print<'a>(&'a self, printer: &mut TextPrinter<'a>, style: Style) {
         let width = printer.width();
 
         match self {
@@ -536,12 +536,12 @@ impl StyleTreeNode {
 }
 
 /// A processed HTML document.
-pub struct StyleTree {
+pub(crate) struct StyleTree {
     pub(super) children: StyleTreeChildren,
 }
 
 impl StyleTree {
-    pub fn get_links(&self) -> Vec<(char, Url)> {
+    pub(crate) fn get_links(&self) -> Vec<(char, Url)> {
         let mut links = Vec::new();
 
         for child in &self.children {
@@ -551,7 +551,7 @@ impl StyleTree {
         return links;
     }
 
-    pub fn to_text<'a>(
+    pub(crate) fn to_text<'a>(
         &'a self,
         width: usize,
         style: Style,
@@ -568,12 +568,12 @@ impl StyleTree {
     }
 }
 
-pub struct TreeGenState {
+pub(crate) struct TreeGenState {
     pub link_num: u8,
 }
 
 impl TreeGenState {
-    pub fn next_link_char(&mut self) -> Option<char> {
+    pub(crate) fn next_link_char(&mut self) -> Option<char> {
         let num = self.link_num;
 
         if num < 62 {
@@ -911,7 +911,7 @@ fn dom_to_style_tree(dom: RcDom) -> StyleTree {
 }
 
 /// Parse an HTML document from a string.
-pub fn parse_matrix_html(s: &str) -> StyleTree {
+pub(crate) fn parse_matrix_html(s: &str) -> StyleTree {
     let dom = parse_fragment(
         RcDom::default(),
         ParseOpts::default(),
@@ -925,7 +925,7 @@ pub fn parse_matrix_html(s: &str) -> StyleTree {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
     use pretty_assertions::assert_eq;
     use ratatui::symbols::line;

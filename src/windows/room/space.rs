@@ -11,7 +11,7 @@ use crate::prelude::*;
 use crate::windows::{GenericRoomItem, RoomLikeItem, room_cmp};
 
 /// State needed for rendering [Space].
-pub struct SpaceState {
+pub(crate) struct SpaceState {
     room_id: OwnedRoomId,
     room: MatrixRoom,
     list: ListState<GenericRoomItem, IambInfo>,
@@ -19,7 +19,7 @@ pub struct SpaceState {
 }
 
 impl SpaceState {
-    pub fn new(room: MatrixRoom) -> Self {
+    pub(crate) fn new(room: MatrixRoom) -> Self {
         let room_id = room.room_id().to_owned();
         let content = IambBufferId::Room(room_id.clone(), None, RoomFocus::Scrollback);
         let list = ListState::new(content, vec![]);
@@ -28,21 +28,21 @@ impl SpaceState {
         SpaceState { room_id, room, list, last_fetch }
     }
 
-    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
+    pub(crate) fn refresh_room(&mut self, store: &mut ProgramStore) {
         if let Some(room) = store.application.worker.client.get_room(self.id()) {
             self.room = room;
         }
     }
 
-    pub fn room(&self) -> &MatrixRoom {
+    pub(crate) fn room(&self) -> &MatrixRoom {
         &self.room
     }
 
-    pub fn id(&self) -> &RoomId {
+    pub(crate) fn id(&self) -> &RoomId {
         &self.room_id
     }
 
-    pub fn dup(&self, store: &mut ProgramStore) -> Self {
+    pub(crate) fn dup(&self, store: &mut ProgramStore) -> Self {
         SpaceState {
             room_id: self.room_id.clone(),
             room: self.room.clone(),
@@ -51,7 +51,7 @@ impl SpaceState {
         }
     }
 
-    pub async fn space_command(
+    pub(crate) async fn space_command(
         &mut self,
         act: SpaceAction,
         _: ProgramContext,
@@ -169,17 +169,17 @@ impl DerefMut for SpaceState {
 }
 
 /// [StatefulWidget] for Matrix spaces.
-pub struct Space<'a> {
+pub(crate) struct Space<'a> {
     focused: bool,
     store: &'a mut ProgramStore,
 }
 
 impl<'a> Space<'a> {
-    pub fn new(store: &'a mut ProgramStore) -> Self {
+    pub(crate) fn new(store: &'a mut ProgramStore) -> Self {
         Space { focused: false, store }
     }
 
-    pub fn focus(mut self, focused: bool) -> Self {
+    pub(crate) fn focus(mut self, focused: bool) -> Self {
         self.focused = focused;
         self
     }

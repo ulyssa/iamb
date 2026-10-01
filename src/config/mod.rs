@@ -27,7 +27,7 @@ use serde::{Deserialize, Deserializer, Serialize};
 use crate::base::{SortColumn, SortFieldRoom, SortFieldSpace, SortFieldUser, SortOrder};
 use crate::prelude::*;
 
-pub mod theme;
+pub(crate) mod theme;
 
 pub type Aliases = IndexMap<String, String>;
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
@@ -165,7 +165,7 @@ const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
 #[derive(Parser)]
 #[clap(version = VERSION, about, long_about = None)]
 #[clap(propagate_version = true)]
-pub struct Iamb {
+pub(crate) struct Iamb {
     #[clap(long, value_parser)]
     pub completions: Option<clap_complete::Shell>,
 
@@ -180,7 +180,7 @@ pub struct Iamb {
 }
 
 #[derive(thiserror::Error, Debug)]
-pub enum ConfigError {
+pub(crate) enum ConfigError {
     #[error("Error reading configuration file: {0}")]
     IO(#[from] std::io::Error),
 
@@ -211,8 +211,8 @@ deserialize_str_with_visitor!(NotifyVia, NotifyViaVisitor);
 deserialize_str_with_visitor!(ProxyUrl, ProxyUrlVisitor);
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct Keys(pub Vec<TerminalKey>, pub String);
-pub struct KeysVisitor;
+pub(crate) struct Keys(pub Vec<TerminalKey>, pub String);
+pub(crate) struct KeysVisitor;
 
 impl Visitor<'_> for KeysVisitor {
     type Value = Keys;
@@ -233,8 +233,8 @@ impl Visitor<'_> for KeysVisitor {
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct VimModes(pub Vec<VimMode>);
-pub struct VimModesVisitor;
+pub(crate) struct VimModes(pub Vec<VimMode>);
+pub(crate) struct VimModesVisitor;
 
 impl Visitor<'_> for VimModesVisitor {
     type Value = VimModes;
@@ -268,7 +268,7 @@ impl Visitor<'_> for VimModesVisitor {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct Session {
+pub(crate) struct Session {
     access_token: String,
     refresh_token: Option<String>,
     user_id: OwnedUserId,
@@ -302,7 +302,7 @@ impl From<MatrixSession> for Session {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-pub struct UserDisplayTunables {
+pub(crate) struct UserDisplayTunables {
     pub color: Option<Color>,
     pub name: Option<String>,
 }
@@ -326,7 +326,7 @@ where
 #[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 #[repr(u8)]
-pub enum ReadReceiptTrigger {
+pub(crate) enum ReadReceiptTrigger {
     /// Update read receipts for a room when a window for it is focused, and it is scrolled to the
     /// last message.
     #[default]
@@ -342,7 +342,7 @@ pub enum ReadReceiptTrigger {
 
 impl ReadReceiptTrigger {
     /// Whether to update read receipts when a room is being rendered.
-    pub fn on_render(&self, last_visible: bool, room_focused: bool) -> bool {
+    pub(crate) fn on_render(&self, last_visible: bool, room_focused: bool) -> bool {
         match self {
             Self::Scrollback => true,
             Self::Focused => last_visible && room_focused,
@@ -351,7 +351,7 @@ impl ReadReceiptTrigger {
         }
     }
 
-    pub fn on_message(&self) -> bool {
+    pub(crate) fn on_message(&self) -> bool {
         matches!(self, Self::Message)
     }
 }
@@ -359,7 +359,7 @@ impl ReadReceiptTrigger {
 #[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 #[repr(u8)]
-pub enum EncryptionIndicator {
+pub(crate) enum EncryptionIndicator {
     /// Always indicate the room's encryption status.
     #[default]
     Enabled,
@@ -374,14 +374,14 @@ pub enum EncryptionIndicator {
 bitflags::bitflags! {
     /// Available options for where to show the encryption status indicator.
     #[derive(Clone, Debug, Eq, PartialEq)]
-    pub struct EncryptionIndicatorLocation: u8 {
+    pub(crate) struct EncryptionIndicatorLocation: u8 {
         const NONE   = 0b00000000;
         const TITLE  = 0b00000001;
         const PROMPT = 0b00000010;
     }
 }
 
-pub struct EncryptionIndicatorLocationVisitor;
+pub(crate) struct EncryptionIndicatorLocationVisitor;
 
 impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
     type Value = EncryptionIndicatorLocation;
@@ -412,7 +412,7 @@ impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum UserDisplayStyle {
+pub(crate) enum UserDisplayStyle {
     // The Matrix username for the sender (e.g., "@user:example.com").
     #[default]
     Username,
@@ -430,14 +430,14 @@ pub enum UserDisplayStyle {
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
-pub enum SplitDirection {
+pub(crate) enum SplitDirection {
     #[default]
     Horizontal,
     Vertical,
 }
 
 impl SplitDirection {
-    pub fn to_axis(self) -> Axis {
+    pub(crate) fn to_axis(self) -> Axis {
         match self {
             Self::Horizontal => Axis::Horizontal,
             Self::Vertical => Axis::Vertical,
@@ -446,14 +446,14 @@ impl SplitDirection {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct NotifyVia {
+pub(crate) struct NotifyVia {
     /// Deliver notifications via terminal bell.
     pub bell: bool,
     /// Deliver notifications via desktop mechanism.
     #[cfg(feature = "desktop")]
     pub desktop: bool,
 }
-pub struct NotifyViaVisitor;
+pub(crate) struct NotifyViaVisitor;
 
 impl Default for NotifyVia {
     fn default() -> Self {
@@ -504,7 +504,7 @@ impl Visitor<'_> for NotifyViaVisitor {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct Encryption {
+pub(crate) struct Encryption {
     indicator: Option<EncryptionIndicator>,
     indicator_location: Option<EncryptionIndicatorLocation>,
     icon_encrypted: Option<String>,
@@ -523,7 +523,7 @@ impl Encryption {
         }
     }
 
-    pub fn values(self) -> EncryptionValues {
+    pub(crate) fn values(self) -> EncryptionValues {
         EncryptionValues {
             indicator: self.indicator.unwrap_or_default(),
             indicator_location: self.indicator_location.unwrap_or(DEFAULT_ENC_INDICATOR_LOC),
@@ -535,7 +535,7 @@ impl Encryption {
 }
 
 #[derive(Clone, Debug)]
-pub struct EncryptionValues {
+pub(crate) struct EncryptionValues {
     pub indicator: EncryptionIndicator,
     pub indicator_location: EncryptionIndicatorLocation,
     pub icon_encrypted: Cow<'static, str>,
@@ -544,7 +544,7 @@ pub struct EncryptionValues {
 }
 
 impl EncryptionValues {
-    pub fn get_indicator(
+    pub(crate) fn get_indicator(
         &self,
         location: EncryptionIndicatorLocation,
         state: EncryptionState,
@@ -587,14 +587,14 @@ impl EncryptionValues {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub enum ProxyUrl {
+pub(crate) enum ProxyUrl {
     Disabled,
     Endpoint(Url),
     #[default]
     System,
 }
 
-pub struct ProxyUrlVisitor;
+pub(crate) struct ProxyUrlVisitor;
 
 impl Visitor<'_> for ProxyUrlVisitor {
     type Value = ProxyUrl;
@@ -619,7 +619,7 @@ impl Visitor<'_> for ProxyUrlVisitor {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct Proxy {
+pub(crate) struct Proxy {
     /// How and where to proxy the client's requests to the homeserver.
     url: Option<ProxyUrl>,
 
@@ -633,7 +633,7 @@ pub struct Proxy {
 }
 
 impl Proxy {
-    pub fn values(self) -> ProxyValues {
+    pub(crate) fn values(self) -> ProxyValues {
         ProxyValues {
             url: self.url.unwrap_or_default(),
             auth: self.auth,
@@ -643,20 +643,20 @@ impl Proxy {
 }
 
 #[derive(Clone, Debug, Default)]
-pub struct ProxyValues {
+pub(crate) struct ProxyValues {
     pub url: ProxyUrl,
     pub auth: Option<HeaderValue>,
     pub headers: HeaderMap,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-pub struct Mouse {
+pub(crate) struct Mouse {
     #[serde(default)]
     pub enabled: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
-pub struct Notifications {
+pub(crate) struct Notifications {
     #[serde(default)]
     pub enabled: bool,
     #[serde(default)]
@@ -668,21 +668,21 @@ pub struct Notifications {
 }
 
 #[derive(Clone)]
-pub struct ImagePreviewValues {
+pub(crate) struct ImagePreviewValues {
     pub enabled: bool,
     pub size: Size,
     pub protocol: ImagePreviewProtocolValues,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct ImagePreview {
+pub(crate) struct ImagePreview {
     pub enabled: Option<bool>,
     pub size: Option<Size>,
     pub protocol: Option<ImagePreviewProtocolValues>,
 }
 
 impl ImagePreview {
-    pub fn values(self) -> ImagePreviewValues {
+    pub(crate) fn values(self) -> ImagePreviewValues {
         ImagePreviewValues {
             enabled: self.enabled.unwrap_or(true),
             size: self.size.unwrap_or(Size { width: 66, height: 10 }),
@@ -692,14 +692,14 @@ impl ImagePreview {
 }
 
 #[derive(Clone, Debug, Deserialize, Default)]
-pub struct ImagePreviewProtocolValues {
+pub(crate) struct ImagePreviewProtocolValues {
     pub r#type: Option<ProtocolType>,
     pub filter: Option<FilterType>,
     pub font_size: Option<(u16, u16)>,
 }
 
 #[derive(Clone)]
-pub struct SortValues {
+pub(crate) struct SortValues {
     pub chats: Vec<SortColumn<SortFieldRoom>>,
     pub dms: Vec<SortColumn<SortFieldRoom>>,
     pub rooms: Vec<SortColumn<SortFieldRoom>>,
@@ -709,7 +709,7 @@ pub struct SortValues {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct SortOverrides {
+pub(crate) struct SortOverrides {
     pub chats: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub dms: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub rooms: Option<Vec<SortColumn<SortFieldRoom>>>,
@@ -730,7 +730,7 @@ impl SortOverrides {
         }
     }
 
-    pub fn values(self) -> SortValues {
+    pub(crate) fn values(self) -> SortValues {
         let rooms = self.rooms.unwrap_or_else(|| Vec::from(DEFAULT_ROOM_SORT));
         let chats = self.chats.unwrap_or_else(|| rooms.clone());
         let dms = self.dms.unwrap_or_else(|| rooms.clone());
@@ -743,7 +743,7 @@ impl SortOverrides {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct Terminal {
+pub(crate) struct Terminal {
     pub cursor_shape: Option<CursorShape>,
     pub enable_extended_keys: Option<bool>,
     pub enable_title: Option<bool>,
@@ -758,7 +758,7 @@ impl Terminal {
         }
     }
 
-    pub fn values(self) -> TerminalValues {
+    pub(crate) fn values(self) -> TerminalValues {
         TerminalValues {
             cursor_shape: self.cursor_shape.unwrap_or_default(),
             enable_extended_keys: self.enable_extended_keys,
@@ -768,7 +768,7 @@ impl Terminal {
 }
 
 #[derive(Clone, Debug)]
-pub struct TerminalValues {
+pub(crate) struct TerminalValues {
     pub cursor_shape: CursorShape,
     pub enable_extended_keys: Option<bool>,
     pub enable_title: bool,
@@ -777,7 +777,7 @@ pub struct TerminalValues {
 /// The configuration settings to run with, after merging the
 /// per-profile overrides on top of the global settings.
 #[derive(Clone)]
-pub struct TunableValues {
+pub(crate) struct TunableValues {
     pub encryption: EncryptionValues,
     pub default_markup: MarkupFormat,
     pub ignorecase: bool,
@@ -798,8 +798,8 @@ pub struct TunableValues {
     pub sync_delay_ms: u64,
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
-    pub users: UserOverrides,
-    pub username_display: UserDisplayStyle,
+    pub(crate) users: UserOverrides,
+    pub(crate) username_display: UserDisplayStyle,
     pub message_user_color: bool,
     pub default_register: Option<Register>,
     pub default_room: Option<String>,
@@ -809,7 +809,7 @@ pub struct TunableValues {
     pub notifications: Notifications,
     pub terminal: TerminalValues,
     pub image_preview: ImagePreviewValues,
-    pub user_gutter_width: usize,
+    pub(crate) user_gutter_width: usize,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
     pub input_prompt: Option<String>,
@@ -821,7 +821,7 @@ pub struct TunableValues {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct Tunables {
+pub(crate) struct Tunables {
     /// Subsection for overriding encryption-related settings.
     #[serde(default)]
     pub encryption: Encryption,
@@ -838,7 +838,7 @@ pub struct Tunables {
     pub terminal: Terminal,
 
     /// Subsection for overriding how specific Matrix users are rendered.
-    pub users: Option<UserOverrides>,
+    pub(crate) users: Option<UserOverrides>,
 
     pub default_markup: Option<MarkupFormat>,
     pub ignorecase: Option<bool>,
@@ -857,7 +857,7 @@ pub struct Tunables {
     pub sync_delay_ms: Option<u64>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
-    pub username_display: Option<UserDisplayStyle>,
+    pub(crate) username_display: Option<UserDisplayStyle>,
     pub message_user_color: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_register")]
     pub default_register: Option<Register>,
@@ -867,7 +867,7 @@ pub struct Tunables {
     pub mouse: Option<Mouse>,
     pub notifications: Option<Notifications>,
     pub image_preview: Option<ImagePreview>,
-    pub user_gutter_width: Option<usize>,
+    pub(crate) user_gutter_width: Option<usize>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
     pub input_prompt: Option<String>,
@@ -993,7 +993,7 @@ impl Tunables {
 #[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 #[repr(u8)]
-pub enum CursorShape {
+pub(crate) enum CursorShape {
     Default,
     Block,
     Line,
@@ -1019,7 +1019,7 @@ impl From<CursorShape> for modalkit::crossterm::cursor::SetCursorStyle {
 #[derive(Copy, Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "kebab-case")]
 #[repr(u8)]
-pub enum MarkupFormat {
+pub(crate) enum MarkupFormat {
     Html,
     #[default]
     Markdown,
@@ -1027,7 +1027,7 @@ pub enum MarkupFormat {
 }
 
 #[derive(Clone)]
-pub struct DirectoryValues {
+pub(crate) struct DirectoryValues {
     pub cache: PathBuf,
     pub data: PathBuf,
     pub logs: PathBuf,
@@ -1053,7 +1053,7 @@ impl DirectoryValues {
 }
 
 #[derive(Clone, Default, Deserialize)]
-pub struct Directories {
+pub(crate) struct Directories {
     pub cache: Option<String>,
     pub data: Option<String>,
     pub logs: Option<String>,
@@ -1127,7 +1127,7 @@ impl Directories {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(untagged)]
-pub enum WindowPath {
+pub(crate) enum WindowPath {
     AliasId(OwnedRoomAliasId),
     RoomId(OwnedRoomId),
     UserId(OwnedUserId),
@@ -1136,14 +1136,14 @@ pub enum WindowPath {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
 #[serde(untagged, deny_unknown_fields)]
-pub enum WindowLayout {
+pub(crate) enum WindowLayout {
     Window { window: WindowPath },
     Split { split: Vec<WindowLayout> },
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase", tag = "style")]
-pub enum Layout {
+pub(crate) enum Layout {
     /// Restore the layout from the previous session.
     #[default]
     Restore,
@@ -1156,8 +1156,8 @@ pub enum Layout {
 }
 
 #[derive(Clone, Deserialize)]
-pub struct ProfileConfig {
-    pub user_id: OwnedUserId,
+pub(crate) struct ProfileConfig {
+    pub(crate) user_id: OwnedUserId,
     pub password_file: Option<PathBuf>,
     pub url: Option<Url>,
     pub settings: Option<Tunables>,
@@ -1169,7 +1169,7 @@ pub struct ProfileConfig {
 }
 
 #[derive(Clone, Deserialize)]
-pub struct IambConfig {
+pub(crate) struct IambConfig {
     pub profiles: BTreeMap<String, ProfileConfig>,
     pub default_profile: Option<String>,
     pub settings: Option<Tunables>,
@@ -1181,14 +1181,14 @@ pub struct IambConfig {
 }
 
 impl IambConfig {
-    pub fn load_toml(path: &Path) -> Result<Self, ConfigError> {
+    pub(crate) fn load_toml(path: &Path) -> Result<Self, ConfigError> {
         let s = std::fs::read_to_string(path)?;
         let config = toml::from_str(&s)?;
 
         Ok(config)
     }
 
-    pub fn load_json(path: &Path) -> Result<Self, ConfigError> {
+    pub(crate) fn load_json(path: &Path) -> Result<Self, ConfigError> {
         let s = std::fs::read_to_string(path)?;
         let config = serde_json::from_str(&s)?;
 
@@ -1197,7 +1197,7 @@ impl IambConfig {
 }
 
 #[derive(Clone)]
-pub struct ApplicationSettings {
+pub(crate) struct ApplicationSettings {
     pub layout_json: PathBuf,
     pub session_json: PathBuf,
     pub session_json_old: PathBuf,
@@ -1224,7 +1224,7 @@ impl ApplicationSettings {
         env::var("XDG_CONFIG_HOME").ok().map(PathBuf::from)
     }
 
-    pub fn load(cli: Iamb) -> Result<Self, Box<dyn std::error::Error>> {
+    pub(crate) fn load(cli: Iamb) -> Result<Self, Box<dyn std::error::Error>> {
         let mut config_dir = cli
             .config_directory
             .or_else(Self::get_xdg_config_home)
@@ -1380,7 +1380,7 @@ impl ApplicationSettings {
     ///
     /// This queries the terminal, so it must only be called once, before the
     /// TUI starts reading input.
-    pub fn probe_enhanced_keys(&mut self) {
+    pub(crate) fn probe_enhanced_keys(&mut self) {
         self.enable_enhanced_keys =
             self.tunables.terminal.enable_extended_keys.unwrap_or_else(|| {
                 crossterm::terminal::supports_keyboard_enhancement()
@@ -1394,14 +1394,14 @@ impl ApplicationSettings {
             });
     }
 
-    pub fn read_session(&self, path: impl AsRef<Path>) -> Result<Session, IambError> {
+    pub(crate) fn read_session(&self, path: impl AsRef<Path>) -> Result<Session, IambError> {
         let file = File::open(path)?;
         let reader = BufReader::new(file);
         let session = serde_json::from_reader(reader).map_err(IambError::from)?;
         Ok(session)
     }
 
-    pub fn write_session(&self, session: MatrixSession) -> Result<(), IambError> {
+    pub(crate) fn write_session(&self, session: MatrixSession) -> Result<(), IambError> {
         let file = File::create(self.session_json.as_path())?;
         let writer = BufWriter::new(file);
         let session = Session::from(session);
@@ -1409,7 +1409,7 @@ impl ApplicationSettings {
         Ok(())
     }
 
-    pub fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
+    pub(crate) fn get_user_char_span(&self, user_id: &UserId) -> Span<'_> {
         let (color, c) = self
             .tunables
             .users
@@ -1423,7 +1423,7 @@ impl ApplicationSettings {
         Span::styled(String::from(c), style)
     }
 
-    pub fn get_user_overrides(
+    pub(crate) fn get_user_overrides(
         &self,
         user_id: &UserId,
     ) -> (Option<Color>, Option<Cow<'static, str>>) {
@@ -1434,7 +1434,7 @@ impl ApplicationSettings {
             .unwrap_or_default()
     }
 
-    pub fn get_user_color(&self, user_id: &UserId) -> Color {
+    pub(crate) fn get_user_color(&self, user_id: &UserId) -> Color {
         self.tunables
             .users
             .get(user_id)
@@ -1442,12 +1442,12 @@ impl ApplicationSettings {
             .unwrap_or_else(|| self.theme.users.color(user_id.as_str()))
     }
 
-    pub fn get_user_style(&self, user_id: &UserId) -> Style {
+    pub(crate) fn get_user_style(&self, user_id: &UserId) -> Style {
         let (color, _) = self.get_user_overrides(user_id);
         self.theme.users.style(user_id.as_str(), color)
     }
 
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
+    pub(crate) fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
         let (color, name) = self.get_user_overrides(user_id);
 
         let style = self.theme.users.style(user_id.as_str(), color);

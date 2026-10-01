@@ -58,7 +58,7 @@ fn preview_state(
     }
 }
 
-pub struct NotJoinedState {
+pub(crate) struct NotJoinedState {
     alias: OwnedRoomOrAliasId,
     /// The resolved [`alias`](`Self::alias`).
     room_id: Option<OwnedRoomId>,
@@ -70,7 +70,7 @@ pub struct NotJoinedState {
 
 impl NotJoinedState {
     /// Create a window for a room the user hasn't joined.
-    pub fn new(alias: OwnedRoomOrAliasId, store: &mut ProgramStore) -> Self {
+    pub(crate) fn new(alias: OwnedRoomOrAliasId, store: &mut ProgramStore) -> Self {
         store.application.need_load.need_preview(alias.clone());
 
         Self {
@@ -82,11 +82,11 @@ impl NotJoinedState {
         }
     }
 
-    pub fn alias(&self) -> &RoomOrAliasId {
+    pub(crate) fn alias(&self) -> &RoomOrAliasId {
         &self.alias
     }
 
-    pub fn room_id(&mut self, store: &ProgramStore) -> Option<&RoomId> {
+    pub(crate) fn room_id(&mut self, store: &ProgramStore) -> Option<&RoomId> {
         let alias_or_id: &RoomOrAliasId = &self.alias;
         match <&RoomId>::try_from(alias_or_id) {
             Ok(id) => Some(id),
@@ -98,7 +98,7 @@ impl NotJoinedState {
         }
     }
 
-    pub fn refresh_room(&mut self, store: &mut ProgramStore) -> Option<RoomState> {
+    pub(crate) fn refresh_room(&mut self, store: &mut ProgramStore) -> Option<RoomState> {
         let room = if let Some(room) = self
             .room_id(store)
             .and_then(|id| store.application.worker.client.get_room(id))
@@ -122,7 +122,7 @@ impl NotJoinedState {
         Some(RoomState::new(room, None, store))
     }
 
-    pub fn dup(&self) -> Self {
+    pub(crate) fn dup(&self) -> Self {
         Self {
             alias: self.alias.clone(),
             room_id: self.room_id.clone(),
@@ -132,7 +132,7 @@ impl NotJoinedState {
         }
     }
 
-    pub fn get_tab_title(&self, store: &ProgramStore) -> Line<'_> {
+    pub(crate) fn get_tab_title(&self, store: &ProgramStore) -> Line<'_> {
         if let Some((Ok(preview), _)) = store.application.room_previews.get(self.alias()) {
             if let Some(name) = &preview.name {
                 return Line::from(name.to_string());
@@ -146,7 +146,7 @@ impl NotJoinedState {
         Line::from(self.alias.as_str())
     }
 
-    pub fn get_title(&self, store: &ProgramStore) -> Line<'_> {
+    pub(crate) fn get_title(&self, store: &ProgramStore) -> Line<'_> {
         if let Some((Ok(preview), _)) = store.application.room_previews.get(self.alias()) {
             if let Some(name) = &preview.name {
                 return Line::from(vec![
@@ -169,7 +169,7 @@ impl NotJoinedState {
         ])
     }
 
-    pub async fn join_command(
+    pub(crate) async fn join_command(
         &mut self,
         act: JoinAction,
         ctx: ProgramContext,
@@ -256,12 +256,12 @@ impl TerminalCursor for NotJoinedState {
 }
 
 /// [StatefulWidget] for Matrix rooms that haven't been joined.
-pub struct NotJoined<'a> {
+pub(crate) struct NotJoined<'a> {
     store: &'a mut ProgramStore,
 }
 
 impl<'a> NotJoined<'a> {
-    pub fn new(store: &'a mut ProgramStore) -> Self {
+    pub(crate) fn new(store: &'a mut ProgramStore) -> Self {
         Self { store }
     }
 }

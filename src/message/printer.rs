@@ -16,7 +16,7 @@ use crate::util::{
 };
 
 /// Wrap styled text for the current terminal width.
-pub struct TextPrinter<'a> {
+pub(crate) struct TextPrinter<'a> {
     text: Text<'a>,
     width: usize,
     base_style: Style,
@@ -32,7 +32,7 @@ pub struct TextPrinter<'a> {
 
 impl<'a> TextPrinter<'a> {
     /// Create a new printer.
-    pub fn new(
+    pub(crate) fn new(
         width: usize,
         base_style: Style,
         settings: &'a ApplicationSettings,
@@ -53,47 +53,47 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// The `(x, y)` position where the next text will be printed.
-    pub fn cursor_pos(&self) -> (usize, usize) {
+    pub(crate) fn cursor_pos(&self) -> (usize, usize) {
         (self.curr_width, self.text.lines.len())
     }
 
     /// Configure the alignment for each line.
-    pub fn align(mut self, alignment: Alignment) -> Self {
+    pub(crate) fn align(mut self, alignment: Alignment) -> Self {
         self.alignment = alignment;
         self
     }
 
     /// Set whether newlines should be treated literally, or turned into spaces.
-    pub fn literal(mut self, literal: bool) -> Self {
+    pub(crate) fn literal(mut self, literal: bool) -> Self {
         self.literal = literal;
         self
     }
 
     /// Set the base style and return the old style.
-    pub fn replace_base_style(&mut self, style: Style) -> Style {
+    pub(crate) fn replace_base_style(&mut self, style: Style) -> Style {
         std::mem::replace(&mut self.base_style, style)
     }
 
     /// Indicates whether emojis should be replaced by shortcodes
-    pub fn emoji_shortcodes(&self) -> bool {
+    pub(crate) fn emoji_shortcodes(&self) -> bool {
         self.tunables().message_shortcode_display
     }
 
-    pub fn settings(&self) -> &ApplicationSettings {
+    pub(crate) fn settings(&self) -> &ApplicationSettings {
         self.settings
     }
 
-    pub fn tunables(&self) -> &TunableValues {
+    pub(crate) fn tunables(&self) -> &TunableValues {
         &self.settings.tunables
     }
 
     /// Indicates the current printer's width.
-    pub fn width(&self) -> usize {
+    pub(crate) fn width(&self) -> usize {
         self.width
     }
 
     /// Create a new printer with a smaller width.
-    pub fn sub(&self, indent: usize) -> Self {
+    pub(crate) fn sub(&self, indent: usize) -> Self {
         TextPrinter {
             text: Text::default(),
             width: self.width.saturating_sub(indent),
@@ -113,7 +113,7 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// If there is any text on the current line, start a new one.
-    pub fn commit(&mut self) {
+    pub(crate) fn commit(&mut self) {
         if self.curr_width > 0 {
             self.push_break();
         }
@@ -125,7 +125,7 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// Start a new line.
-    pub fn push_break(&mut self) {
+    pub(crate) fn push_break(&mut self) {
         if self.curr_width == 0 && self.text.lines.is_empty() {
             // Disallow leading breaks.
             return;
@@ -193,7 +193,7 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// Push a [Span] that isn't allowed to break across lines.
-    pub fn push_span_nobreak(&mut self, mut span: Span<'a>) {
+    pub(crate) fn push_span_nobreak(&mut self, mut span: Span<'a>) {
         if self.emoji_shortcodes() {
             replace_emojis_in_span(&mut span);
         }
@@ -209,7 +209,7 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// Push text with a [Style].
-    pub fn push_str(&mut self, s: &'a str, style: Style) {
+    pub(crate) fn push_str(&mut self, s: &'a str, style: Style) {
         let style = self.base_style.patch(style);
 
         if self.width == 0 {
@@ -274,7 +274,7 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// Push a [Line] into the printer.
-    pub fn push_line(&mut self, mut line: Line<'a>) {
+    pub(crate) fn push_line(&mut self, mut line: Line<'a>) {
         self.commit();
         if self.emoji_shortcodes() {
             replace_emojis_in_line(&mut line);
@@ -283,7 +283,7 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// Push multiline [Text] into the printer.
-    pub fn push_text(&mut self, mut text: Text<'a>) {
+    pub(crate) fn push_text(&mut self, mut text: Text<'a>) {
         self.commit();
         if self.emoji_shortcodes() {
             for line in &mut text.lines {
@@ -294,14 +294,14 @@ impl<'a> TextPrinter<'a> {
     }
 
     /// Render the contents of this printer as [Text].
-    pub fn finish(mut self) -> Text<'a> {
+    pub(crate) fn finish(mut self) -> Text<'a> {
         self.commit();
         self.text
     }
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use crate::tests::{mock_room, mock_settings};
