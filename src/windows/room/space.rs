@@ -298,7 +298,7 @@ mod tests {
             alias: None,
             tags: vec![],
             unread: Default::default(),
-            invite: false,
+            membership: MatrixRoomState::Invited,
         };
         let room2 = TestRoomItem {
             room_id: RoomId::new_v1(server).to_owned(),
@@ -306,7 +306,7 @@ mod tests {
             alias: None,
             tags: vec![],
             unread: Default::default(),
-            invite: false,
+            membership: MatrixRoomState::Invited,
         };
         let room3 = TestRoomItem {
             room_id: RoomId::new_v1(server).to_owned(),
@@ -314,7 +314,7 @@ mod tests {
             alias: None,
             tags: vec![],
             unread: Default::default(),
-            invite: false,
+            membership: MatrixRoomState::Invited,
         };
         let room4 = TestRoomItem {
             room_id: RoomId::new_v1(server).to_owned(),
@@ -322,7 +322,7 @@ mod tests {
             alias: None,
             tags: vec![],
             unread: Default::default(),
-            invite: false,
+            membership: MatrixRoomState::Invited,
         };
 
         let space = SpaceInfo {

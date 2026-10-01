@@ -253,6 +253,9 @@ pub enum SortFieldRoom {
 
     /// Sort rooms by whether they are invites.
     Invite,
+
+    /// Sort rooms by whether the user has joined them.
+    Joined,
 }
 
 /// Fields that space children can be sorted by.
@@ -328,6 +331,7 @@ impl Visitor<'_> for SortRoomVisitor {
             "id" => SortFieldRoom::RoomId,
             "server" => SortFieldRoom::Server,
             "invite" => SortFieldRoom::Invite,
+            "joined" => SortFieldRoom::Joined,
             _ => {
                 let msg = format!("Unknown sort field: {value:?}");
                 return Err(E::custom(msg));
