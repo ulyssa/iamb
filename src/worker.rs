@@ -271,7 +271,9 @@ async fn run_plan(client: &Client, store: &AsyncProgramStore, plan: Plan) {
                     .room_via
                     .get(&alias_id)
                     .unwrap_or(&locked.application.settings.tunables.default_via)
-                    .to_vec()
+                    .iter()
+                    .cloned()
+                    .collect()
             };
 
             let res = client.get_room_preview(&alias_id, via).await;
@@ -993,11 +995,15 @@ async fn load_space_children(client: &Client, store: &AsyncProgramStore) {
     }
 
     let mut locked = store.lock().await;
+    let ChatStore { spaces, room_via, .. } = &mut locked.application;
+
     for (room, ev) in all_events {
         let room_id = room.room_id().to_owned();
-        let info = locked.application.spaces.entry(room_id).or_default();
+        let info = spaces.entry(room_id.clone()).or_default();
         match ev {
             SyncStateEvent::Original(ev) => {
+                room_via.entry(room_id.into()).or_default().extend(ev.content.via.clone());
+
                 info.children.insert(ev.state_key, (ev.content, ev.origin_server_ts));
             },
             SyncStateEvent::Redacted(ev) => {
@@ -1601,10 +1607,16 @@ impl ClientWorker {
                 async move {
                     let room_id = room.room_id().to_owned();
                     let mut locked = store.lock().await;
+                    let ChatStore { spaces, room_via, .. } = &mut locked.application;
 
-                    let info = locked.application.spaces.entry(room_id).or_default();
+                    let info = spaces.entry(room_id.clone()).or_default();
                     match ev {
                         SyncStateEvent::Original(ev) => {
+                            room_via
+                                .entry(room_id.into())
+                                .or_default()
+                                .extend(ev.content.via.clone());
+
                             info.children.insert(ev.state_key, (ev.content, ev.origin_server_ts));
                         },
                         SyncStateEvent::Redacted(ev) => {

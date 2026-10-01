@@ -2371,7 +2371,7 @@ pub struct ChatStore {
     /// Cache of encountered `via` parameters in room links.
     ///
     /// This is stored here because this data is lost in the conversion to [IambId].
-    pub room_via: HashMap<OwnedRoomOrAliasId, Vec<OwnedServerName>>,
+    pub room_via: HashMap<OwnedRoomOrAliasId, HashSet<OwnedServerName>>,
 
     /// Map of joined spaces.
     pub spaces: HashMap<OwnedRoomId, SpaceInfo>,

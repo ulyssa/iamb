@@ -181,7 +181,9 @@ impl NotJoinedState {
                     .room_via
                     .get(self.alias())
                     .unwrap_or(&store.application.settings.tunables.default_via)
-                    .to_vec();
+                    .iter()
+                    .cloned()
+                    .collect();
 
                 let chan = store.application.worker.join_room_chan(self.alias().to_owned(), via);
                 self.joining = Some(chan);

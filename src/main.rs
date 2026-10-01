@@ -147,7 +147,12 @@ fn resolve_mxid(
         },
     };
 
-    store.application.room_via.insert(alias_id.to_owned(), via);
+    store
+        .application
+        .room_via
+        .entry(alias_id.to_owned())
+        .or_default()
+        .extend(via);
 
     Ok(IambId::Room(alias_id, None))
 }
