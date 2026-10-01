@@ -1121,6 +1121,16 @@ impl UnreadInfo {
     }
 }
 
+impl std::ops::AddAssign<Self> for UnreadInfo {
+    fn add_assign(&mut self, rhs: Self) {
+        self.unread_mark |= rhs.unread_mark;
+        self.unread_messages += rhs.unread_messages;
+        self.unread_notifications += rhs.unread_notifications;
+        self.unread_mentions += rhs.unread_mentions;
+        self.latest = self.latest.max(rhs.latest);
+    }
+}
+
 /// The [`OwnedUserId`]s for users with the given displayname in [`DisplayNameStore`].
 #[derive(Default)]
 struct DisplayNameUsers {

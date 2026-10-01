@@ -19,7 +19,15 @@ use matrix_sdk::ruma::{RoomAliasId, RoomOrAliasId, assign};
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 
-use crate::base::{RoomNeeds, SortColumn, SortFieldRoom, SortFieldUser, SortOrder, UnreadInfo};
+use crate::base::{
+    RoomNeeds,
+    SortColumn,
+    SortFieldRoom,
+    SortFieldUser,
+    SortOrder,
+    SpaceInfo,
+    UnreadInfo,
+};
 use crate::config::theme::ThemeRoomsValues;
 use crate::prelude::*;
 use crate::windows::room::{RoomState, room_command};
@@ -587,8 +595,10 @@ impl WindowOps<IambInfo> for IambWindow {
             sync_info,
             verifications,
             worker,
+            spaces,
             ..
         } = &mut store.application;
+        let client = &worker.client;
 
         let default_list_style = settings.theme.default;
         let default_rooms_style = settings.theme.rooms.default;
@@ -603,6 +613,8 @@ impl WindowOps<IambInfo> for IambWindow {
                         GenericRoomItem::new_unspecified(
                             room,
                             rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
                         )
                     })
                     .collect::<Vec<_>>();
@@ -681,6 +693,8 @@ impl WindowOps<IambInfo> for IambWindow {
                         GenericRoomItem::new_unspecified(
                             room,
                             rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
                         )
                     })
                     .collect::<Vec<_>>();
@@ -703,7 +717,12 @@ impl WindowOps<IambInfo> for IambWindow {
                     .iter()
                     .chain(sync_info.dms.iter())
                     .map(|room| {
-                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                        GenericRoomItem::new(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
+                        )
                     })
                     .collect::<Vec<_>>();
 
@@ -726,7 +745,12 @@ impl WindowOps<IambInfo> for IambWindow {
                     .iter()
                     .chain(sync_info.dms.iter())
                     .map(|room| {
-                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                        GenericRoomItem::new(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
+                        )
                     })
                     .filter(RoomLikeItem::is_unread)
                     .collect::<Vec<_>>();
@@ -750,7 +774,12 @@ impl WindowOps<IambInfo> for IambWindow {
                     .iter()
                     .chain(sync_info.dms.iter())
                     .map(|room| {
-                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                        GenericRoomItem::new(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
+                        )
                     })
                     .filter(RoomLikeItem::has_mention)
                     .collect::<Vec<_>>();
@@ -774,7 +803,12 @@ impl WindowOps<IambInfo> for IambWindow {
                     .iter()
                     .chain(sync_info.dms.iter())
                     .map(|room| {
-                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                        GenericRoomItem::new(
+                            room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
+                        )
                     })
                     .filter(|item| item.membership() == MatrixRoomState::Invited)
                     .collect::<Vec<_>>();
@@ -800,6 +834,8 @@ impl WindowOps<IambInfo> for IambWindow {
                         GenericRoomItem::new_unspecified(
                             room,
                             rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
                         )
                     })
                     .collect::<Vec<_>>();
@@ -1143,13 +1179,28 @@ pub struct GenericRoomItem {
 }
 
 impl GenericRoomItem {
-    pub fn new_unspecified(room: &MatrixRoom, info: &RoomInfo) -> Self {
+    pub fn new_unspecified(
+        room: &MatrixRoom,
+        info: &RoomInfo,
+        client: &Client,
+        spaces: &HashMap<OwnedRoomId, SpaceInfo>,
+    ) -> Self {
         let room_id = room.room_id().to_owned();
 
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
-        let unread = info.unreads(room);
+        let mut unread = info.unreads(room);
         let tags = info.tags.clone();
+
+        if room.is_space() &&
+            let Some(space_info) = spaces.get(&room_id)
+        {
+            for child in space_info.children.keys() {
+                if let Some(child) = client.get_room(child) {
+                    unread += info.unreads(&child);
+                }
+            }
+        }
 
         Self {
             name,
@@ -1162,7 +1213,12 @@ impl GenericRoomItem {
         }
     }
 
-    pub fn new(room: &MatrixRoom, info: &RoomInfo) -> Self {
+    pub fn new(
+        room: &MatrixRoom,
+        info: &RoomInfo,
+        client: &Client,
+        spaces: &HashMap<OwnedRoomId, SpaceInfo>,
+    ) -> Self {
         let room_type = if room.is_space() {
             RoomType::Space
         } else if room.is_dm() {
@@ -1171,7 +1227,7 @@ impl GenericRoomItem {
             RoomType::Room
         };
 
-        assign!(Self::new_unspecified(room, info), { room_type })
+        assign!(Self::new_unspecified(room, info, client, spaces), { room_type })
     }
 
     /// Create for a room the client doesn't know about.
@@ -1234,12 +1290,10 @@ impl RoomLikeItem for GenericRoomItem {
     }
 
     fn is_unread(&self) -> bool {
-        // XXX: check space children for space
         self.unread.is_unread()
     }
 
     fn recent_ts(&self) -> Option<&MessageTimeStamp> {
-        // XXX: check space children for space
         self.unread.latest()
     }
 
@@ -1256,12 +1310,10 @@ impl RoomLikeItem for GenericRoomItem {
     }
 
     fn has_mention(&self) -> bool {
-        // XXX: check space children for space
         self.unread.has_mention()
     }
 
     fn has_notification(&self) -> bool {
-        // XXX: check space children for space
         self.unread.has_notification()
     }
 }
