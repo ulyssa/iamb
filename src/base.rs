@@ -83,11 +83,11 @@ const ROOM_FETCH_DEBOUNCE: Duration = Duration::from_secs(2);
 
 /// Empty type used solely to implement [ApplicationInfo].
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum IambInfo {}
+pub(crate) enum IambInfo {}
 
 /// An action taken against an ongoing verification request.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum VerifyAction {
+pub(crate) enum VerifyAction {
     /// Accept a verification request.
     Accept,
 
@@ -106,14 +106,14 @@ pub enum VerifyAction {
 
 /// An action taken against a room's timeline.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum TimelineAction {
+pub(crate) enum TimelineAction {
     /// Jump to a loaded message in the scrollback.
     GotoEvent(OwnedEventId),
 }
 
 /// An action taken against the currently selected message.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MessageAction {
+pub(crate) enum MessageAction {
     /// Cance the current reply or edit.
     ///
     /// The [bool] argument indicates whether to skip confirmation for clearing the message bar.
@@ -165,7 +165,7 @@ pub enum MessageAction {
 
 /// An action taken in the currently selected space.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SpaceAction {
+pub(crate) enum SpaceAction {
     /// Add a room or update metadata.
     SetChild {
         /// The room that should be added to the space.
@@ -182,7 +182,7 @@ pub enum SpaceAction {
 
 /// The type of room being created.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum CreateRoomType {
+pub(crate) enum CreateRoomType {
     /// A standard chat room.
     Room,
 
@@ -193,7 +193,7 @@ pub enum CreateRoomType {
 bitflags::bitflags! {
     /// Available options for newly created rooms.
     #[derive(Clone, Debug, Eq, PartialEq)]
-    pub struct CreateRoomFlags: u32 {
+    pub(crate) struct CreateRoomFlags: u32 {
         /// No flags specified.
         const NONE = 0b00000000;
 
@@ -208,7 +208,7 @@ bitflags::bitflags! {
 bitflags::bitflags! {
     /// Available options when downloading files.
     #[derive(Clone, Debug, Eq, PartialEq)]
-    pub struct DownloadFlags: u32 {
+    pub(crate) struct DownloadFlags: u32 {
         /// No flags specified.
         const NONE = 0b00000000;
 
@@ -222,7 +222,7 @@ bitflags::bitflags! {
 
 /// Fields that rooms and spaces can be sorted by.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SortFieldRoom {
+pub(crate) enum SortFieldRoom {
     /// Sort rooms by whether they have the Favorite tag.
     Favorite,
 
@@ -260,14 +260,14 @@ pub enum SortFieldRoom {
 
 /// Fields that space children can be sorted by.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SortFieldSpace {
+pub(crate) enum SortFieldSpace {
     Room(SortFieldRoom),
     SpaceOrder,
 }
 
 /// Fields that users can be sorted by.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SortFieldUser {
+pub(crate) enum SortFieldUser {
     PowerLevel,
     UserId,
     LocalPart,
@@ -278,14 +278,14 @@ pub enum SortFieldUser {
 
 /// Whether to use the default sort direction for a field, or to reverse it.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SortOrder {
+pub(crate) enum SortOrder {
     Ascending,
     Descending,
 }
 
 /// One of the columns to sort on.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct SortColumn<T>(pub T, pub SortOrder);
+pub(crate) struct SortColumn<T>(pub T, pub SortOrder);
 
 impl<'de> Deserialize<'de> for SortColumn<SortFieldRoom> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
@@ -441,7 +441,7 @@ impl Visitor<'_> for SortUserVisitor {
 
 /// A room property.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RoomField {
+pub(crate) enum RoomField {
     /// The room's join rules, aka who can access this room.
     Access,
 
@@ -481,7 +481,7 @@ pub enum RoomField {
 
 /// An action that operates on a room member.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum MemberUpdateAction {
+pub(crate) enum MemberUpdateAction {
     Ban,
     Kick,
     Unban,
@@ -499,7 +499,7 @@ impl Display for MemberUpdateAction {
 
 /// An internal version of [`JoinRule`]
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum IambJoinRule {
+pub(crate) enum IambJoinRule {
     Public,
     Restricted(Vec<OwnedRoomOrAliasId>),
     Knock,
@@ -508,7 +508,7 @@ pub enum IambJoinRule {
 }
 
 impl IambJoinRule {
-    pub async fn into_join_rule(self, client: &Client) -> Result<JoinRule, IambError> {
+    pub(crate) async fn into_join_rule(self, client: &Client) -> Result<JoinRule, IambError> {
         async fn resolve_aliases(
             rooms: Vec<OwnedRoomOrAliasId>,
             client: &Client,
@@ -545,7 +545,7 @@ impl IambJoinRule {
 
 /// An action that operates on a focused room.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum RoomAction {
+pub(crate) enum RoomAction {
     /// Follow the room upgrade information.
     Follow(Box<CommandContext>, MoveDir1D),
 
@@ -604,7 +604,7 @@ pub enum RoomAction {
 
 /// An action that joins  a room.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum JoinAction {
+pub(crate) enum JoinAction {
     /// Join the focused room.
     Join,
 
@@ -614,7 +614,7 @@ pub enum JoinAction {
 
 /// An action that sends a message to a room.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum SendAction {
+pub(crate) enum SendAction {
     /// Send the text in the message bar.
     Submit,
 
@@ -635,7 +635,7 @@ pub enum SendAction {
 
 /// An action performed against the user's homeserver.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum HomeserverAction {
+pub(crate) enum HomeserverAction {
     /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
 
@@ -660,7 +660,7 @@ pub enum HomeserverAction {
 
 /// An action performed against the user's room keys.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum KeysAction {
+pub(crate) enum KeysAction {
     /// Export room keys to a file, encrypted with a passphrase.
     Export(String, String),
     /// Import room keys from a file, encrypted with a passphrase.
@@ -671,7 +671,7 @@ pub enum KeysAction {
 ///
 /// See [the commands module][super::commands] for where these are usually created.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum IambAction {
+pub(crate) enum IambAction {
     /// Perform an action against the homeserver.
     Homeserver(HomeserverAction),
 
@@ -717,7 +717,7 @@ pub enum IambAction {
 
 impl IambAction {
     /// Indicates whether this action will draw over the screen.
-    pub fn scribbles(&self) -> bool {
+    pub(crate) fn scribbles(&self) -> bool {
         matches!(self, IambAction::Send(SendAction::SubmitFromEditor))
     }
 }
@@ -893,7 +893,7 @@ pub type MessageEdits = BTreeMap<MessageKey, RoomMessageEventContentWithoutRelat
 
 /// Errors encountered during application use.
 #[derive(thiserror::Error, Debug)]
-pub enum IambError {
+pub(crate) enum IambError {
     /// An invalid history visibility was specified.
     #[error("Invalid history visibility setting: {0}")]
     InvalidHistoryVisibility(String),
@@ -1041,7 +1041,7 @@ impl ApplicationError for IambError {}
 
 /// Indicates where an [EventId] lives in the [ChatStore].
 #[derive(Clone)]
-pub enum EventLocation {
+pub(crate) enum EventLocation {
     /// The [EventId] belongs to a message like event.
     ///
     /// If the first argument is [None], then it's part of the main scrollback. When [Some],
@@ -1075,7 +1075,7 @@ impl EventLocation {
 
 /// Indicates where a local echo lives in the [`ChatStore`].
 #[derive(Debug, Clone)]
-pub enum EchoLocation {
+pub(crate) enum EchoLocation {
     /// The [`OwnedTransactionId`] belongs to a message.
     ///
     /// If the first argument is [`None`], then it's part of the main scrollback. When [`Some`], it
@@ -1087,7 +1087,7 @@ pub enum EchoLocation {
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct UnreadInfo {
+pub(crate) struct UnreadInfo {
     pub(crate) unread_mark: bool,
     pub(crate) unread_messages: u64,
     pub(crate) unread_notifications: u64,
@@ -1096,15 +1096,15 @@ pub struct UnreadInfo {
 }
 
 impl UnreadInfo {
-    pub fn is_unread(&self) -> bool {
+    pub(crate) fn is_unread(&self) -> bool {
         self.unread_mark || self.unread_notifications > 0 || self.unread_mentions > 0
     }
 
-    pub fn has_mention(&self) -> bool {
+    pub(crate) fn has_mention(&self) -> bool {
         self.unread_mentions > 0
     }
 
-    pub fn latest(&self) -> Option<&MessageTimeStamp> {
+    pub(crate) fn latest(&self) -> Option<&MessageTimeStamp> {
         self.latest.as_ref()
     }
 }
@@ -1122,7 +1122,7 @@ struct DisplayNameUsers {
 /// Track the display names for users and render any needed disambiguation for
 /// those with overlapping names.
 #[derive(Default)]
-pub struct DisplayNameStore {
+pub(crate) struct DisplayNameStore {
     /// The boolean is the same `is_active` field as the argument to [`Self::set`].
     by_ids: CompletionMap<OwnedUserId, (Option<String>, bool)>,
 
@@ -1155,7 +1155,7 @@ impl DisplayNameStore {
 
     /// Track a new user ID to displayname mapping, or unset any existing ones. `is_active` tracks,
     /// whether the user is an active member (invited or joined) or not.
-    pub fn set(&mut self, user_id: OwnedUserId, name: Option<String>, is_active: bool) {
+    pub(crate) fn set(&mut self, user_id: OwnedUserId, name: Option<String>, is_active: bool) {
         if let Some(name) = name.as_deref() {
             self.set_by_name(user_id.clone(), name, is_active);
         }
@@ -1191,7 +1191,7 @@ impl DisplayNameStore {
         }
     }
 
-    pub fn get<'a>(&'a self, user_id: &UserId) -> Option<Cow<'a, str>> {
+    pub(crate) fn get<'a>(&'a self, user_id: &UserId) -> Option<Cow<'a, str>> {
         let (displayname, is_active) = self.by_ids.get(user_id)?;
         let displayname = displayname.as_ref()?;
         let users = self.by_names.get(displayname)?;
@@ -1211,7 +1211,7 @@ impl DisplayNameStore {
         Some(Cow::Owned(format!("{displayname} ({user_id})")))
     }
 
-    pub fn complete_mention(&self, prefix: &str) -> Vec<String> {
+    pub(crate) fn complete_mention(&self, prefix: &str) -> Vec<String> {
         // spec says to mention with display name in anchor text
         let mut users: BTreeSet<_> = self
             .by_names
@@ -1237,7 +1237,7 @@ impl DisplayNameStore {
 }
 
 /// Information about room's the user's joined.
-pub struct RoomInfo {
+pub(crate) struct RoomInfo {
     /// The display name for this room.
     pub name: Option<String>,
 
@@ -1258,7 +1258,7 @@ pub struct RoomInfo {
     /// Every receipt in this map should also have an entry in [`event_receipts`](`Self::event_receipts`),
     /// however not every user has an entry. If a user's most recent receipt is
     /// older than the oldest loaded event, that user will not be included.
-    pub user_receipts: HashMap<ReceiptThread, HashMap<OwnedUserId, OwnedEventId>>,
+    pub(crate) user_receipts: HashMap<ReceiptThread, HashMap<OwnedUserId, OwnedEventId>>,
     /// A map of message identifiers to a map of reaction events.
     pub reactions: HashMap<OwnedEventId, MessageReactions>,
     /// A map of message identifiers to a list of edit events for message that are not yet cached.
@@ -1280,7 +1280,7 @@ pub struct RoomInfo {
     pub fetch_last: Option<Instant>,
 
     /// Users currently typing in this room, and when we received notification of them doing so.
-    pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
+    pub(crate) users_typing: Option<(Instant, Vec<OwnedUserId>)>,
 
     /// The display names for users in this room.
     pub display_names: DisplayNameStore,
@@ -1328,7 +1328,7 @@ impl Default for RoomInfo {
 }
 
 impl RoomInfo {
-    pub fn get_thread(&self, root: Option<&EventId>) -> Option<&Messages> {
+    pub(crate) fn get_thread(&self, root: Option<&EventId>) -> Option<&Messages> {
         if let Some(thread_root) = root {
             self.threads.get(thread_root)
         } else {
@@ -1336,7 +1336,7 @@ impl RoomInfo {
         }
     }
 
-    pub fn get_thread_mut(&mut self, root: Option<OwnedEventId>) -> &mut Messages {
+    pub(crate) fn get_thread_mut(&mut self, root: Option<OwnedEventId>) -> &mut Messages {
         if let Some(thread_root) = root {
             self.threads
                 .entry(thread_root.clone())
@@ -1352,7 +1352,7 @@ impl RoomInfo {
     /// This does not apply edits to the returned event.
     ///
     /// This returns `None` if the event identifier isn't in the room.
-    pub fn get_thread_last<'a>(
+    pub(crate) fn get_thread_last<'a>(
         &'a self,
         thread_root: &OwnedEventId,
     ) -> Option<&'a OriginalRoomMessageEvent> {
@@ -1375,24 +1375,24 @@ impl RoomInfo {
     }
 
     /// Whether a message is pinned to the room.
-    pub fn is_pinned(&self, event_id: &EventId) -> bool {
+    pub(crate) fn is_pinned(&self, event_id: &EventId) -> bool {
         self.pinned_events.iter().any(|id| id == event_id)
     }
 
     /// Get a pinned message, from the scrollback if it's loaded or else from the fetched previews.
-    pub fn get_pinned(&self, event_id: &EventId) -> Option<&Message> {
+    pub(crate) fn get_pinned(&self, event_id: &EventId) -> Option<&Message> {
         self.get_event(event_id).or_else(|| self.pinned_previews.get(event_id))
     }
 
     /// Whether fetching a pinned event has failed too many times to keep retrying.
-    pub fn pinned_unavailable(&self, event_id: &EventId) -> bool {
+    pub(crate) fn pinned_unavailable(&self, event_id: &EventId) -> bool {
         self.pinned_failures
             .get(event_id)
             .is_some_and(|failures| *failures >= PINNED_FETCH_ATTEMPTS)
     }
 
     /// Record the result of fetching a pinned event for the `:pinned` window.
-    pub fn insert_pinned(&mut self, event_id: OwnedEventId, msg: Option<Message>) {
+    pub(crate) fn insert_pinned(&mut self, event_id: OwnedEventId, msg: Option<Message>) {
         match msg {
             Some(msg) => {
                 self.pinned_failures.remove(&event_id);
@@ -1406,7 +1406,7 @@ impl RoomInfo {
     }
 
     /// Pinned events that still need to be fetched for the `:pinned` window.
-    pub fn missing_pinned(&self) -> Vec<OwnedEventId> {
+    pub(crate) fn missing_pinned(&self) -> Vec<OwnedEventId> {
         self.pinned_events
             .iter()
             .filter(|id| self.get_pinned(id).is_none() && !self.pinned_unavailable(id))
@@ -1415,7 +1415,7 @@ impl RoomInfo {
     }
 
     /// Get where a loaded message lives, as its thread root and key.
-    pub fn get_message_location(
+    pub(crate) fn get_message_location(
         &self,
         event_id: &EventId,
     ) -> Option<(Option<&EventId>, &MessageKey)> {
@@ -1424,7 +1424,7 @@ impl RoomInfo {
         Some((loc.to_thread_root(), loc.to_message_key()?))
     }
 
-    pub fn get_receipt_thread(&self, event_id: &EventId) -> Option<ReceiptThread> {
+    pub(crate) fn get_receipt_thread(&self, event_id: &EventId) -> Option<ReceiptThread> {
         match self.keys.get(event_id)? {
             EventLocation::Message(None, _) => Some(ReceiptThread::Main),
             EventLocation::Message(Some(root), _) => Some(ReceiptThread::Thread(root.clone())),
@@ -1433,7 +1433,10 @@ impl RoomInfo {
     }
 
     /// Get the reactions and their counts for a message.
-    pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize, &Option<MediaSource>)> {
+    pub(crate) fn get_reactions(
+        &self,
+        event_id: &EventId,
+    ) -> Vec<(&str, usize, &Option<MediaSource>)> {
         if let Some(reacts) = self.reactions.get(event_id) {
             let mut counts = HashMap::new();
 
@@ -1459,7 +1462,10 @@ impl RoomInfo {
         }
     }
 
-    pub fn get_reaction_images(&self, event_id: &EventId) -> impl Iterator<Item = &MediaSource> {
+    pub(crate) fn get_reaction_images(
+        &self,
+        event_id: &EventId,
+    ) -> impl Iterator<Item = &MediaSource> {
         self.reactions
             .get(event_id)
             .map(HashMap::iter)
@@ -1468,12 +1474,12 @@ impl RoomInfo {
     }
 
     /// Map an event identifier to its [MessageKey].
-    pub fn get_message_key(&self, event_id: &EventId) -> Option<&MessageKey> {
+    pub(crate) fn get_message_key(&self, event_id: &EventId) -> Option<&MessageKey> {
         self.keys.get(event_id)?.to_message_key()
     }
 
     /// Get an event for an identifier.
-    pub fn get_event(&self, event_id: &EventId) -> Option<&Message> {
+    pub(crate) fn get_event(&self, event_id: &EventId) -> Option<&Message> {
         let loc = self.keys.get(event_id)?;
 
         let key = loc.to_message_key()?;
@@ -1483,7 +1489,7 @@ impl RoomInfo {
     }
 
     /// Get an event for an identifier as mutable.
-    pub fn get_event_mut(&mut self, event_id: &EventId) -> Option<&mut Message> {
+    pub(crate) fn get_event_mut(&mut self, event_id: &EventId) -> Option<&mut Message> {
         let loc = self.keys.get(event_id)?.clone();
 
         let key = loc.to_message_key()?;
@@ -1492,7 +1498,7 @@ impl RoomInfo {
         self.get_thread_mut(root.map(ToOwned::to_owned)).get_mut(key)
     }
 
-    pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
+    pub(crate) fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
         let Some(redacts) = &ev.redacts else {
             return;
         };
@@ -1527,6 +1533,8 @@ impl RoomInfo {
                         _ => (),
                     }
                 } else if let Some(poll) = self.unloaded_unstable_polls.get_mut(&poll_event_id) {
+                    poll.redact(&loc);
+                } else if let Some(poll) = self.unloaded_polls.get_mut(&poll_event_id) {
                     poll.redact(&loc);
                 }
             },
@@ -1591,7 +1599,7 @@ impl RoomInfo {
     }
 
     /// Insert a sticker
-    pub fn insert_sticker_with_preview(
+    pub(crate) fn insert_sticker_with_preview(
         &mut self,
         sticker: StickerEvent,
         settings: &ApplicationSettings,
@@ -1624,7 +1632,7 @@ impl RoomInfo {
     }
 
     /// Insert a reaction to a message.
-    pub fn insert_reaction_with_preview(
+    pub(crate) fn insert_reaction_with_preview(
         &mut self,
         react: ReactionEvent,
         settings: &ApplicationSettings,
@@ -1650,7 +1658,7 @@ impl RoomInfo {
     }
 
     /// Insert the start of a poll.
-    pub fn insert_poll_start(&mut self, poll: PollStartEvent) {
+    pub(crate) fn insert_poll_start(&mut self, poll: PollStartEvent) {
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
             ts: poll.origin_server_ts().into(),
@@ -1711,7 +1719,7 @@ impl RoomInfo {
     }
 
     /// Insert the start of a poll.
-    pub fn insert_unstable_poll_start(&mut self, poll: UnstablePollStartEvent) {
+    pub(crate) fn insert_unstable_poll_start(&mut self, poll: UnstablePollStartEvent) {
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
             ts: poll.origin_server_ts().into(),
@@ -1775,7 +1783,7 @@ impl RoomInfo {
     }
 
     /// Insert an event that relates to a poll
-    pub fn insert_poll_relation(&mut self, relation: PollRelation) {
+    pub(crate) fn insert_poll_relation(&mut self, relation: PollRelation) {
         let event_id = relation.event_id().to_owned();
         let poll_event_id = relation.poll_event_id().to_owned();
 
@@ -1797,7 +1805,7 @@ impl RoomInfo {
     }
 
     /// Insert an event that relates to a poll
-    pub fn insert_unstable_poll_relation(&mut self, relation: UnstablePollRelation) {
+    pub(crate) fn insert_unstable_poll_relation(&mut self, relation: UnstablePollRelation) {
         let event_id = relation.event_id().to_owned();
         let poll_event_id = relation.poll_event_id().to_owned();
 
@@ -1849,14 +1857,14 @@ impl RoomInfo {
         self.keys.insert(edit_msg.event_id.clone(), loc);
     }
 
-    pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
+    pub(crate) fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
         let event_id = msg.event_id().to_owned();
 
         self.insert_msglike(event_id, None, msg.into());
     }
 
     /// Inserts events that couldn't be decrypted into the scrollback.
-    pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
+    pub(crate) fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
         let event_id = msg.event_id().to_owned();
 
         let thread_root = if let Some(EncryptedRelation::Thread(Thread { event_id, .. })) =
@@ -1892,7 +1900,7 @@ impl RoomInfo {
     }
 
     /// Insert a new message event, and prepare for image-preview if it has an image attachment.
-    pub fn insert_with_preview(
+    pub(crate) fn insert_with_preview(
         &mut self,
         ev: RoomMessageEvent,
         settings: &ApplicationSettings,
@@ -1911,7 +1919,7 @@ impl RoomInfo {
     }
 
     /// Indicates whether this room has unread messages.
-    pub fn unreads(&self, room: &matrix_sdk::Room) -> UnreadInfo {
+    pub(crate) fn unreads(&self, room: &matrix_sdk::Room) -> UnreadInfo {
         let last_message = self
             .messages
             .iter()
@@ -1928,7 +1936,7 @@ impl RoomInfo {
     }
 
     /// Indicates whether we've recently fetched scrollback for this room.
-    pub fn recently_fetched(&self) -> bool {
+    pub(crate) fn recently_fetched(&self) -> bool {
         self.fetch_last.is_some_and(|i| i.elapsed() < ROOM_FETCH_DEBOUNCE)
     }
 
@@ -1949,7 +1957,7 @@ impl RoomInfo {
         None
     }
 
-    pub fn set_receipt(
+    pub(crate) fn set_receipt(
         &mut self,
         thread: ReceiptThread,
         user_id: OwnedUserId,
@@ -2044,7 +2052,7 @@ impl RoomInfo {
     /// > action such as viewing the room that the event was sent to or dismissing a notification
     /// > in order for the event to count as “read”. Clients SHOULD NOT send read receipts for
     /// > events sent by their own user.
-    pub fn fully_read(
+    pub(crate) fn fully_read(
         &mut self,
         room_id: OwnedRoomId,
         thread: ReceiptThread,
@@ -2101,7 +2109,7 @@ impl RoomInfo {
         }
     }
 
-    pub fn fully_read_all(
+    pub(crate) fn fully_read_all(
         &mut self,
         room_id: OwnedRoomId,
         worker: &Requester,
@@ -2123,7 +2131,7 @@ impl RoomInfo {
         self.fully_read(room_id, ReceiptThread::Main, worker, settings, open_notifications);
     }
 
-    pub fn read_event_users<'a>(
+    pub(crate) fn read_event_users<'a>(
         &'a self,
         thread: ReceiptThread,
         event_id: &'a EventId,
@@ -2175,12 +2183,12 @@ impl RoomInfo {
     }
 
     /// Update typing information for this room.
-    pub fn set_typing(&mut self, user_ids: Vec<OwnedUserId>) {
+    pub(crate) fn set_typing(&mut self, user_ids: Vec<OwnedUserId>) {
         self.users_typing = (Instant::now(), user_ids).into();
     }
 
     /// Create a [Rect] that displays what users are typing.
-    pub fn render_typing(
+    pub(crate) fn render_typing(
         &mut self,
         area: Rect,
         buf: &mut Buffer,
@@ -2207,7 +2215,7 @@ impl RoomInfo {
     }
 
     /// Checks if a given user has reacted with the given emoji on the given event
-    pub fn user_reactions_contains(
+    pub(crate) fn user_reactions_contains(
         &mut self,
         user_id: &UserId,
         event_id: &EventId,
@@ -2238,14 +2246,14 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
 
 /// Information about spaces the user's joined.
 #[derive(Default)]
-pub struct SpaceInfo {
+pub(crate) struct SpaceInfo {
     /// The space child events with content and `origin_server_ts`.
     pub children: HashMap<OwnedRoomId, (SpaceChildEventContent, MilliSecondsSinceUnixEpoch)>,
 }
 
 /// Information gathered during server syncs about joined rooms.
 #[derive(Default)]
-pub struct SyncInfo {
+pub(crate) struct SyncInfo {
     /// Spaces that the user is a member of.
     pub spaces: Vec<MatrixRoom>,
 
@@ -2257,15 +2265,15 @@ pub struct SyncInfo {
 }
 
 impl SyncInfo {
-    pub fn rooms(&self) -> impl Iterator<Item = &RoomId> {
+    pub(crate) fn rooms(&self) -> impl Iterator<Item = &RoomId> {
         self.rooms.iter().map(|r| r.room_id())
     }
 
-    pub fn dms(&self) -> impl Iterator<Item = &RoomId> {
+    pub(crate) fn dms(&self) -> impl Iterator<Item = &RoomId> {
         self.dms.iter().map(|r| r.room_id())
     }
 
-    pub fn chats(&self) -> impl Iterator<Item = &RoomId> {
+    pub(crate) fn chats(&self) -> impl Iterator<Item = &RoomId> {
         self.rooms().chain(self.dms())
     }
 }
@@ -2277,13 +2285,13 @@ const PINNED_FETCH_ATTEMPTS: u8 = 10;
 
 #[derive(Debug, PartialEq)]
 /// Load messages until the event is loaded or `ttl` loads are exceeded
-pub struct MessageNeed {
+pub(crate) struct MessageNeed {
     pub event_id: OwnedEventId,
     pub ttl: u8,
 }
 
 #[derive(Default, Debug, PartialEq)]
-pub struct Need {
+pub(crate) struct Need {
     pub members: bool,
     pub pinned: bool,
     pub messages: Option<Vec<MessageNeed>>,
@@ -2291,36 +2299,40 @@ pub struct Need {
 
 /// Things that need loading for different rooms.
 #[derive(Default, Debug)]
-pub struct RoomNeeds {
+pub(crate) struct RoomNeeds {
     needs: HashMap<OwnedRoomId, Need>,
     previews: HashSet<OwnedRoomOrAliasId>,
 }
 
 impl RoomNeeds {
     /// Mark a room for needing to load members.
-    pub fn need_members(&mut self, room_id: OwnedRoomId) {
+    pub(crate) fn need_members(&mut self, room_id: OwnedRoomId) {
         self.needs.entry(room_id).or_default().members = true;
     }
 
     /// Mark a room for needing to fetch its pinned events.
-    pub fn need_pinned(&mut self, room_id: OwnedRoomId) {
+    pub(crate) fn need_pinned(&mut self, room_id: OwnedRoomId) {
         self.needs.entry(room_id).or_default().pinned = true;
     }
 
     /// Mark a room for needing to load messages.
-    pub fn need_messages(&mut self, room_id: OwnedRoomId) {
+    pub(crate) fn need_messages(&mut self, room_id: OwnedRoomId) {
         self.needs.entry(room_id).or_default().messages.get_or_insert_default();
     }
 
     /// Mark a room for needing to load messages until the given message is loaded or a retry limit
     /// is exceeded.
-    pub fn need_message(&mut self, room_id: OwnedRoomId, event_id: OwnedEventId) {
+    pub(crate) fn need_message(&mut self, room_id: OwnedRoomId, event_id: OwnedEventId) {
         let messages = &mut self.needs.entry(room_id).or_default().messages.get_or_insert_default();
 
         messages.push(MessageNeed { event_id, ttl: MESSAGE_NEED_TTL });
     }
 
-    pub fn need_messages_all(&mut self, room_id: OwnedRoomId, message_needs: Vec<MessageNeed>) {
+    pub(crate) fn need_messages_all(
+        &mut self,
+        room_id: OwnedRoomId,
+        message_needs: Vec<MessageNeed>,
+    ) {
         self.needs
             .entry(room_id)
             .or_default()
@@ -2330,16 +2342,16 @@ impl RoomNeeds {
     }
 
     /// Request the load of a room preview.
-    pub fn need_preview(&mut self, room: OwnedRoomOrAliasId) {
+    pub(crate) fn need_preview(&mut self, room: OwnedRoomOrAliasId) {
         self.previews.insert(room);
     }
 
     /// Return all requested room previews
-    pub fn preview_needs(&mut self) -> impl Iterator<Item = OwnedRoomOrAliasId> {
+    pub(crate) fn preview_needs(&mut self) -> impl Iterator<Item = OwnedRoomOrAliasId> {
         std::mem::take(&mut self.previews).into_iter()
     }
 
-    pub fn rooms(&self) -> usize {
+    pub(crate) fn rooms(&self) -> usize {
         self.needs.len()
     }
 }
@@ -2354,7 +2366,7 @@ impl IntoIterator for RoomNeeds {
 }
 
 /// The main application state.
-pub struct ChatStore {
+pub(crate) struct ChatStore {
     /// `:`-commands
     pub cmds: ProgramCommands,
 
@@ -2422,7 +2434,7 @@ pub struct ChatStore {
 
 impl ChatStore {
     /// Create a new [ChatStore].
-    pub fn new(worker: Requester, settings: ApplicationSettings) -> IambResult<Self> {
+    pub(crate) fn new(worker: Requester, settings: ApplicationSettings) -> IambResult<Self> {
         let previews = PreviewManager::new(&settings);
         let cmds = crate::commands::setup_commands(&settings.aliases)?;
 
@@ -2454,7 +2466,7 @@ impl ChatStore {
     }
 
     /// Get a joined room.
-    pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
+    pub(crate) fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
         let room = self.worker.client.get_room(room_id)?;
 
         if room.state() == MatrixRoomState::Joined {
@@ -2465,12 +2477,12 @@ impl ChatStore {
     }
 
     /// Get the alias for a room if it has one (and the client knows it).
-    pub fn get_joined_room_alias(&self, room_id: &RoomId) -> Option<OwnedRoomAliasId> {
+    pub(crate) fn get_joined_room_alias(&self, room_id: &RoomId) -> Option<OwnedRoomAliasId> {
         self.worker.client.get_room(room_id).and_then(|r| r.canonical_alias())
     }
 
     /// Get the title for a room.
-    pub fn get_room_title(&self, room_id: &RoomId) -> String {
+    pub(crate) fn get_room_title(&self, room_id: &RoomId) -> String {
         self.rooms
             .get(room_id)
             .and_then(|i| i.name.as_ref())
@@ -2479,12 +2491,12 @@ impl ChatStore {
     }
 
     /// Get the [RoomInfo] for a given room identifier.
-    pub fn get_room_info(&mut self, room_id: OwnedRoomId) -> &mut RoomInfo {
+    pub(crate) fn get_room_info(&mut self, room_id: OwnedRoomId) -> &mut RoomInfo {
         self.rooms.get_or_default(room_id)
     }
 
     /// Set the name and tags for a room.
-    pub fn set_room_info(
+    pub(crate) fn set_room_info(
         &mut self,
         room_id: OwnedRoomId,
         name: String,
@@ -2505,7 +2517,7 @@ impl ApplicationStore for ChatStore {}
 
 /// Identified used to track window content.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum IambId {
+pub(crate) enum IambId {
     /// A Matrix room, with an optional thread to show.
     Room(OwnedRoomOrAliasId, Option<OwnedEventId>),
 
@@ -2738,7 +2750,7 @@ impl Visitor<'_> for IambIdVisitor {
 
 /// Which part of the room window's UI is focused.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
-pub enum RoomFocus {
+pub(crate) enum RoomFocus {
     /// The scrollback for a room window is focused.
     Scrollback,
 
@@ -2748,16 +2760,16 @@ pub enum RoomFocus {
 
 impl RoomFocus {
     /// Whether this is [RoomFocus::Scrollback].
-    pub fn is_scrollback(&self) -> bool {
+    pub(crate) fn is_scrollback(&self) -> bool {
         matches!(self, RoomFocus::Scrollback)
     }
 
     /// Whether this is [RoomFocus::MessageBar].
-    pub fn is_msgbar(&self) -> bool {
+    pub(crate) fn is_msgbar(&self) -> bool {
         matches!(self, RoomFocus::MessageBar)
     }
 
-    pub fn toggle(&mut self) {
+    pub(crate) fn toggle(&mut self) {
         *self = match self {
             RoomFocus::MessageBar => RoomFocus::Scrollback,
             RoomFocus::Scrollback => RoomFocus::MessageBar,
@@ -2770,7 +2782,7 @@ impl RoomFocus {
 /// While this is the "buffer identifier" for the mark,
 /// not all of these are necessarily actual buffers.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum IambBufferId {
+pub(crate) enum IambBufferId {
     /// The command bar buffer.
     Command(CommandType),
 
@@ -2813,7 +2825,7 @@ pub enum IambBufferId {
 
 impl IambBufferId {
     /// Get the identifier for the window that contains this buffer.
-    pub fn to_window(&self) -> Option<IambId> {
+    pub(crate) fn to_window(&self) -> Option<IambId> {
         let id = match self {
             IambBufferId::Command(_) => return None,
             IambBufferId::Room(room, thread, _) => {
@@ -2851,7 +2863,7 @@ impl ApplicationInfo for IambInfo {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use std::iter::FromIterator as _;

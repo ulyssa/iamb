@@ -63,7 +63,7 @@ fn hist_visibility_mode(name: impl Into<String>) -> IambResult<HistoryVisibility
     Ok(mode)
 }
 
-pub async fn room_command(
+pub(crate) async fn room_command(
     id: &RoomId,
     act: RoomAction,
     ctx: ProgramContext,
@@ -645,7 +645,7 @@ pub async fn room_command(
 /// Since spaces function as special rooms within Matrix, we wrap their window state together, so
 /// that operations like sending and accepting invites, opening the members window, etc., all work
 /// similarly.
-pub enum RoomState {
+pub(crate) enum RoomState {
     NotJoined(Box<NotJoinedState>),
     Chat(Box<ChatState>),
     Space(Box<SpaceState>),
@@ -670,7 +670,11 @@ impl From<SpaceState> for RoomState {
 }
 
 impl RoomState {
-    pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
+    pub(crate) fn new(
+        room: MatrixRoom,
+        thread: Option<OwnedEventId>,
+        store: &mut ProgramStore,
+    ) -> Self {
         if room.is_space() {
             SpaceState::new(room).into()
         } else {
@@ -678,11 +682,11 @@ impl RoomState {
         }
     }
 
-    pub fn not_joined(alias: OwnedRoomOrAliasId, store: &mut ProgramStore) -> Self {
+    pub(crate) fn not_joined(alias: OwnedRoomOrAliasId, store: &mut ProgramStore) -> Self {
         Self::from(NotJoinedState::new(alias, store))
     }
 
-    pub fn window_id(&self) -> IambId {
+    pub(crate) fn window_id(&self) -> IambId {
         match self {
             RoomState::NotJoined(nj) => IambId::Room(nj.alias().to_owned(), None),
             RoomState::Chat(chat) => {
@@ -692,7 +696,7 @@ impl RoomState {
         }
     }
 
-    pub fn room_state(&self) -> Option<MatrixRoomState> {
+    pub(crate) fn room_state(&self) -> Option<MatrixRoomState> {
         match self {
             RoomState::NotJoined(_) => None,
             RoomState::Chat(chat) => Some(chat.room().state()),
@@ -700,7 +704,7 @@ impl RoomState {
         }
     }
 
-    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
+    pub(crate) fn refresh_room(&mut self, store: &mut ProgramStore) {
         if let Some(room) = self.room() &&
             room.state() == MatrixRoomState::Left
         {
@@ -781,7 +785,7 @@ impl RoomState {
         return;
     }
 
-    pub async fn timeline_command(
+    pub(crate) async fn timeline_command(
         &mut self,
         act: TimelineAction,
         ctx: ProgramContext,
@@ -794,7 +798,7 @@ impl RoomState {
         }
     }
 
-    pub async fn message_command(
+    pub(crate) async fn message_command(
         &mut self,
         act: MessageAction,
         ctx: ProgramContext,
@@ -807,7 +811,7 @@ impl RoomState {
         }
     }
 
-    pub async fn space_command(
+    pub(crate) async fn space_command(
         &mut self,
         act: SpaceAction,
         ctx: ProgramContext,
@@ -820,7 +824,7 @@ impl RoomState {
         }
     }
 
-    pub async fn join_command(
+    pub(crate) async fn join_command(
         &mut self,
         act: JoinAction,
         ctx: ProgramContext,
@@ -833,7 +837,7 @@ impl RoomState {
         }
     }
 
-    pub async fn send_command(
+    pub(crate) async fn send_command(
         &mut self,
         act: SendAction,
         ctx: ProgramContext,
@@ -846,7 +850,7 @@ impl RoomState {
         }
     }
 
-    pub fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
+    pub(crate) fn get_title(&self, store: &mut ProgramStore) -> Line<'_> {
         let theme = &store.application.settings.theme;
         let default_style = theme.windows.default;
         let title_style = theme.windows.title;
@@ -894,7 +898,7 @@ impl RoomState {
         Line::from(spans)
     }
 
-    pub fn get_tab_title(&self, store: &mut ProgramStore) -> Line<'_> {
+    pub(crate) fn get_tab_title(&self, store: &mut ProgramStore) -> Line<'_> {
         match self {
             RoomState::Space(w) => store.application.get_room_title(w.id()).into(),
             RoomState::Chat(w) => store.application.get_room_title(w.id()).into(),
@@ -902,14 +906,14 @@ impl RoomState {
         }
     }
 
-    pub fn focus_toggle(&mut self) {
+    pub(crate) fn focus_toggle(&mut self) {
         match self {
             RoomState::Chat(chat) => chat.focus_toggle(),
             RoomState::NotJoined(_) | RoomState::Space(_) => return,
         }
     }
 
-    pub fn room(&self) -> Option<&MatrixRoom> {
+    pub(crate) fn room(&self) -> Option<&MatrixRoom> {
         match self {
             RoomState::Chat(chat) => Some(chat.room()),
             RoomState::Space(space) => Some(space.room()),
@@ -917,7 +921,7 @@ impl RoomState {
         }
     }
 
-    pub fn id(&mut self, store: &ProgramStore) -> Option<&RoomId> {
+    pub(crate) fn id(&mut self, store: &ProgramStore) -> Option<&RoomId> {
         match self {
             RoomState::Chat(chat) => Some(chat.id()),
             RoomState::Space(space) => Some(space.id()),

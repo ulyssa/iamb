@@ -76,7 +76,7 @@ mod parse {
 
     /// Acts linke [`separated_list0`](nom::multi::separated_list0) but additionally returns a copy of the last element unparsed.
     // This implementation is mostely copied from nom.
-    pub fn separated_list0_last_raw<I, E, F, G>(
+    pub(crate) fn separated_list0_last_raw<I, E, F, G>(
         sep: G,
         f: F,
     ) -> impl Parser<I, Output = (Vec<<F as Parser<I>>::Output>, I), Error = E>
@@ -90,7 +90,7 @@ mod parse {
     }
 
     /// Parser implementation for the [separated_list0_last_raw] combinator
-    pub struct SeparatedList0LastRaw<F, G> {
+    pub(crate) struct SeparatedList0LastRaw<F, G> {
         parser: F,
         separator: G,
     }
@@ -185,7 +185,7 @@ mod parse {
 
     /// Returns a list with the parsed strings and a raw version of the last string to be stripped
     /// from the input before completing.
-    pub fn parse_started_strings(input: &str) -> IResult<&str, (Vec<String>, &str)> {
+    pub(crate) fn parse_started_strings(input: &str) -> IResult<&str, (Vec<String>, &str)> {
         let (input, (mut args, mut last_arg_raw)) =
             separated_list0_last_raw(space1, parse_string).parse(input)?;
 
@@ -765,7 +765,7 @@ fn complete_msgbar(
     }
 }
 
-pub struct IambCompleter;
+pub(crate) struct IambCompleter;
 
 impl Completer<IambInfo> for IambCompleter {
     fn complete(
@@ -804,7 +804,7 @@ impl Completer<IambInfo> for IambCompleter {
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
 
     use modalkit::commands::CommandResult;

@@ -30,7 +30,7 @@ use crate::message::{MessageKey, MessageTimeStamp};
 
 /// Indicates where an [EventId] lives in the poll.
 #[derive(Clone, Debug)]
-pub enum PollEventLocation {
+pub(crate) enum PollEventLocation {
     /// The [EventId] belongs to a replacement and has key [MessageKey].
     Replacement(MessageKey),
     /// The [EventId] belongs to a response and has key [MessageKey].
@@ -88,7 +88,7 @@ fn body_cow<'a>(
 
 /// All data related to a poll in an unsupported room version.
 #[derive(Debug, Clone)]
-pub struct Poll {
+pub(crate) struct Poll {
     event_id: OwnedEventId,
     own_user_id: OwnedUserId,
     pub start: PollStartEventContent,
@@ -100,7 +100,7 @@ pub struct Poll {
 }
 
 impl Poll {
-    pub fn new(
+    pub(crate) fn new(
         event_id: OwnedEventId,
         own_user_id: OwnedUserId,
         start: PollStartEventContent,
@@ -133,12 +133,12 @@ impl Poll {
         poll::compile_poll_results(poll, responses, end_timestamp)
     }
 
-    pub fn event_id(&self) -> &EventId {
+    pub(crate) fn event_id(&self) -> &EventId {
         self.event_id.as_ref()
     }
 
     /// The message this poll replied to if it is a reply.
-    pub fn reply_to(&self) -> Option<&EventId> {
+    pub(crate) fn reply_to(&self) -> Option<&EventId> {
         match &self.start.relates_to {
             Some(Relation::Reply(reply)) => Some(reply.in_reply_to.event_id.as_ref()),
             Some(Relation::Thread(Thread {
@@ -151,7 +151,7 @@ impl Poll {
     }
 
     /// Return the thread root if this is the first message in the thread.
-    pub fn thread_root(&self) -> Option<&EventId> {
+    pub(crate) fn thread_root(&self) -> Option<&EventId> {
         match &self.start.relates_to {
             Some(Relation::Thread(Thread {
                 event_id,
@@ -163,7 +163,7 @@ impl Poll {
         }
     }
 
-    pub fn redact(&mut self, loc: &PollEventLocation) {
+    pub(crate) fn redact(&mut self, loc: &PollEventLocation) {
         match loc {
             PollEventLocation::Replacement(key) => {
                 self.replacements.remove(key);
@@ -175,7 +175,7 @@ impl Poll {
         }
     }
 
-    pub fn insert_relation(&mut self, value: PollRelation) -> PollEventLocation {
+    pub(crate) fn insert_relation(&mut self, value: PollRelation) -> PollEventLocation {
         match value {
             PollRelation::Response(ev) => {
                 let key = MessageKey {
@@ -194,7 +194,7 @@ impl Poll {
         }
     }
 
-    pub fn body_cow(&self) -> Cow<'_, str> {
+    pub(crate) fn body_cow(&self) -> Cow<'_, str> {
         let start = self.content();
 
         let question = start.question.text.find_plain().unwrap_or("Question not found");
@@ -211,7 +211,7 @@ impl Poll {
 
 /// All data accumulated for a [`Poll`] before the start event was loaded.
 #[derive(Debug, Clone, Default)]
-pub struct UnloadedPoll {
+pub(crate) struct UnloadedPoll {
     pub replacements: BTreeMap<MessageKey, PollStartEventContentWithoutRelation>,
 
     pub responeses: BTreeMap<MessageKey, OriginalPollResponseEvent>,
@@ -220,7 +220,7 @@ pub struct UnloadedPoll {
 }
 
 impl UnloadedPoll {
-    pub fn redact(&mut self, loc: &PollEventLocation) {
+    pub(crate) fn redact(&mut self, loc: &PollEventLocation) {
         match loc {
             PollEventLocation::Replacement(key) => {
                 self.replacements.remove(key);
@@ -232,7 +232,7 @@ impl UnloadedPoll {
         }
     }
 
-    pub fn insert_relation(&mut self, value: PollRelation) -> PollEventLocation {
+    pub(crate) fn insert_relation(&mut self, value: PollRelation) -> PollEventLocation {
         match value {
             PollRelation::Response(ev) => {
                 let key = MessageKey {
@@ -254,13 +254,13 @@ impl UnloadedPoll {
 
 /// A response or end event that is stored with the poll. Used for more unified
 /// insertion logic.
-pub enum PollRelation {
+pub(crate) enum PollRelation {
     Response(OriginalPollResponseEvent),
     End(OriginalPollEndEvent),
 }
 
 impl PollRelation {
-    pub fn event_id(&self) -> &EventId {
+    pub(crate) fn event_id(&self) -> &EventId {
         match self {
             PollRelation::Response(ev) => &ev.event_id,
             PollRelation::End(ev) => &ev.event_id,
@@ -268,7 +268,7 @@ impl PollRelation {
     }
 
     /// The [`EventId`] of the poll start this event relates to.
-    pub fn poll_event_id(&self) -> &EventId {
+    pub(crate) fn poll_event_id(&self) -> &EventId {
         match self {
             PollRelation::Response(ev) => &ev.content.relates_to.event_id,
             PollRelation::End(ev) => &ev.content.relates_to.event_id,
@@ -289,7 +289,7 @@ impl From<OriginalPollEndEvent> for PollRelation {
 
 /// All data related to a poll in an unsupported room version.
 #[derive(Debug, Clone)]
-pub struct UnstablePoll {
+pub(crate) struct UnstablePoll {
     event_id: OwnedEventId,
     own_user_id: OwnedUserId,
     pub start: NewUnstablePollStartEventContent,
@@ -301,7 +301,7 @@ pub struct UnstablePoll {
 }
 
 impl UnstablePoll {
-    pub fn new(
+    pub(crate) fn new(
         event_id: OwnedEventId,
         own_user_id: OwnedUserId,
         start: NewUnstablePollStartEventContent,
@@ -334,12 +334,12 @@ impl UnstablePoll {
         poll::compile_unstable_poll_results(poll, responses, end_timestamp)
     }
 
-    pub fn event_id(&self) -> &EventId {
+    pub(crate) fn event_id(&self) -> &EventId {
         self.event_id.as_ref()
     }
 
     /// The message this poll replied to if it is a reply.
-    pub fn reply_to(&self) -> Option<&EventId> {
+    pub(crate) fn reply_to(&self) -> Option<&EventId> {
         match &self.start.relates_to {
             Some(RelationWithoutReplacement::Reply(reply)) => {
                 Some(reply.in_reply_to.event_id.as_ref())
@@ -354,7 +354,7 @@ impl UnstablePoll {
     }
 
     /// Return the thread root if this is the first message in the thread.
-    pub fn thread_root(&self) -> Option<&EventId> {
+    pub(crate) fn thread_root(&self) -> Option<&EventId> {
         match &self.start.relates_to {
             Some(RelationWithoutReplacement::Thread(Thread {
                 event_id,
@@ -366,7 +366,7 @@ impl UnstablePoll {
         }
     }
 
-    pub fn redact(&mut self, loc: &PollEventLocation) {
+    pub(crate) fn redact(&mut self, loc: &PollEventLocation) {
         match loc {
             PollEventLocation::Replacement(key) => {
                 self.replacements.remove(key);
@@ -378,7 +378,7 @@ impl UnstablePoll {
         }
     }
 
-    pub fn insert_relation(&mut self, value: UnstablePollRelation) -> PollEventLocation {
+    pub(crate) fn insert_relation(&mut self, value: UnstablePollRelation) -> PollEventLocation {
         match value {
             UnstablePollRelation::Response(ev) => {
                 let key = MessageKey {
@@ -397,7 +397,7 @@ impl UnstablePoll {
         }
     }
 
-    pub fn body_cow(&self) -> Cow<'_, str> {
+    pub(crate) fn body_cow(&self) -> Cow<'_, str> {
         let start = self.content();
 
         let question = &start.question.text;
@@ -414,7 +414,7 @@ impl UnstablePoll {
 
 /// All data accumulated for a [`UnstablePoll`] before the start event was loaded.
 #[derive(Debug, Clone, Default)]
-pub struct UnloadedUnstablePoll {
+pub(crate) struct UnloadedUnstablePoll {
     pub replacements: BTreeMap<MessageKey, ReplacementUnstablePollStartEventContent>,
 
     pub responeses: BTreeMap<MessageKey, OriginalUnstablePollResponseEvent>,
@@ -423,7 +423,7 @@ pub struct UnloadedUnstablePoll {
 }
 
 impl UnloadedUnstablePoll {
-    pub fn redact(&mut self, loc: &PollEventLocation) {
+    pub(crate) fn redact(&mut self, loc: &PollEventLocation) {
         match loc {
             PollEventLocation::Replacement(key) => {
                 self.replacements.remove(key);
@@ -435,7 +435,7 @@ impl UnloadedUnstablePoll {
         }
     }
 
-    pub fn insert_relation(&mut self, value: UnstablePollRelation) -> PollEventLocation {
+    pub(crate) fn insert_relation(&mut self, value: UnstablePollRelation) -> PollEventLocation {
         match value {
             UnstablePollRelation::Response(ev) => {
                 let key = MessageKey {
@@ -457,13 +457,13 @@ impl UnloadedUnstablePoll {
 
 /// A response or end event that is stored with the poll. Used for more unified
 /// insertion logic.
-pub enum UnstablePollRelation {
+pub(crate) enum UnstablePollRelation {
     Response(OriginalUnstablePollResponseEvent),
     End(OriginalUnstablePollEndEvent),
 }
 
 impl UnstablePollRelation {
-    pub fn event_id(&self) -> &EventId {
+    pub(crate) fn event_id(&self) -> &EventId {
         match self {
             UnstablePollRelation::Response(ev) => &ev.event_id,
             UnstablePollRelation::End(ev) => &ev.event_id,
@@ -471,7 +471,7 @@ impl UnstablePollRelation {
     }
 
     /// The [`EventId`] of the poll start this event relates to.
-    pub fn poll_event_id(&self) -> &EventId {
+    pub(crate) fn poll_event_id(&self) -> &EventId {
         match self {
             UnstablePollRelation::Response(ev) => &ev.content.relates_to.event_id,
             UnstablePollRelation::End(ev) => &ev.content.relates_to.event_id,

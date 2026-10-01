@@ -72,7 +72,7 @@ fn prevmsg<'a>(key: &MessageKey, thread: &'a Messages) -> Option<&'a Message> {
     thread.range(..key).next_back().map(|(_, v)| v)
 }
 
-pub struct ScrollbackState {
+pub(crate) struct ScrollbackState {
     /// The room identifier.
     room_id: OwnedRoomId,
 
@@ -102,7 +102,7 @@ pub struct ScrollbackState {
 }
 
 impl ScrollbackState {
-    pub fn new(room_id: OwnedRoomId, thread: Option<OwnedEventId>) -> ScrollbackState {
+    pub(crate) fn new(room_id: OwnedRoomId, thread: Option<OwnedEventId>) -> ScrollbackState {
         let id = IambBufferId::Room(room_id.to_owned(), thread.clone(), RoomFocus::Scrollback);
         let cursor = MessageCursor::default();
         let viewctx = ViewportContext::default();
@@ -121,33 +121,33 @@ impl ScrollbackState {
         }
     }
 
-    pub fn is_latest(&self) -> bool {
+    pub(crate) fn is_latest(&self) -> bool {
         self.cursor.timestamp.is_none()
     }
 
-    pub fn goto_latest(&mut self) {
+    pub(crate) fn goto_latest(&mut self) {
         self.cursor = MessageCursor::latest();
     }
 
-    pub fn goto_message(&mut self, target: MessageKey) {
+    pub(crate) fn goto_message(&mut self, target: MessageKey) {
         let mut cursor = MessageCursor::new(target, 0);
         std::mem::swap(&mut cursor, &mut self.cursor);
         self.jumped.push(cursor);
     }
 
     /// Set the dimensions and placement within the terminal window for this list.
-    pub fn set_term_info(&mut self, area: Rect) {
+    pub(crate) fn set_term_info(&mut self, area: Rect) {
         self.viewctx.dimensions = (area.width as usize, area.height as usize);
     }
 
-    pub fn get_key(&self, info: &mut RoomInfo) -> Option<MessageKey> {
+    pub(crate) fn get_key(&self, info: &mut RoomInfo) -> Option<MessageKey> {
         self.cursor
             .timestamp
             .clone()
             .or_else(|| self.get_thread(info)?.last_key_value().map(|kv| kv.0.clone()))
     }
 
-    pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
+    pub(crate) fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
         let thread = self.get_thread_mut(info);
 
         if let Some(k) = &self.cursor.timestamp {
@@ -157,19 +157,19 @@ impl ScrollbackState {
         }
     }
 
-    pub fn thread(&self) -> Option<&OwnedEventId> {
+    pub(crate) fn thread(&self) -> Option<&OwnedEventId> {
         self.thread.as_ref()
     }
 
-    pub fn get_thread<'a>(&self, info: &'a RoomInfo) -> Option<&'a Messages> {
+    pub(crate) fn get_thread<'a>(&self, info: &'a RoomInfo) -> Option<&'a Messages> {
         info.get_thread(self.thread.as_deref())
     }
 
-    pub fn get_thread_mut<'a>(&self, info: &'a mut RoomInfo) -> &'a mut Messages {
+    pub(crate) fn get_thread_mut<'a>(&self, info: &'a mut RoomInfo) -> &'a mut Messages {
         info.get_thread_mut(self.thread.clone())
     }
 
-    pub fn messages<'a>(
+    pub(crate) fn messages<'a>(
         &self,
         range: EditRange<MessageCursor>,
         info: &'a RoomInfo,
@@ -1259,7 +1259,7 @@ fn render_jump_to_recent(area: Rect, buf: &mut Buffer, focused: bool) -> Rect {
     return top;
 }
 
-pub struct Scrollback<'a> {
+pub(crate) struct Scrollback<'a> {
     room_focused: bool,
     style: Style,
     focused: bool,
@@ -1267,7 +1267,7 @@ pub struct Scrollback<'a> {
 }
 
 impl<'a> Scrollback<'a> {
-    pub fn new(store: &'a mut ProgramStore) -> Self {
+    pub(crate) fn new(store: &'a mut ProgramStore) -> Self {
         Scrollback {
             room_focused: false,
             focused: false,
@@ -1277,20 +1277,20 @@ impl<'a> Scrollback<'a> {
     }
 
     /// Set the default style for the cells within the room scrollback.
-    pub fn style(mut self, style: Style) -> Self {
+    pub(crate) fn style(mut self, style: Style) -> Self {
         self.style = style;
         self
     }
 
     /// Indicate whether the room window is currently focused, regardless of whether the scrollback
     /// also is.
-    pub fn room_focus(mut self, focused: bool) -> Self {
+    pub(crate) fn room_focus(mut self, focused: bool) -> Self {
         self.room_focused = focused;
         self
     }
 
     /// Indicate whether the scrollback is currently focused.
-    pub fn focus(mut self, focused: bool) -> Self {
+    pub(crate) fn focus(mut self, focused: bool) -> Self {
         self.focused = focused;
         self
     }

@@ -198,7 +198,7 @@ fn text_to_message_content(input: Cow<'_, str>) -> TextMessageEventContent {
     }
 }
 
-pub fn text_to_message(
+pub(crate) fn text_to_message(
     input: Cow<'_, str>,
     default_markup: MarkupFormat,
 ) -> RoomMessageEventContent {
@@ -213,7 +213,7 @@ pub fn text_to_message(
 }
 
 /// Returns `None` if `input` contains a non-text slash command.
-pub fn text_to_text_message_event_content(
+pub(crate) fn text_to_text_message_event_content(
     input: String,
     default_markup: MarkupFormat,
 ) -> Option<TextMessageEventContent> {
@@ -231,7 +231,7 @@ pub fn text_to_text_message_event_content(
 }
 
 #[cfg(test)]
-pub mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]

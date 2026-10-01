@@ -8,7 +8,7 @@ use tokio::sync::Semaphore;
 use crate::config::ImagePreviewValues;
 use crate::prelude::*;
 
-pub enum ImageStatus {
+pub(crate) enum ImageStatus {
     Queued(Size),
     Downloading(Size),
     Loaded(SlicedProtocol),
@@ -16,7 +16,7 @@ pub enum ImageStatus {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
-pub enum PreviewKind {
+pub(crate) enum PreviewKind {
     Message,
     Reaction,
 }
@@ -30,7 +30,7 @@ impl PreviewKind {
     }
 }
 
-pub struct PreviewManager {
+pub(crate) struct PreviewManager {
     /// Image preview "protocol" picker.
     picker: Arc<Picker>,
 
@@ -42,7 +42,7 @@ pub struct PreviewManager {
 }
 
 impl PreviewManager {
-    pub fn new(settings: &ApplicationSettings) -> Self {
+    pub(crate) fn new(settings: &ApplicationSettings) -> Self {
         let picker = picker_from_settings(settings);
 
         Self {
@@ -52,7 +52,7 @@ impl PreviewManager {
         }
     }
 
-    pub fn get(&self, source: &MediaSource, kind: PreviewKind) -> Option<&ImageStatus> {
+    pub(crate) fn get(&self, source: &MediaSource, kind: PreviewKind) -> Option<&ImageStatus> {
         self.previews.get(&(source.unique_key(), kind))
     }
 
@@ -61,7 +61,7 @@ impl PreviewManager {
     }
 
     /// Queue download and preparation of preview
-    pub fn load(&mut self, source: &MediaSource, kind: PreviewKind, worker: &Requester) {
+    pub(crate) fn load(&mut self, source: &MediaSource, kind: PreviewKind, worker: &Requester) {
         let Some(status) = self.previews.get_mut(&(source.unique_key(), kind)) else {
             return;
         };
@@ -80,7 +80,7 @@ impl PreviewManager {
         }
     }
 
-    pub fn register_preview(
+    pub(crate) fn register_preview(
         &mut self,
         settings: &ApplicationSettings,
         source: &MediaSource,
@@ -123,7 +123,7 @@ fn picker_from_settings(settings: &ApplicationSettings) -> Picker {
     picker
 }
 
-pub async fn load_image(
+pub(crate) async fn load_image(
     store: AsyncProgramStore,
     media: Media,
     source: MediaSource,

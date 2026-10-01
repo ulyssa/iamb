@@ -25,15 +25,15 @@ use crate::windows::room::{RoomState, room_command};
 use crate::windows::verify::VerifyItem;
 use crate::windows::welcome::WelcomeState;
 
-pub mod room;
-pub mod verify;
-pub mod welcome;
+pub(crate) mod room;
+pub(crate) mod verify;
+pub(crate) mod welcome;
 
 const MEMBER_FETCH_DEBOUNCE: Duration = Duration::from_secs(5);
 const ROOM_PREVIEW_DEBOUNCE: Duration = Duration::from_secs(15);
 
 #[inline]
-pub fn selected_style(selected: bool, style: Style) -> Style {
+pub(crate) fn selected_style(selected: bool, style: Style) -> Style {
     if selected {
         style.add_modifier(StyleModifier::REVERSED)
     } else {
@@ -343,7 +343,7 @@ macro_rules! delegate {
     };
 }
 
-pub enum IambWindow {
+pub(crate) enum IambWindow {
     DirectList(RoomListState),
     MemberList(MemberListState, OwnedRoomId, Option<Instant>),
     PinnedList(PinnedListState, OwnedRoomId, Option<Instant>),
@@ -359,7 +359,7 @@ pub enum IambWindow {
 }
 
 impl IambWindow {
-    pub fn focus_toggle(&mut self) {
+    pub(crate) fn focus_toggle(&mut self) {
         if let IambWindow::Room(w) = self {
             w.focus_toggle()
         } else {
@@ -367,7 +367,7 @@ impl IambWindow {
         }
     }
 
-    pub async fn timeline_command(
+    pub(crate) async fn timeline_command(
         &mut self,
         act: TimelineAction,
         ctx: ProgramContext,
@@ -380,7 +380,7 @@ impl IambWindow {
         }
     }
 
-    pub async fn message_command(
+    pub(crate) async fn message_command(
         &mut self,
         act: MessageAction,
         ctx: ProgramContext,
@@ -393,7 +393,7 @@ impl IambWindow {
         }
     }
 
-    pub async fn space_command(
+    pub(crate) async fn space_command(
         &mut self,
         act: SpaceAction,
         ctx: ProgramContext,
@@ -406,7 +406,7 @@ impl IambWindow {
         }
     }
 
-    pub async fn room_command(
+    pub(crate) async fn room_command(
         &mut self,
         act: RoomAction,
         ctx: ProgramContext,
@@ -434,7 +434,7 @@ impl IambWindow {
         }
     }
 
-    pub async fn join_command(
+    pub(crate) async fn join_command(
         &mut self,
         act: JoinAction,
         ctx: ProgramContext,
@@ -447,7 +447,7 @@ impl IambWindow {
         }
     }
 
-    pub async fn send_command(
+    pub(crate) async fn send_command(
         &mut self,
         act: SendAction,
         ctx: ProgramContext,
@@ -1095,7 +1095,7 @@ impl RoomType {
 }
 
 #[derive(Debug, Clone)]
-pub struct GenericRoomItem {
+pub(crate) struct GenericRoomItem {
     room_id: OwnedRoomId,
     name: String,
     alias: Option<OwnedRoomAliasId>,
@@ -1107,7 +1107,7 @@ pub struct GenericRoomItem {
 }
 
 impl GenericRoomItem {
-    pub fn new_unspecified(room: &MatrixRoom, info: &RoomInfo) -> Self {
+    pub(crate) fn new_unspecified(room: &MatrixRoom, info: &RoomInfo) -> Self {
         let room_id = room.room_id().to_owned();
 
         let name = info.name.clone().unwrap_or_default();
@@ -1126,7 +1126,7 @@ impl GenericRoomItem {
         }
     }
 
-    pub fn new(room: &MatrixRoom, info: &RoomInfo) -> Self {
+    pub(crate) fn new(room: &MatrixRoom, info: &RoomInfo) -> Self {
         let room_type = if room.is_space() {
             RoomType::Space
         } else if room.is_dm() {
@@ -1139,7 +1139,7 @@ impl GenericRoomItem {
     }
 
     /// Create for a room the client doesn't know about.
-    pub fn new_unknown(
+    pub(crate) fn new_unknown(
         room_id: OwnedRoomId,
         room_previews: &HashMap<
             OwnedRoomOrAliasId,
@@ -1284,7 +1284,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for GenericRoomItem {
 }
 
 #[derive(Clone)]
-pub struct MemberItem {
+pub(crate) struct MemberItem {
     member: RoomMember,
     room_id: OwnedRoomId,
 }
@@ -1434,7 +1434,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MemberItem {
 }
 
 #[derive(Clone)]
-pub struct PinnedItem {
+pub(crate) struct PinnedItem {
     room_id: OwnedRoomId,
     event_id: OwnedEventId,
 }

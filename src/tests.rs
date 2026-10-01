@@ -12,45 +12,45 @@ use crate::config::*;
 use crate::prelude::*;
 
 lazy_static! {
-    pub static ref TEST_ROOM1_ALIAS: OwnedRoomAliasId = owned_room_alias_id!("#room1:example.com");
-    pub static ref TEST_ROOM1_ID: OwnedRoomId =
+    pub(crate) static ref TEST_ROOM1_ALIAS: OwnedRoomAliasId = owned_room_alias_id!("#room1:example.com");
+    pub(crate) static ref TEST_ROOM1_ID: OwnedRoomId =
         RoomId::new_v1(server_name!("example.com")).to_owned();
-    pub static ref TEST_USER1: OwnedUserId = user_id!("@user1:example.com").to_owned();
-    pub static ref TEST_USER2: OwnedUserId = user_id!("@user2:example.com").to_owned();
-    pub static ref TEST_USER3: OwnedUserId = user_id!("@user3:example.com").to_owned();
-    pub static ref TEST_USER4: OwnedUserId = user_id!("@user4:example.com").to_owned();
-    pub static ref TEST_USER5: OwnedUserId = user_id!("@user5:example.com").to_owned();
-    pub static ref MSG1_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
-    pub static ref MSG2_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
-    pub static ref MSG3_EVID: OwnedEventId =
+    pub(crate) static ref TEST_USER1: OwnedUserId = user_id!("@user1:example.com").to_owned();
+    pub(crate) static ref TEST_USER2: OwnedUserId = user_id!("@user2:example.com").to_owned();
+    pub(crate) static ref TEST_USER3: OwnedUserId = user_id!("@user3:example.com").to_owned();
+    pub(crate) static ref TEST_USER4: OwnedUserId = user_id!("@user4:example.com").to_owned();
+    pub(crate) static ref TEST_USER5: OwnedUserId = user_id!("@user5:example.com").to_owned();
+    pub(crate) static ref MSG1_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
+    pub(crate) static ref MSG2_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
+    pub(crate) static ref MSG3_EVID: OwnedEventId =
         event_id!("$5jRz3KfVhaUzXtVj7k:example.com").to_owned();
-    pub static ref MSG4_EVID: OwnedEventId =
+    pub(crate) static ref MSG4_EVID: OwnedEventId =
         event_id!("$JP6qFV7WyXk5ZnexM3:example.com").to_owned();
-    pub static ref MSG5_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
-    pub static ref MSG1_KEY: MessageKey = MessageKey {
+    pub(crate) static ref MSG5_EVID: OwnedEventId = EventId::new_v1(server_name!("example.com"));
+    pub(crate) static ref MSG1_KEY: MessageKey = MessageKey {
         // 2000-01-01T00:00:00
         ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(946681200).unwrap())),
         id: MSG1_EVID.clone().into()
     };
-    pub static ref MSG2_KEY: MessageKey = MessageKey {
+    pub(crate) static ref MSG2_KEY: MessageKey = MessageKey {
         ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(1).unwrap())),
         id: MSG2_EVID.clone().into()
     };
-    pub static ref MSG3_KEY: MessageKey = MessageKey {
+    pub(crate) static ref MSG3_KEY: MessageKey = MessageKey {
         ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(2).unwrap())),
         id: MSG3_EVID.clone().into()
     };
-    pub static ref MSG4_KEY: MessageKey = MessageKey {
+    pub(crate) static ref MSG4_KEY: MessageKey = MessageKey {
         ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(2).unwrap())),
         id: MSG4_EVID.clone().into()
     };
-    pub static ref MSG5_KEY: MessageKey = MessageKey {
+    pub(crate) static ref MSG5_KEY: MessageKey = MessageKey {
         ts: MessageTimeStamp(MilliSecondsSinceUnixEpoch(UInt::new(8).unwrap())),
         id: MSG5_EVID.clone().into()
     };
 }
 
-pub fn mock_room1_message(
+pub(crate) fn mock_room1_message(
     content: RoomMessageEventContent,
     sender: OwnedUserId,
     key: MessageKey,
@@ -71,37 +71,37 @@ pub fn mock_room1_message(
     Message::new(MessageEvent::Original(event, Default::default()), sender, timestamp.into())
 }
 
-pub fn mock_message1() -> Message {
+pub(crate) fn mock_message1() -> Message {
     let content = RoomMessageEventContent::text_plain("writhe");
 
     mock_room1_message(content, TEST_USER1.clone(), MSG1_KEY.clone())
 }
 
-pub fn mock_message2() -> Message {
+pub(crate) fn mock_message2() -> Message {
     let content = RoomMessageEventContent::text_plain("helium");
 
     mock_room1_message(content, TEST_USER2.clone(), MSG2_KEY.clone())
 }
 
-pub fn mock_message3() -> Message {
+pub(crate) fn mock_message3() -> Message {
     let content = RoomMessageEventContent::text_plain("this\nis\na\nmultiline\nmessage");
 
     mock_room1_message(content, TEST_USER2.clone(), MSG3_KEY.clone())
 }
 
-pub fn mock_message4() -> Message {
+pub(crate) fn mock_message4() -> Message {
     let content = RoomMessageEventContent::text_plain("help");
 
     mock_room1_message(content, TEST_USER1.clone(), MSG4_KEY.clone())
 }
 
-pub fn mock_message5() -> Message {
+pub(crate) fn mock_message5() -> Message {
     let content = RoomMessageEventContent::text_plain("character");
 
     mock_room1_message(content, TEST_USER2.clone(), MSG4_KEY.clone())
 }
 
-pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
+pub(crate) fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
     let mut keys = HashMap::new();
 
     keys.insert(MSG1_EVID.clone(), EventLocation::Message(None, MSG1_KEY.clone()));
@@ -113,8 +113,8 @@ pub fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
     keys
 }
 
-pub fn mock_messages() -> Messages {
-    let mut messages = Messages::main();
+pub(crate) fn mock_messages() -> Messages {
+    let mut messages = Messages::new(ReceiptThread::Main);
 
     messages.insert(MSG1_KEY.clone(), mock_message1());
     messages.insert(MSG2_KEY.clone(), mock_message2());
@@ -125,7 +125,7 @@ pub fn mock_messages() -> Messages {
     messages
 }
 
-pub fn mock_room() -> RoomInfo {
+pub(crate) fn mock_room() -> RoomInfo {
     let mut room = RoomInfo::default();
     room.name = Some("Watercooler Discussion".into());
     room.keys = mock_keys();
@@ -138,7 +138,7 @@ pub fn mock_room() -> RoomInfo {
     room
 }
 
-pub fn mock_dirs() -> DirectoryValues {
+pub(crate) fn mock_dirs() -> DirectoryValues {
     DirectoryValues {
         cache: PathBuf::new(),
         data: PathBuf::new(),
@@ -147,7 +147,7 @@ pub fn mock_dirs() -> DirectoryValues {
     }
 }
 
-pub fn mock_tunables() -> TunableValues {
+pub(crate) fn mock_tunables() -> TunableValues {
     TunableValues {
         default_markup: Default::default(),
         ignorecase: false,
@@ -202,7 +202,7 @@ pub fn mock_tunables() -> TunableValues {
     }
 }
 
-pub fn mock_settings() -> ApplicationSettings {
+pub(crate) fn mock_settings() -> ApplicationSettings {
     ApplicationSettings {
         layout_json: PathBuf::new(),
         session_json: PathBuf::new(),
@@ -233,7 +233,7 @@ pub fn mock_settings() -> ApplicationSettings {
     }
 }
 
-pub async fn mock_store() -> ProgramStore {
+pub(crate) async fn mock_store() -> ProgramStore {
     let (tx, _) = unbounded_channel();
     let (receipts, _) = unbounded_channel();
     let client = matrix_sdk::Client::builder()

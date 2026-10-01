@@ -50,7 +50,7 @@ use crate::windows::room::scrollback::{Scrollback, ScrollbackState};
 const PENDING_JUMP_TIMEOUT: Duration = Duration::from_secs(120);
 
 /// State needed for rendering [Chat].
-pub struct ChatState {
+pub(crate) struct ChatState {
     room_id: OwnedRoomId,
     room: MatrixRoom,
 
@@ -69,7 +69,11 @@ pub struct ChatState {
 }
 
 impl ChatState {
-    pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
+    pub(crate) fn new(
+        room: MatrixRoom,
+        thread: Option<OwnedEventId>,
+        store: &mut ProgramStore,
+    ) -> Self {
         let room_id = room.room_id().to_owned();
         let scrollback = ScrollbackState::new(room_id.clone(), thread.clone());
         let id = IambBufferId::Room(room_id.clone(), thread, RoomFocus::MessageBar);
@@ -93,7 +97,7 @@ impl ChatState {
         }
     }
 
-    pub fn thread(&self) -> Option<&OwnedEventId> {
+    pub(crate) fn thread(&self) -> Option<&OwnedEventId> {
         self.scrollback.thread()
     }
 
@@ -127,7 +131,7 @@ impl ChatState {
         self.tbox.reset()
     }
 
-    pub fn refresh_room(&mut self, store: &mut ProgramStore) {
+    pub(crate) fn refresh_room(&mut self, store: &mut ProgramStore) {
         if let Some(room) = store.application.worker.client.get_room(self.id()) {
             self.room = room;
         }
@@ -191,7 +195,7 @@ impl ChatState {
         }
     }
 
-    pub async fn timeline_command(
+    pub(crate) async fn timeline_command(
         &mut self,
         act: TimelineAction,
         _: ProgramContext,
@@ -202,7 +206,7 @@ impl ChatState {
         }
     }
 
-    pub async fn message_command(
+    pub(crate) async fn message_command(
         &mut self,
         act: MessageAction,
         _: ProgramContext,
@@ -512,7 +516,7 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev, _) => ev.event_id.clone(),
-                    MessageEvent::Local(_, handle, _) => {
+                    MessageEvent::Local(handle, _) => {
                         let succeeded = handle
                             .abort()
                             .await
@@ -693,7 +697,7 @@ impl ChatState {
         config
     }
 
-    pub async fn send_command(
+    pub(crate) async fn send_command(
         &mut self,
         act: SendAction,
         _: ProgramContext,
@@ -745,7 +749,7 @@ impl ChatState {
                             match info.echo_keys.get(transaction_id) {
                                 Some(EchoLocation::Replaced(id)) => id,
                                 Some(EchoLocation::Message(thread, orig_key)) => {
-                                    let Some(MessageEvent::Local(_, handle, _)) = info
+                                    let Some(MessageEvent::Local(handle, _)) = info
                                         .get_thread(thread.as_deref())
                                         .and_then(|thread| thread.get(orig_key))
                                         .map(|msg| &msg.event)
@@ -897,19 +901,19 @@ impl ChatState {
         Ok(None)
     }
 
-    pub fn focus_toggle(&mut self) {
+    pub(crate) fn focus_toggle(&mut self) {
         self.focus.toggle();
     }
 
-    pub fn room(&self) -> &MatrixRoom {
+    pub(crate) fn room(&self) -> &MatrixRoom {
         &self.room
     }
 
-    pub fn id(&self) -> &RoomId {
+    pub(crate) fn id(&self) -> &RoomId {
         &self.room_id
     }
 
-    pub fn auto_toggle_focus(
+    pub(crate) fn auto_toggle_focus(
         &mut self,
         act: &EditorAction,
         ctx: &ProgramContext,
@@ -917,7 +921,7 @@ impl ChatState {
         auto_toggle_focus(&mut self.focus, act, ctx, &self.scrollback, &mut self.tbox)
     }
 
-    pub fn typing_notice(
+    pub(crate) fn typing_notice(
         &self,
         act: &EditorAction,
         ctx: &ProgramContext,
@@ -1225,17 +1229,17 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ChatState {
 }
 
 /// [StatefulWidget] for Matrix rooms.
-pub struct Chat<'a> {
+pub(crate) struct Chat<'a> {
     store: &'a mut ProgramStore,
     focused: bool,
 }
 
 impl<'a> Chat<'a> {
-    pub fn new(store: &'a mut ProgramStore) -> Chat<'a> {
+    pub(crate) fn new(store: &'a mut ProgramStore) -> Chat<'a> {
         Chat { store, focused: false }
     }
 
-    pub fn focus(mut self, focused: bool) -> Self {
+    pub(crate) fn focus(mut self, focused: bool) -> Self {
         self.focused = focused;
         self
     }
@@ -1409,7 +1413,7 @@ fn cmd(open_command: &Vec<String>) -> Option<Command> {
     None
 }
 
-pub fn auto_toggle_focus(
+pub(crate) fn auto_toggle_focus(
     focus: &mut RoomFocus,
     act: &EditorAction,
     ctx: &ProgramContext,
