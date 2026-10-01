@@ -1534,6 +1534,8 @@ impl RoomInfo {
                     }
                 } else if let Some(poll) = self.unloaded_unstable_polls.get_mut(&poll_event_id) {
                     poll.redact(&loc);
+                } else if let Some(poll) = self.unloaded_polls.get_mut(&poll_event_id) {
+                    poll.redact(&loc);
                 }
             },
             Some(EventLocation::Message(None, key)) => {
