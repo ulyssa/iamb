@@ -1,14 +1,14 @@
 //! Window for Matrix spaces
 
+use feruca::Collator;
 use matrix_sdk::ruma::OwnedSpaceChildOrder;
 use matrix_sdk::ruma::events::StateEventType;
 use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use modalkit_ratatui::list::{List, ListState};
 
+use crate::base::{SortColumn, SortFieldRoom, SortFieldSpace, SortOrder, SpaceInfo};
 use crate::prelude::*;
-use crate::windows::{GenericRoomItem, RoomLikeItem, room_fields_cmp};
-
-const SPACE_HIERARCHY_DEBOUNCE: Duration = Duration::from_secs(5);
+use crate::windows::{GenericRoomItem, RoomLikeItem, room_cmp};
 
 /// State needed for rendering [Space].
 pub struct SpaceState {
@@ -191,7 +191,7 @@ impl StatefulWidget for Space<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer, state: &mut Self::State) {
         let ChatStore {
             rooms,
-            aliases,
+            spaces,
             worker,
             settings,
             collator,
@@ -199,57 +199,174 @@ impl StatefulWidget for Space<'_> {
             room_previews,
             ..
         } = &mut self.store.application;
+        let default_rooms_style = settings.theme.rooms.default;
+
+        let info = spaces.entry(state.room_id.clone()).or_default();
+
+        let mut items = info
+            .children
+            .keys()
+            .map(|id| {
+                if let Some(room) = worker.client.get_room(id) {
+                    GenericRoomItem::new(&room, rooms.get_or_default(id.to_owned()))
+                } else {
+                    GenericRoomItem::new_unknown(id.to_owned(), room_previews, need_load)
+                }
+            })
+            .collect::<Vec<_>>();
+
+        let fields = &settings.tunables.sort.space;
+        items.sort_by(|a, b| space_fields_cmp(a, b, fields, collator, info));
+
+        state.list.set(items);
         state.set_ignorecase(settings.tunables.ignorecase);
 
-        let mut empty_message = None;
-        let need_fetch = match state.last_fetch {
-            Some(i) => i.elapsed() >= SPACE_HIERARCHY_DEBOUNCE,
-            None => true,
+        List::new(self.store)
+            .empty_message("This space is empty")
+            .empty_alignment(Alignment::Center)
+            .focus(self.focused)
+            .style(default_rooms_style)
+            .render(area, buffer, &mut state.list)
+    }
+}
+
+fn space_child_cmp<T: RoomLikeItem>(
+    a: &T,
+    b: &T,
+    field: &SortFieldSpace,
+    collator: &mut Collator,
+    space: &SpaceInfo,
+) -> Ordering {
+    match field {
+        SortFieldSpace::Room(field) => room_cmp(a, b, field, collator),
+        SortFieldSpace::SpaceOrder => {
+            let (Some(a_child), Some(b_child)) =
+                (space.children.get(a.room_id()), space.children.get(b.room_id()))
+            else {
+                // This should never happen since we got both room ids from the space info, but fall
+                // back to room id order anyway and hope for the best.
+                return room_cmp(a, b, &SortFieldRoom::RoomId, collator);
+            };
+
+            match (a_child.0.order.as_ref(), b_child.0.order.as_ref()) {
+                (Some(a), Some(b)) => a.cmp(b),
+                (Some(_), None) => Ordering::Less,
+                (None, Some(_)) => Ordering::Greater,
+                (None, None) => (a_child.1, a.room_id()).cmp(&(b_child.1, b.room_id())),
+            }
+        },
+    }
+}
+
+/// Compare two space children according the configured sort criteria.
+fn space_fields_cmp<T: RoomLikeItem>(
+    a: &T,
+    b: &T,
+    fields: &[SortColumn<SortFieldSpace>],
+    collator: &mut Collator,
+    space: &SpaceInfo,
+) -> Ordering {
+    for SortColumn(field, order) in fields {
+        match (space_child_cmp(a, b, field, collator, space), order) {
+            (Ordering::Equal, _) => continue,
+            (o, SortOrder::Ascending) => return o,
+            (o, SortOrder::Descending) => return o.reverse(),
+        }
+    }
+
+    // Break ties on space order.
+    space_child_cmp(a, b, &SortFieldSpace::SpaceOrder, collator, space)
+}
+
+#[cfg(test)]
+mod tests {
+    use matrix_sdk::ruma::{assign, server_name};
+
+    use crate::windows::tests::TestRoomItem;
+
+    use super::*;
+
+    #[test]
+    fn test_sort_space_children() {
+        let mut collator = Collator::default();
+        let collator = &mut collator;
+        let server = server_name!("example.com");
+
+        let room1 = TestRoomItem {
+            room_id: RoomId::new_v1(server).to_owned(),
+            name: "1",
+            alias: None,
+            tags: vec![],
+            unread: Default::default(),
+            membership: MatrixRoomState::Invited,
+        };
+        let room2 = TestRoomItem {
+            room_id: RoomId::new_v1(server).to_owned(),
+            name: "2",
+            alias: None,
+            tags: vec![],
+            unread: Default::default(),
+            membership: MatrixRoomState::Invited,
+        };
+        let room3 = TestRoomItem {
+            room_id: RoomId::new_v1(server).to_owned(),
+            name: "3",
+            alias: None,
+            tags: vec![],
+            unread: Default::default(),
+            membership: MatrixRoomState::Invited,
+        };
+        let room4 = TestRoomItem {
+            room_id: RoomId::new_v1(server).to_owned(),
+            name: "4",
+            alias: None,
+            tags: vec![],
+            unread: Default::default(),
+            membership: MatrixRoomState::Invited,
         };
 
-        if need_fetch {
-            let res = worker.space_members(state.room_id.clone());
+        let space = SpaceInfo {
+            children: [
+                (
+                    room1.room_id.clone(),
+                    (
+                        assign!(SpaceChildEventContent::new(vec![]), {
+                            order: Some("b".try_into().unwrap())
+                        }),
+                        MilliSecondsSinceUnixEpoch(5.try_into().unwrap()),
+                    ),
+                ),
+                (
+                    room2.room_id.clone(),
+                    (
+                        assign!(SpaceChildEventContent::new(vec![]), {
+                            order: Some("a".try_into().unwrap())
+                        }),
+                        MilliSecondsSinceUnixEpoch(6.try_into().unwrap()),
+                    ),
+                ),
+                (
+                    room3.room_id.clone(),
+                    (
+                        SpaceChildEventContent::new(vec![]),
+                        MilliSecondsSinceUnixEpoch(7.try_into().unwrap()),
+                    ),
+                ),
+                (
+                    room4.room_id.clone(),
+                    (
+                        SpaceChildEventContent::new(vec![]),
+                        MilliSecondsSinceUnixEpoch(4.try_into().unwrap()),
+                    ),
+                ),
+            ]
+            .into(),
+        };
 
-            match res {
-                Ok(members) => {
-                    let mut items = members
-                        .into_iter()
-                        .filter_map(|id| {
-                            if id == state.room_id {
-                                return None;
-                            }
-
-                            if let Some(room) = worker.client.get_room(&id) {
-                                GenericRoomItem::new(&room, rooms, aliases)
-                            } else {
-                                GenericRoomItem::new_unknown(id, room_previews, need_load)
-                            }
-                            .into()
-                        })
-                        .collect::<Vec<_>>();
-                    let fields = &settings.tunables.sort.rooms;
-                    items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
-
-                    state.list.set(items);
-                    state.last_fetch = Some(Instant::now());
-                },
-                Err(e) => {
-                    let lines = vec![
-                        Line::from("Unable to fetch space room hierarchy:"),
-                        Span::styled(e.to_string(), Style::default().fg(Color::Red)).into(),
-                    ];
-
-                    empty_message = Text::from(lines).into();
-                },
-            }
-        }
-
-        let mut list = List::new(self.store).focus(self.focused);
-
-        if let Some(text) = empty_message {
-            list = list.empty_message(text);
-        }
-
-        list.render(area, buffer, &mut state.list)
+        // Sort by space order
+        let mut rooms = vec![&room1, &room2, &room3, &room4];
+        let fields = &[SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending)];
+        rooms.sort_by(|a, b| space_fields_cmp(a, b, fields, collator, &space));
+        assert_eq!(rooms, vec![&room2, &room1, &room4, &room3]);
     }
 }

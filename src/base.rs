@@ -25,6 +25,7 @@ use matrix_sdk::ruma::events::room::redaction::{
     OriginalSyncRoomRedactionEvent,
     SyncRoomRedactionEvent,
 };
+use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::sticker::{StickerEvent, StickerEventContent};
 use matrix_sdk::ruma::events::{MessageLikeEvent, OriginalMessageLikeEvent};
 use matrix_sdk::ruma::presence::PresenceState;
@@ -257,6 +258,13 @@ pub enum SortFieldRoom {
     Joined,
 }
 
+/// Fields that space children can be sorted by.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SortFieldSpace {
+    Room(SortFieldRoom),
+    SpaceOrder,
+}
+
 /// Fields that users can be sorted by.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SortFieldUser {
@@ -327,6 +335,52 @@ impl Visitor<'_> for SortRoomVisitor {
             _ => {
                 let msg = format!("Unknown sort field: {value:?}");
                 return Err(E::custom(msg));
+            },
+        };
+
+        Ok(SortColumn(field, order))
+    }
+}
+
+impl<'de> Deserialize<'de> for SortColumn<SortFieldSpace> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SortSpaceVisitor)
+    }
+}
+
+/// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
+struct SortSpaceVisitor;
+
+impl Visitor<'_> for SortSpaceVisitor {
+    type Value = SortColumn<SortFieldSpace>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid field for sorting space children")
+    }
+
+    fn visit_str<E>(self, mut value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        if value.is_empty() {
+            return Err(E::custom("Invalid sort field"));
+        }
+
+        let order = if value.starts_with('~') {
+            value = &value[1..];
+            SortOrder::Descending
+        } else {
+            SortOrder::Ascending
+        };
+
+        let field = match value {
+            "spaceorder" => SortFieldSpace::SpaceOrder,
+            _ => {
+                let room_column = SortRoomVisitor.visit_str(value)?;
+                SortFieldSpace::Room(room_column.0)
             },
         };
 
@@ -2182,6 +2236,13 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
     return emojis;
 }
 
+/// Information about spaces the user's joined.
+#[derive(Default)]
+pub struct SpaceInfo {
+    /// The space child events with content and `origin_server_ts`.
+    pub children: HashMap<OwnedRoomId, (SpaceChildEventContent, MilliSecondsSinceUnixEpoch)>,
+}
+
 /// Information gathered during server syncs about joined rooms.
 #[derive(Default)]
 pub struct SyncInfo {
@@ -2312,6 +2373,9 @@ pub struct ChatStore {
     /// This is stored here because this data is lost in the conversion to [IambId].
     pub room_via: HashMap<OwnedRoomOrAliasId, Vec<OwnedServerName>>,
 
+    /// Map of joined spaces.
+    pub spaces: HashMap<OwnedRoomId, SpaceInfo>,
+
     /// Map of room aliases.
     pub aliases: CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
 
@@ -2374,6 +2438,7 @@ impl ChatStore {
             rooms: Default::default(),
             room_previews: Default::default(),
             room_via: Default::default(),
+            spaces: Default::default(),
             presences: Default::default(),
             verifications: Default::default(),
             need_load: Default::default(),
