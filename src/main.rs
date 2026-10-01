@@ -48,7 +48,7 @@ use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use crate::base::{HomeserverAction, KeysAction};
 use crate::completions::IambCompleter;
-use crate::config::{CursorShape, Iamb};
+use crate::config::{CursorShape, Iamb, Session};
 use crate::prelude::*;
 use crate::util::{restore_tty, setup_tty};
 use crate::windows::IambWindow;
@@ -891,14 +891,14 @@ fn read_response(question: &str) -> String {
 async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult<()> {
     if settings.session_json.is_file() {
         let session = settings.read_session(&settings.session_json)?;
-        worker.login(LoginStyle::SessionRestore(session.into()))?;
+        restore_session(worker, session)?;
 
         return Ok(());
     }
 
     if settings.session_json_old.is_file() && !settings.sled_dir.is_dir() {
         let session = settings.read_session(&settings.session_json_old)?;
-        worker.login(LoginStyle::SessionRestore(session.into()))?;
+        restore_session(worker, session)?;
 
         return Ok(());
     }
@@ -912,6 +912,21 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
         } else {
             return Ok(());
         }
+    }
+
+    match worker.try_oauth() {
+        Ok(info) => {
+            // TODO: this should probably have better logic for determining
+            // if OAuth is available rather than relying on None
+            if let Some(msg) = info {
+                println!("{msg}");
+                return Ok(());
+            }
+        },
+        Err(err) => {
+            println!("Failed to get OAuth login: {err}");
+            println!("Continuing to legacy login options");
+        },
     }
 
     loop {
@@ -947,6 +962,16 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
         }
     }
 
+    Ok(())
+}
+
+fn restore_session(worker: &Requester, session: Session) -> IambResult<()> {
+    if session.is_oauth() {
+        let oauth_session = session.try_into().expect("OAuth session should into");
+        worker.login(LoginStyle::OAuthSessionRestore(oauth_session))?;
+    } else {
+        worker.login(LoginStyle::SessionRestore(session.into()))?;
+    }
     Ok(())
 }
 

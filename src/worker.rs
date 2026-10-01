@@ -4,6 +4,7 @@
 //! block on a reply from the async worker.
 
 use std::fmt::{Debug, Formatter};
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
 use futures::stream::FuturesUnordered;
@@ -11,6 +12,13 @@ use futures::{FutureExt as _, StreamExt};
 use gethostname::gethostname;
 use matrix_sdk::OwnedServerName;
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::authentication::oauth::registration::{
+    ApplicationType,
+    ClientMetadata,
+    Localized,
+    OAuthGrantType,
+};
+use matrix_sdk::authentication::oauth::{OAuthAuthorizationData, OAuthSession};
 use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
 use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
@@ -72,6 +80,7 @@ use matrix_sdk::ruma::presence::PresenceState;
 use matrix_sdk::ruma::room::RoomType;
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
+use matrix_sdk::utils::local_server::LocalServerBuilder;
 use matrix_sdk::{
     ClientBuildError,
     Error as MatrixError,
@@ -1050,6 +1059,7 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
 #[derive(Debug)]
 pub enum LoginStyle {
     SessionRestore(MatrixSession),
+    OAuthSessionRestore(OAuthSession),
     Password(String),
     SingleSignOn,
 }
@@ -1085,6 +1095,7 @@ pub type FetchedRoom = (MatrixRoom, RoomDisplayName);
 
 pub enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
+    TryOAuthLogin(ClientReply<IambResult<EditInfo>>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     Logout(String, ClientReply<IambResult<EditInfo>>),
     GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
@@ -1168,6 +1179,7 @@ impl Debug for WorkerTask {
                     .field(&format_args!("_"))
                     .finish()
             },
+            WorkerTask::TryOAuthLogin(_) => f.debug_tuple("WorkerTask::TryOAuthLogin").finish(),
         }
     }
 }
@@ -1336,6 +1348,14 @@ impl Requester {
             .receipts
             .send((room, thread, receipt_type, event))
             .inspect_err(|_| tracing::warn!("Read receipt worker is no longer running"));
+    }
+
+    pub fn try_oauth(&self) -> IambResult<EditInfo> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::TryOAuthLogin(reply)).unwrap();
+
+        return response.recv();
     }
 
     pub fn login(&self, style: LoginStyle) -> IambResult<EditInfo> {
@@ -1551,6 +1571,7 @@ impl ClientWorker {
                     size,
                 ));
             },
+            WorkerTask::TryOAuthLogin(reply) => reply.send(self.try_oauth_login().await),
         }
     }
 
@@ -2057,11 +2078,73 @@ impl ClientWorker {
         self.initialized = true;
     }
 
+    async fn try_oauth_login(&mut self) -> IambResult<EditInfo> {
+        let client = self.client.clone();
+        let oauth = client.oauth();
+
+        match oauth.server_metadata().await {
+            Ok(server_metadata) => {
+                tracing::info!(
+                    "Found OAuth 2.0 server metadata with issuer: {}",
+                    server_metadata.issuer
+                );
+
+                let (redirect_uri, server_handle) = LocalServerBuilder::new().spawn().await?;
+                let OAuthAuthorizationData { url, .. } = oauth
+                    .login(redirect_uri, None, Some(client_metadata().into()), None)
+                    .build()
+                    .await
+                    .map_err(IambError::from)?;
+
+                let opened = format!(
+                    "The following URL should have been opened in your browser:\n    {url}"
+                );
+                tokio::task::spawn_blocking(move || open::that(url.as_str()));
+                println!("{opened}");
+
+                let Some(query_string) = server_handle.await else {
+                    return Err(UIError::Failure(
+                        "Error: failed to login: missing query string on the redirect URL".into(),
+                    ));
+                };
+
+                oauth.finish_login(query_string.into()).await.map_err(IambError::from)?;
+
+                self.settings.write_session(
+                    oauth.full_session().expect("logged in client should have session"),
+                )?;
+
+                let sync_delay = Duration::from_millis(self.settings.tunables.sync_delay_ms);
+                self.sync_handle = tokio::spawn(async move {
+                    loop {
+                        let settings = SyncSettings::default();
+                        let _ = client.sync(settings).await;
+                        tokio::time::sleep(sync_delay).await;
+                    }
+                })
+                .into();
+
+                Ok(Some(InfoMessage::from("* Successfully logged in!".to_string())))
+            },
+            Err(error) => {
+                if error.is_not_supported() {
+                    tracing::debug!("Homeserver doesn't advertise OAuth 2.0 metadata");
+                } else {
+                    tracing::debug!("Error fetching OAuth 2.0 metadata : {error:?}");
+                }
+                Ok(None)
+            },
+        }
+    }
+
     async fn login_and_sync(&mut self, style: LoginStyle) -> IambResult<EditInfo> {
         let client = self.client.clone();
 
         match style {
             LoginStyle::SessionRestore(session) => {
+                client.restore_session(session).await.map_err(IambError::from)?;
+            },
+            LoginStyle::OAuthSessionRestore(session) => {
                 client.restore_session(session).await.map_err(IambError::from)?;
             },
             LoginStyle::Password(password) => {
@@ -2197,4 +2280,35 @@ impl ClientWorker {
             let _ = room.typing_notice(true).await;
         }
     }
+}
+
+// Taken from the sdk's example
+fn client_metadata() -> Raw<ClientMetadata> {
+    let ipv4_localhost_uri = Url::parse(&format!("http://{}/", Ipv4Addr::LOCALHOST))
+        .expect("Couldn't parse IPv4 redirect URI");
+    let ipv6_localhost_uri = Url::parse(&format!("http://[{}]/", Ipv6Addr::LOCALHOST))
+        .expect("Couldn't parse IPv6 redirect URI");
+    let client_uri = Localized::new(
+        Url::parse("https://github.com/ulyssa/iamb").expect("Couldn't parse client URI"),
+        None,
+    );
+
+    let metadata = ClientMetadata {
+        // TODO: update policy and tos uris to proper ones
+        client_name: Some(Localized::new("iamb".to_owned(), [])),
+        policy_uri: Some(client_uri.clone()),
+        tos_uri: Some(client_uri.clone()),
+        ..ClientMetadata::new(
+            // This is a native application (in contrast to a web application, that runs in a
+            // browser).
+            ApplicationType::Native,
+            // We are going to use the Authorization Code flow.
+            vec![OAuthGrantType::AuthorizationCode {
+                redirect_uris: vec![ipv4_localhost_uri, ipv6_localhost_uri],
+            }],
+            client_uri,
+        )
+    };
+
+    Raw::new(&metadata).expect("Couldn't serialize client metadata")
 }
