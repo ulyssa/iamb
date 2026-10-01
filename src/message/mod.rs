@@ -83,10 +83,6 @@ impl Messages {
         Self(Default::default(), thread)
     }
 
-    pub(crate) fn main() -> Self {
-        Self::new(ReceiptThread::Main)
-    }
-
     pub(crate) fn thread(root: OwnedEventId) -> Self {
         Self::new(ReceiptThread::Thread(root))
     }
@@ -409,7 +405,7 @@ pub(crate) enum MessageEvent {
     Redacted(OwnedEventId, Option<String>),
     State(Box<AnySyncStateEvent>),
     Sticker(Box<OriginalStickerEvent>, MediaSource),
-    Local(OwnedTransactionId, SendHandle, Box<RoomMessageEventContent>),
+    Local(SendHandle, Box<RoomMessageEventContent>),
     Poll(Box<Poll>),
     UnstablePoll(Box<UnstablePoll>),
 }
@@ -439,7 +435,7 @@ impl MessageEvent {
                     .map(|(_, ev)| &ev.msgtype)
                     .or(Some(&ev.content.msgtype))
             },
-            MessageEvent::Local(_, _, content) => Some(&content.msgtype),
+            MessageEvent::Local(.., content) => Some(&content.msgtype),
             MessageEvent::EncryptedOriginal(..) |
             MessageEvent::EncryptedRedacted(..) |
             MessageEvent::Redacted(..) |
@@ -466,7 +462,7 @@ impl MessageEvent {
             MessageEvent::Redacted(_, reason) => body_cow_reason(reason.as_deref()),
             MessageEvent::Sticker(ev, ..) => body_cow_sticker(ev),
             MessageEvent::State(ev) => body_cow_state(ev),
-            MessageEvent::Local(_, _, content) => body_cow_content(&content.msgtype),
+            MessageEvent::Local(.., content) => body_cow_content(&content.msgtype),
             MessageEvent::Poll(poll) => poll.body_cow(),
             MessageEvent::UnstablePoll(poll) => poll.body_cow(),
         }
@@ -492,7 +488,7 @@ impl MessageEvent {
             MessageEvent::Redacted(..) => return settings.theme.timeline.redacted,
             MessageEvent::State(_) => return settings.theme.timeline.state,
             MessageEvent::Original(ev, _) => &ev.content,
-            MessageEvent::Local(_, _, content) => content,
+            MessageEvent::Local(.., content) => content,
             MessageEvent::Sticker(..) => return settings.theme.timeline.sticker,
             MessageEvent::Poll(..) | MessageEvent::UnstablePoll(..) => {
                 return settings.theme.timeline.poll;
@@ -1009,7 +1005,7 @@ impl Message {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, _, content) => content,
+            MessageEvent::Local(.., content) => content,
             MessageEvent::Original(ev, _) => &ev.content,
             MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,
@@ -1044,7 +1040,7 @@ impl Message {
         let content = match &self.event {
             MessageEvent::EncryptedOriginal(_) => return None,
             MessageEvent::EncryptedRedacted(_) => return None,
-            MessageEvent::Local(_, _, content) => content,
+            MessageEvent::Local(.., content) => content,
             MessageEvent::Original(ev, _) => &ev.content,
             MessageEvent::Redacted(_, _) => return None,
             MessageEvent::State(_) => return None,

@@ -621,18 +621,12 @@ impl ThemeEncryption {
         let icon_unencrypted = default.patch(self.icon_unencrypted);
         let icon_unknown = default.patch(self.icon_unknown);
 
-        ThemeEncryptionValues {
-            default,
-            icon_encrypted,
-            icon_unencrypted,
-            icon_unknown,
-        }
+        ThemeEncryptionValues { icon_encrypted, icon_unencrypted, icon_unknown }
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub(crate) struct ThemeEncryptionValues {
-    pub default: Style,
     pub icon_encrypted: Style,
     pub icon_unencrypted: Style,
     pub icon_unknown: Style,

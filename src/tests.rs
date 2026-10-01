@@ -114,7 +114,7 @@ pub(crate) fn mock_keys() -> HashMap<OwnedEventId, EventLocation> {
 }
 
 pub(crate) fn mock_messages() -> Messages {
-    let mut messages = Messages::main();
+    let mut messages = Messages::new(ReceiptThread::Main);
 
     messages.insert(MSG1_KEY.clone(), mock_message1());
     messages.insert(MSG2_KEY.clone(), mock_message2());

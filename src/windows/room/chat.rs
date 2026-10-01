@@ -516,7 +516,7 @@ impl ChatState {
                     MessageEvent::EncryptedOriginal(ev) => ev.event_id.clone(),
                     MessageEvent::EncryptedRedacted(ev) => ev.event_id.clone(),
                     MessageEvent::Original(ev, _) => ev.event_id.clone(),
-                    MessageEvent::Local(_, handle, _) => {
+                    MessageEvent::Local(handle, _) => {
                         let succeeded = handle
                             .abort()
                             .await
@@ -749,7 +749,7 @@ impl ChatState {
                             match info.echo_keys.get(transaction_id) {
                                 Some(EchoLocation::Replaced(id)) => id,
                                 Some(EchoLocation::Message(thread, orig_key)) => {
-                                    let Some(MessageEvent::Local(_, handle, _)) = info
+                                    let Some(MessageEvent::Local(handle, _)) = info
                                         .get_thread(thread.as_deref())
                                         .and_then(|thread| thread.get(orig_key))
                                         .map(|msg| &msg.event)

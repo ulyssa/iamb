@@ -17,7 +17,6 @@ use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::room::RoomMember;
-use matrix_sdk::ruma::OwnedRoomAliasId;
 use matrix_sdk::ruma::api::client::filter::{
     FilterDefinition,
     LazyLoadOptions,
@@ -30,7 +29,6 @@ use matrix_sdk::ruma::api::client::room::create_room::v3::{
     CreationContent,
     Request as CreateRoomRequest,
 };
-use matrix_sdk::ruma::api::client::space::get_hierarchy::v1::Request as SpaceHierarchyRequest;
 use matrix_sdk::ruma::assign;
 use matrix_sdk::ruma::events::MessageLikeEvent;
 use matrix_sdk::ruma::events::key::verification::ready::{
@@ -863,7 +861,7 @@ fn insert_local_echo(
 
             let ts = send_handle.created_at.into();
             let key = MessageKey { ts, id: MessageId::Local(transaction_id.clone()) };
-            let msg = MessageEvent::Local(transaction_id.clone(), send_handle, msg.into());
+            let msg = MessageEvent::Local(send_handle, msg.into());
             let msg = Message::new(msg, own_user_id, ts);
 
             info.echo_keys
@@ -923,7 +921,7 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
                     continue;
                 };
 
-                let MessageEvent::Local(_, _, msg) = &mut msg.event else {
+                let MessageEvent::Local(.., msg) = &mut msg.event else {
                     continue;
                 };
 
@@ -1084,19 +1082,14 @@ fn oneshot<T>() -> (ClientReply<T>, ClientResponse<T>) {
     return (reply, response);
 }
 
-pub type FetchedRoom = (MatrixRoom, RoomDisplayName);
-
 pub(crate) enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     Logout(String, ClientReply<IambResult<EditInfo>>),
     GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
-    GetRoom(OwnedRoomId, ClientReply<IambResult<FetchedRoom>>),
-    ResolveAlias(OwnedRoomAliasId, ClientReply<IambResult<OwnedRoomId>>),
     JoinRoom(OwnedRoomOrAliasId, Vec<OwnedServerName>, ClientReply<IambResult<OwnedRoomId>>),
     CreateDM(OwnedUserId, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
-    SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     TypingNotice(OwnedRoomId),
     LoadImage(MediaSource, PreviewKind, Size, Arc<Picker>, Arc<Semaphore>),
 }
@@ -1122,18 +1115,6 @@ impl Debug for WorkerTask {
             WorkerTask::GetInviter(invite, _) => {
                 f.debug_tuple("WorkerTask::GetInviter").field(invite).finish()
             },
-            WorkerTask::GetRoom(room_id, _) => {
-                f.debug_tuple("WorkerTask::GetRoom")
-                    .field(room_id)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::ResolveAlias(s, _) => {
-                f.debug_tuple("WorkerTask::ResolveAlias")
-                    .field(s)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
             WorkerTask::JoinRoom(s, via, _) => {
                 f.debug_tuple("WorkerTask::JoinRoom")
                     .field(s)
@@ -1149,12 +1130,6 @@ impl Debug for WorkerTask {
             },
             WorkerTask::Members(room_id, _) => {
                 f.debug_tuple("WorkerTask::Members")
-                    .field(room_id)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::SpaceMembers(room_id, _) => {
-                f.debug_tuple("WorkerTask::SpaceMembers")
                     .field(room_id)
                     .field(&format_args!("_"))
                     .finish()
@@ -1365,22 +1340,6 @@ impl Requester {
         return response.recv();
     }
 
-    pub(crate) fn get_room(&self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
-        let (reply, response) = oneshot();
-
-        self.tx.send(WorkerTask::GetRoom(room_id, reply)).unwrap();
-
-        return response.recv();
-    }
-
-    pub(crate) fn resolve_alias(&self, alias_id: OwnedRoomAliasId) -> IambResult<OwnedRoomId> {
-        let (reply, response) = oneshot();
-
-        self.tx.send(WorkerTask::ResolveAlias(alias_id, reply)).unwrap();
-
-        return response.recv();
-    }
-
     pub(crate) fn join_room_chan(
         &self,
         alias_id: OwnedRoomOrAliasId,
@@ -1389,14 +1348,6 @@ impl Requester {
         let (reply, response) = oneshot();
         self.tx.send(WorkerTask::JoinRoom(alias_id, via, reply)).unwrap();
         response
-    }
-
-    pub(crate) fn join_room(
-        &self,
-        alias_id: OwnedRoomOrAliasId,
-        via: Vec<OwnedServerName>,
-    ) -> IambResult<OwnedRoomId> {
-        self.join_room_chan(alias_id, via).recv()
     }
 
     pub(crate) fn create_dm(&self, user_id: OwnedUserId) -> IambResult<OwnedRoomId> {
@@ -1411,14 +1362,6 @@ impl Requester {
         let (reply, response) = oneshot();
 
         self.tx.send(WorkerTask::Members(room_id, reply)).unwrap();
-
-        return response.recv();
-    }
-
-    pub(crate) fn space_members(&self, space: OwnedRoomId) -> IambResult<Vec<OwnedRoomId>> {
-        let (reply, response) = oneshot();
-
-        self.tx.send(WorkerTask::SpaceMembers(space, reply)).unwrap();
 
         return response.recv();
     }
@@ -1501,10 +1444,6 @@ impl ClientWorker {
                 self.init(store).await;
                 reply.send(());
             },
-            WorkerTask::ResolveAlias(alias_id, reply) => {
-                assert!(self.initialized);
-                reply.send(self.resolve_alias(alias_id).await);
-            },
             WorkerTask::JoinRoom(alias_id, via, reply) => {
                 assert!(self.initialized);
                 let client = self.client.clone();
@@ -1518,10 +1457,6 @@ impl ClientWorker {
                 assert!(self.initialized);
                 reply.send(self.get_inviter(invited).await);
             },
-            WorkerTask::GetRoom(room_id, reply) => {
-                assert!(self.initialized);
-                reply.send(self.get_room(room_id).await);
-            },
             WorkerTask::Login(style, reply) => {
                 assert!(self.initialized);
                 reply.send(self.login_and_sync(style).await);
@@ -1533,10 +1468,6 @@ impl ClientWorker {
             WorkerTask::Members(room_id, reply) => {
                 assert!(self.initialized);
                 reply.send(self.members(room_id).await);
-            },
-            WorkerTask::SpaceMembers(space, reply) => {
-                assert!(self.initialized);
-                reply.send(self.space_members(space).await);
             },
             WorkerTask::TypingNotice(room_id) => {
                 assert!(self.initialized);
@@ -2146,32 +2077,6 @@ impl ClientWorker {
         Ok(details.inviter)
     }
 
-    async fn get_room(&mut self, room_id: OwnedRoomId) -> IambResult<FetchedRoom> {
-        if let Some(room) = self.client.get_room(&room_id) {
-            let name = if let Some(name) = room.cached_display_name() {
-                name
-            } else {
-                room.display_name().await.map_err(IambError::from)?
-            };
-
-            Ok((room, name))
-        } else {
-            Err(IambError::UnknownRoom(room_id).into())
-        }
-    }
-
-    async fn resolve_alias(&mut self, alias_id: OwnedRoomAliasId) -> IambResult<OwnedRoomId> {
-        match self.client.resolve_room_alias(&alias_id).await {
-            Ok(resp) => Ok(resp.room_id),
-            Err(e) => {
-                let msg = e.to_string();
-                let err = UIError::Failure(msg);
-
-                return Err(err);
-            },
-        }
-    }
-
     async fn members(&mut self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
         if let Some(room) = self.client.get_room(room_id.as_ref()) {
             Ok(room
@@ -2181,18 +2086,6 @@ impl ClientWorker {
         } else {
             Err(IambError::UnknownRoom(room_id).into())
         }
-    }
-
-    async fn space_members(&mut self, space: OwnedRoomId) -> IambResult<Vec<OwnedRoomId>> {
-        let mut req = SpaceHierarchyRequest::new(space);
-        req.limit = Some(1000u32.into());
-        req.max_depth = Some(1u32.into());
-
-        let resp = self.client.send(req).await.map_err(IambError::from)?;
-
-        let rooms = resp.rooms.into_iter().map(|chunk| chunk.summary.room_id).collect();
-
-        Ok(rooms)
     }
 
     async fn typing_notice(&mut self, room_id: OwnedRoomId) {
