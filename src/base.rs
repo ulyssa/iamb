@@ -323,7 +323,7 @@ impl Visitor<'_> for SortRoomVisitor {
             "id" => SortFieldRoom::RoomId,
             "server" => SortFieldRoom::Server,
             "invite" => SortFieldRoom::Invite,
-            "unjoined" => SortFieldRoom::Joined,
+            "joined" => SortFieldRoom::Joined,
             _ => {
                 let msg = format!("Unknown sort field: {value:?}");
                 return Err(E::custom(msg));

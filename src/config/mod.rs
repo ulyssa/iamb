@@ -1655,6 +1655,21 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_default_members_sort() {
+        let sort: Vec<SortColumn<SortFieldUser>> =
+            serde_json::from_str(r#"["power","knock","~invite","id"]"#).unwrap();
+        assert_eq!(sort.as_slice(), &DEFAULT_MEMBERS_SORT[..]);
+    }
+
+    #[test]
+    fn test_parse_default_rooms_sort() {
+        let sort: Vec<SortColumn<SortFieldRoom>> =
+            serde_json::from_str(r#"["favorite","invite","lowpriority","unread","joined","name"]"#)
+                .unwrap();
+        assert_eq!(sort.as_slice(), &DEFAULT_ROOM_SORT[..]);
+    }
+
+    #[test]
     fn test_parse_tunables_proxy_invalid() {
         let res =
             serde_json::from_str::<Tunables>(r#"{"proxy": {"url": "localhost"}}"#).unwrap_err();
