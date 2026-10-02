@@ -43,6 +43,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::Level;
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use crate::base::{HomeserverAction, KeysAction};
@@ -1061,7 +1062,7 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
             .unwrap_or_else(print_exit)
     } else {
         EnvFilter::builder()
-            .with_default_directive(Level::WARN.into())
+            .with_default_directive(LevelFilter::OFF.into())
             .parse(log_level)
             .map_err(|err| format!("Unable to parse `log_level`: {err}"))
             .unwrap_or_else(print_exit)
