@@ -989,6 +989,7 @@ async fn login_normal(
     login(worker, settings).await?;
     println!("* Syncing...");
     worker.spawn_sync()?;
+    worker.setup_persistent_tokens();
     worker::do_first_sync(&worker.client, store)
         .await
         .map_err(IambError::from)?;

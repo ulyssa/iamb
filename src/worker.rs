@@ -1109,6 +1109,8 @@ pub enum WorkerTask {
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     StartSync(ClientReply<IambResult<EditInfo>>),
+    SaveTokens,
+    StartPersistentTokenTask(UnboundedSender<WorkerTask>),
     TypingNotice(OwnedRoomId),
     LoadImage(MediaSource, PreviewKind, Size, Arc<Picker>, Arc<Semaphore>),
 }
@@ -1183,8 +1185,18 @@ impl Debug for WorkerTask {
                     .field(&format_args!("_"))
                     .finish()
             },
-            WorkerTask::TryOAuthLogin(_) => f.debug_tuple("WorkerTask::TryOAuthLogin").finish(),
-            WorkerTask::StartSync(_) => f.debug_tuple("WorkerTask::StartSync").finish(),
+            WorkerTask::TryOAuthLogin(_) => {
+                f.debug_tuple("WorkerTask::TryOAuthLogin")
+                    .field(&format_args!("_"))
+                    .finish()
+            },
+            WorkerTask::StartSync(_) => {
+                f.debug_tuple("WorkerTask::StartSync").field(&format_args!("_")).finish()
+            },
+            WorkerTask::SaveTokens => f.debug_tuple("WorkerTask::SaveTokens").finish(),
+            WorkerTask::StartPersistentTokenTask(tx) => {
+                f.debug_tuple("WorkerTask::RenderImage").field(tx).finish()
+            },
         }
     }
 }
@@ -1245,6 +1257,7 @@ async fn create_client_inner(
             settings.sqlite_cache_dir.as_path(),
             None,
         )
+        .handle_refresh_tokens()
         .request_config(req_config)
         .with_encryption_settings(DEFAULT_ENCRYPTION_SETTINGS);
 
@@ -1453,6 +1466,12 @@ impl Requester {
         return response.recv();
     }
 
+    pub fn setup_persistent_tokens(&self) {
+        self.tx
+            .send(WorkerTask::StartPersistentTokenTask(self.tx.clone()))
+            .unwrap();
+    }
+
     pub fn typing_notice(&self, room_id: OwnedRoomId) {
         self.tx.send(WorkerTask::TypingNotice(room_id)).unwrap();
     }
@@ -1591,6 +1610,14 @@ impl ClientWorker {
                     permits,
                     size,
                 ));
+            },
+            WorkerTask::SaveTokens => {
+                assert!(self.initialized);
+                self.save_tokens().await;
+            },
+            WorkerTask::StartPersistentTokenTask(tx) => {
+                assert!(self.initialized);
+                self.setup_persistent_tokens(tx);
             },
         }
     }
@@ -2304,6 +2331,51 @@ impl ClientWorker {
         })
         .into();
         Ok(Some(InfoMessage::from("Sync task spawned")))
+    }
+
+    fn setup_persistent_tokens(&self, tx: UnboundedSender<WorkerTask>) {
+        let client = self.client.clone();
+
+        tokio::spawn(async move {
+            while let Ok(change) = client.subscribe_to_session_changes().recv().await {
+                match change {
+                    matrix_sdk::SessionChange::UnknownToken(unknown_token) => {
+                        tracing::warn!(
+                            "client encountered an unknown token: soft logout = {}",
+                            unknown_token.soft_logout
+                        );
+                    },
+                    matrix_sdk::SessionChange::TokensRefreshed => {
+                        if let Err(_) = tx.send(WorkerTask::SaveTokens) {
+                            // Unable to send requests - the worker has probably ended
+                            // quit gracefully
+                            tracing::debug!(
+                                "persistent token task ending - tokens will no longer be saved"
+                            )
+                        }
+                    },
+                }
+            }
+        });
+    }
+
+    async fn save_tokens(&self) {
+        let oauth = self.client.oauth();
+        if oauth.client_id().is_some() {
+            let session = oauth.full_session().expect("logged in client should have session");
+            if let Err(e) = self.settings.write_session(session) {
+                tracing::warn!("Failed to persist oauth session: {e}");
+            }
+        } else {
+            let session = self
+                .client
+                .matrix_auth()
+                .session()
+                .expect("logged in client should have session");
+            if let Err(e) = self.settings.write_session(session) {
+                tracing::warn!("Failed to persist matrix session: {e}");
+            }
+        }
     }
 }
 
