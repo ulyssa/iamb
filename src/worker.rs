@@ -10,7 +10,6 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt as _, StreamExt};
 use gethostname::gethostname;
-use matrix_sdk::OwnedServerName;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::authentication::oauth::registration::{
     ApplicationType,
@@ -83,6 +82,7 @@ use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
 use matrix_sdk::utils::UrlOrQuery;
 use matrix_sdk::utils::local_server::{LocalServerBuilder, LocalServerRedirectHandle};
+use matrix_sdk::{AuthApi, OwnedServerName};
 use matrix_sdk::{
     ClientBuildError,
     Error as MatrixError,
@@ -2350,21 +2350,23 @@ impl ClientWorker {
     }
 
     async fn save_tokens(&self) {
-        let oauth = self.client.oauth();
-        if oauth.client_id().is_some() {
-            let session = oauth.full_session().expect("logged in client should have session");
-            if let Err(e) = self.settings.write_session(session) {
-                tracing::warn!("Failed to persist oauth session: {e}");
-            }
-        } else {
-            let session = self
-                .client
-                .matrix_auth()
-                .session()
-                .expect("logged in client should have session");
-            if let Err(e) = self.settings.write_session(session) {
-                tracing::warn!("Failed to persist matrix session: {e}");
-            }
+        let auth_api = self.client.auth_api().expect("client should be logged in");
+        match auth_api {
+            AuthApi::OAuth(oauth) => {
+                let session = oauth.full_session().expect("logged in client should have session");
+                if let Err(e) = self.settings.write_session(session) {
+                    tracing::warn!("Failed to persist oauth session: {e}");
+                }
+            },
+            AuthApi::Matrix(matrix) => {
+                let session = matrix.session().expect("logged in client should have session");
+                if let Err(e) = self.settings.write_session(session) {
+                    tracing::warn!("Failed to persist matrix session: {e}");
+                }
+            },
+            _ => {
+                tracing::error!("Unknown login method. Cannot persist tokens");
+            },
         }
     }
 }
