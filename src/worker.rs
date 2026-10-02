@@ -2162,13 +2162,7 @@ impl ClientWorker {
                 )?;
 
                 // User may login with different user than in settings, update here
-                let logged_in = client.user_id().expect("logged in client should have user");
-
-                if logged_in != self.settings.profile.user_id {
-                    // Trace warning if this happens
-                    tracing::warn!("logged in as a different user than expected");
-                    self.settings.profile.user_id = logged_in.to_owned();
-                }
+                self.update_profile_on_login();
 
                 Ok(Some(InfoMessage::from("* Successfully logged in!".to_string())))
             },
@@ -2192,6 +2186,7 @@ impl ClientWorker {
             },
             LoginStyle::OAuthSessionRestore(session) => {
                 client.restore_session(session).await.map_err(IambError::from)?;
+                self.update_profile_on_login();
             },
             LoginStyle::Password(password) => {
                 let resp = client
@@ -2376,6 +2371,17 @@ impl ClientWorker {
             _ => {
                 tracing::error!("Unknown login method. Cannot persist tokens");
             },
+        }
+    }
+
+    fn update_profile_on_login(&mut self) {
+        // User may login with different user than in settings, update here
+        let logged_in = self.client.user_id().expect("logged in client should have user");
+
+        if logged_in != self.settings.profile.user_id {
+            // Trace warning if this happens
+            tracing::warn!("logged in as a different user than expected");
+            self.settings.profile.user_id = logged_in.to_owned();
         }
     }
 }
