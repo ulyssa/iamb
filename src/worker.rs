@@ -81,7 +81,8 @@ use matrix_sdk::ruma::presence::PresenceState;
 use matrix_sdk::ruma::room::RoomType;
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
-use matrix_sdk::utils::local_server::LocalServerBuilder;
+use matrix_sdk::utils::UrlOrQuery;
+use matrix_sdk::utils::local_server::{LocalServerBuilder, LocalServerRedirectHandle};
 use matrix_sdk::{
     ClientBuildError,
     Error as MatrixError,
@@ -92,6 +93,7 @@ use matrix_sdk::{
 use matrix_sdk_base::RoomStateFilter;
 use modalkit::editing::completion::CompletionMap;
 use ratatui_image::picker::Picker;
+use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
@@ -2116,18 +2118,17 @@ impl ClientWorker {
                     .map_err(IambError::from)?;
 
                 let opened = format!(
-                    "The following URL should have been opened in your browser:\n    {url}"
+                    "The following URL should have been opened in your browser:\n    {url}\n\n\
+                    If the redirect fails to connect (i.e., iamb is not reachable from your browser), \
+                    the url (or just the query string) can be pasted here to complete the authorisation flow.\n"
                 );
                 tokio::task::spawn_blocking(move || open::that(url.as_str()));
                 println!("{opened}");
 
-                let Some(query_string) = server_handle.await else {
-                    return Err(UIError::Failure(
-                        "Error: failed to login: missing query string on the redirect URL".into(),
-                    ));
-                };
-
-                oauth.finish_login(query_string.into()).await.map_err(IambError::from)?;
+                oauth
+                    .finish_login(wait_auth_code(server_handle).await?)
+                    .await
+                    .map_err(IambError::from)?;
 
                 self.settings.write_session(
                     oauth.full_session().expect("logged in client should have session"),
@@ -2303,6 +2304,39 @@ impl ClientWorker {
         })
         .into();
         Ok(Some(InfoMessage::from("Sync task spawned")))
+    }
+}
+
+async fn wait_auth_code(server_handle: LocalServerRedirectHandle) -> IambResult<UrlOrQuery> {
+    let maybe_url_or_query = tokio::select! {
+        result = read_url_stdin() => {
+            Some(result?)
+        },
+        server_resp = server_handle => {
+            server_resp.map(UrlOrQuery::from)
+        }
+    };
+
+    if let Some(url_or_query) = maybe_url_or_query {
+        Ok(url_or_query)
+    } else {
+        println!(
+            "Failed to read query string from browser redirect. Please paste url or query string here:"
+        );
+        read_url_stdin().await
+    }
+}
+
+async fn read_url_stdin() -> IambResult<UrlOrQuery> {
+    let stdin = tokio::io::stdin();
+    let mut reader = BufReader::new(stdin);
+    let mut line = String::new();
+
+    reader.read_line(&mut line).await.map_err(IambError::from)?;
+    if let Ok(url) = Url::parse(&line) {
+        Ok(UrlOrQuery::Url(url))
+    } else {
+        Ok(UrlOrQuery::Query(line))
     }
 }
 
