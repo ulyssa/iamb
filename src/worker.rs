@@ -2234,7 +2234,7 @@ impl ClientWorker {
         }
 
         // Send the logout request.
-        if let Err(e) = self.send_logout_rq().await {
+        if let Err(e) = self.client.logout().await {
             let msg = format!("Failed to logout: {e}");
             let err = UIError::Failure(msg);
 
@@ -2245,17 +2245,6 @@ impl ClientWorker {
         std::fs::remove_file(&self.settings.session_json)?;
 
         Ok(Some(InfoMessage::from("Successfully logged out")))
-    }
-
-    async fn send_logout_rq(&self) -> IambResult<()> {
-        let oauth = self.client.oauth();
-
-        if oauth.client_id().is_some() {
-            oauth.logout().await.map_err(IambError::from)?;
-        } else {
-            self.client.matrix_auth().logout().await.map_err(IambError::from)?;
-        }
-        Ok(())
     }
 
     async fn get_inviter(&mut self, invited: MatrixRoom) -> IambResult<Option<RoomMember>> {
