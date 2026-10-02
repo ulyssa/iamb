@@ -1573,7 +1573,7 @@ impl ClientWorker {
             },
             WorkerTask::Login(style, reply) => {
                 assert!(self.initialized);
-                reply.send(self.login_and_sync(style).await);
+                reply.send(self.login(style).await);
             },
             WorkerTask::Logout(user_id, reply) => {
                 assert!(self.initialized);
@@ -2177,7 +2177,7 @@ impl ClientWorker {
         }
     }
 
-    async fn login_and_sync(&mut self, style: LoginStyle) -> IambResult<EditInfo> {
+    async fn login(&mut self, style: LoginStyle) -> IambResult<EditInfo> {
         let client = self.client.clone();
 
         match style {
