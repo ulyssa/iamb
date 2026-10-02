@@ -19,7 +19,7 @@ use matrix_sdk::ruma::{RoomAliasId, RoomOrAliasId, assign};
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 
-use crate::base::{RoomNeeds, SortColumn, SortFieldRoom, SortFieldUser, SortOrder, UnreadInfo};
+use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder, UnreadInfo};
 use crate::prelude::*;
 use crate::resolve_mxid;
 use crate::windows::room::{RoomState, room_command};
@@ -1143,34 +1143,7 @@ impl GenericRoomItem {
         assign!(Self::new_unspecified(room, info), { room_type })
     }
 
-    /// Create for a room the client doesn't know about.
-    pub fn new_unknown(
-        room_id: OwnedRoomId,
-        room_previews: &HashMap<
-            OwnedRoomOrAliasId,
-            (Result<RoomPreview, matrix_sdk::Error>, Instant),
-        >,
-        need_load: &mut RoomNeeds,
-    ) -> Self {
-        let alias_id: OwnedRoomOrAliasId = room_id.clone().into();
-
-        let preview = room_previews.get(&alias_id);
-        if preview.is_none_or(|(_, fetched)| fetched.elapsed() > ROOM_PREVIEW_DEBOUNCE) {
-            need_load.need_preview(alias_id);
-        }
-
-        let Some((Ok(preview), _)) = preview else {
-            return Self {
-                name: room_id.to_string(),
-                room_id,
-                alias: None,
-                tags: None,
-                membership: MatrixRoomState::Left,
-                unread: Default::default(),
-                room_type: RoomType::Unspecified,
-            };
-        };
-
+    pub fn new_preview(room_id: OwnedRoomId, preview: &RoomPreview) -> Self {
         let name = room_name_from_preview(preview).into_owned();
         let membership = preview.state.unwrap_or(MatrixRoomState::Left);
         let room_type = if Some(MatrixRoomType::Space) == preview.room_type {
