@@ -1571,6 +1571,10 @@ impl ClientWorker {
                 let client = self.client.clone();
                 reply.send(self.start_sync(client));
             },
+            WorkerTask::TryOAuthLogin(reply) => {
+                assert!(self.initialized);
+                reply.send(self.try_oauth_login().await);
+            },
             WorkerTask::TypingNotice(room_id) => {
                 assert!(self.initialized);
                 self.typing_notice(room_id).await;
@@ -1587,7 +1591,6 @@ impl ClientWorker {
                     size,
                 ));
             },
-            WorkerTask::TryOAuthLogin(reply) => reply.send(self.try_oauth_login().await),
         }
     }
 
