@@ -2161,6 +2161,15 @@ impl ClientWorker {
                     oauth.full_session().expect("logged in client should have session"),
                 )?;
 
+                // User may login with different user than in settings, update here
+                let logged_in = client.user_id().expect("logged in client should have user");
+
+                if logged_in != self.settings.profile.user_id {
+                    // Trace warning if this happens
+                    tracing::warn!("logged in as a different user than expected");
+                    self.settings.profile.user_id = logged_in.to_owned();
+                }
+
                 Ok(Some(InfoMessage::from("* Successfully logged in!".to_string())))
             },
             Err(error) => {
