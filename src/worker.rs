@@ -2326,7 +2326,8 @@ impl ClientWorker {
         let client = self.client.clone();
 
         tokio::spawn(async move {
-            while let Ok(change) = client.subscribe_to_session_changes().recv().await {
+            let mut session_changes_sub = client.subscribe_to_session_changes();
+            while let Ok(change) = session_changes_sub.recv().await {
                 match change {
                     matrix_sdk::SessionChange::UnknownToken(unknown_token) => {
                         tracing::warn!(
