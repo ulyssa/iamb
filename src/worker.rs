@@ -2111,6 +2111,7 @@ impl ClientWorker {
                 let (redirect_uri, server_handle) = LocalServerBuilder::new().spawn().await?;
                 let OAuthAuthorizationData { url, .. } = oauth
                     .login(redirect_uri, None, Some(client_metadata().into()), None)
+                    .user_id_hint(&self.settings.profile.user_id)
                     .build()
                     .await
                     .map_err(IambError::from)?;
