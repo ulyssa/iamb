@@ -71,11 +71,7 @@ const DEFAULT_ICON_ENC: Cow<'static, str> = Cow::Borrowed("[E] ");
 const DEFAULT_ICON_UNENC: Cow<'static, str> = Cow::Borrowed("[U] ");
 const DEFAULT_ICON_UNKNOWN: Cow<'static, str> = Cow::Borrowed("[?] ");
 
-const DEFAULT_LOG_LEVEL: &str = if cfg!(feature = "max_level_error") {
-    "error"
-} else {
-    "warn"
-};
+const DEFAULT_LOG_LEVEL: &str = "off";
 
 fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
