@@ -1568,8 +1568,7 @@ impl ClientWorker {
             },
             WorkerTask::StartSync(reply) => {
                 assert!(self.initialized);
-                let client = self.client.clone();
-                reply.send(self.start_sync(client));
+                reply.send(self.start_sync());
             },
             WorkerTask::TryOAuthLogin(reply) => {
                 assert!(self.initialized);
@@ -2292,7 +2291,8 @@ impl ClientWorker {
         }
     }
 
-    fn start_sync(&mut self, client: Client) -> IambResult<EditInfo> {
+    fn start_sync(&mut self) -> IambResult<EditInfo> {
+        let client = self.client.clone();
         let sync_delay = Duration::from_millis(self.settings.tunables.sync_delay_ms);
         self.sync_handle = tokio::spawn(async move {
             loop {
