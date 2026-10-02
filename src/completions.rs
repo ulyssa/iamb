@@ -532,6 +532,14 @@ fn complete_iamb_space(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     }
 }
 
+/// Tab completion for `:spaces`
+fn complete_iamb_spaces(args: Vec<String>) -> Vec<String> {
+    match args.len() {
+        1 if "toplevel".starts_with(&args[0]) => vec!["toplevel".to_string()],
+        _ => vec![],
+    }
+}
+
 /// Tab completion for `:logout`
 fn complete_iamb_logout(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     let id = store.settings.profile.user_id.as_str();
@@ -600,6 +608,8 @@ fn complete_cmdarg(
 
         "space" => complete_iamb_space(args, store),
 
+        "spaces" => complete_iamb_spaces(args),
+
         // XXX: Check whether we can get the id of the focused message to improve completion
         "unreact" if args.len() == 1 => complete_emoji(&args[0], store),
         "unreact" => vec![],
@@ -622,7 +632,7 @@ fn complete_cmdarg(
         // These have no arguments
         "cancel" | "chats" | "dms" | "editor" | "edit" | "forget" | "invites" | "leave" |
         "members" | "mentions" | "pin" | "pinned" | "unpin" | "replied" | "reply" | "rooms" |
-        "spaces" | "welcome" => vec![],
+        "welcome" => vec![],
 
         "abo" | "aboveleft" | "bel" | "belowright" | "hor" | "horizontal" | "lefta" |
         "leftabove" | "rightb" | "rightbelow" | "tab" | "vert" | "vertical" => {
@@ -793,6 +803,7 @@ impl Completer<IambInfo> for IambCompleter {
             IambBufferId::PinnedList(_) => vec![],
             IambBufferId::RoomList => vec![],
             IambBufferId::SpaceList => vec![],
+            IambBufferId::ToplevelSpaceList => vec![],
             IambBufferId::VerifyList => vec![],
             IambBufferId::Welcome => vec![],
             IambBufferId::ChatList => vec![],

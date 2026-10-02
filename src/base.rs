@@ -2524,6 +2524,9 @@ pub enum IambId {
     /// The `:spaces` window.
     SpaceList,
 
+    /// The `:spaces toplevel` window.
+    ToplevelSpaceList,
+
     /// The `:verify` window.
     VerifyList,
 
@@ -2563,6 +2566,7 @@ impl Display for IambId {
             IambId::DirectList => f.write_str("iamb://dms"),
             IambId::RoomList => f.write_str("iamb://rooms"),
             IambId::SpaceList => f.write_str("iamb://spaces"),
+            IambId::ToplevelSpaceList => f.write_str("iamb://spaces/toplevel"),
             IambId::VerifyList => f.write_str("iamb://verify"),
             IambId::Welcome => f.write_str("iamb://welcome"),
             IambId::ChatList => f.write_str("iamb://chats"),
@@ -2682,8 +2686,12 @@ impl Visitor<'_> for IambIdVisitor {
                 Ok(IambId::RoomList)
             },
             Some("spaces") => {
+                if url.path() == "toplevel" {
+                    return Ok(IambId::ToplevelSpaceList);
+                }
+
                 if url.path() != "" {
-                    return Err(E::custom("iamb://spaces takes no path"));
+                    return Err(E::custom("Invalid iamb window URL"));
                 }
 
                 Ok(IambId::SpaceList)
@@ -2792,6 +2800,9 @@ pub enum IambBufferId {
     /// The `:spaces` window.
     SpaceList,
 
+    /// The `:spaces toplevel` window.
+    ToplevelSpaceList,
+
     /// The `:verify` window.
     VerifyList,
 
@@ -2824,6 +2835,7 @@ impl IambBufferId {
             IambBufferId::PinnedList(room) => IambId::PinnedList(room.clone()),
             IambBufferId::RoomList => IambId::RoomList,
             IambBufferId::SpaceList => IambId::SpaceList,
+            IambBufferId::ToplevelSpaceList => IambId::ToplevelSpaceList,
             IambBufferId::VerifyList => IambId::VerifyList,
             IambBufferId::Welcome => IambId::Welcome,
             IambBufferId::ChatList => IambId::ChatList,

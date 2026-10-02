@@ -8,6 +8,7 @@
 //! where we have the message bar and room ID easily accessible and resettable.
 
 use std::cmp::Ord;
+use std::collections::HashSet;
 use std::fmt::{self, Write as _};
 
 use feruca::Collator;
@@ -334,6 +335,7 @@ macro_rules! delegate {
             IambWindow::PinnedList($id, _, _) => $e,
             IambWindow::RoomList($id) => $e,
             IambWindow::SpaceList($id) => $e,
+            IambWindow::ToplevelSpaceList($id) => $e,
             IambWindow::VerifyList($id) => $e,
             IambWindow::Welcome($id) => $e,
             IambWindow::ChatList($id) => $e,
@@ -352,6 +354,7 @@ pub enum IambWindow {
     VerifyList(VerifyListState),
     RoomList(RoomListState),
     SpaceList(RoomListState),
+    ToplevelSpaceList(RoomListState),
     Welcome(WelcomeState),
     ChatList(RoomListState),
     UnreadList(RoomListState),
@@ -421,6 +424,7 @@ impl IambWindow {
             IambWindow::DirectList(state) => state.get().map(|state| state.room_id()),
             IambWindow::RoomList(state) => state.get().map(|state| state.room_id()),
             IambWindow::SpaceList(state) => state.get().map(|state| state.room_id()),
+            IambWindow::ToplevelSpaceList(state) => state.get().map(|state| state.room_id()),
             IambWindow::ChatList(state) | IambWindow::UnreadList(state) => {
                 state.get().map(|state| state.room_id())
             },
@@ -548,6 +552,7 @@ impl WindowOps<IambInfo> for IambWindow {
         let ChatStore {
             collator,
             rooms,
+            spaces,
             settings,
             sync_info,
             verifications,
@@ -782,6 +787,43 @@ impl WindowOps<IambInfo> for IambWindow {
                     .style(default_rooms_style)
                     .render(area, buf, state);
             },
+            IambWindow::ToplevelSpaceList(state) => {
+                let mut toplevel_spaces: HashSet<_> =
+                    sync_info.spaces.iter().map(|room| room.room_id()).collect();
+
+                sync_info
+                    .spaces
+                    .iter()
+                    .filter_map(|room| spaces.get(room.room_id()))
+                    .flat_map(|info| info.children.keys())
+                    .for_each(|child_id| {
+                        toplevel_spaces.remove(child_id.deref());
+                    });
+
+                let mut items = toplevel_spaces
+                    .into_iter()
+                    .flat_map(|room_id| worker.client.get_room(room_id))
+                    .map(|room| {
+                        GenericRoomItem::new_unspecified(
+                            &room,
+                            rooms.get_or_default(room.room_id().to_owned()),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                let fields = &settings.tunables.sort.spaces;
+                items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+
+                state.set(items);
+                state.set_ignorecase(settings.tunables.ignorecase);
+
+                List::new(store)
+                    .empty_message("You haven't joined any spaces yet")
+                    .empty_alignment(Alignment::Center)
+                    .focus(focused)
+                    .style(default_rooms_style)
+                    .render(area, buf, state);
+            },
             IambWindow::VerifyList(state) => {
                 let mut items = verifications
                     .iter()
@@ -821,6 +863,7 @@ impl WindowOps<IambInfo> for IambWindow {
             },
             IambWindow::RoomList(w) => Self::RoomList(w.dup(store)),
             IambWindow::SpaceList(w) => Self::SpaceList(w.dup(store)),
+            IambWindow::ToplevelSpaceList(w) => Self::ToplevelSpaceList(w.dup(store)),
             IambWindow::VerifyList(w) => w.dup(store).into(),
             IambWindow::Welcome(w) => w.dup(store).into(),
             IambWindow::ChatList(w) => Self::ChatList(w.dup(store)),
@@ -865,6 +908,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::PinnedList(_, room_id, _) => IambId::PinnedList(room_id.clone()),
             IambWindow::RoomList(_) => IambId::RoomList,
             IambWindow::SpaceList(_) => IambId::SpaceList,
+            IambWindow::ToplevelSpaceList(_) => IambId::ToplevelSpaceList,
             IambWindow::VerifyList(_) => IambId::VerifyList,
             IambWindow::Welcome(_) => IambId::Welcome,
             IambWindow::ChatList(_) => IambId::ChatList,
@@ -879,6 +923,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::DirectList(_) => Line::from("Direct Messages"),
             IambWindow::RoomList(_) => Line::from("Rooms"),
             IambWindow::SpaceList(_) => Line::from("Spaces"),
+            IambWindow::ToplevelSpaceList(_) => Line::from("Toplevel Spaces"),
             IambWindow::VerifyList(_) => Line::from("Verifications"),
             IambWindow::Welcome(_) => Line::from("Welcome to iamb"),
             IambWindow::ChatList(_) => Line::from("DMs & Rooms"),
@@ -918,6 +963,7 @@ impl Window<IambInfo> for IambWindow {
             IambWindow::DirectList(_) => Line::styled("Direct Messages", style),
             IambWindow::RoomList(_) => Line::styled("Rooms", style),
             IambWindow::SpaceList(_) => Line::styled("Spaces", style),
+            IambWindow::ToplevelSpaceList(_) => Line::styled("Toplevel Spaces", style),
             IambWindow::VerifyList(_) => Line::styled("Verifications", style),
             IambWindow::Welcome(_) => Line::styled("Welcome to iamb", style),
             IambWindow::ChatList(_) => Line::styled("DMs & Rooms", style),
@@ -1002,6 +1048,11 @@ impl Window<IambInfo> for IambWindow {
                 let list = RoomListState::new(IambBufferId::SpaceList, vec![]);
 
                 return Ok(Self::SpaceList(list));
+            },
+            IambId::ToplevelSpaceList => {
+                let list = RoomListState::new(IambBufferId::ToplevelSpaceList, vec![]);
+
+                return Ok(Self::ToplevelSpaceList(list));
             },
             IambId::VerifyList => {
                 let list = VerifyListState::new(IambBufferId::VerifyList, vec![]);
