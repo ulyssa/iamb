@@ -1105,6 +1105,7 @@ pub enum WorkerTask {
     CreateDM(OwnedUserId, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
+    StartSync(ClientReply<IambResult<EditInfo>>),
     TypingNotice(OwnedRoomId),
     LoadImage(MediaSource, PreviewKind, Size, Arc<Picker>, Arc<Semaphore>),
 }
@@ -1180,6 +1181,7 @@ impl Debug for WorkerTask {
                     .finish()
             },
             WorkerTask::TryOAuthLogin(_) => f.debug_tuple("WorkerTask::TryOAuthLogin").finish(),
+            WorkerTask::StartSync(_) => f.debug_tuple("WorkerTask::StartSync").finish(),
         }
     }
 }
@@ -1374,6 +1376,14 @@ impl Requester {
         return response.recv();
     }
 
+    pub fn spawn_sync(&self) -> IambResult<EditInfo> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::StartSync(reply)).unwrap();
+
+        return response.recv();
+    }
+
     pub fn get_inviter(&self, invite: MatrixRoom) -> IambResult<Option<RoomMember>> {
         let (reply, response) = oneshot();
 
@@ -1554,6 +1564,11 @@ impl ClientWorker {
             WorkerTask::SpaceMembers(space, reply) => {
                 assert!(self.initialized);
                 reply.send(self.space_members(space).await);
+            },
+            WorkerTask::StartSync(reply) => {
+                assert!(self.initialized);
+                let client = self.client.clone();
+                reply.send(self.start_sync(client));
             },
             WorkerTask::TypingNotice(room_id) => {
                 assert!(self.initialized);
@@ -2114,16 +2129,6 @@ impl ClientWorker {
                     oauth.full_session().expect("logged in client should have session"),
                 )?;
 
-                let sync_delay = Duration::from_millis(self.settings.tunables.sync_delay_ms);
-                self.sync_handle = tokio::spawn(async move {
-                    loop {
-                        let settings = SyncSettings::default();
-                        let _ = client.sync(settings).await;
-                        tokio::time::sleep(sync_delay).await;
-                    }
-                })
-                .into();
-
                 Ok(Some(InfoMessage::from("* Successfully logged in!".to_string())))
             },
             Err(error) => {
@@ -2181,16 +2186,6 @@ impl ClientWorker {
                 self.settings.write_session(session)?;
             },
         }
-
-        let sync_delay = Duration::from_millis(self.settings.tunables.sync_delay_ms);
-        self.sync_handle = tokio::spawn(async move {
-            loop {
-                let settings = SyncSettings::default();
-                let _ = client.sync(settings).await;
-                tokio::time::sleep(sync_delay).await;
-            }
-        })
-        .into();
 
         Ok(Some(InfoMessage::from("* Successfully logged in!")))
     }
@@ -2279,6 +2274,19 @@ impl ClientWorker {
         if let Some(room) = self.client.get_room(room_id.as_ref()) {
             let _ = room.typing_notice(true).await;
         }
+    }
+
+    fn start_sync(&mut self, client: Client) -> IambResult<EditInfo> {
+        let sync_delay = Duration::from_millis(self.settings.tunables.sync_delay_ms);
+        self.sync_handle = tokio::spawn(async move {
+            loop {
+                let settings = SyncSettings::default();
+                let _ = client.sync(settings).await;
+                tokio::time::sleep(sync_delay).await;
+            }
+        })
+        .into();
+        Ok(Some(InfoMessage::from("Sync task spawned")))
     }
 }
 
