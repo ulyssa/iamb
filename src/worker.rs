@@ -2135,7 +2135,7 @@ impl ClientWorker {
                 if error.is_not_supported() {
                     tracing::debug!("Homeserver doesn't advertise OAuth 2.0 metadata");
                 } else {
-                    tracing::debug!("Error fetching OAuth 2.0 metadata : {error:?}");
+                    tracing::warn!("Error fetching OAuth 2.0 metadata : {error:?}");
                 }
                 Ok(None)
             },
