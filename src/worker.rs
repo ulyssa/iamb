@@ -25,6 +25,7 @@ use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::room::RoomMember;
+use matrix_sdk::ruma;
 use matrix_sdk::ruma::OwnedRoomAliasId;
 use matrix_sdk::ruma::api::client::filter::{
     FilterDefinition,
@@ -2296,27 +2297,23 @@ fn client_metadata() -> Raw<ClientMetadata> {
         .expect("Couldn't parse IPv4 redirect URI");
     let ipv6_localhost_uri = Url::parse(&format!("http://[{}]/", Ipv6Addr::LOCALHOST))
         .expect("Couldn't parse IPv6 redirect URI");
-    let client_uri = Localized::new(
-        Url::parse("https://github.com/ulyssa/iamb").expect("Couldn't parse client URI"),
+    let client_uri =
+        Localized::new(Url::parse("https://iamb.chat").expect("Couldn't parse client URI"), None);
+    let logo_uri = Localized::new(
+        Url::parse("https://iamb.chat/images/iamb.png").expect("Couldn't parse logo uri"),
         None,
     );
 
-    let metadata = ClientMetadata {
-        // TODO: update policy and tos uris to proper ones
-        client_name: Some(Localized::new("iamb".to_owned(), [])),
-        policy_uri: Some(client_uri.clone()),
-        tos_uri: Some(client_uri.clone()),
-        ..ClientMetadata::new(
-            // This is a native application (in contrast to a web application, that runs in a
-            // browser).
+    let metadata = ruma::assign!(
+        ClientMetadata::new(
             ApplicationType::Native,
-            // We are going to use the Authorization Code flow.
             vec![OAuthGrantType::AuthorizationCode {
-                redirect_uris: vec![ipv4_localhost_uri, ipv6_localhost_uri],
-            }],
-            client_uri,
-        )
-    };
+                    redirect_uris: vec![ipv4_localhost_uri, ipv6_localhost_uri],
+                }],
+        client_uri), {
+            client_name: Some(Localized::new("iamb".to_owned(), [])),
+            logo_uri: Some(logo_uri)
+    });
 
     Raw::new(&metadata).expect("Couldn't serialize client metadata")
 }
