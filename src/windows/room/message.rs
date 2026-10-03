@@ -379,11 +379,17 @@ impl StatefulWidget for MessageWidget<'_> {
 
         // receipts
         if saved_tunables.read_receipt_display &&
-            let Some(event_id) = msg.event.event_id()
+            let Some(event_id) = msg.event.event_id() &&
+            let Some((thread, _)) = info.get_message_location(event_id)
         {
+            let thread = match thread {
+                Some(root) => ReceiptThread::Thread(root.to_owned()),
+                None => ReceiptThread::Main,
+            };
             let receipts = info
-                .event_receipts
-                .values()
+                .event_receipts(&thread)
+                .into_iter()
+                .chain(info.event_receipts(&ReceiptThread::Unthreaded))
                 .filter_map(|receipts| receipts.get(event_id))
                 .flat_map(|receipts| receipts.iter())
                 .map(|user_id| {
