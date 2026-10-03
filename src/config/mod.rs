@@ -274,16 +274,22 @@ pub struct Session {
     client_id: Option<ClientId>,
 }
 
-impl Session {
-    pub fn is_oauth(&self) -> bool {
-        self.client_id.is_some()
-    }
-}
-
 impl From<Session> for AuthSession {
     fn from(session: Session) -> Self {
-        if session.is_oauth() {
-            AuthSession::OAuth(Box::new(session.try_into().expect("oauth session should into")))
+        if let Some(client_id) = session.client_id {
+            AuthSession::OAuth(Box::new(OAuthSession {
+                client_id: client_id,
+                user: UserSession {
+                    meta: SessionMeta {
+                        user_id: session.user_id,
+                        device_id: session.device_id,
+                    },
+                    tokens: SessionTokens {
+                        access_token: session.access_token,
+                        refresh_token: session.refresh_token,
+                    },
+                },
+            }))
         } else {
             AuthSession::Matrix(session.into())
         }
@@ -314,25 +320,6 @@ impl From<MatrixSession> for Session {
             device_id: session.meta.device_id,
             client_id: None,
         }
-    }
-}
-
-impl TryFrom<Session> for OAuthSession {
-    type Error = ();
-    fn try_from(session: Session) -> Result<Self, Self::Error> {
-        Ok(OAuthSession {
-            client_id: session.client_id.ok_or(())?,
-            user: UserSession {
-                meta: SessionMeta {
-                    user_id: session.user_id,
-                    device_id: session.device_id,
-                },
-                tokens: SessionTokens {
-                    access_token: session.access_token,
-                    refresh_token: session.refresh_token,
-                },
-            },
-        })
     }
 }
 
