@@ -4,27 +4,19 @@
 //! block on a reply from the async worker.
 
 use std::fmt::{Debug, Formatter};
-use std::net::{Ipv4Addr, Ipv6Addr};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt as _, StreamExt};
 use gethostname::gethostname;
+use matrix_sdk::AuthSession;
 use matrix_sdk::authentication::matrix::MatrixSession;
-use matrix_sdk::authentication::oauth::registration::{
-    ApplicationType,
-    ClientMetadata,
-    Localized,
-    OAuthGrantType,
-};
-use matrix_sdk::authentication::oauth::{OAuthAuthorizationData, OAuthSession};
 use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
 use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::room::RoomMember;
-use matrix_sdk::ruma;
 use matrix_sdk::ruma::OwnedRoomAliasId;
 use matrix_sdk::ruma::api::client::filter::{
     FilterDefinition,
@@ -80,8 +72,6 @@ use matrix_sdk::ruma::presence::PresenceState;
 use matrix_sdk::ruma::room::RoomType;
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
-use matrix_sdk::utils::UrlOrQuery;
-use matrix_sdk::utils::local_server::{LocalServerBuilder, LocalServerRedirectHandle};
 use matrix_sdk::{AuthApi, OwnedServerName};
 use matrix_sdk::{
     ClientBuildError,
@@ -93,7 +83,6 @@ use matrix_sdk::{
 use matrix_sdk_base::RoomStateFilter;
 use modalkit::editing::completion::CompletionMap;
 use ratatui_image::picker::Picker;
-use tokio::io::{AsyncBufReadExt, BufReader};
 use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::task::JoinHandle;
@@ -104,6 +93,7 @@ use crate::base::{CreateRoomFlags, CreateRoomType, EchoLocation, MessageNeed};
 use crate::config::ProxyUrl;
 use crate::message::MessageId;
 use crate::notifications::register_notifications;
+use crate::oauth::oauth_login;
 use crate::prelude::*;
 use crate::preview::{PreviewKind, PreviewManager};
 use crate::verifications;
@@ -1061,10 +1051,10 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
 
 #[derive(Debug)]
 pub enum LoginStyle {
-    SessionRestore(MatrixSession),
-    OAuthSessionRestore(OAuthSession),
+    SessionRestore(AuthSession),
     Password(String),
     SingleSignOn,
+    OAuth,
 }
 
 pub struct ClientResponse<T>(Receiver<T>);
@@ -1098,7 +1088,6 @@ pub type FetchedRoom = (MatrixRoom, RoomDisplayName);
 
 pub enum WorkerTask {
     Init(AsyncProgramStore, ClientReply<()>),
-    TryOAuthLogin(ClientReply<IambResult<EditInfo>>),
     Login(LoginStyle, ClientReply<IambResult<EditInfo>>),
     Logout(String, ClientReply<IambResult<EditInfo>>),
     GetInviter(MatrixRoom, ClientReply<IambResult<Option<RoomMember>>>),
@@ -1182,11 +1171,6 @@ impl Debug for WorkerTask {
                     .field(kind)
                     .field(size)
                     .field(&format_args!("_"))
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::TryOAuthLogin(_) => {
-                f.debug_tuple("WorkerTask::TryOAuthLogin")
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -1366,14 +1350,6 @@ impl Requester {
             .receipts
             .send((room, thread, receipt_type, event))
             .inspect_err(|_| tracing::warn!("Read receipt worker is no longer running"));
-    }
-
-    pub fn try_oauth(&self) -> IambResult<EditInfo> {
-        let (reply, response) = oneshot();
-
-        self.tx.send(WorkerTask::TryOAuthLogin(reply)).unwrap();
-
-        return response.recv();
     }
 
     pub fn login(&self, style: LoginStyle) -> IambResult<EditInfo> {
@@ -1590,10 +1566,6 @@ impl ClientWorker {
             WorkerTask::StartSync(reply) => {
                 assert!(self.initialized);
                 reply.send(self.start_sync());
-            },
-            WorkerTask::TryOAuthLogin(reply) => {
-                assert!(self.initialized);
-                reply.send(self.try_oauth_login().await);
             },
             WorkerTask::TypingNotice(room_id) => {
                 assert!(self.initialized);
@@ -2125,66 +2097,17 @@ impl ClientWorker {
         self.initialized = true;
     }
 
-    async fn try_oauth_login(&mut self) -> IambResult<EditInfo> {
-        let client = self.client.clone();
-        let oauth = client.oauth();
-
-        match oauth.server_metadata().await {
-            Ok(server_metadata) => {
-                tracing::info!(
-                    "Found OAuth 2.0 server metadata with issuer: {}",
-                    server_metadata.issuer
-                );
-
-                let (redirect_uri, server_handle) = LocalServerBuilder::new().spawn().await?;
-                let OAuthAuthorizationData { url, .. } = oauth
-                    .login(redirect_uri, None, Some(client_metadata().into()), None)
-                    .user_id_hint(&self.settings.profile.user_id)
-                    .build()
-                    .await
-                    .map_err(IambError::from)?;
-
-                let opened = format!(
-                    "The following URL should have been opened in your browser:\n    {url}\n\n\
-                    If the redirect fails to connect (i.e., iamb is not reachable from your browser), \
-                    the url (or just the query string) can be pasted here to complete the authorisation flow.\n"
-                );
-                tokio::task::spawn_blocking(move || open::that(url.as_str()));
-                println!("{opened}");
-
-                oauth
-                    .finish_login(wait_auth_code(server_handle).await?)
-                    .await
-                    .map_err(IambError::from)?;
-
-                self.settings.write_session(
-                    oauth.full_session().expect("logged in client should have session"),
-                )?;
-
-                // User may login with different user than in settings, update here
-                self.update_profile_on_login().await
-            },
-            Err(error) => {
-                if error.is_not_supported() {
-                    tracing::debug!("Homeserver doesn't advertise OAuth 2.0 metadata");
-                } else {
-                    tracing::warn!("Error fetching OAuth 2.0 metadata : {error:?}");
-                }
-                Ok(None)
-            },
-        }
-    }
-
     async fn login(&mut self, style: LoginStyle) -> IambResult<EditInfo> {
         let client = self.client.clone();
 
         match style {
             LoginStyle::SessionRestore(session) => {
-                client.restore_session(session).await.map_err(IambError::from)?;
-            },
-            LoginStyle::OAuthSessionRestore(session) => {
-                client.restore_session(session).await.map_err(IambError::from)?;
-                return self.update_profile_on_login().await;
+                if let AuthSession::OAuth(_) = session {
+                    client.restore_session(session).await.map_err(IambError::from)?;
+                    self.update_profile_on_login().await?;
+                } else {
+                    client.restore_session(session).await.map_err(IambError::from)?;
+                }
             },
             LoginStyle::Password(password) => {
                 let resp = client
@@ -2219,8 +2142,17 @@ impl ClientWorker {
                 let session = MatrixSession::from(&resp);
                 self.settings.write_session(session)?;
             },
+            LoginStyle::OAuth => {
+                oauth_login(self.client.clone(), &self.settings.profile.user_id).await?;
+                self.update_profile_on_login().await?;
+                let session = self
+                    .client
+                    .oauth()
+                    .full_session()
+                    .expect("logged in client should have session");
+                self.settings.write_session(session)?;
+            },
         }
-
         Ok(Some(InfoMessage::from("* Successfully logged in!")))
     }
 
@@ -2393,64 +2325,4 @@ impl ClientWorker {
         }
         Ok(Some(InfoMessage::from(msg)))
     }
-}
-
-async fn wait_auth_code(server_handle: LocalServerRedirectHandle) -> IambResult<UrlOrQuery> {
-    let maybe_url_or_query = tokio::select! {
-        result = read_url_stdin() => {
-            Some(result?)
-        },
-        server_resp = server_handle => {
-            server_resp.map(UrlOrQuery::from)
-        }
-    };
-
-    if let Some(url_or_query) = maybe_url_or_query {
-        Ok(url_or_query)
-    } else {
-        println!(
-            "Failed to read query string from browser redirect. Please paste url or query string here:"
-        );
-        read_url_stdin().await
-    }
-}
-
-async fn read_url_stdin() -> IambResult<UrlOrQuery> {
-    let stdin = tokio::io::stdin();
-    let mut reader = BufReader::new(stdin);
-    let mut line = String::new();
-
-    reader.read_line(&mut line).await.map_err(IambError::from)?;
-    if let Ok(url) = Url::parse(&line) {
-        Ok(UrlOrQuery::Url(url))
-    } else {
-        Ok(UrlOrQuery::Query(line))
-    }
-}
-
-// Taken from the sdk's example
-fn client_metadata() -> Raw<ClientMetadata> {
-    let ipv4_localhost_uri = Url::parse(&format!("http://{}/", Ipv4Addr::LOCALHOST))
-        .expect("Couldn't parse IPv4 redirect URI");
-    let ipv6_localhost_uri = Url::parse(&format!("http://[{}]/", Ipv6Addr::LOCALHOST))
-        .expect("Couldn't parse IPv6 redirect URI");
-    let client_uri =
-        Localized::new(Url::parse("https://iamb.chat").expect("Couldn't parse client URI"), None);
-    let logo_uri = Localized::new(
-        Url::parse("https://iamb.chat/images/iamb.png").expect("Couldn't parse logo uri"),
-        None,
-    );
-
-    let metadata = ruma::assign!(
-        ClientMetadata::new(
-            ApplicationType::Native,
-            vec![OAuthGrantType::AuthorizationCode {
-                    redirect_uris: vec![ipv4_localhost_uri, ipv6_localhost_uri],
-                }],
-        client_uri), {
-            client_name: Some(Localized::new("iamb".to_owned(), [])),
-            logo_uri: Some(logo_uri)
-    });
-
-    Raw::new(&metadata).expect("Couldn't serialize client metadata")
 }

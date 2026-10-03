@@ -15,7 +15,7 @@ use matrix_sdk::authentication::oauth::{ClientId, OAuthSession, UserSession};
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{OwnedDeviceId, owned_server_name};
-use matrix_sdk::{EncryptionState, SessionMeta, SessionTokens};
+use matrix_sdk::{AuthSession, EncryptionState, SessionMeta, SessionTokens};
 use modalkit::crossterm;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
@@ -270,12 +270,23 @@ pub struct Session {
     refresh_token: Option<String>,
     user_id: OwnedUserId,
     device_id: OwnedDeviceId,
+    #[serde(skip_serializing_if = "Option::is_none")]
     client_id: Option<ClientId>,
 }
 
 impl Session {
     pub fn is_oauth(&self) -> bool {
         self.client_id.is_some()
+    }
+}
+
+impl From<Session> for AuthSession {
+    fn from(session: Session) -> Self {
+        if session.is_oauth() {
+            AuthSession::OAuth(Box::new(session.try_into().expect("oauth session should into")))
+        } else {
+            AuthSession::Matrix(session.into())
+        }
     }
 }
 
