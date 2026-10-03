@@ -2162,9 +2162,7 @@ impl ClientWorker {
                 )?;
 
                 // User may login with different user than in settings, update here
-                self.update_profile_on_login();
-
-                Ok(Some(InfoMessage::from("* Successfully logged in!".to_string())))
+                self.update_profile_on_login().await
             },
             Err(error) => {
                 if error.is_not_supported() {
@@ -2186,7 +2184,7 @@ impl ClientWorker {
             },
             LoginStyle::OAuthSessionRestore(session) => {
                 client.restore_session(session).await.map_err(IambError::from)?;
-                self.update_profile_on_login();
+                return self.update_profile_on_login().await;
             },
             LoginStyle::Password(password) => {
                 let resp = client
@@ -2374,15 +2372,26 @@ impl ClientWorker {
         }
     }
 
-    fn update_profile_on_login(&mut self) {
-        // User may login with different user than in settings, update here
-        let logged_in = self.client.user_id().expect("logged in client should have user");
+    async fn update_profile_on_login(&mut self) -> IambResult<EditInfo> {
+        let client = self.client.clone();
 
-        if logged_in != self.settings.profile.user_id {
+        // User may login with different user than in settings, update here
+        let whoami = client.whoami().await;
+        if whoami
+            .as_ref()
+            .is_err_and(|e| matches!(e, matrix_sdk::HttpError::RefreshToken(_)))
+        {
+            tracing::error!("Login attempt failed: invalid refresh token loaded from profile.");
+        }
+        let user = whoami.map_err(IambError::from)?;
+
+        let msg = format!("* Successfully logged in with {}!", &user.user_id);
+        if user.user_id != self.settings.profile.user_id {
             // Trace warning if this happens
             tracing::warn!("logged in as a different user than expected");
-            self.settings.profile.user_id = logged_in.to_owned();
+            self.settings.profile.user_id = user.user_id;
         }
+        Ok(Some(InfoMessage::from(msg)))
     }
 }
 
