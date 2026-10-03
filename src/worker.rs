@@ -2270,11 +2270,11 @@ impl ClientWorker {
                         );
                     },
                     matrix_sdk::SessionChange::TokensRefreshed => {
-                        if let Err(_) = tx.send(WorkerTask::SaveTokens) {
+                        if let Err(e) = tx.send(WorkerTask::SaveTokens) {
                             // Unable to send requests - the worker has probably ended
                             // quit gracefully
                             tracing::debug!(
-                                "persistent token task ending - tokens will no longer be saved"
+                                "persistent token task ending - tokens will no longer be saved: {e}"
                             )
                         }
                     },
