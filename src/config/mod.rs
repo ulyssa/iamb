@@ -14,7 +14,7 @@ use matrix_sdk::EncryptionState;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
-use matrix_sdk::ruma::{OwnedDeviceId, owned_server_name};
+use matrix_sdk::ruma::{DeviceId, OwnedDeviceId, owned_server_name};
 use modalkit::crossterm;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
@@ -267,6 +267,18 @@ impl Visitor<'_> for VimModesVisitor {
 pub struct Session {
     access_token: String,
     refresh_token: Option<String>,
+    user_id: OwnedUserId,
+    device_id: OwnedDeviceId,
+}
+
+/// A device ID saved at logout so that the next login can reuse it.
+///
+/// The SDK store is keyed by user and device ID, so logging back in with
+/// a freshly issued device ID would leave the existing store unusable
+/// (#775). Saving the ID lets the next login ask the homeserver for the
+/// same device and keep using that store.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SavedDevice {
     user_id: OwnedUserId,
     device_id: OwnedDeviceId,
 }
@@ -1196,6 +1208,7 @@ impl IambConfig {
 pub struct ApplicationSettings {
     pub layout_json: PathBuf,
     pub session_json: PathBuf,
+    pub device_json: PathBuf,
     pub session_json_old: PathBuf,
     pub sled_dir: PathBuf,
     pub sqlite_dir: PathBuf,
@@ -1336,6 +1349,9 @@ impl ApplicationSettings {
         let mut session_json = profile_data_dir.clone();
         session_json.push("session.json");
 
+        let mut device_json = profile_data_dir;
+        device_json.push("device.json");
+
         let mut session_json_old = profile_dir;
         session_json_old.push("session.json");
 
@@ -1354,6 +1370,7 @@ impl ApplicationSettings {
             sled_dir,
             layout_json,
             session_json,
+            device_json,
             session_json_old,
             sqlite_dir,
             sqlite_cache_dir,
@@ -1402,6 +1419,32 @@ impl ApplicationSettings {
         let writer = BufWriter::new(file);
         let session = Session::from(session);
         serde_json::to_writer(writer, &session).map_err(IambError::from)?;
+        Ok(())
+    }
+
+    /// The device ID saved at logout, if it was saved for this profile's
+    /// user. A missing or stale file is not an error: the next login then
+    /// simply gets a fresh device ID from the homeserver.
+    pub fn read_saved_device(&self) -> Option<OwnedDeviceId> {
+        let file = File::open(self.device_json.as_path()).ok()?;
+        let reader = BufReader::new(file);
+        let saved: SavedDevice = serde_json::from_reader(reader).ok()?;
+
+        if saved.user_id == self.profile.user_id {
+            Some(saved.device_id)
+        } else {
+            None
+        }
+    }
+
+    pub fn write_saved_device(&self, device_id: &DeviceId) -> Result<(), IambError> {
+        let file = File::create(self.device_json.as_path())?;
+        let writer = BufWriter::new(file);
+        let saved = SavedDevice {
+            user_id: self.profile.user_id.clone(),
+            device_id: device_id.to_owned(),
+        };
+        serde_json::to_writer(writer, &saved).map_err(IambError::from)?;
         Ok(())
     }
 

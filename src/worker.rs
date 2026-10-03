@@ -2065,34 +2065,34 @@ impl ClientWorker {
                 client.restore_session(session).await.map_err(IambError::from)?;
             },
             LoginStyle::Password(password) => {
-                let resp = client
+                let mut login = client
                     .matrix_auth()
                     .login_username(&self.settings.profile.user_id, &password)
-                    .initial_device_display_name(initial_devname().as_str())
-                    .send()
-                    .await
-                    .map_err(IambError::from)?;
+                    .initial_device_display_name(initial_devname().as_str());
+                if let Some(device_id) = self.settings.read_saved_device() {
+                    login = login.device_id(device_id.as_str());
+                }
+                let resp = login.send().await.map_err(IambError::from)?;
                 let session = MatrixSession::from(&resp);
                 self.settings.write_session(session)?;
             },
             LoginStyle::SingleSignOn => {
-                let resp = client
-                    .matrix_auth()
-                    .login_sso(|url| {
-                        let opened = format!(
-                            "The following URL should have been opened in your browser:\n    {url}"
-                        );
+                let mut login = client.matrix_auth().login_sso(|url| {
+                    let opened = format!(
+                        "The following URL should have been opened in your browser:\n    {url}"
+                    );
 
-                        async move {
-                            tokio::task::spawn_blocking(move || open::that(url));
-                            println!("\n{opened}\n");
-                            Ok(())
-                        }
-                    })
-                    .initial_device_display_name(initial_devname().as_str())
-                    .send()
-                    .await
-                    .map_err(IambError::from)?;
+                    async move {
+                        tokio::task::spawn_blocking(move || open::that(url));
+                        println!("\n{opened}\n");
+                        Ok(())
+                    }
+                });
+                login = login.initial_device_display_name(initial_devname().as_str());
+                if let Some(device_id) = self.settings.read_saved_device() {
+                    login = login.device_id(device_id.as_str());
+                }
+                let resp = login.send().await.map_err(IambError::from)?;
 
                 let session = MatrixSession::from(&resp);
                 self.settings.write_session(session)?;
@@ -2123,12 +2123,23 @@ impl ClientWorker {
             return Err(err);
         }
 
+        // Capture the device ID before logging out, while the session is
+        // still active. The next login reuses it, which keeps the existing
+        // SDK store valid: the store is keyed by user and device ID, and a
+        // freshly issued device ID would no longer match it (#775).
+        let device_id = self.client.device_id().map(|id| id.to_owned());
+
         // Send the logout request.
         if let Err(e) = self.client.matrix_auth().logout().await {
             let msg = format!("Failed to logout: {e}");
             let err = UIError::Failure(msg);
 
             return Err(err);
+        }
+
+        // Save the device ID for the next login.
+        if let Some(device_id) = device_id {
+            self.settings.write_saved_device(&device_id)?;
         }
 
         // Remove the session.json file.
