@@ -2134,6 +2134,14 @@ impl ClientWorker {
         // Remove the session.json file.
         std::fs::remove_file(&self.settings.session_json)?;
 
+        // Remove the SQLite store, which holds the crypto account for the
+        // device that was just logged out. Leaving it behind makes the next
+        // login fail, since the newly issued device ID won't match the one
+        // in the store.
+        if self.settings.sqlite_dir.is_dir() {
+            std::fs::remove_dir_all(&self.settings.sqlite_dir)?;
+        }
+
         Ok(Some(InfoMessage::from("Successfully logged out")))
     }
 
