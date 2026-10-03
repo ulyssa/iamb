@@ -35,7 +35,7 @@ use modalkit::editing::cursor::Cursor;
 use ratatui::symbols::line::{HORIZONTAL, THICK_VERTICAL};
 use ratatui_image::sliced::SlicedProtocol;
 
-use crate::base::MessageEdits;
+use crate::base::{MessageEdits, Thread};
 use crate::message::html::{StyleTree, parse_matrix_html};
 use crate::message::poll::{Poll, UnstablePoll};
 use crate::message::state::{body_cow_state, html_state};
@@ -980,22 +980,48 @@ impl<'a> MessageFormatter<'a> {
         protos
     }
 
-    fn push_thread_reply_count(&mut self, len: usize, text: &mut Text<'a>, style: Style) {
+    fn push_thread_reply_count(&mut self, thread: &Thread, text: &mut Text<'a>, style: Style) {
+        let len = thread.summary.as_ref().map(|s| s.num_replies).unwrap_or_default();
+        let len = thread.len().max(len as usize);
+
         if len == 0 {
             return;
         }
 
         // If we have threaded replies to this message, show how many.
-        let plural = len != 1;
+        let is_plural = len != 1;
         let mut threaded =
             printer::TextPrinter::new(self.width(), style, self.settings, self.info).literal(true);
         let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
         threaded.push_str(" \u{2937} ", style);
         threaded.push_span_nobreak(len);
-        if plural {
+        if is_plural {
             threaded.push_str(" replies in thread", style);
         } else {
             threaded.push_str(" reply in thread", style);
+        }
+
+        let (num, singular, plural) = if thread.unreads.num_mentions > 0 {
+            (thread.unreads.num_mentions, "mention", "mentions")
+        } else if thread.unreads.num_notifications > 0 {
+            (thread.unreads.num_notifications, "notification", "notifications")
+        } else {
+            (thread.unreads.num_unread, "unread", "unreads")
+        };
+
+        if num > 0 {
+            threaded.push_str(" (", style);
+            threaded.push_span_nobreak(Span::styled(
+                thread.unreads.num_mentions.to_string(),
+                style.bold(),
+            ));
+            threaded.push_str(" ", style);
+            if is_plural {
+                threaded.push_str(plural, style);
+            } else {
+                threaded.push_str(singular, style);
+            }
+            threaded.push_str(")", style);
         }
 
         self.push_text(threaded.finish(), style, text);
@@ -1140,8 +1166,7 @@ impl Message {
         settings: &ApplicationSettings,
     ) -> bool {
         let marker = info
-            .user_receipts
-            .get(&self.receipt_thread(info))
+            .user_receipts(&self.receipt_thread(info))
             .and_then(|receipts| receipts.get(&settings.user_id));
 
         is_after_read_marker(prev, marker)
@@ -1377,8 +1402,7 @@ impl Message {
         }
 
         if let Some(thread) = self.event.event_id().and_then(|id| info.get_thread(id)) {
-            let len = thread.summary.as_ref().map(|s| s.num_replies).unwrap_or_default();
-            fmt.push_thread_reply_count(thread.len().max(len as usize), &mut text, style);
+            fmt.push_thread_reply_count(thread, &mut text, style);
         }
 
         (text, protos)
@@ -2112,7 +2136,7 @@ pub mod tests {
         assert!(msg.show_trackbar(Some(&prev), &info, &settings));
 
         // The main timeline's marker doesn't apply to a thread's messages.
-        info.user_receipts.remove(&ReceiptThread::Thread(root));
+        info.user_receipts_or_default(ReceiptThread::Thread(root)).clear();
         info.set_receipt(ReceiptThread::Main, user_id, MSG1_EVID.clone());
         assert!(!msg.show_trackbar(Some(&prev), &info, &settings));
     }

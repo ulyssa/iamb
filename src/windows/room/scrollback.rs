@@ -1904,8 +1904,7 @@ mod tests {
             let info = store.application.get_room_info(TEST_ROOM1_ID.clone());
 
             let receipt = info
-                .user_receipts
-                .get(&ReceiptThread::Main)
+                .user_receipts(&ReceiptThread::Main)
                 .and_then(|receipts| receipts.get(&user_id));
             let exp = Some(&*MSG1_EVID);
             assert_eq!(

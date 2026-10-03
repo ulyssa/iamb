@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
+use eyeball_im::{Vector, VectorDiff};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt as _, StreamExt};
 use gethostname::gethostname;
@@ -17,6 +18,7 @@ use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
 use matrix_sdk::deserialized_responses::{ThreadSummaryStatus, TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_cache::DecryptionRetryRequest;
+use matrix_sdk::event_cache::ThreadEventCacheUpdate;
 use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::notification_settings::RoomNotificationMode;
 use matrix_sdk::room::RoomMember;
@@ -35,7 +37,6 @@ use matrix_sdk::ruma::api::client::room::create_room::v3::{
 };
 use matrix_sdk::ruma::api::client::space::get_hierarchy::v1::Request as SpaceHierarchyRequest;
 use matrix_sdk::ruma::assign;
-use matrix_sdk::ruma::events::MessageLikeEvent;
 use matrix_sdk::ruma::events::key::verification::ready::{
     OriginalSyncKeyVerificationReadyEvent,
     ToDeviceKeyVerificationReadyEvent,
@@ -67,6 +68,7 @@ use matrix_sdk::ruma::events::{
     AnyMessageLikeEventContent,
     AnyTimelineEvent,
     InitialStateEvent,
+    MessageLikeEvent,
     SyncEphemeralRoomEvent,
     SyncMessageLikeEvent,
     SyncStateEvent,
@@ -746,6 +748,114 @@ async fn load_initial_messages(client: Client, store: AsyncProgramStore) {
         .await;
 }
 
+pub(crate) async fn subscribe_thread_updates(
+    room: MatrixRoom,
+    thread_id: OwnedEventId,
+    store: AsyncProgramStore,
+) -> Result<JoinHandle<()>, matrix_sdk::event_cache::EventCacheError> {
+    let (thread, drop_handle) =
+        room.client().event_cache().thread(room.room_id(), &thread_id).await?;
+    let (initial_events, mut events_sub) = thread.subscribe().await?;
+    let mut unreads_sub = thread.subscribe_to_thread_info().await?;
+    let initial_unreads = thread.read_receipts().await?;
+
+    Ok(tokio::spawn(async move {
+        let _drop_handle = drop_handle;
+
+        {
+            let msgs = get_receipts_for_timeline_events(&room, initial_events).await;
+            let mut locked = store.lock().await;
+
+            let ChatStore { presences, rooms, previews, settings, .. } = &mut locked.application;
+            let info = rooms.get_or_default(room.room_id().to_owned());
+            insert_msgs_and_receipts(msgs, info, presences, previews, settings);
+            info.get_thread_mut(thread_id.clone()).unreads = initial_unreads;
+        }
+
+        loop {
+            tokio::select! {
+                update = events_sub.recv() => {
+                    let Ok(update) = update else {
+                        // The sender side has gone away, so just exit the loop.
+                        return
+                    };
+
+                    handle_thread_update(update, &room, &store).await;
+                }
+
+                update = unreads_sub.next() => {
+                    let Some(update) = update else {
+                        // The sender side has gone away, so just exit the loop.
+                        return
+                    };
+
+                store
+                    .lock()
+                    .await
+                    .application
+                    .get_room_info(room.room_id().to_owned())
+                    .get_thread_mut(thread_id.clone())
+                    .unreads = update.read_receipts;
+                }
+            }
+        }
+    }))
+}
+
+async fn handle_thread_update(
+    update: ThreadEventCacheUpdate,
+    room: &MatrixRoom,
+    store: &AsyncProgramStore,
+) {
+    match update {
+        ThreadEventCacheUpdate::UpdateTimelineEvents(diffs) => {
+            // Ignore the update itself and just collect the changed items. Because we index by
+            // `MessageKey`, the correct events should be replaced.
+            let events = diffs
+                .diffs
+                .into_iter()
+                .flat_map(|diff| {
+                    match diff {
+                        VectorDiff::Append { values } | VectorDiff::Reset { values } => values,
+                        VectorDiff::PushFront { value } |
+                        VectorDiff::PushBack { value } |
+                        VectorDiff::Insert { value, .. } |
+                        VectorDiff::Set { value, .. } => {
+                            let mut vector = Vector::new();
+                            vector.push_back(value);
+                            vector
+                        },
+                        VectorDiff::PopFront |
+                        VectorDiff::PopBack |
+                        VectorDiff::Clear |
+                        VectorDiff::Remove { .. } |
+                        VectorDiff::Truncate { .. } => Vector::new(),
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let msgs = get_receipts_for_timeline_events(room, events).await;
+            let mut locked = store.lock().await;
+
+            let ChatStore { presences, rooms, previews, settings, .. } = &mut locked.application;
+            let info = rooms.get_or_default(room.room_id().to_owned());
+            insert_msgs_and_receipts(msgs, info, presences, previews, settings);
+        },
+        ThreadEventCacheUpdate::AddReadReceiptEvent { event } => {
+            let mut locked = store.lock().await;
+            let info = locked.application.get_room_info(room.room_id().to_owned());
+            for (event_id, receipts) in event {
+                let Some(receipts) = receipts.get(&ReceiptType::Read) else {
+                    continue;
+                };
+                for (user_id, rcpt) in receipts.iter() {
+                    info.set_receipt(rcpt.thread.clone(), user_id.to_owned(), event_id.clone());
+                }
+            }
+        },
+    }
+}
+
 async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
     // Load any pending older messages or members every 2 seconds.
     let mut interval = tokio::time::interval(Duration::from_secs(2));
@@ -815,6 +925,14 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     }
 
     let mut locked = store.lock().await;
+
+    for room in rooms.iter().chain(dms.iter()) {
+        locked
+            .application
+            .get_room_info(room.room_id().to_owned())
+            .subscribe_thread_updates(room, store)
+            .await
+    }
 
     locked.application.sync_info.spaces = spaces;
     locked.application.sync_info.rooms = rooms;
