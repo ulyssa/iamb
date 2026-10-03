@@ -1037,6 +1037,12 @@ impl From<matrix_sdk::event_cache::EventCacheError> for IambError {
     }
 }
 
+impl From<matrix_sdk::authentication::oauth::OAuthError> for IambError {
+    fn from(value: matrix_sdk::authentication::oauth::OAuthError) -> Self {
+        Self::from(matrix_sdk::Error::from(value))
+    }
+}
+
 impl ApplicationError for IambError {}
 
 /// Indicates where an [EventId] lives in the [ChatStore].

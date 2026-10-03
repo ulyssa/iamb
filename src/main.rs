@@ -61,6 +61,7 @@ mod config;
 mod keybindings;
 mod message;
 mod notifications;
+mod oauth;
 mod prelude;
 mod preview;
 mod util;
@@ -892,14 +893,12 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
     if settings.session_json.is_file() {
         let session = settings.read_session(&settings.session_json)?;
         worker.login(LoginStyle::SessionRestore(session.into()))?;
-
         return Ok(());
     }
 
     if settings.session_json_old.is_file() && !settings.sled_dir.is_dir() {
         let session = settings.read_session(&settings.session_json_old)?;
         worker.login(LoginStyle::SessionRestore(session.into()))?;
-
         return Ok(());
     }
 
@@ -915,22 +914,24 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
     }
 
     loop {
-        let login_style =
-            match read_response("Please select login type: [p]assword / [s]ingle sign on")
-                .chars()
-                .next()
-                .map(|c| c.to_ascii_lowercase())
-            {
-                None | Some('p') => {
-                    let password = rpassword::prompt_password("Password: ")?;
-                    LoginStyle::Password(password)
-                },
-                Some('s') => LoginStyle::SingleSignOn,
-                Some(_) => {
-                    println!("Failed to login. Please enter 'p' or 's'");
-                    continue;
-                },
-            };
+        let login_style = match read_response(
+            "Please select login type: [p]assword / [s]ingle sign on / [o]auth",
+        )
+        .chars()
+        .next()
+        .map(|c| c.to_ascii_lowercase())
+        {
+            None | Some('p') => {
+                let password = rpassword::prompt_password("Password: ")?;
+                LoginStyle::Password(password)
+            },
+            Some('s') => LoginStyle::SingleSignOn,
+            Some('o') => LoginStyle::OAuth,
+            Some(_) => {
+                println!("Failed to login. Please enter 'p', 's' or 'o'");
+                continue;
+            },
+        };
 
         match worker.login(login_style) {
             Ok(info) => {
@@ -963,6 +964,8 @@ async fn login_normal(
     println!("* Logging in for {}...", settings.profile.user_id);
     login(worker, settings).await?;
     println!("* Syncing...");
+    worker.spawn_sync()?;
+    worker.setup_persistent_tokens();
     worker::do_first_sync(&worker.client, store)
         .await
         .map_err(IambError::from)?;
