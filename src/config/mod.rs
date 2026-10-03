@@ -278,7 +278,7 @@ impl From<Session> for AuthSession {
     fn from(session: Session) -> Self {
         if let Some(client_id) = session.client_id {
             AuthSession::OAuth(Box::new(OAuthSession {
-                client_id: client_id,
+                client_id,
                 user: UserSession {
                     meta: SessionMeta {
                         user_id: session.user_id,
