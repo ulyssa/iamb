@@ -2102,12 +2102,8 @@ impl ClientWorker {
 
         match style {
             LoginStyle::SessionRestore(session) => {
-                if let AuthSession::OAuth(_) = session {
-                    client.restore_session(session).await.map_err(IambError::from)?;
-                    self.update_profile_on_login().await?;
-                } else {
-                    client.restore_session(session).await.map_err(IambError::from)?;
-                }
+                client.restore_session(session).await.map_err(IambError::from)?;
+                return self.update_profile_on_login(true).await;
             },
             LoginStyle::Password(password) => {
                 let resp = client
@@ -2144,7 +2140,6 @@ impl ClientWorker {
             },
             LoginStyle::OAuth => {
                 oauth_login(self.client.clone(), &self.settings.profile.user_id).await?;
-                self.update_profile_on_login().await?;
                 let session = self
                     .client
                     .oauth()
@@ -2153,7 +2148,7 @@ impl ClientWorker {
                 self.settings.write_session(session)?;
             },
         }
-        Ok(Some(InfoMessage::from("* Successfully logged in!")))
+        self.update_profile_on_login(false).await
     }
 
     async fn logout(&mut self, user_id: String) -> IambResult<EditInfo> {
@@ -2304,24 +2299,32 @@ impl ClientWorker {
         }
     }
 
-    async fn update_profile_on_login(&mut self) -> IambResult<EditInfo> {
+    async fn update_profile_on_login(&mut self, restored: bool) -> IambResult<EditInfo> {
         let client = self.client.clone();
 
         // User may login with different user than in settings, update here
-        let whoami = client.whoami().await;
-        if whoami
-            .as_ref()
-            .is_err_and(|e| matches!(e, matrix_sdk::HttpError::RefreshToken(_)))
-        {
-            tracing::error!("Login attempt failed: invalid refresh token loaded from profile.");
-        }
-        let user = whoami.map_err(IambError::from)?;
+        // If we've restored the session from an access token, check with the
+        // homeserver who the token belongs to
+        let user = if restored {
+            let whoami = client.whoami().await;
+            if whoami
+                .as_ref()
+                .is_err_and(|e| matches!(e, matrix_sdk::HttpError::RefreshToken(_)))
+            {
+                tracing::error!("Login attempt failed: invalid refresh token loaded from profile.");
+            }
+            &whoami.map_err(IambError::from)?.user_id
+        } else {
+            client.user_id().expect("logged in user should have id")
+        };
 
-        let msg = format!("* Successfully logged in with {}!", &user.user_id);
-        if user.user_id != self.settings.profile.user_id {
+        let msg = format!("* Successfully logged in with {}!", user);
+        if user != self.settings.profile.user_id {
             // Trace warning if this happens
             tracing::warn!("logged in as a different user than expected");
-            self.settings.profile.user_id = user.user_id;
+            self.settings.profile.user_id = user.to_owned();
+            let store = self.store.as_ref().expect("initialised worker should have store");
+            store.lock().await.application.settings.profile.user_id = user.to_owned();
         }
         Ok(Some(InfoMessage::from(msg)))
     }
