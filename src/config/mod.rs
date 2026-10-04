@@ -1,5 +1,6 @@
 //! # Logic for loading and validating application configuration
 
+use std::collections::HashSet;
 use std::env;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write as _};
@@ -49,17 +50,24 @@ const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
     SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
 ];
 
-const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 6] = [
+const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 10] = [
     SortColumn(SortFieldRoom::Favorite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Invite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::LowPriority, SortOrder::Ascending),
-    SortColumn(SortFieldRoom::Unread, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Mentions, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Notifications, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Joined, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Space, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Direct, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Recent, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 
-const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 1] =
-    [SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending)];
+const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 3] = [
+    SortColumn(SortFieldSpace::Room(SortFieldRoom::Space), SortOrder::Ascending),
+    SortColumn(SortFieldSpace::Room(SortFieldRoom::Joined), SortOrder::Ascending),
+    SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending),
+];
 
 const DEFAULT_ENABLE_TITLE: bool = true;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
@@ -70,11 +78,7 @@ const DEFAULT_ICON_ENC: Cow<'static, str> = Cow::Borrowed("[E] ");
 const DEFAULT_ICON_UNENC: Cow<'static, str> = Cow::Borrowed("[U] ");
 const DEFAULT_ICON_UNKNOWN: Cow<'static, str> = Cow::Borrowed("[?] ");
 
-const DEFAULT_LOG_LEVEL: &str = if cfg!(feature = "max_level_error") {
-    "error"
-} else {
-    "warn"
-};
+const DEFAULT_LOG_LEVEL: &str = "off";
 
 fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
@@ -802,7 +806,7 @@ pub struct TunableValues {
     pub message_user_color: bool,
     pub default_register: Option<Register>,
     pub default_room: Option<String>,
-    pub default_via: Vec<OwnedServerName>,
+    pub default_via: HashSet<OwnedServerName>,
     pub open_command: Option<Vec<String>>,
     pub mouse: Mouse,
     pub notifications: Notifications,
@@ -965,7 +969,11 @@ impl Tunables {
             message_user_color: self.message_user_color.unwrap_or(false),
             default_register: self.default_register,
             default_room: self.default_room,
-            default_via: self.default_via.unwrap_or_else(|| vec![DEFAULT_VIA_SERVER.clone()]),
+            default_via: self
+                .default_via
+                .unwrap_or_else(|| vec![DEFAULT_VIA_SERVER.clone()])
+                .into_iter()
+                .collect(),
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),
@@ -1671,9 +1679,16 @@ mod tests {
     #[test]
     fn test_parse_default_rooms_sort() {
         let sort: Vec<SortColumn<SortFieldRoom>> =
-            serde_json::from_str(r#"["favorite","invite","lowpriority","unread","joined","name"]"#)
+            serde_json::from_str(r#"["favorite","invite","lowpriority","mentions","notifications","joined","space","dm","recent","name"]"#)
                 .unwrap();
         assert_eq!(sort.as_slice(), &DEFAULT_ROOM_SORT[..]);
+    }
+
+    #[test]
+    fn test_parse_default_space_sort() {
+        let sort: Vec<SortColumn<SortFieldSpace>> =
+            serde_json::from_str(r#"["space","joined","spaceorder"]"#).unwrap();
+        assert_eq!(sort.as_slice(), &DEFAULT_SPACE_SORT[..]);
     }
 
     #[test]

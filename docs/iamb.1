@@ -162,6 +162,8 @@ Send an invitation to a user to join the currently focused room.
 Join the focused preview room.
 .It Sy ":join [room]"
 Join a room or open it if you are already joined.
+This accepts a room id, room alias, user id, matrix uri, or matrix.to link.
+If the argument refers to a user, a dm room with them is opened/created.
 .It Sy ":knock"
 Request to join the focused preview room.
 .It Sy ":knock accept [user]"

@@ -1,10 +1,11 @@
 use matrix_sdk::ruma::RoomOrAliasId;
-use matrix_sdk::ruma::room::{JoinRuleSummary, RestrictedSummary};
+use matrix_sdk::ruma::room::{JoinRuleSummary, RestrictedSummary, RoomType as MatrixRoomType};
 
 use crate::base::{HomeserverAction, SyncInfo};
 use crate::prelude::*;
-use crate::windows::ROOM_PREVIEW_DEBOUNCE;
+use crate::util::wrap;
 use crate::windows::room::RoomState;
+use crate::windows::{ROOM_PREVIEW_DEBOUNCE, room_name_from_preview};
 use crate::worker::ClientResponse;
 
 fn can_join_restricted(summary: &RestrictedSummary, sync_info: &SyncInfo) -> bool {
@@ -181,7 +182,9 @@ impl NotJoinedState {
                     .room_via
                     .get(self.alias())
                     .unwrap_or(&store.application.settings.tunables.default_via)
-                    .to_vec();
+                    .iter()
+                    .cloned()
+                    .collect();
 
                 let chan = store.application.worker.join_room_chan(self.alias().to_owned(), via);
                 self.joining = Some(chan);
@@ -287,22 +290,29 @@ impl StatefulWidget for NotJoined<'_> {
 
         match preview {
             Some((Ok(preview), _)) => {
-                let mut name_line = vec![];
-                if let Some(name) = &preview.name {
-                    name_line.push(Span::styled(name, StyleModifier::BOLD));
-                    name_line.push(Span::raw(" "));
-                }
+                lines.push(Line::from(room_name_from_preview(preview)));
+
+                let mut info_line = vec![];
                 if let Some(alias) = &preview.canonical_alias {
-                    name_line.push(Span::raw(alias.as_str()));
-                    name_line.push(Span::raw(" "));
+                    info_line.push(", ".into());
+                    info_line.push(Span::styled(alias.as_str(), default_style.bold()));
+                }
+                if Some(MatrixRoomType::Space) == preview.room_type {
+                    info_line.push(", ".into());
+                    info_line.push("Space".into());
+                } else if Some(true) == preview.is_direct {
+                    info_line.push(", ".into());
+                    info_line.push("DM".into());
                 }
 
-                name_line.push(Span::raw("("));
-                name_line.push(Span::raw(state.alias().as_str()));
-                name_line.push(Span::raw(")"));
-                lines.push(Line::from(name_line));
+                if !info_line.is_empty() {
+                    info_line.push(")".into());
+                    info_line[0] = "(".into();
+                    lines.push(Line::from(info_line));
+                }
+
                 if let Some(topic) = &preview.topic {
-                    lines.push(Line::raw(topic));
+                    lines.extend(wrap(topic, area.width.into()).map(|(line, _)| Line::raw(line)));
                 }
 
                 lines.push(Line::raw(""));
