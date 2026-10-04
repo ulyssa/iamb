@@ -454,6 +454,13 @@ impl Visitor<'_> for SortUserVisitor {
     }
 }
 
+/// An account property.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountField {
+    /// The account's ignore list.
+    Ignore,
+}
+
 /// A room property.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomField {
@@ -653,6 +660,15 @@ pub enum SendAction {
 pub enum HomeserverAction {
     /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
+
+    /// Update an account property.
+    AccountSet(AccountField, String),
+
+    /// Show information about an account property.
+    AccountShow(AccountField),
+
+    /// Remove a user from the account's ignore list.
+    AccountUnset(AccountField, Option<String>),
 
     /// "Knock" on a room, aka "request to join".
     KnockSend(OwnedRoomOrAliasId, Option<String>),
@@ -918,7 +934,7 @@ pub enum IambError {
     InvalidNotificationLevel(String),
 
     /// An invalid user identifier was specified.
-    #[error("Invalid user identifier: {0}")]
+    #[error("Invalid user identifier: {0:?}")]
     InvalidUserId(String),
 
     /// An invalid user identifier was specified.
@@ -2480,6 +2496,22 @@ impl ChatStore {
         };
 
         Ok(store)
+    }
+
+    /// Clear the `EventCache` for all rooms.
+    ///
+    /// This forces a re-fetch of the most recent messages in joined rooms afterwards,
+    /// which makes sure that we re-fetch any missing events (such as those sent by
+    /// recently unignored users that a re-fetch would make appear in the timeline).
+    pub async fn clear_room_cache(&mut self, client: &Client) -> Result<(), IambError> {
+        client.event_cache().clear_all_rooms().await?;
+        for room in client.joined_rooms() {
+            let room_id = room.room_id().to_owned();
+            let room = self.rooms.get_or_default(room_id.clone());
+            room.reached_timeline_start = false;
+            self.need_load.need_messages(room_id.to_owned());
+        }
+        Ok(())
     }
 
     /// Get a joined room.

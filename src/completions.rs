@@ -380,6 +380,16 @@ fn complete_iamb_verify(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     }
 }
 
+/// Tab completion for `:ignore`
+fn complete_iamb_ignore(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    let subcmds = ["set", "unset", "show"];
+    match args.len() {
+        1 => complete_choices(&args[0], &subcmds),
+        2 if subcmds[0..2].contains(&args[0].as_str()) => complete_users(args[1].as_str(), store),
+        _ => vec![],
+    }
+}
+
 /// Tab completion for `:self`
 fn complete_iamb_self(args: Vec<String>) -> Vec<String> {
     let subcmds = ["avatar", "name", "nick", "timezone", "tz"];
@@ -585,6 +595,7 @@ fn complete_cmdarg(
 
         "follow" => complete_choices(&args[0], &["next", "previous"]),
 
+        "ignore" => complete_iamb_ignore(args, store),
         "invite" => complete_iamb_invite(args, store),
 
         "join" if args.len() == 1 => complete_matrix_names(&args[0], store),

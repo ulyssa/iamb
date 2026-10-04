@@ -252,12 +252,12 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
             let info = rooms.get_or_default(room_id.clone());
 
             if !info.recently_fetched() && !info.fetching {
-                info.fetch_last = Instant::now().into();
-                info.fetching = true;
-
                 if info.reached_timeline_start {
                     continue;
                 }
+
+                info.fetch_last = Instant::now().into();
+                info.fetching = true;
 
                 plan.push(Plan::Messages(room_id.to_owned(), message_need));
             } else {
