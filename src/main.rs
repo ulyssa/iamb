@@ -717,6 +717,7 @@ impl Application {
                     .unignore_user(&user)
                     .await
                     .map_err(IambError::from)?;
+                store.application.clear_room_cache(&self.worker.client).await?;
                 Ok(vec![])
             },
             HomeserverAction::AccountShow(AccountField::Ignore) => {

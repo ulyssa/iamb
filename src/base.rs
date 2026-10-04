@@ -2498,6 +2498,22 @@ impl ChatStore {
         Ok(store)
     }
 
+    /// Clear the `EventCache` for all rooms.
+    ///
+    /// This forces a re-fetch of the most recent messages in joined rooms afterwards,
+    /// which makes sure that we re-fetch any missing events (such as those sent by
+    /// recently unignored users that a re-fetch would make appear in the timeline).
+    pub async fn clear_room_cache(&mut self, client: &Client) -> Result<(), IambError> {
+        client.event_cache().clear_all_rooms().await?;
+        for room in client.joined_rooms() {
+            let room_id = room.room_id().to_owned();
+            let room = self.rooms.get_or_default(room_id.clone());
+            room.reached_timeline_start = false;
+            self.need_load.need_messages(room_id.to_owned());
+        }
+        Ok(())
+    }
+
     /// Get a joined room.
     pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
         let room = self.worker.client.get_room(room_id)?;
