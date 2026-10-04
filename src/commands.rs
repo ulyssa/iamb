@@ -583,14 +583,27 @@ fn iamb_self(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 }
 
 fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    if !desc.arg.text.is_empty() {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let open = ctx.switch(OpenTarget::Application(IambId::SpaceList));
-    let step = CommandStep::Continue(open, ctx.context.clone());
+    match args.pop().as_deref() {
+        Some("toplevel") => {
+            let open = ctx.switch(OpenTarget::Application(IambId::ToplevelSpaceList));
+            let step = CommandStep::Continue(open, ctx.context.clone());
 
-    return Ok(step);
+            return Ok(step);
+        },
+        Some(_) => return Result::Err(CommandError::InvalidArgument),
+        None => {
+            let open = ctx.switch(OpenTarget::Application(IambId::SpaceList));
+            let step = CommandStep::Continue(open, ctx.context.clone());
+
+            return Ok(step);
+        },
+    }
 }
 
 fn iamb_welcome(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
