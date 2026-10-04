@@ -225,6 +225,7 @@ impl StatefulWidget for Space<'_> {
 
         let fields = &settings.tunables.sort.space;
         items.sort_by(|a, b| space_fields_cmp(a, b, fields, collator, info));
+        items.iter_mut().for_each(|i| i.set_section(fields));
 
         state.list.set(items);
         state.set_ignorecase(settings.tunables.ignorecase);
@@ -290,6 +291,7 @@ fn space_fields_cmp<T: RoomLikeItem>(
 mod tests {
     use matrix_sdk::ruma::{assign, server_name};
 
+    use crate::windows::RoomType;
     use crate::windows::tests::TestRoomItem;
 
     use super::*;
@@ -307,6 +309,7 @@ mod tests {
             tags: vec![],
             unread: Default::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
         let room2 = TestRoomItem {
             room_id: RoomId::new_v1(server).to_owned(),
@@ -315,6 +318,7 @@ mod tests {
             tags: vec![],
             unread: Default::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
         let room3 = TestRoomItem {
             room_id: RoomId::new_v1(server).to_owned(),
@@ -323,6 +327,7 @@ mod tests {
             tags: vec![],
             unread: Default::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
         let room4 = TestRoomItem {
             room_id: RoomId::new_v1(server).to_owned(),
@@ -331,6 +336,7 @@ mod tests {
             tags: vec![],
             unread: Default::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
 
         let space = SpaceInfo {

@@ -14,7 +14,6 @@ use matrix_sdk::ruma::events::poll::unstable_start::{
 };
 use matrix_sdk::ruma::events::reaction::ReactionEvent;
 use matrix_sdk::ruma::events::relation::Replacement;
-use matrix_sdk::ruma::events::room::encrypted::Relation as EncryptedRelation;
 use matrix_sdk::ruma::events::room::encrypted::RoomEncryptedEvent;
 use matrix_sdk::ruma::events::room::message::RelationWithoutReplacement;
 use matrix_sdk::ruma::events::room::message::{
@@ -257,6 +256,12 @@ pub enum SortFieldRoom {
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
 
+    /// Sort rooms by whether they are direct messages.
+    Direct,
+
+    /// Sort rooms by whether they are spaces.
+    Space,
+
     /// Sort rooms by whether they are invites.
     Invite,
 
@@ -336,8 +341,10 @@ impl Visitor<'_> for SortRoomVisitor {
             "mentions" => SortFieldRoom::Mentions,
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
+            "dm" => SortFieldRoom::Direct,
             "id" => SortFieldRoom::RoomId,
             "server" => SortFieldRoom::Server,
+            "space" => SortFieldRoom::Space,
             "invite" => SortFieldRoom::Invite,
             "joined" => SortFieldRoom::Joined,
             _ => {
