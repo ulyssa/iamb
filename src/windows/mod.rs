@@ -14,12 +14,22 @@ use feruca::Collator;
 use matrix_sdk::RoomHeroWithProfile;
 use matrix_sdk::room::RoomMember;
 use matrix_sdk::ruma::events::room::member::MembershipState;
+use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
 use matrix_sdk::ruma::room::RoomType as MatrixRoomType;
-use matrix_sdk::ruma::{RoomAliasId, RoomOrAliasId, assign};
+use matrix_sdk::ruma::{RoomAliasId, RoomOrAliasId};
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
+use ratatui::prelude::Stylize;
 
-use crate::base::{RoomNeeds, SortColumn, SortFieldRoom, SortFieldUser, SortOrder, UnreadInfo};
+use crate::base::{
+    RoomNeeds,
+    SortColumn,
+    SortFieldRoom,
+    SortFieldSpace,
+    SortFieldUser,
+    SortOrder,
+    UnreadInfo,
+};
 use crate::prelude::*;
 use crate::resolve_mxid;
 use crate::windows::room::{RoomState, room_command};
@@ -199,6 +209,20 @@ fn room_cmp<T: RoomLikeItem>(
             // sort larger timestamps towards the top.
             some_cmp(a.recent_ts(), b.recent_ts(), |a, b| b.cmp(a))
         },
+        SortFieldRoom::Direct => {
+            // sort DMs before other rooms.
+            let a = a.room_type().is_dm();
+            let b = b.room_type().is_dm();
+
+            b.cmp(&a)
+        },
+        SortFieldRoom::Space => {
+            // sort spaces before other rooms.
+            let a = a.room_type().is_space();
+            let b = b.room_type().is_space();
+
+            b.cmp(&a)
+        },
         SortFieldRoom::Invite => {
             // sort invites before other rooms.
             let a = a.membership() == MatrixRoomState::Invited;
@@ -285,8 +309,130 @@ fn append_tags<'a>(tags: Vec<Vec<Span<'a>>>, spans: &mut Vec<Span<'a>>, style: S
     spans.push(Span::styled(")", style));
 }
 
+trait SortedSection {
+    fn get_section<R: RoomLikeItem>(&self, room: &R) -> Option<ListSectionHeader>;
+}
+
+impl SortedSection for SortFieldSpace {
+    fn get_section<R: RoomLikeItem>(&self, room: &R) -> Option<ListSectionHeader> {
+        match self {
+            SortFieldSpace::Room(col) => col.get_section(room),
+            SortFieldSpace::SpaceOrder => None,
+        }
+    }
+}
+
+impl SortedSection for SortFieldRoom {
+    fn get_section<R: RoomLikeItem>(&self, room: &R) -> Option<ListSectionHeader> {
+        let header = match self {
+            SortFieldRoom::Direct if room.room_type().is_dm() => ListSectionHeader::DirectMessages,
+            SortFieldRoom::Favorite if room.has_tag(TagName::Favorite) => {
+                ListSectionHeader::Favorites
+            },
+            SortFieldRoom::Invite if room.membership() == MatrixRoomState::Invited => {
+                ListSectionHeader::Invites
+            },
+            SortFieldRoom::Joined if room.membership() != MatrixRoomState::Joined => {
+                ListSectionHeader::NotJoined
+            },
+            SortFieldRoom::LowPriority if room.has_tag(TagName::LowPriority) => {
+                ListSectionHeader::LowPriority
+            },
+            SortFieldRoom::Space if room.room_type().is_space() => ListSectionHeader::Spaces,
+            SortFieldRoom::Unread if room.is_unread() => ListSectionHeader::Unreads,
+            _ => return None,
+        };
+
+        return Some(header);
+    }
+}
+
+fn get_user_section(sort: &SortFieldUser, member: &MemberItem) -> Option<ListSectionHeader> {
+    let header = match sort {
+        SortFieldUser::PowerLevel => {
+            match member.member.power_level() {
+                UserPowerLevel::Infinite => ListSectionHeader::Admins,
+                UserPowerLevel::Int(n) => {
+                    match u32::try_from(n) {
+                        Ok(100) => ListSectionHeader::Admins,
+                        Ok(51..100) => ListSectionHeader::ModeratorsPlus,
+                        Ok(50) => ListSectionHeader::Moderators,
+                        _ => return None,
+                    }
+                },
+                _ => return None,
+            }
+        },
+        SortFieldUser::Knock if member.is_knock() => ListSectionHeader::Knocked,
+        SortFieldUser::Invite if member.is_invite() => ListSectionHeader::Invited,
+        _ => return None,
+    };
+
+    return Some(header);
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum ListSectionHeader {
+    Admins,
+    DirectMessages,
+    Favorites,
+    Invited,
+    Invites,
+    Knocked,
+    LowPriority,
+    Moderators,
+    ModeratorsPlus,
+    NotJoined,
+    Rooms,
+    Spaces,
+    Unreads,
+    Users,
+}
+
+impl ListSectionHeader {
+    fn for_room<R, T>(room: &R, sort: &[SortColumn<T>]) -> Option<Self>
+    where
+        T: SortedSection,
+        R: RoomLikeItem,
+    {
+        sort.iter()
+            .flat_map(|col| col.0.get_section(room))
+            .next()
+            .or(Some(Self::Rooms))
+    }
+
+    fn for_user(member: &MemberItem, sort: &[SortColumn<SortFieldUser>]) -> Option<Self> {
+        sort.iter()
+            .flat_map(|col| get_user_section(&col.0, member))
+            .next()
+            .or(Some(Self::Users))
+    }
+}
+
+impl From<ListSectionHeader> for Line<'static> {
+    fn from(section: ListSectionHeader) -> Self {
+        match section {
+            ListSectionHeader::Admins => Line::raw("Admins").bold(),
+            ListSectionHeader::DirectMessages => Line::raw("Direct Messages").bold(),
+            ListSectionHeader::Favorites => Line::raw("Favorites").bold(),
+            ListSectionHeader::Invited => Line::raw("Invited").bold(),
+            ListSectionHeader::Invites => Line::raw("Invites").bold(),
+            ListSectionHeader::Knocked => Line::raw("Knocked").bold(),
+            ListSectionHeader::LowPriority => Line::raw("Low Priority").bold(),
+            ListSectionHeader::Moderators => Line::raw("Moderators").bold(),
+            ListSectionHeader::ModeratorsPlus => Line::raw("Moderators++").bold(),
+            ListSectionHeader::NotJoined => Line::raw("Not Joined").bold(),
+            ListSectionHeader::Rooms => Line::raw("Rooms").bold(),
+            ListSectionHeader::Spaces => Line::raw("Spaces").bold(),
+            ListSectionHeader::Unreads => Line::raw("Unreads").bold(),
+            ListSectionHeader::Users => Line::raw("Users").bold(),
+        }
+    }
+}
+
 trait RoomLikeItem {
     fn room_id(&self) -> &RoomId;
+    fn room_type(&self) -> &RoomType;
     fn has_tag(&self, tag: TagName) -> bool;
     fn is_unread(&self) -> bool;
     fn recent_ts(&self) -> Option<&MessageTimeStamp>;
@@ -565,14 +711,13 @@ impl WindowOps<IambInfo> for IambWindow {
                     .dms
                     .iter()
                     .map(|room| {
-                        GenericRoomItem::new_unspecified(
-                            room,
-                            rooms.get_or_default(room.room_id().to_owned()),
-                        )
+                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                            .show_room_type(false)
                     })
                     .collect::<Vec<_>>();
                 let fields = &settings.tunables.sort.dms;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+                items.iter_mut().for_each(|i| i.set_section(fields));
 
                 state.set(items);
                 state.set_ignorecase(settings.tunables.ignorecase);
@@ -597,6 +742,7 @@ impl WindowOps<IambInfo> for IambWindow {
                         .collect::<Vec<_>>();
                     let fields = &settings.tunables.sort.members;
                     items.sort_by(|a, b| user_fields_cmp(a, b, fields));
+                    items.iter_mut().for_each(|i| i.set_section(fields));
                     state.set(items);
                     *last_fetch = Some(Instant::now());
                 }
@@ -643,14 +789,13 @@ impl WindowOps<IambInfo> for IambWindow {
                     .rooms
                     .iter()
                     .map(|room| {
-                        GenericRoomItem::new_unspecified(
-                            room,
-                            rooms.get_or_default(room.room_id().to_owned()),
-                        )
+                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                            .show_room_type(false)
                     })
                     .collect::<Vec<_>>();
                 let fields = &settings.tunables.sort.rooms;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+                items.iter_mut().for_each(|i| i.set_section(fields));
 
                 state.set(items);
                 state.set_ignorecase(settings.tunables.ignorecase);
@@ -674,6 +819,7 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 let fields = &settings.tunables.sort.chats;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+                items.iter_mut().for_each(|i| i.set_section(fields));
 
                 state.set(items);
                 state.set_ignorecase(settings.tunables.ignorecase);
@@ -698,6 +844,7 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 let fields = &settings.tunables.sort.chats;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+                items.iter_mut().for_each(|i| i.set_section(fields));
 
                 state.set(items);
                 state.set_ignorecase(settings.tunables.ignorecase);
@@ -722,6 +869,7 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 let fields = &settings.tunables.sort.chats;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+                items.iter_mut().for_each(|i| i.set_section(fields));
 
                 state.set(items);
                 state.set_ignorecase(settings.tunables.ignorecase);
@@ -746,6 +894,7 @@ impl WindowOps<IambInfo> for IambWindow {
 
                 let fields = &settings.tunables.sort.chats;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+                items.iter_mut().for_each(|i| i.set_section(fields));
 
                 state.set(items);
                 state.set_ignorecase(settings.tunables.ignorecase);
@@ -762,15 +911,14 @@ impl WindowOps<IambInfo> for IambWindow {
                     .spaces
                     .iter()
                     .map(|room| {
-                        GenericRoomItem::new_unspecified(
-                            room,
-                            rooms.get_or_default(room.room_id().to_owned()),
-                        )
+                        GenericRoomItem::new(room, rooms.get_or_default(room.room_id().to_owned()))
+                            .show_room_type(false)
                     })
                     .collect::<Vec<_>>();
 
                 let fields = &settings.tunables.sort.spaces;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+                items.iter_mut().for_each(|i| i.set_section(fields));
 
                 state.set(items);
                 state.set_ignorecase(settings.tunables.ignorecase);
@@ -1089,6 +1237,14 @@ enum RoomType {
 }
 
 impl RoomType {
+    fn is_dm(&self) -> bool {
+        matches!(self, Self::DM)
+    }
+
+    fn is_space(&self) -> bool {
+        matches!(self, Self::Space)
+    }
+
     fn text(self) -> Option<&'static str> {
         match self {
             RoomType::DM => Some("DM"),
@@ -1105,14 +1261,15 @@ pub struct GenericRoomItem {
     name: String,
     alias: Option<OwnedRoomAliasId>,
     tags: Option<Tags>,
+    section: Option<ListSectionHeader>,
     membership: MatrixRoomState,
     unread: UnreadInfo,
-
+    room_type_show: bool,
     room_type: RoomType,
 }
 
 impl GenericRoomItem {
-    pub fn new_unspecified(room: &MatrixRoom, info: &RoomInfo) -> Self {
+    pub fn new(room: &MatrixRoom, info: &RoomInfo) -> Self {
         let room_id = room.room_id().to_owned();
 
         let name = info.name.clone().unwrap_or_default();
@@ -1120,18 +1277,6 @@ impl GenericRoomItem {
         let unread = info.unreads(room);
         let tags = info.tags.clone();
 
-        Self {
-            name,
-            room_id,
-            alias,
-            tags,
-            unread,
-            membership: room.state(),
-            room_type: RoomType::Unspecified,
-        }
-    }
-
-    pub fn new(room: &MatrixRoom, info: &RoomInfo) -> Self {
         let room_type = if room.is_space() {
             RoomType::Space
         } else if room.is_dm() {
@@ -1140,7 +1285,17 @@ impl GenericRoomItem {
             RoomType::Room
         };
 
-        assign!(Self::new_unspecified(room, info), { room_type })
+        Self {
+            name,
+            room_id,
+            alias,
+            tags,
+            unread,
+            membership: room.state(),
+            room_type,
+            room_type_show: true,
+            section: None,
+        }
     }
 
     /// Create for a room the client doesn't know about.
@@ -1168,6 +1323,8 @@ impl GenericRoomItem {
                 membership: MatrixRoomState::Left,
                 unread: Default::default(),
                 room_type: RoomType::Unspecified,
+                room_type_show: false,
+                section: None,
             };
         };
 
@@ -1189,13 +1346,28 @@ impl GenericRoomItem {
             membership,
             unread: Default::default(),
             room_type,
+            room_type_show: true,
+            section: None,
         }
+    }
+
+    fn show_room_type(mut self, show: bool) -> Self {
+        self.room_type_show = show;
+        self
+    }
+
+    fn set_section<T: SortedSection>(&mut self, fields: &[SortColumn<T>]) {
+        self.section = ListSectionHeader::for_room(self, fields);
     }
 }
 
 impl RoomLikeItem for GenericRoomItem {
     fn room_id(&self) -> &RoomId {
         &self.room_id
+    }
+
+    fn room_type(&self) -> &RoomType {
+        &self.room_type
     }
 
     fn has_tag(&self, tag: TagName) -> bool {
@@ -1237,7 +1409,7 @@ impl Display for GenericRoomItem {
 }
 
 impl ListItem<IambInfo> for GenericRoomItem {
-    type Section = &'static str;
+    type Section = ListSectionHeader;
 
     fn show(
         &self,
@@ -1257,7 +1429,12 @@ impl ListItem<IambInfo> for GenericRoomItem {
         let tags_style = selected_style(selected, theme.rooms.labels);
         let (name, mut labels) =
             name_and_labels(&self.name, &self.unread, self.membership, name_style, tags_style);
-        let mut spans = vec![name];
+
+        let mut spans = if self.section.is_some() {
+            vec![Span::raw("  "), name]
+        } else {
+            vec![name]
+        };
 
         if let Some(label) = self.room_type.text() {
             labels.push(vec![Span::styled(label, tags_style)]);
@@ -1274,6 +1451,10 @@ impl ListItem<IambInfo> for GenericRoomItem {
     fn get_word(&self) -> Option<String> {
         // Return the room identifier so that `gf`/`<C-W>gf`/etc. go to the room:
         self.room_id().to_string().into()
+    }
+
+    fn get_section(&self) -> Option<&Self::Section> {
+        self.section.as_ref()
     }
 }
 
@@ -1292,11 +1473,16 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for GenericRoomItem {
 pub struct MemberItem {
     member: RoomMember,
     room_id: OwnedRoomId,
+    section: Option<ListSectionHeader>,
 }
 
 impl MemberItem {
     fn new(member: RoomMember, room_id: OwnedRoomId) -> Self {
-        Self { member, room_id }
+        Self { member, room_id, section: None }
+    }
+
+    fn set_section(&mut self, sort: &[SortColumn<SortFieldUser>]) {
+        self.section = ListSectionHeader::for_user(self, sort);
     }
 
     fn is_knock(&self) -> bool {
@@ -1315,7 +1501,7 @@ impl Display for MemberItem {
 }
 
 impl ListItem<IambInfo> for MemberItem {
-    type Section = &'static str;
+    type Section = ListSectionHeader;
 
     fn show(
         &self,
@@ -1402,6 +1588,10 @@ impl ListItem<IambInfo> for MemberItem {
         }
 
         return Line::from(spans).into();
+    }
+
+    fn get_section(&self) -> Option<&ListSectionHeader> {
+        self.section.as_ref()
     }
 
     fn get_word(&self) -> Option<String> {
@@ -1544,6 +1734,7 @@ mod tests {
     #[derive(Debug, Eq, PartialEq)]
     pub(super) struct TestRoomItem {
         pub room_id: OwnedRoomId,
+        pub room_type: RoomType,
         pub tags: Vec<TagName>,
         pub alias: Option<OwnedRoomAliasId>,
         pub name: &'static str,
@@ -1554,6 +1745,10 @@ mod tests {
     impl RoomLikeItem for &TestRoomItem {
         fn room_id(&self) -> &RoomId {
             self.room_id.as_ref()
+        }
+
+        fn room_type(&self) -> &RoomType {
+            &self.room_type
         }
 
         fn has_tag(&self, tag: TagName) -> bool {
@@ -1596,7 +1791,9 @@ mod tests {
             tags: None,
             membership: MatrixRoomState::Joined,
             unread: UnreadInfo::default(),
+            room_type_show: true,
             room_type: RoomType::Room,
+            section: None,
         };
 
         // This should return the room ID, and not the alias or name:
@@ -1616,6 +1813,7 @@ mod tests {
             name: "Z",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         let room2 = TestRoomItem {
@@ -1625,6 +1823,7 @@ mod tests {
             name: "Unnamed Room",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         let room3 = TestRoomItem {
@@ -1634,6 +1833,7 @@ mod tests {
             name: "Cool Room",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         // Sort by Name ascending.
@@ -1688,6 +1888,7 @@ mod tests {
                 unread_mentions: 0,
             },
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         let room2 = TestRoomItem {
@@ -1703,6 +1904,7 @@ mod tests {
                 unread_mentions: 0,
             },
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         let room3 = TestRoomItem {
@@ -1718,6 +1920,7 @@ mod tests {
                 unread_mentions: 0,
             },
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         // Sort by Recent ascending.
@@ -1746,6 +1949,7 @@ mod tests {
             name: "Old room 1",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         let room2 = TestRoomItem {
@@ -1755,6 +1959,7 @@ mod tests {
             name: "Old room 2",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         let room3 = TestRoomItem {
@@ -1764,6 +1969,7 @@ mod tests {
             name: "New Fancy Room",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
 
         // Sort invites first
@@ -1800,6 +2006,7 @@ mod tests {
             name: "Room E",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         // Alias and V1 room ID agree:
@@ -1810,6 +2017,7 @@ mod tests {
             name: "Room D",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Joined,
+            room_type: RoomType::Room,
         };
 
         // Alias, V2 room id:
@@ -1820,6 +2028,7 @@ mod tests {
             name: "Room C",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
 
         // Alias and V2 room ID disagree, alias is used:
@@ -1830,6 +2039,7 @@ mod tests {
             name: "Room B",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
 
         // No alias and V2 room ID:
@@ -1840,6 +2050,7 @@ mod tests {
             name: "Room A",
             unread: UnreadInfo::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
 
         // Sort servers first ascending, name tie breaks:

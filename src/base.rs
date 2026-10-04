@@ -251,6 +251,12 @@ pub enum SortFieldRoom {
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
 
+    /// Sort rooms by whether they are direct messages.
+    Direct,
+
+    /// Sort rooms by whether they are spaces.
+    Space,
+
     /// Sort rooms by whether they are invites.
     Invite,
 
@@ -328,8 +334,10 @@ impl Visitor<'_> for SortRoomVisitor {
             "unread" => SortFieldRoom::Unread,
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
+            "dm" => SortFieldRoom::Direct,
             "id" => SortFieldRoom::RoomId,
             "server" => SortFieldRoom::Server,
+            "space" => SortFieldRoom::Space,
             "invite" => SortFieldRoom::Invite,
             "joined" => SortFieldRoom::Joined,
             _ => {

@@ -567,7 +567,7 @@ How to sort the
 .Sy :rooms
 window.
 Defaults to
-.Sy ["favorite",\ "invite",\ "lowpriority",\ "unread",\ "joined",\ "name"] .
+.Sy ["favorite",\ "invite",\ "lowpriority",\ "unread",\ "joined",\ "space",\ "dm",\ "name"] .
 .It Sy chats
 How to sort the
 .Sy :chats
@@ -592,7 +592,7 @@ value.
 .It Sy space
 How to sort rooms in a space.
 Defaults to
-.Sy ["spaceorder"] .
+.Sy ["space",\ "joined",\ "spaceorder"] .
 .It Sy members
 How to sort the
 .Sy :members
@@ -603,28 +603,32 @@ Defaults to
 .Pp
 The available values for sorting rooms are:
 .Bl -tag -width Ds
+.It Sy alias
+Sort rooms by alphabetically ascending canonical room alias.
+.It Sy dm
+Put direct messages before other rooms.
 .It Sy favorite
 Put favorite rooms before other rooms.
+.It Sy id
+Sort rooms by alphabetically ascending Matrix room identifier.
+.It Sy invite
+Put invites before other rooms.
+.It Sy joined
+Put joined rooms before unjoined rooms.
 .It Sy lowpriority
 Put lowpriority rooms after other rooms.
 .It Sy name
 Sort rooms by alphabetically ascending room name.
-.It Sy alias
-Sort rooms by alphabetically ascending canonical room alias.
-.It Sy id
-Sort rooms by alphabetically ascending Matrix room identifier.
+.It Sy recent
+Sort rooms by most recent message timestamp.
 .It Sy server
 Sort rooms by alphabetically ascending server name from the room alias.
 This will fall back to the server from the room identifier if there is
 no canonical alias for the room.
+.It Sy space
+Put spaces before other rooms.
 .It Sy unread
 Put unread rooms before other rooms.
-.It Sy joined
-Put joined rooms before unjoined rooms.
-.It Sy recent
-Sort rooms by most recent message timestamp.
-.It Sy invite
-Put invites before other rooms.
 .El
 The available values for sorting space members are the same as for sorting rooms with the addition:
 .Bl -tag -width Ds
