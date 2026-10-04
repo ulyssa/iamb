@@ -206,6 +206,7 @@ pub fn mock_settings() -> ApplicationSettings {
     ApplicationSettings {
         layout_json: PathBuf::new(),
         session_json: PathBuf::new(),
+        device_json: PathBuf::new(),
         session_json_old: PathBuf::new(),
         sled_dir: PathBuf::new(),
         sqlite_dir: PathBuf::new(),
