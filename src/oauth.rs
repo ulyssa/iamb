@@ -1,19 +1,15 @@
-use std::{
-    char,
-    net::{Ipv4Addr, Ipv6Addr},
-};
+use std::net::{Ipv4Addr, Ipv6Addr};
 
-use matrix_sdk::{
-    authentication::oauth::{
-        OAuthAuthorizationData,
-        registration::{ApplicationType, ClientMetadata, Localized, OAuthGrantType},
-    },
-    ruma::{self, UserId, serde::Raw},
-    utils::{
-        UrlOrQuery,
-        local_server::{LocalServerBuilder, LocalServerRedirectHandle},
-    },
+use matrix_sdk::authentication::oauth::OAuthAuthorizationData;
+use matrix_sdk::authentication::oauth::registration::{
+    ApplicationType,
+    ClientMetadata,
+    Localized,
+    OAuthGrantType,
 };
+use matrix_sdk::ruma::{self, UserId, serde::Raw};
+use matrix_sdk::utils::UrlOrQuery;
+use matrix_sdk::utils::local_server::{LocalServerBuilder, LocalServerRedirectHandle};
 use tokio::{io::AsyncBufReadExt, task::JoinHandle};
 
 use crate::prelude::*;
