@@ -385,7 +385,7 @@ fn complete_iamb_ignore(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     let subcmds = ["set", "unset", "show"];
     match args.len() {
         1 => complete_choices(&args[0], &subcmds),
-        2 if subcmds[0..2].contains(&args[0].as_str()) => complete_users(&args[1].as_str(), store),
+        2 if subcmds[0..2].contains(&args[0].as_str()) => complete_users(args[1].as_str(), store),
         _ => vec![],
     }
 }
