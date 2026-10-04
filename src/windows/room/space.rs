@@ -201,14 +201,22 @@ impl StatefulWidget for Space<'_> {
         } = &mut self.store.application;
         let default_rooms_style = settings.theme.rooms.default;
 
-        let info = spaces.entry(state.room_id.clone()).or_default();
+        if !spaces.contains_key(&state.room_id) {
+            spaces.insert(state.room_id.clone(), Default::default());
+        }
+        let info = spaces.get(&state.room_id).unwrap();
 
         let mut items = info
             .children
             .keys()
             .map(|id| {
                 if let Some(room) = worker.client.get_room(id) {
-                    GenericRoomItem::new(&room, rooms.get_or_default(id.to_owned()))
+                    GenericRoomItem::new(
+                        &room,
+                        rooms.get_or_default(id.to_owned()),
+                        &worker.client,
+                        spaces,
+                    )
                 } else {
                     GenericRoomItem::new_unknown(id.to_owned(), room_previews, need_load)
                 }

@@ -247,6 +247,12 @@ pub enum SortFieldRoom {
     /// Sort rooms by whether they have unread messages.
     Unread,
 
+    /// Sort rooms by whether they have unread notifications.
+    Notifications,
+
+    /// Sort rooms by whether they have unread mentions.
+    Mentions,
+
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
 
@@ -331,6 +337,8 @@ impl Visitor<'_> for SortRoomVisitor {
             "lowpriority" => SortFieldRoom::LowPriority,
             "recent" => SortFieldRoom::Recent,
             "unread" => SortFieldRoom::Unread,
+            "notifications" => SortFieldRoom::Notifications,
+            "mentions" => SortFieldRoom::Mentions,
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
             "dm" => SortFieldRoom::Direct,
@@ -1111,8 +1119,22 @@ impl UnreadInfo {
         self.unread_mentions > 0
     }
 
+    pub fn has_notification(&self) -> bool {
+        self.unread_notifications > 0
+    }
+
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
         self.latest.as_ref()
+    }
+}
+
+impl std::ops::AddAssign<Self> for UnreadInfo {
+    fn add_assign(&mut self, rhs: Self) {
+        self.unread_mark |= rhs.unread_mark;
+        self.unread_messages += rhs.unread_messages;
+        self.unread_notifications += rhs.unread_notifications;
+        self.unread_mentions += rhs.unread_mentions;
+        self.latest = self.latest.max(rhs.latest);
     }
 }
 
