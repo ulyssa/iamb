@@ -72,6 +72,7 @@ pub use unicode_width::UnicodeWidthStr;
 pub use url::Url;
 
 pub use crate::base::{
+    AccountField,
     AsyncProgramStore,
     ChatStore,
     IambAction,

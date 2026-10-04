@@ -26,6 +26,7 @@ use std::sync::atomic::AtomicUsize;
 use clap::{CommandFactory, Parser};
 use matrix_sdk::OwnedServerName;
 use matrix_sdk::ruma::api::error::ErrorKind;
+use matrix_sdk::ruma::events::ignored_user_list::IgnoredUserListEventContent;
 use modalkit::actions::{Commandable, TabAction, TabContainer, TabCount, WindowContainer};
 use modalkit::crossterm;
 use modalkit::crossterm::cursor::SetCursorStyle;
@@ -690,6 +691,61 @@ impl Application {
                 let action = WindowAction::Switch(target);
 
                 Ok(vec![(action.into(), ctx)])
+            },
+            HomeserverAction::AccountSet(AccountField::Ignore, user) => {
+                let Ok(user) = OwnedUserId::from_str(&user) else {
+                    return Err(IambError::InvalidUserId(user).into());
+                };
+                self.worker
+                    .client
+                    .account()
+                    .ignore_user(&user)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountUnset(AccountField::Ignore, user) => {
+                let Some(user) = user else {
+                    return Err(IambError::InvalidUserId("".into()).into());
+                };
+                let Ok(user) = OwnedUserId::from_str(&user) else {
+                    return Err(IambError::InvalidUserId(user).into());
+                };
+                self.worker
+                    .client
+                    .account()
+                    .unignore_user(&user)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountShow(AccountField::Ignore) => {
+                let ignored = self
+                    .worker
+                    .client
+                    .account()
+                    .account_data::<IgnoredUserListEventContent>()
+                    .await
+                    .map_err(IambError::from)?;
+                let ignored_users = ignored
+                    .map(|raw| raw.deserialize())
+                    .transpose()
+                    .map_err(IambError::from)?
+                    .map(|c| c.ignored_users);
+
+                let msg = match ignored_users {
+                    Some(users) if !users.is_empty() => {
+                        let mut s = String::from("You are currently ignoring:");
+                        users.keys().for_each(|u| {
+                            s.push_str("\n - ");
+                            s.push_str(u.as_ref());
+                        });
+                        s
+                    },
+                    _ => "You have no users in your ignore list.".into(),
+                };
+
+                Ok(vec![(Action::ShowInfoMessage(InfoMessage::Pager(msg)), ctx)])
             },
             HomeserverAction::KnockSend(alias, reason) => {
                 let _ = self

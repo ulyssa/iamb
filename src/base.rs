@@ -454,6 +454,13 @@ impl Visitor<'_> for SortUserVisitor {
     }
 }
 
+/// An account property.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountField {
+    /// The account's ignore list.
+    Ignore,
+}
+
 /// A room property.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RoomField {
@@ -653,6 +660,15 @@ pub enum SendAction {
 pub enum HomeserverAction {
     /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
+
+    /// Update an account property.
+    AccountSet(AccountField, String),
+
+    /// Show information about an account property.
+    AccountShow(AccountField),
+
+    /// Remove a user from the account's ignore list.
+    AccountUnset(AccountField, Option<String>),
 
     /// "Knock" on a room, aka "request to join".
     KnockSend(OwnedRoomOrAliasId, Option<String>),
@@ -918,7 +934,7 @@ pub enum IambError {
     InvalidNotificationLevel(String),
 
     /// An invalid user identifier was specified.
-    #[error("Invalid user identifier: {0}")]
+    #[error("Invalid user identifier: {0:?}")]
     InvalidUserId(String),
 
     /// An invalid user identifier was specified.

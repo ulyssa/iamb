@@ -49,6 +49,38 @@ fn tag_name(name: String) -> Result<TagName, CommandError> {
     Ok(tag)
 }
 
+fn iamb_ignore(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut iter = desc.arg.strings()?.into_iter();
+    let action = iter.next().ok_or(CommandError::InvalidArgument)?;
+    let arg = iter.next();
+
+    if iter.next().is_some() {
+        return Err(CommandError::InvalidArgument);
+    }
+
+    let act: IambAction = match (action.as_str(), arg) {
+        ("set", Some(user)) => HomeserverAction::AccountSet(AccountField::Ignore, user).into(),
+        ("set", None) => return Err(CommandError::InvalidArgument),
+
+        ("show", None) => HomeserverAction::AccountShow(AccountField::Ignore).into(),
+        ("show", Some(_)) => return Err(CommandError::InvalidArgument),
+
+        ("unset", Some(user)) => {
+            HomeserverAction::AccountUnset(AccountField::Ignore, Some(user)).into()
+        },
+        ("unset", None) => return Err(CommandError::InvalidArgument),
+
+        (op, _) => {
+            let msg = format!("unknown `:ignore` operation: {op:?}");
+            return Err(CommandError::Error(msg));
+        },
+    };
+
+    let step = CommandStep::Continue(act.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_invite(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let args = desc.arg.strings()?;
 
@@ -1109,6 +1141,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
         name: "forget".into(),
         aliases: vec![],
         f: iamb_forget,
+    });
+    cmds.add_command(ProgramCommand {
+        name: "ignore".into(),
+        aliases: vec![],
+        f: iamb_ignore,
     });
     cmds.add_command(ProgramCommand {
         name: "invite".into(),
