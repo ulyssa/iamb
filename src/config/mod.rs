@@ -50,17 +50,22 @@ const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
     SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
 ];
 
-const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 6] = [
+const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 8] = [
     SortColumn(SortFieldRoom::Favorite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Invite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::LowPriority, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Unread, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Joined, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Space, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Direct, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 
-const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 1] =
-    [SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending)];
+const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 3] = [
+    SortColumn(SortFieldSpace::Room(SortFieldRoom::Space), SortOrder::Ascending),
+    SortColumn(SortFieldSpace::Room(SortFieldRoom::Joined), SortOrder::Ascending),
+    SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending),
+];
 
 const DEFAULT_ENABLE_TITLE: bool = true;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
@@ -1671,10 +1676,18 @@ mod tests {
 
     #[test]
     fn test_parse_default_rooms_sort() {
-        let sort: Vec<SortColumn<SortFieldRoom>> =
-            serde_json::from_str(r#"["favorite","invite","lowpriority","unread","joined","name"]"#)
-                .unwrap();
+        let sort: Vec<SortColumn<SortFieldRoom>> = serde_json::from_str(
+            r#"["favorite","invite","lowpriority","unread","joined","space","dm","name"]"#,
+        )
+        .unwrap();
         assert_eq!(sort.as_slice(), &DEFAULT_ROOM_SORT[..]);
+    }
+
+    #[test]
+    fn test_parse_default_space_sort() {
+        let sort: Vec<SortColumn<SortFieldSpace>> =
+            serde_json::from_str(r#"["space","joined","spaceorder"]"#).unwrap();
+        assert_eq!(sort.as_slice(), &DEFAULT_SPACE_SORT[..]);
     }
 
     #[test]
