@@ -2077,18 +2077,20 @@ impl ClientWorker {
                 self.settings.write_session(session)?;
             },
             LoginStyle::SingleSignOn => {
-                let mut login = client.matrix_auth().login_sso(|url| {
-                    let opened = format!(
-                        "The following URL should have been opened in your browser:\n    {url}"
-                    );
+                let mut login = client
+                    .matrix_auth()
+                    .login_sso(|url| {
+                        let opened = format!(
+                            "The following URL should have been opened in your browser:\n    {url}"
+                        );
 
-                    async move {
-                        tokio::task::spawn_blocking(move || open::that(url));
-                        println!("\n{opened}\n");
-                        Ok(())
-                    }
-                });
-                login = login.initial_device_display_name(initial_devname().as_str());
+                        async move {
+                            tokio::task::spawn_blocking(move || open::that(url));
+                            println!("\n{opened}\n");
+                            Ok(())
+                        }
+                    })
+                    .initial_device_display_name(initial_devname().as_str());
                 if let Some(device_id) = self.settings.read_saved_device() {
                     login = login.device_id(device_id.as_str());
                 }
@@ -2126,8 +2128,10 @@ impl ClientWorker {
         // Capture the device ID before logging out, while the session is
         // still active. The next login reuses it, which keeps the existing
         // SDK store valid: the store is keyed by user and device ID, and a
-        // freshly issued device ID would no longer match it (#775).
-        let device_id = self.client.device_id().map(|id| id.to_owned());
+        // freshly issued device ID would no longer match it.
+        if let Some(device_id) = self.client.device_id() {
+            self.settings.write_saved_device(device_id)?;
+        }
 
         // Send the logout request.
         if let Err(e) = self.client.matrix_auth().logout().await {
@@ -2135,11 +2139,6 @@ impl ClientWorker {
             let err = UIError::Failure(msg);
 
             return Err(err);
-        }
-
-        // Save the device ID for the next login.
-        if let Some(device_id) = device_id {
-            self.settings.write_saved_device(&device_id)?;
         }
 
         // Remove the session.json file.
