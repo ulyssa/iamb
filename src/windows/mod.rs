@@ -743,7 +743,6 @@ impl WindowOps<IambInfo> for IambWindow {
             sync_info,
             verifications,
             worker,
-            spaces,
             ..
         } = &mut store.application;
         let client = &worker.client;
@@ -1029,15 +1028,19 @@ impl WindowOps<IambInfo> for IambWindow {
                     .into_iter()
                     .flat_map(|room_id| worker.client.get_room(room_id))
                     .map(|room| {
-                        GenericRoomItem::new_unspecified(
+                        GenericRoomItem::new(
                             &room,
                             rooms.get_or_default(room.room_id().to_owned()),
+                            client,
+                            spaces,
                         )
+                        .show_room_type(false)
                     })
                     .collect::<Vec<_>>();
 
                 let fields = &settings.tunables.sort.spaces;
                 items.sort_by(|a, b| room_fields_cmp(a, b, fields, collator));
+                items.iter_mut().for_each(|i| i.set_section(fields));
 
                 state.set(items);
                 state.set_ignorecase(settings.tunables.ignorecase);
