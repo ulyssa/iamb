@@ -375,6 +375,8 @@ impl SortedSection for SortFieldRoom {
                 ListSectionHeader::LowPriority
             },
             SortFieldRoom::Space if room.room_type().is_space() => ListSectionHeader::Spaces,
+            SortFieldRoom::Mentions if room.has_mention() => ListSectionHeader::UnreadMentions,
+            SortFieldRoom::Notifications if room.has_notification() => ListSectionHeader::Unreads,
             SortFieldRoom::Unread if room.is_unread() => ListSectionHeader::Unreads,
             _ => return None,
         };
@@ -421,6 +423,7 @@ pub enum ListSectionHeader {
     NotJoined,
     Rooms,
     Spaces,
+    UnreadMentions,
     Unreads,
     Users,
 }
@@ -461,6 +464,7 @@ impl From<ListSectionHeader> for Line<'static> {
             ListSectionHeader::Rooms => Line::raw("Rooms").bold(),
             ListSectionHeader::Spaces => Line::raw("Spaces").bold(),
             ListSectionHeader::Unreads => Line::raw("Unreads").bold(),
+            ListSectionHeader::UnreadMentions => Line::raw("Unread Mentions").bold(),
             ListSectionHeader::Users => Line::raw("Users").bold(),
         }
     }
