@@ -14,7 +14,6 @@ use matrix_sdk::ruma::events::poll::unstable_start::{
 };
 use matrix_sdk::ruma::events::reaction::ReactionEvent;
 use matrix_sdk::ruma::events::relation::Replacement;
-use matrix_sdk::ruma::events::room::encrypted::Relation as EncryptedRelation;
 use matrix_sdk::ruma::events::room::encrypted::RoomEncryptedEvent;
 use matrix_sdk::ruma::events::room::message::RelationWithoutReplacement;
 use matrix_sdk::ruma::events::room::message::{
@@ -248,8 +247,20 @@ pub enum SortFieldRoom {
     /// Sort rooms by whether they have unread messages.
     Unread,
 
+    /// Sort rooms by whether they have unread notifications.
+    Notifications,
+
+    /// Sort rooms by whether they have unread mentions.
+    Mentions,
+
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
+
+    /// Sort rooms by whether they are direct messages.
+    Direct,
+
+    /// Sort rooms by whether they are spaces.
+    Space,
 
     /// Sort rooms by whether they are invites.
     Invite,
@@ -326,10 +337,14 @@ impl Visitor<'_> for SortRoomVisitor {
             "lowpriority" => SortFieldRoom::LowPriority,
             "recent" => SortFieldRoom::Recent,
             "unread" => SortFieldRoom::Unread,
+            "notifications" => SortFieldRoom::Notifications,
+            "mentions" => SortFieldRoom::Mentions,
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
+            "dm" => SortFieldRoom::Direct,
             "id" => SortFieldRoom::RoomId,
             "server" => SortFieldRoom::Server,
+            "space" => SortFieldRoom::Space,
             "invite" => SortFieldRoom::Invite,
             "joined" => SortFieldRoom::Joined,
             _ => {
@@ -1104,8 +1119,22 @@ impl UnreadInfo {
         self.unread_mentions > 0
     }
 
+    pub fn has_notification(&self) -> bool {
+        self.unread_notifications > 0
+    }
+
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
         self.latest.as_ref()
+    }
+}
+
+impl std::ops::AddAssign<Self> for UnreadInfo {
+    fn add_assign(&mut self, rhs: Self) {
+        self.unread_mark |= rhs.unread_mark;
+        self.unread_messages += rhs.unread_messages;
+        self.unread_notifications += rhs.unread_notifications;
+        self.unread_mentions += rhs.unread_mentions;
+        self.latest = self.latest.max(rhs.latest);
     }
 }
 

@@ -201,14 +201,22 @@ impl StatefulWidget for Space<'_> {
         } = &mut self.store.application;
         let default_rooms_style = settings.theme.rooms.default;
 
-        let info = spaces.entry(state.room_id.clone()).or_default();
+        if !spaces.contains_key(&state.room_id) {
+            spaces.insert(state.room_id.clone(), Default::default());
+        }
+        let info = spaces.get(&state.room_id).unwrap();
 
         let mut items = info
             .children
             .keys()
             .filter_map(|id| {
                 if let Some(room) = worker.client.get_room(id) {
-                    GenericRoomItem::new(&room, rooms.get_or_default(id.to_owned()))
+                    GenericRoomItem::new(
+                        &room,
+                        rooms.get_or_default(id.to_owned()),
+                        &worker.client,
+                        spaces,
+                    )
                 } else if let Some((preview, fetched)) = room_previews.get(id.as_str()) {
                     if fetched.elapsed() > ROOM_PREVIEW_DEBOUNCE {
                         need_load.need_preview(id.to_owned().into());
@@ -229,6 +237,7 @@ impl StatefulWidget for Space<'_> {
 
         let fields = &settings.tunables.sort.space;
         items.sort_by(|a, b| space_fields_cmp(a, b, fields, collator, info));
+        items.iter_mut().for_each(|i| i.set_section(fields));
 
         state.list.set(items);
         state.set_ignorecase(settings.tunables.ignorecase);
@@ -294,6 +303,7 @@ fn space_fields_cmp<T: RoomLikeItem>(
 mod tests {
     use matrix_sdk::ruma::{assign, server_name};
 
+    use crate::windows::RoomType;
     use crate::windows::tests::TestRoomItem;
 
     use super::*;
@@ -311,6 +321,7 @@ mod tests {
             tags: vec![],
             unread: Default::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
         let room2 = TestRoomItem {
             room_id: RoomId::new_v1(server).to_owned(),
@@ -319,6 +330,7 @@ mod tests {
             tags: vec![],
             unread: Default::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
         let room3 = TestRoomItem {
             room_id: RoomId::new_v1(server).to_owned(),
@@ -327,6 +339,7 @@ mod tests {
             tags: vec![],
             unread: Default::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
         let room4 = TestRoomItem {
             room_id: RoomId::new_v1(server).to_owned(),
@@ -335,6 +348,7 @@ mod tests {
             tags: vec![],
             unread: Default::default(),
             membership: MatrixRoomState::Invited,
+            room_type: RoomType::Room,
         };
 
         let space = SpaceInfo {
