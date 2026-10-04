@@ -756,7 +756,7 @@ impl WindowOps<IambInfo> for IambWindow {
                             client,
                             spaces,
                         )
-                            .show_room_type(false)
+                        .show_room_type(false)
                     })
                     .collect::<Vec<_>>();
                 let fields = &settings.tunables.sort.dms;
@@ -839,7 +839,7 @@ impl WindowOps<IambInfo> for IambWindow {
                             client,
                             spaces,
                         )
-                            .show_room_type(false)
+                        .show_room_type(false)
                     })
                     .collect::<Vec<_>>();
                 let fields = &settings.tunables.sort.rooms;
@@ -986,7 +986,7 @@ impl WindowOps<IambInfo> for IambWindow {
                             client,
                             spaces,
                         )
-                            .show_room_type(false)
+                        .show_room_type(false)
                     })
                     .collect::<Vec<_>>();
 
