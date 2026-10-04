@@ -22,7 +22,6 @@ use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 use ratatui::prelude::Stylize;
 
 use crate::base::{
-    RoomNeeds,
     SortColumn,
     SortFieldRoom,
     SortFieldSpace,
@@ -1309,9 +1308,6 @@ enum RoomType {
     DM,
     Room,
     Space,
-
-    /// Don't show a tag
-    Unspecified,
 }
 
 impl RoomType {
@@ -1328,7 +1324,6 @@ impl RoomType {
             RoomType::DM => Some("DM"),
             RoomType::Room => Some("Room"),
             RoomType::Space => Some("Space"),
-            RoomType::Unspecified => None,
         }
     }
 }
@@ -1391,36 +1386,9 @@ impl GenericRoomItem {
         }
     }
 
-    /// Create for a room the client doesn't know about.
-    pub fn new_unknown(
-        room_id: OwnedRoomId,
-        room_previews: &HashMap<
-            OwnedRoomOrAliasId,
-            (Result<RoomPreview, matrix_sdk::Error>, Instant),
-        >,
-        need_load: &mut RoomNeeds,
-    ) -> Self {
-        let alias_id: OwnedRoomOrAliasId = room_id.clone().into();
-
-        let preview = room_previews.get(&alias_id);
-        if preview.is_none_or(|(_, fetched)| fetched.elapsed() > ROOM_PREVIEW_DEBOUNCE) {
-            need_load.need_preview(alias_id);
-        }
-
-        let Some((Ok(preview), _)) = preview else {
-            return Self {
-                name: room_id.to_string(),
-                room_id,
-                alias: None,
-                tags: None,
-                membership: MatrixRoomState::Left,
-                unread: Default::default(),
-                room_type: RoomType::Unspecified,
-                room_type_show: false,
-                section: None,
-            };
-        };
-
+    /// Create a [GenericRoomItem] for a room that the client doesn't know about, because
+    /// the user hasn't joined it yet.
+    pub fn new_preview(room_id: OwnedRoomId, preview: &RoomPreview) -> Self {
         let name = room_name_from_preview(preview).into_owned();
         let membership = preview.state.unwrap_or(MatrixRoomState::Left);
         let room_type = if Some(MatrixRoomType::Space) == preview.room_type {
@@ -1521,7 +1489,9 @@ impl ListItem<IambInfo> for GenericRoomItem {
             name_and_labels(&self.name, &self.unread, self.membership, name_style, tags_style);
         let mut spans = vec![unreads, name];
 
-        if let Some(label) = self.room_type.text() {
+        if let Some(label) = self.room_type.text() &&
+            self.room_type_show
+        {
             labels.push(vec![Span::styled(label, tags_style)]);
         }
 

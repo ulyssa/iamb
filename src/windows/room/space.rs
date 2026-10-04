@@ -8,7 +8,7 @@ use modalkit_ratatui::list::{List, ListState};
 
 use crate::base::{SortColumn, SortFieldRoom, SortFieldSpace, SortOrder, SpaceInfo};
 use crate::prelude::*;
-use crate::windows::{GenericRoomItem, RoomLikeItem, room_cmp};
+use crate::windows::{GenericRoomItem, ROOM_PREVIEW_DEBOUNCE, RoomLikeItem, room_cmp};
 
 /// State needed for rendering [Space].
 pub struct SpaceState {
@@ -209,7 +209,7 @@ impl StatefulWidget for Space<'_> {
         let mut items = info
             .children
             .keys()
-            .map(|id| {
+            .filter_map(|id| {
                 if let Some(room) = worker.client.get_room(id) {
                     GenericRoomItem::new(
                         &room,
@@ -217,9 +217,21 @@ impl StatefulWidget for Space<'_> {
                         &worker.client,
                         spaces,
                     )
+                } else if let Some((preview, fetched)) = room_previews.get(id.as_str()) {
+                    if fetched.elapsed() > ROOM_PREVIEW_DEBOUNCE {
+                        need_load.need_preview(id.to_owned().into());
+                    }
+
+                    if let Ok(preview) = preview {
+                        GenericRoomItem::new_preview(id.to_owned(), preview)
+                    } else {
+                        return None;
+                    }
                 } else {
-                    GenericRoomItem::new_unknown(id.to_owned(), room_previews, need_load)
+                    need_load.need_preview(id.to_owned().into());
+                    return None;
                 }
+                .into()
             })
             .collect::<Vec<_>>();
 
