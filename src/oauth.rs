@@ -7,10 +7,13 @@ use matrix_sdk::authentication::oauth::registration::{
     Localized,
     OAuthGrantType,
 };
-use matrix_sdk::ruma::{self, UserId, serde::Raw};
+use matrix_sdk::ruma;
+use matrix_sdk::ruma::UserId;
+use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::utils::UrlOrQuery;
 use matrix_sdk::utils::local_server::{LocalServerBuilder, LocalServerRedirectHandle};
-use tokio::{io::AsyncBufReadExt, task::JoinHandle};
+use tokio::io::AsyncBufReadExt;
+use tokio::task::JoinHandle;
 
 use crate::prelude::*;
 
