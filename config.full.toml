@@ -4,7 +4,7 @@
 # While some of the options in here are set to their defaults, many of them are
 # not and might not actually be what you want to use!
 #
-# If you want to start with something simple, use `config.basic.toml` and add
+# If you want to start with something simple, use `config.example.toml` and add
 # things in one-by-one as you need them.
 # ==============================================================================
 default_profile = "default"
