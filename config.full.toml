@@ -1,13 +1,27 @@
+# ==============================================================================
+# NOTE: This file demonstrates using most of the configuration options in iamb!
+#
+# While some of the options in here are set to their defaults, many of them are
+# not and might not actually be what you want to use!
+#
+# If you want to start with something simple, use `config.basic.toml` and add
+# things in one-by-one as you need them.
+# ==============================================================================
 default_profile = "default"
 
+# Specify a user profile to log in as.
+#
+# Usually `user_id` is sufficient, and you will be prompted for a password at
+# startup, but you can use `url` to override the typical homeserver discovery,
+# and `password_file` to avoid being prompted for a password at login.
 [profiles.default]
 user_id = "@user:matrix.org"
 password_file = "/path/to/password"
-url = "https://matrix.org"
+url = "https://matrix-client.matrix.org"
 
 [settings]
-default_markup = "html"
-default_register = "+"
+default_markup = "markdown"
+default_register = "\""
 default_room = "#iamb-users:0x.badd.cafe"
 default_split = "vertical"
 external_edit_file_suffix = ".md"
@@ -29,31 +43,38 @@ typing_notice_send = true
 user_gutter_width = 30
 username_display = "username"
 
+# Settings related to the encryption indicator:
 [settings.encryption]
 indicator = "only-encrypted"
 indicator_location = "title|prompt"
 
+# Settings related to showing image previews in the terminal:
 [settings.image_preview]
 protocol = { type = "sixel", filter = "Nearest" }
 size = { "width" = 66, "height" = 10 }
 
+# Settings related to proxying homeserver requests:
 [settings.proxy]
 url = "" # An empty string disables any proxying
 auth = "Bearer abcd1234"
 headers.X-Proxy-Config = "foobar"
 
+# Settings related to overriding how lists of rooms are sorted:
 [settings.sort]
 rooms = ["favorite", "lowpriority", "unread", "name"]
 members = ["power", "id"]
 
+# Settings related to how iamb interacts with the terminal:
 [settings.terminal]
 cursor_shape = "default"
 enable_extended_keys = false
 enable_title = true
 
+# Settings related to overriding how specific users are shown:
 [settings.users]
 "@user:matrix.org" = { "name" = "John Doe", "color" = "magenta" }
 
+# Specify a specific tab and window layout to use every time iamb starts:
 [layout]
 style = "config"
 
@@ -69,12 +90,14 @@ split = [
     { "window" = "#iamb-dev:0x.badd.cafe" }
 ]
 
+# Map specific key inputs to other keys:
 [macros.insert]
 "jj" = "<Esc>"
 
 [macros."normal|visual"]
 "V" = "<C-W>m"
 
+# Map command aliases to to other commands:
 [aliases]
 "c" = "chats"
 "d" = "download"
@@ -85,11 +108,13 @@ split = [
 "ca" = "cancel"
 "red" = "redact"
 
+# Specify different directories to use instead of the system defaults:
 [dirs]
 cache = "/home/user/.cache/iamb/"
 logs = "/home/user/.local/share/iamb/logs/"
 downloads = "/home/user/Downloads/"
 
+# Override default colors:
 [theme]
 timeline.state.color = "cyan"
 timeline.redacted.color = "245" # light gray

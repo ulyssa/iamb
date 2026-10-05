@@ -135,7 +135,7 @@ fn deserialize_register<'de, D>(deserializer: D) -> Result<Option<Register>, D::
 where
     D: serde::de::Deserializer<'de>,
 {
-    let r = <&'de str>::deserialize(deserializer)?;
+    let r = String::deserialize(deserializer)?;
 
     if r.len() > 1 {
         return Err(D::Error::custom("expected a single character to specify a register"));
@@ -1972,8 +1972,8 @@ mod tests {
 
     #[test]
     fn test_load_example_config_toml() {
-        let path = PathBuf::from("config.example.toml");
-        let config = IambConfig::load_toml(&path).expect("can load example_config.toml");
+        let path = PathBuf::from("config.full.toml");
+        let config = IambConfig::load_toml(&path).expect("can load config.full.toml");
 
         let IambConfig {
             profiles,

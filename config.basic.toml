@@ -1,0 +1,10 @@
+# ==============================================================================
+# This is an example of a basic `config.toml` for iamb.
+#
+# Reference iamb(5) or <https://iamb.chat> for the options you can set here.
+# ==============================================================================
+[profiles.default]
+user_id = "@user:matrix.org"
+
+[settings]
+ignorecase = true

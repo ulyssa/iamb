@@ -32,7 +32,8 @@ you'll want to install as part of a package:
 | Repository Path         | Installed Path (may vary per OS)                |
 | ----------------------- | ----------------------------------------------- |
 | /iamb.desktop           | /usr/share/applications/iamb.desktop            |
-| /config.example.toml    | /usr/share/iamb/config.example.toml             |
+| /config.basic.toml      | /usr/share/iamb/config.basic.toml               |
+| /config.full.toml       | /usr/share/iamb/config.full.toml                |
 | /docs/iamb-256x256.png  | /usr/share/icons/hicolor/256x256/apps/iamb.png  |
 | /docs/iamb-512x512.png  | /usr/share/icons/hicolor/512x512/apps/iamb.png  |
 | /docs/iamb.svg          | /usr/share/icons/hicolor/scalable/apps/iamb.svg |
