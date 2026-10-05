@@ -459,6 +459,9 @@ impl Visitor<'_> for SortUserVisitor {
 pub enum AccountField {
     /// The account's ignore list.
     Ignore,
+
+    /// Set whether other user's are allowed to invite the user to rooms.
+    Invites,
 }
 
 /// A room property.
