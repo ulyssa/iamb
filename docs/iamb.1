@@ -65,6 +65,8 @@ Log out of
 View a list of joined rooms.
 .It Sy ":spaces"
 View a list of joined spaces.
+.It Sy ":spaces toplevel"
+View a list of joined spaces that are not children of other joined spaces.
 .It Sy ":unreads"
 View a list of unread rooms.
 .It Sy ":unreads clear"
@@ -150,6 +152,12 @@ and
 Follow the tombstone information to the upgraded room.
 .It Sy ":follow previous"
 Follow the room creation information to the pre-upgraded room.
+.It Sy ":ignore set [user]"
+Add a user to your account's ignore list.
+.It Sy ":ignore unset [user]"
+Remove a user from your account's ignore list.
+.It Sy ":ignore show"
+Show all users in your account's ignore list.
 .It Sy ":invite accept"
 Accept an invitation to the currently focused room.
 .It Sy ":invite reject"
@@ -313,6 +321,13 @@ Set the avatar URL for your profile.
 Unset the avatar for your profile.
 .It Sy ":self avatar show"
 Show the current avatar URL for your profile.
+.It Sy ":self invites set [allow|block]"
+Set whether others are allowed to send you invites.
+.It Sy ":self invites unset"
+Shorthand for
+.Sy ":self invites set allow" .
+.It Sy ":self invites show"
+Show whether other users are currently allowed to send you invites.
 .It Sy ":self name set [nickname]"
 Set the display name for your profile.
 .It Sy ":self name unset"

@@ -14,8 +14,9 @@ use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::authentication::oauth::{ClientId, OAuthSession, UserSession};
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
-use matrix_sdk::ruma::{OwnedDeviceId, owned_server_name};
+use matrix_sdk::ruma::{DeviceId, OwnedDeviceId, owned_server_name};
 use matrix_sdk::{AuthSession, EncryptionState, SessionMeta, SessionTokens};
+
 use modalkit::crossterm;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
@@ -51,17 +52,24 @@ const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
     SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
 ];
 
-const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 6] = [
+const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 10] = [
     SortColumn(SortFieldRoom::Favorite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Invite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::LowPriority, SortOrder::Ascending),
-    SortColumn(SortFieldRoom::Unread, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Mentions, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Notifications, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Joined, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Space, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Direct, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Recent, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
 ];
 
-const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 1] =
-    [SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending)];
+const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 3] = [
+    SortColumn(SortFieldSpace::Room(SortFieldRoom::Space), SortOrder::Ascending),
+    SortColumn(SortFieldSpace::Room(SortFieldRoom::Joined), SortOrder::Ascending),
+    SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending),
+];
 
 const DEFAULT_ENABLE_TITLE: bool = true;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
@@ -129,7 +137,7 @@ fn deserialize_register<'de, D>(deserializer: D) -> Result<Option<Register>, D::
 where
     D: serde::de::Deserializer<'de>,
 {
-    let r = <&'de str>::deserialize(deserializer)?;
+    let r = String::deserialize(deserializer)?;
 
     if r.len() > 1 {
         return Err(D::Error::custom("expected a single character to specify a register"));
@@ -294,6 +302,18 @@ impl From<Session> for AuthSession {
             AuthSession::Matrix(session.into())
         }
     }
+}
+
+/// A device ID saved at logout so that the next login can reuse it.
+///
+/// The SDK store is keyed by user and device ID, so logging back in with
+/// a freshly issued device ID would leave the existing store unusable
+/// (#775). Saving the ID lets the next login ask the homeserver for the
+/// same device and keep using that store.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct SavedDevice {
+    user_id: OwnedUserId,
+    device_id: OwnedDeviceId,
 }
 
 impl From<Session> for MatrixSession {
@@ -1234,6 +1254,7 @@ impl IambConfig {
 pub struct ApplicationSettings {
     pub layout_json: PathBuf,
     pub session_json: PathBuf,
+    pub device_json: PathBuf,
     pub session_json_old: PathBuf,
     pub sled_dir: PathBuf,
     pub sqlite_dir: PathBuf,
@@ -1374,6 +1395,9 @@ impl ApplicationSettings {
         let mut session_json = profile_data_dir.clone();
         session_json.push("session.json");
 
+        let mut device_json = profile_data_dir;
+        device_json.push("device.json");
+
         let mut session_json_old = profile_dir;
         session_json_old.push("session.json");
 
@@ -1392,6 +1416,7 @@ impl ApplicationSettings {
             sled_dir,
             layout_json,
             session_json,
+            device_json,
             session_json_old,
             sqlite_dir,
             sqlite_cache_dir,
@@ -1440,6 +1465,32 @@ impl ApplicationSettings {
         let writer = BufWriter::new(file);
         let session: Session = session.into();
         serde_json::to_writer(writer, &session).map_err(IambError::from)?;
+        Ok(())
+    }
+
+    /// The device ID saved at logout, if it was saved for this profile's
+    /// user. A missing or stale file is not an error: the next login then
+    /// simply gets a fresh device ID from the homeserver.
+    pub fn read_saved_device(&self) -> Option<OwnedDeviceId> {
+        let file = File::open(self.device_json.as_path()).ok()?;
+        let reader = BufReader::new(file);
+        let saved: SavedDevice = serde_json::from_reader(reader).ok()?;
+
+        if saved.user_id == self.profile.user_id {
+            Some(saved.device_id)
+        } else {
+            None
+        }
+    }
+
+    pub fn write_saved_device(&self, device_id: &DeviceId) -> Result<(), IambError> {
+        let file = File::create(self.device_json.as_path())?;
+        let writer = BufWriter::new(file);
+        let saved = SavedDevice {
+            user_id: self.profile.user_id.clone(),
+            device_id: device_id.to_owned(),
+        };
+        serde_json::to_writer(writer, &saved).map_err(IambError::from)?;
         Ok(())
     }
 
@@ -1710,9 +1761,16 @@ mod tests {
     #[test]
     fn test_parse_default_rooms_sort() {
         let sort: Vec<SortColumn<SortFieldRoom>> =
-            serde_json::from_str(r#"["favorite","invite","lowpriority","unread","joined","name"]"#)
+            serde_json::from_str(r#"["favorite","invite","lowpriority","mentions","notifications","joined","space","dm","recent","name"]"#)
                 .unwrap();
         assert_eq!(sort.as_slice(), &DEFAULT_ROOM_SORT[..]);
+    }
+
+    #[test]
+    fn test_parse_default_space_sort() {
+        let sort: Vec<SortColumn<SortFieldSpace>> =
+            serde_json::from_str(r#"["space","joined","spaceorder"]"#).unwrap();
+        assert_eq!(sort.as_slice(), &DEFAULT_SPACE_SORT[..]);
     }
 
     #[test]
@@ -1953,8 +2011,8 @@ mod tests {
 
     #[test]
     fn test_load_example_config_toml() {
-        let path = PathBuf::from("config.example.toml");
-        let config = IambConfig::load_toml(&path).expect("can load example_config.toml");
+        let path = PathBuf::from("config.full.toml");
+        let config = IambConfig::load_toml(&path).expect("can load config.full.toml");
 
         let IambConfig {
             profiles,

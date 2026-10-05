@@ -138,6 +138,7 @@ assets = [
     # Other assets:
     ["iamb.desktop", "usr/share/applications/iamb.desktop", "644"],
     ["config.example.toml", "usr/share/iamb/config.example.toml", "644"],
+    ["config.full.toml", "usr/share/iamb/config.full.toml", "644"],
     ["docs/iamb.svg", "usr/share/icons/hicolor/scalable/apps/iamb.svg", "644"],
     ["docs/iamb.metainfo.xml", "usr/share/metainfo/iamb.metainfo.xml", "644"],
 ]
@@ -153,6 +154,7 @@ assets = [
     # Other assets:
     { source = "iamb.desktop", dest = "/usr/share/applications/iamb.desktop", mode = "644" },
     { source = "config.example.toml", dest = "/usr/share/iamb/config.example.toml", mode = "644"},
+    { source = "config.full.toml", dest = "/usr/share/iamb/config.full.toml", mode = "644"},
     { source = "docs/iamb.svg", dest = "/usr/share/icons/hicolor/scalable/apps/iamb.svg", mode = "644"},
     { source = "docs/iamb.metainfo.xml", dest = "/usr/share/metainfo/iamb.metainfo.xml", mode = "644"},
 ]

@@ -26,6 +26,11 @@ use std::sync::atomic::AtomicUsize;
 use clap::{CommandFactory, Parser};
 use matrix_sdk::OwnedServerName;
 use matrix_sdk::ruma::api::error::ErrorKind;
+use matrix_sdk::ruma::events::ignored_user_list::IgnoredUserListEventContent;
+use matrix_sdk::ruma::events::invite_permission_config::{
+    InvitePermissionAction,
+    InvitePermissionConfigEventContent,
+};
 use modalkit::actions::{Commandable, TabAction, TabContainer, TabCount, WindowContainer};
 use modalkit::crossterm;
 use modalkit::crossterm::cursor::SetCursorStyle;
@@ -691,6 +696,121 @@ impl Application {
                 let action = WindowAction::Switch(target);
 
                 Ok(vec![(action.into(), ctx)])
+            },
+            HomeserverAction::AccountSet(AccountField::Invites, perms) => {
+                let perms = match perms.as_str() {
+                    "allow" => None,
+                    "block" => Some(InvitePermissionAction::Block),
+                    perm => {
+                        return Err(UIError::Failure(format!(
+                            "{perm:?} is not a valid invite permission"
+                        )));
+                    },
+                };
+                let mut content = InvitePermissionConfigEventContent::new();
+                content.default_action = perms;
+                let _ = self
+                    .worker
+                    .client
+                    .account()
+                    .set_account_data(content)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountUnset(AccountField::Invites, val) => {
+                if let Some(val) = val {
+                    let msg = format!("Cannot unset invites with a value (given {val:?})");
+                    return Err(UIError::Failure(msg));
+                }
+
+                let mut content = InvitePermissionConfigEventContent::new();
+                content.default_action = None;
+                let _ = self
+                    .worker
+                    .client
+                    .account()
+                    .set_account_data(content)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountShow(AccountField::Invites) => {
+                let resp = self
+                    .worker
+                    .client
+                    .account()
+                    .fetch_account_data_static::<InvitePermissionConfigEventContent>()
+                    .await
+                    .map_err(IambError::from)?;
+                let resp = resp
+                    .map(|r| r.deserialize())
+                    .transpose()
+                    .map_err(IambError::from)?
+                    .and_then(|r| r.default_action);
+                let action = match resp.as_ref() {
+                    None => "allow",
+                    Some(InvitePermissionAction::Block) => "block",
+                    Some(other) => other.as_str(),
+                };
+                let msg = format!("Current default invite permission: {action}");
+                Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)])
+            },
+            HomeserverAction::AccountSet(AccountField::Ignore, user) => {
+                let Ok(user) = OwnedUserId::from_str(&user) else {
+                    return Err(IambError::InvalidUserId(user).into());
+                };
+                self.worker
+                    .client
+                    .account()
+                    .ignore_user(&user)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountUnset(AccountField::Ignore, user) => {
+                let Some(user) = user else {
+                    return Err(IambError::InvalidUserId("".into()).into());
+                };
+                let Ok(user) = OwnedUserId::from_str(&user) else {
+                    return Err(IambError::InvalidUserId(user).into());
+                };
+                self.worker
+                    .client
+                    .account()
+                    .unignore_user(&user)
+                    .await
+                    .map_err(IambError::from)?;
+                store.application.clear_room_cache(&self.worker.client).await?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountShow(AccountField::Ignore) => {
+                let ignored = self
+                    .worker
+                    .client
+                    .account()
+                    .account_data::<IgnoredUserListEventContent>()
+                    .await
+                    .map_err(IambError::from)?;
+                let ignored_users = ignored
+                    .map(|raw| raw.deserialize())
+                    .transpose()
+                    .map_err(IambError::from)?
+                    .map(|c| c.ignored_users);
+
+                let msg = match ignored_users {
+                    Some(users) if !users.is_empty() => {
+                        let mut s = String::from("You are currently ignoring:");
+                        users.keys().for_each(|u| {
+                            s.push_str("\n - ");
+                            s.push_str(u.as_ref());
+                        });
+                        s
+                    },
+                    _ => "You have no users in your ignore list.".into(),
+                };
+
+                Ok(vec![(Action::ShowInfoMessage(InfoMessage::Pager(msg)), ctx)])
             },
             HomeserverAction::KnockSend(alias, reason) => {
                 let _ = self

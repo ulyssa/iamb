@@ -114,10 +114,49 @@ const RECEIPT_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 type ReceiptKey = (OwnedRoomId, ReceiptThread, ReceiptType);
 type ReceiptUpdate = (OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId);
 
-type MessageFetchResult = IambResult<(bool, Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>)>;
+type MessageAndReceipts = (AnyTimelineEvent, ReceiptThread, Vec<OwnedUserId>);
+type MessageFetchResult = IambResult<(bool, Vec<MessageAndReceipts>)>;
 
 fn initial_devname() -> String {
     format!("{} on {}", IAMB_DEVICE_NAME, gethostname().to_string_lossy())
+}
+
+fn any_timeline_event_thread(item: &AnyTimelineEvent) -> Option<OwnedEventId> {
+    let AnyTimelineEvent::MessageLike(item) = item else {
+        return None;
+    };
+    let relation = match item {
+        AnyMessageLikeEvent::RoomEncrypted(MessageLikeEvent::Original(ev)) => {
+            ev.content.relates_to.clone()?
+        },
+        AnyMessageLikeEvent::Location(MessageLikeEvent::Original(ev)) => {
+            ev.content.relates_to.clone()?.into()
+        },
+        AnyMessageLikeEvent::Message(MessageLikeEvent::Original(ev)) => {
+            ev.content.relates_to.clone()?.into()
+        },
+        AnyMessageLikeEvent::PollStart(MessageLikeEvent::Original(ev)) => {
+            ev.content.relates_to.clone()?.into()
+        },
+        AnyMessageLikeEvent::UnstablePollStart(MessageLikeEvent::Original(ev)) => {
+            match &ev.content {
+                UnstablePollStartEventContent::New(ev) => ev.relates_to.clone()?.into(),
+                _ => return None,
+            }
+        },
+        AnyMessageLikeEvent::RoomMessage(MessageLikeEvent::Original(ev)) => {
+            ev.content.relates_to.clone()?.into()
+        },
+        AnyMessageLikeEvent::Sticker(MessageLikeEvent::Original(ev)) => {
+            ev.content.relates_to.clone()?.into()
+        },
+        _ => return None,
+    };
+
+    match relation {
+        EncryptedRelation::Thread(thread) => Some(thread.event_id),
+        _ => None,
+    }
 }
 
 pub async fn create_room(
@@ -167,11 +206,13 @@ pub async fn create_room(
     return Ok(resp.room_id().to_owned());
 }
 
-async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id: &EventId) {
-    let receipts = match room
-        .load_event_receipts(ReceiptType::Read, &ReceiptThread::Main, event_id)
-        .await
-    {
+/// This must not be called before the message is inserted into the [`RoomInfo`].
+async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id: OwnedEventId) {
+    let Some(thread) = info.get_receipt_thread(&event_id) else {
+        return;
+    };
+
+    let receipts = match room.load_event_receipts(ReceiptType::Read, &thread, &event_id).await {
         Ok(receipts) => receipts,
         Err(e) => {
             tracing::warn!(?event_id, "failed to get event receipts: {e}");
@@ -180,7 +221,7 @@ async fn update_event_receipts(info: &mut RoomInfo, room: &MatrixRoom, event_id:
     };
 
     for (user_id, _) in receipts {
-        info.set_receipt(ReceiptThread::Main, user_id, event_id.to_owned());
+        info.set_receipt(thread.clone(), user_id, event_id.to_owned());
     }
 }
 
@@ -213,12 +254,12 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
             let info = rooms.get_or_default(room_id.clone());
 
             if !info.recently_fetched() && !info.fetching {
-                info.fetch_last = Instant::now().into();
-                info.fetching = true;
-
                 if info.reached_timeline_start {
                     continue;
                 }
+
+                info.fetch_last = Instant::now().into();
+                info.fetching = true;
 
                 plan.push(Plan::Messages(room_id.to_owned(), message_need));
             } else {
@@ -339,7 +380,7 @@ async fn pinned_load_one(
 async fn get_receipts_for_timeline_events(
     room: &MatrixRoom,
     events: Vec<TimelineEvent>,
-) -> Vec<(AnyTimelineEvent, Vec<OwnedUserId>)> {
+) -> Vec<MessageAndReceipts> {
     let mut msgs = vec![];
 
     for ev in events.into_iter() {
@@ -401,10 +442,12 @@ async fn get_receipts_for_timeline_events(
         };
 
         let event_id = msg.event_id();
-        let receipts = match room
-            .load_event_receipts(ReceiptType::Read, &ReceiptThread::Main, event_id)
-            .await
-        {
+        let thread = if let Some(root) = any_timeline_event_thread(&msg) {
+            ReceiptThread::Thread(root)
+        } else {
+            ReceiptThread::Main
+        };
+        let receipts = match room.load_event_receipts(ReceiptType::Read, &thread, event_id).await {
             Ok(receipts) => receipts.into_iter().map(|(u, _)| u).collect(),
             Err(e) => {
                 tracing::warn!(?event_id, "failed to get event receipts: {e}");
@@ -412,7 +455,7 @@ async fn get_receipts_for_timeline_events(
             },
         };
 
-        msgs.push((msg, receipts));
+        msgs.push((msg, thread, receipts));
     }
 
     msgs
@@ -436,18 +479,18 @@ async fn load_older_one(room: &MatrixRoom) -> MessageFetchResult {
 }
 
 fn insert_msgs_and_receipts(
-    msgs: Vec<(AnyTimelineEvent, Vec<OwnedUserId>)>,
+    msgs: Vec<MessageAndReceipts>,
     info: &mut RoomInfo,
     presences: &mut CompletionMap<OwnedUserId, PresenceState>,
     previews: &mut PreviewManager,
     settings: &ApplicationSettings,
 ) {
-    for (msg, receipts) in msgs {
+    for (msg, thread, receipts) in msgs {
         let sender = msg.sender().to_owned();
         let _ = presences.get_or_default(sender);
 
         for user_id in receipts {
-            info.set_receipt(ReceiptThread::Main, user_id, msg.event_id().to_owned());
+            info.set_receipt(thread.clone(), user_id, msg.event_id().to_owned());
         }
 
         match msg {
@@ -1243,6 +1286,7 @@ async fn create_client_inner(
         )
         .handle_refresh_tokens()
         .request_config(req_config)
+        .with_threading_support(matrix_sdk::ThreadingSupport::Enabled { with_subscriptions: false })
         .with_encryption_settings(DEFAULT_ENCRYPTION_SETTINGS);
 
     let builder = if let Some(url) = homeserver {
@@ -1691,15 +1735,16 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
 
                     let sender = ev.sender().to_owned();
+                    let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let ChatStore { rooms, previews, settings, .. } = &mut locked.application;
                     let info = rooms.get_or_default(room_id.to_owned());
 
-                    update_event_receipts(info, &room, ev.event_id()).await;
-
                     let full_ev = ev.into_full_event(room_id.to_owned());
                     info.insert_with_preview(full_ev, settings, previews);
+
+                    update_event_receipts(info, &room, event_id).await;
                 }
             },
         );
@@ -1714,18 +1759,19 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
 
                     let sender = ev.sender().to_owned();
+                    let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let ChatStore { rooms, previews, settings, .. } = &mut locked.application;
                     let info = rooms.get_or_default(room_id.to_owned());
-
-                    update_event_receipts(info, &room, ev.event_id()).await;
 
                     info.insert_reaction_with_preview(
                         ev.into_full_event(room_id.to_owned()),
                         settings,
                         previews,
                     );
+
+                    update_event_receipts(info, &room, event_id).await;
                 }
             },
         );
@@ -1740,16 +1786,17 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
 
                     let sender = ev.sender().to_owned();
+                    let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let ChatStore { rooms, settings, previews, .. } = &mut locked.application;
 
                     let info = rooms.get_or_default(room_id.to_owned());
 
-                    update_event_receipts(info, &room, ev.event_id()).await;
-
                     let full_ev = ev.into_full_event(room_id.to_owned());
                     info.insert_sticker_with_preview(full_ev, settings, previews);
+
+                    update_event_receipts(info, &room, event_id).await;
                 }
             },
         );
@@ -1790,14 +1837,15 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
 
                     let sender = ev.sender().to_owned();
+                    let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let info = locked.application.rooms.get_or_default(room_id.to_owned());
 
-                    update_event_receipts(info, &room, ev.event_id()).await;
-
                     let full_ev = ev.into_full_event(room_id.to_owned());
                     info.insert_poll_start(full_ev);
+
+                    update_event_receipts(info, &room, event_id).await;
                 }
             },
         );
@@ -1812,14 +1860,15 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
 
                     let sender = ev.sender().to_owned();
+                    let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let info = locked.application.rooms.get_or_default(room_id.to_owned());
 
-                    update_event_receipts(info, &room, ev.event_id()).await;
-
                     let full_ev = ev.into_full_event(room_id.to_owned());
                     info.insert_unstable_poll_start(full_ev);
+
+                    update_event_receipts(info, &room, event_id).await;
                 }
             },
         );
@@ -1834,16 +1883,17 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
 
                     let sender = ev.sender().to_owned();
+                    let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let info = locked.application.rooms.get_or_default(room_id.to_owned());
-
-                    update_event_receipts(info, &room, ev.event_id()).await;
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
                     if let MessageLikeEvent::Original(ev) = full_ev {
                         info.insert_poll_relation(ev.into());
                     }
+
+                    update_event_receipts(info, &room, event_id).await;
                 }
             },
         );
@@ -1858,16 +1908,17 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
 
                     let sender = ev.sender().to_owned();
+                    let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let info = locked.application.rooms.get_or_default(room_id.to_owned());
-
-                    update_event_receipts(info, &room, ev.event_id()).await;
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
                     if let MessageLikeEvent::Original(ev) = full_ev {
                         info.insert_unstable_poll_relation(ev.into());
                     }
+
+                    update_event_receipts(info, &room, event_id).await;
                 }
             },
         );
@@ -1882,16 +1933,17 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
 
                     let sender = ev.sender().to_owned();
+                    let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let info = locked.application.rooms.get_or_default(room_id.to_owned());
-
-                    update_event_receipts(info, &room, ev.event_id()).await;
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
                     if let MessageLikeEvent::Original(ev) = full_ev {
                         info.insert_poll_relation(ev.into());
                     }
+
+                    update_event_receipts(info, &room, event_id).await;
                 }
             },
         );
@@ -1906,16 +1958,17 @@ impl ClientWorker {
                     let mut locked = store.lock().await;
 
                     let sender = ev.sender().to_owned();
+                    let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
                     let info = locked.application.rooms.get_or_default(room_id.to_owned());
-
-                    update_event_receipts(info, &room, ev.event_id()).await;
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
                     if let MessageLikeEvent::Original(ev) = full_ev {
                         info.insert_unstable_poll_relation(ev.into());
                     }
+
+                    update_event_receipts(info, &room, event_id).await;
                 }
             },
         );
@@ -2106,18 +2159,19 @@ impl ClientWorker {
                 return self.update_profile_on_login(true).await;
             },
             LoginStyle::Password(password) => {
-                let resp = client
+                let mut login = client
                     .matrix_auth()
                     .login_username(&self.settings.profile.user_id, &password)
-                    .initial_device_display_name(initial_devname().as_str())
-                    .send()
-                    .await
-                    .map_err(IambError::from)?;
+                    .initial_device_display_name(initial_devname().as_str());
+                if let Some(device_id) = self.settings.read_saved_device() {
+                    login = login.device_id(device_id.as_str());
+                }
+                let resp = login.send().await.map_err(IambError::from)?;
                 let session = MatrixSession::from(&resp);
                 self.settings.write_session(session)?;
             },
             LoginStyle::SingleSignOn => {
-                let resp = client
+                let mut login = client
                     .matrix_auth()
                     .login_sso(|url| {
                         let opened = format!(
@@ -2130,10 +2184,11 @@ impl ClientWorker {
                             Ok(())
                         }
                     })
-                    .initial_device_display_name(initial_devname().as_str())
-                    .send()
-                    .await
-                    .map_err(IambError::from)?;
+                    .initial_device_display_name(initial_devname().as_str());
+                if let Some(device_id) = self.settings.read_saved_device() {
+                    login = login.device_id(device_id.as_str());
+                }
+                let resp = login.send().await.map_err(IambError::from)?;
 
                 let session = MatrixSession::from(&resp);
                 self.settings.write_session(session)?;
@@ -2160,6 +2215,14 @@ impl ClientWorker {
             let err = UIError::Failure(msg);
 
             return Err(err);
+        }
+
+        // Capture the device ID before logging out, while the session is
+        // still active. The next login reuses it, which keeps the existing
+        // SDK store valid: the store is keyed by user and device ID, and a
+        // freshly issued device ID would no longer match it.
+        if let Some(device_id) = self.client.device_id() {
+            self.settings.write_saved_device(device_id)?;
         }
 
         // Send the logout request.

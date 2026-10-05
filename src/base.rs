@@ -14,7 +14,6 @@ use matrix_sdk::ruma::events::poll::unstable_start::{
 };
 use matrix_sdk::ruma::events::reaction::ReactionEvent;
 use matrix_sdk::ruma::events::relation::Replacement;
-use matrix_sdk::ruma::events::room::encrypted::Relation as EncryptedRelation;
 use matrix_sdk::ruma::events::room::encrypted::RoomEncryptedEvent;
 use matrix_sdk::ruma::events::room::message::RelationWithoutReplacement;
 use matrix_sdk::ruma::events::room::message::{
@@ -248,8 +247,20 @@ pub enum SortFieldRoom {
     /// Sort rooms by whether they have unread messages.
     Unread,
 
+    /// Sort rooms by whether they have unread notifications.
+    Notifications,
+
+    /// Sort rooms by whether they have unread mentions.
+    Mentions,
+
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
+
+    /// Sort rooms by whether they are direct messages.
+    Direct,
+
+    /// Sort rooms by whether they are spaces.
+    Space,
 
     /// Sort rooms by whether they are invites.
     Invite,
@@ -326,10 +337,14 @@ impl Visitor<'_> for SortRoomVisitor {
             "lowpriority" => SortFieldRoom::LowPriority,
             "recent" => SortFieldRoom::Recent,
             "unread" => SortFieldRoom::Unread,
+            "notifications" => SortFieldRoom::Notifications,
+            "mentions" => SortFieldRoom::Mentions,
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
+            "dm" => SortFieldRoom::Direct,
             "id" => SortFieldRoom::RoomId,
             "server" => SortFieldRoom::Server,
+            "space" => SortFieldRoom::Space,
             "invite" => SortFieldRoom::Invite,
             "joined" => SortFieldRoom::Joined,
             _ => {
@@ -437,6 +452,16 @@ impl Visitor<'_> for SortUserVisitor {
 
         Ok(SortColumn(field, order))
     }
+}
+
+/// An account property.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountField {
+    /// The account's ignore list.
+    Ignore,
+
+    /// Set whether other user's are allowed to invite the user to rooms.
+    Invites,
 }
 
 /// A room property.
@@ -638,6 +663,15 @@ pub enum SendAction {
 pub enum HomeserverAction {
     /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
+
+    /// Update an account property.
+    AccountSet(AccountField, String),
+
+    /// Show information about an account property.
+    AccountShow(AccountField),
+
+    /// Remove a user from the account's ignore list.
+    AccountUnset(AccountField, Option<String>),
 
     /// "Knock" on a room, aka "request to join".
     KnockSend(OwnedRoomOrAliasId, Option<String>),
@@ -903,7 +937,7 @@ pub enum IambError {
     InvalidNotificationLevel(String),
 
     /// An invalid user identifier was specified.
-    #[error("Invalid user identifier: {0}")]
+    #[error("Invalid user identifier: {0:?}")]
     InvalidUserId(String),
 
     /// An invalid user identifier was specified.
@@ -1110,8 +1144,22 @@ impl UnreadInfo {
         self.unread_mentions > 0
     }
 
+    pub fn has_notification(&self) -> bool {
+        self.unread_notifications > 0
+    }
+
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
         self.latest.as_ref()
+    }
+}
+
+impl std::ops::AddAssign<Self> for UnreadInfo {
+    fn add_assign(&mut self, rhs: Self) {
+        self.unread_mark |= rhs.unread_mark;
+        self.unread_messages += rhs.unread_messages;
+        self.unread_notifications += rhs.unread_notifications;
+        self.unread_mentions += rhs.unread_mentions;
+        self.latest = self.latest.max(rhs.latest);
     }
 }
 
@@ -2459,6 +2507,22 @@ impl ChatStore {
         Ok(store)
     }
 
+    /// Clear the `EventCache` for all rooms.
+    ///
+    /// This forces a re-fetch of the most recent messages in joined rooms afterwards,
+    /// which makes sure that we re-fetch any missing events (such as those sent by
+    /// recently unignored users that a re-fetch would make appear in the timeline).
+    pub async fn clear_room_cache(&mut self, client: &Client) -> Result<(), IambError> {
+        client.event_cache().clear_all_rooms().await?;
+        for room in client.joined_rooms() {
+            let room_id = room.room_id().to_owned();
+            let room = self.rooms.get_or_default(room_id.clone());
+            room.reached_timeline_start = false;
+            self.need_load.need_messages(room_id.to_owned());
+        }
+        Ok(())
+    }
+
     /// Get a joined room.
     pub fn get_joined_room(&self, room_id: &RoomId) -> Option<MatrixRoom> {
         let room = self.worker.client.get_room(room_id)?;
@@ -2530,6 +2594,9 @@ pub enum IambId {
     /// The `:spaces` window.
     SpaceList,
 
+    /// The `:spaces toplevel` window.
+    ToplevelSpaceList,
+
     /// The `:verify` window.
     VerifyList,
 
@@ -2569,6 +2636,7 @@ impl Display for IambId {
             IambId::DirectList => f.write_str("iamb://dms"),
             IambId::RoomList => f.write_str("iamb://rooms"),
             IambId::SpaceList => f.write_str("iamb://spaces"),
+            IambId::ToplevelSpaceList => f.write_str("iamb://spaces/toplevel"),
             IambId::VerifyList => f.write_str("iamb://verify"),
             IambId::Welcome => f.write_str("iamb://welcome"),
             IambId::ChatList => f.write_str("iamb://chats"),
@@ -2688,8 +2756,12 @@ impl Visitor<'_> for IambIdVisitor {
                 Ok(IambId::RoomList)
             },
             Some("spaces") => {
+                if url.path() == "toplevel" {
+                    return Ok(IambId::ToplevelSpaceList);
+                }
+
                 if url.path() != "" {
-                    return Err(E::custom("iamb://spaces takes no path"));
+                    return Err(E::custom("Invalid iamb window URL"));
                 }
 
                 Ok(IambId::SpaceList)
@@ -2798,6 +2870,9 @@ pub enum IambBufferId {
     /// The `:spaces` window.
     SpaceList,
 
+    /// The `:spaces toplevel` window.
+    ToplevelSpaceList,
+
     /// The `:verify` window.
     VerifyList,
 
@@ -2830,6 +2905,7 @@ impl IambBufferId {
             IambBufferId::PinnedList(room) => IambId::PinnedList(room.clone()),
             IambBufferId::RoomList => IambId::RoomList,
             IambBufferId::SpaceList => IambId::SpaceList,
+            IambBufferId::ToplevelSpaceList => IambId::ToplevelSpaceList,
             IambBufferId::VerifyList => IambId::VerifyList,
             IambBufferId::Welcome => IambId::Welcome,
             IambBufferId::ChatList => IambId::ChatList,

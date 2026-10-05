@@ -14,6 +14,7 @@ pub use matrix_sdk::ruma::events::AnySyncStateEvent;
 pub use matrix_sdk::ruma::events::receipt::ReceiptThread;
 pub use matrix_sdk::ruma::events::relation::Thread;
 pub use matrix_sdk::ruma::events::room::MediaSource;
+pub use matrix_sdk::ruma::events::room::encrypted::Relation as EncryptedRelation;
 pub use matrix_sdk::ruma::events::room::message::{
     MessageType,
     OriginalRoomMessageEvent,
@@ -71,6 +72,7 @@ pub use unicode_width::UnicodeWidthStr;
 pub use url::Url;
 
 pub use crate::base::{
+    AccountField,
     AsyncProgramStore,
     ChatStore,
     IambAction,
