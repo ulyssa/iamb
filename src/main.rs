@@ -27,6 +27,10 @@ use clap::{CommandFactory, Parser};
 use matrix_sdk::OwnedServerName;
 use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk::ruma::events::ignored_user_list::IgnoredUserListEventContent;
+use matrix_sdk::ruma::events::invite_permission_config::{
+    InvitePermissionAction,
+    InvitePermissionConfigEventContent,
+};
 use modalkit::actions::{Commandable, TabAction, TabContainer, TabCount, WindowContainer};
 use modalkit::crossterm;
 use modalkit::crossterm::cursor::SetCursorStyle;
@@ -691,6 +695,65 @@ impl Application {
                 let action = WindowAction::Switch(target);
 
                 Ok(vec![(action.into(), ctx)])
+            },
+            HomeserverAction::AccountSet(AccountField::Invites, perms) => {
+                let perms = match perms.as_str() {
+                    "allow" => None,
+                    "block" => Some(InvitePermissionAction::Block),
+                    perm => {
+                        return Err(UIError::Failure(format!(
+                            "{perm:?} is not a valid invite permission"
+                        )));
+                    },
+                };
+                let mut content = InvitePermissionConfigEventContent::new();
+                content.default_action = perms;
+                let _ = self
+                    .worker
+                    .client
+                    .account()
+                    .set_account_data(content)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountUnset(AccountField::Invites, val) => {
+                if let Some(val) = val {
+                    let msg = format!("Cannot unset invites with a value (given {val:?})");
+                    return Err(UIError::Failure(msg));
+                }
+
+                let mut content = InvitePermissionConfigEventContent::new();
+                content.default_action = None;
+                let _ = self
+                    .worker
+                    .client
+                    .account()
+                    .set_account_data(content)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountShow(AccountField::Invites) => {
+                let resp = self
+                    .worker
+                    .client
+                    .account()
+                    .fetch_account_data_static::<InvitePermissionConfigEventContent>()
+                    .await
+                    .map_err(IambError::from)?;
+                let resp = resp
+                    .map(|r| r.deserialize())
+                    .transpose()
+                    .map_err(IambError::from)?
+                    .and_then(|r| r.default_action);
+                let action = match resp.as_ref() {
+                    None => "allow",
+                    Some(InvitePermissionAction::Block) => "block",
+                    Some(other) => other.as_str(),
+                };
+                let msg = format!("Current default invite permission: {action}");
+                Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)])
             },
             HomeserverAction::AccountSet(AccountField::Ignore, user) => {
                 let Ok(user) = OwnedUserId::from_str(&user) else {

@@ -567,6 +567,22 @@ fn iamb_self(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         },
         ("avatar", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
+        // :self invites show
+        ("invites", "show", None) => HomeserverAction::AccountShow(AccountField::Invites).into(),
+        ("invites", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self invites set
+        ("invites", "set", Some(s)) => {
+            HomeserverAction::AccountSet(AccountField::Invites, s).into()
+        },
+        ("invites", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self invites unset
+        ("invites", "unset", None) => {
+            HomeserverAction::AccountUnset(AccountField::Invites, None).into()
+        },
+        ("invites", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
         // :self name show
         ("name" | "nick", "show", None) => {
             HomeserverAction::ProfileFieldShow(ProfileFieldName::DisplayName).into()

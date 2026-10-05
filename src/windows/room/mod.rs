@@ -983,6 +983,10 @@ impl TerminalCursor for RoomState {
 
 impl WindowOps<IambInfo> for RoomState {
     fn draw(&mut self, area: Rect, buf: &mut Buffer, focused: bool, store: &mut ProgramStore) {
+        let theme = &store.application.settings.theme;
+        let default_style = theme.timeline.default;
+        buf.set_style(area, default_style);
+
         if self.room_state() != Some(MatrixRoomState::Joined) {
             self.refresh_room(store);
         }
