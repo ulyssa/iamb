@@ -1290,6 +1290,21 @@ impl DisplayNameStore {
     }
 }
 
+bitflags::bitflags! {
+    /// Additional information about a room.
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct RoomInfoFlags: u32 {
+        /// No flags specified.
+        const NONE = 0b00000000;
+
+        /// All notifications for this room have been muted.
+        const MUTED = 0b00000001;
+
+        /// Non-mention/keyword notifications for this room have been muted.
+        const CALMED = 0b00000010;
+    }
+}
+
 /// Information about room's the user's joined.
 pub struct RoomInfo {
     /// The display name for this room.
@@ -1297,6 +1312,8 @@ pub struct RoomInfo {
 
     /// The tags placed on this room.
     pub tags: Option<Tags>,
+
+    pub flags: RoomInfoFlags,
 
     /// A map of event IDs to where they are stored in this struct.
     pub keys: HashMap<OwnedEventId, EventLocation>,
@@ -1360,6 +1377,7 @@ impl Default for RoomInfo {
             name: Default::default(),
             tags: Default::default(),
             keys: Default::default(),
+            flags: Default::default(),
             echo_keys: Default::default(),
             event_receipts: Default::default(),
             user_receipts: Default::default(),
@@ -2560,6 +2578,7 @@ impl ChatStore {
         name: String,
         tags: Option<Tags>,
         aliases: Vec<OwnedRoomAliasId>,
+        flags: RoomInfoFlags,
     ) {
         for alias in aliases {
             self.aliases.insert(alias, room_id.clone());
@@ -2567,6 +2586,7 @@ impl ChatStore {
 
         let info = self.rooms.get_or_default(room_id);
         info.name = name.into();
+        info.flags = flags;
         info.tags = tags;
     }
 }

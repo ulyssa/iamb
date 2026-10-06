@@ -1390,6 +1390,7 @@ pub struct GenericRoomItem {
     tags: Option<Tags>,
     section: Option<ListSectionHeader>,
     membership: MatrixRoomState,
+    room_flags: RoomInfoFlags,
     unread: UnreadInfo,
     room_type_show: bool,
     room_type: RoomType,
@@ -1407,6 +1408,7 @@ impl GenericRoomItem {
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
         let mut unread = info.unreads(room);
+        let room_flags = info.flags;
         let tags = info.tags.clone();
 
         if room.is_space() &&
@@ -1434,6 +1436,7 @@ impl GenericRoomItem {
             tags,
             unread,
             membership: room.state(),
+            room_flags,
             room_type,
             room_type_show: true,
             section: None,
@@ -1459,6 +1462,7 @@ impl GenericRoomItem {
             alias: preview.canonical_alias.clone(),
             tags: None,
             membership,
+            room_flags: RoomInfoFlags::NONE,
             unread: Default::default(),
             room_type,
             room_type_show: true,
@@ -1547,6 +1551,12 @@ impl ListItem<IambInfo> for GenericRoomItem {
             self.room_type_show
         {
             labels.push(vec![Span::styled(label, tags_style)]);
+        }
+
+        if self.room_flags.contains(RoomInfoFlags::MUTED) {
+            labels.push(vec![Span::styled("Muted", tags_style)]);
+        } else if self.room_flags.contains(RoomInfoFlags::CALMED) {
+            labels.push(vec![Span::styled("Calmed", tags_style)]);
         }
 
         if let Some(tags) = &self.tags {
@@ -1904,6 +1914,7 @@ mod tests {
             tags: None,
             membership: MatrixRoomState::Joined,
             unread: UnreadInfo::default(),
+            room_flags: RoomInfoFlags::NONE,
             room_type_show: true,
             room_type: RoomType::Room,
             section: None,
