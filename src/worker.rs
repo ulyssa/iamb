@@ -2217,12 +2217,14 @@ impl ClientWorker {
             return Err(err);
         }
 
+        let client_id = self.client.oauth().client_id().map(|id| id.clone());
+
         // Capture the device ID before logging out, while the session is
         // still active. The next login reuses it, which keeps the existing
         // SDK store valid: the store is keyed by user and device ID, and a
         // freshly issued device ID would no longer match it.
         if let Some(device_id) = self.client.device_id() {
-            self.settings.write_saved_device(device_id)?;
+            self.settings.write_saved_device(device_id, client_id)?;
         }
 
         // Send the logout request.

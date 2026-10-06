@@ -312,6 +312,8 @@ impl From<Session> for AuthSession {
 pub struct SavedDevice {
     user_id: OwnedUserId,
     device_id: OwnedDeviceId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_id: Option<ClientId>,
 }
 
 impl From<Session> for MatrixSession {
@@ -1481,12 +1483,17 @@ impl ApplicationSettings {
         }
     }
 
-    pub fn write_saved_device(&self, device_id: &DeviceId) -> Result<(), IambError> {
+    pub fn write_saved_device(
+        &self,
+        device_id: &DeviceId,
+        client_id: Option<ClientId>,
+    ) -> Result<(), IambError> {
         let file = File::create(self.device_json.as_path())?;
         let writer = BufWriter::new(file);
         let saved = SavedDevice {
             user_id: self.profile.user_id.clone(),
             device_id: device_id.to_owned(),
+            client_id,
         };
         serde_json::to_writer(writer, &saved).map_err(IambError::from)?;
         Ok(())
