@@ -1,5 +1,4 @@
 //! # Logic for loading and validating application configuration
-
 use std::collections::HashSet;
 use std::env;
 use std::fs::File;
@@ -16,7 +15,6 @@ use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{DeviceId, OwnedDeviceId, owned_server_name};
 use matrix_sdk::{AuthSession, EncryptionState, SessionMeta, SessionTokens};
-
 use modalkit::crossterm;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
