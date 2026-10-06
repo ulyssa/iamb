@@ -9,7 +9,7 @@ use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt as _, StreamExt};
 use gethostname::gethostname;
-use matrix_sdk::OwnedServerName;
+use matrix_sdk::AuthSession;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
@@ -72,6 +72,7 @@ use matrix_sdk::ruma::presence::PresenceState;
 use matrix_sdk::ruma::room::RoomType;
 use matrix_sdk::ruma::serde::Raw;
 use matrix_sdk::send_queue::{LocalEcho, LocalEchoContent, RoomSendQueueUpdate, SendQueueUpdate};
+use matrix_sdk::{AuthApi, OwnedServerName};
 use matrix_sdk::{
     ClientBuildError,
     Error as MatrixError,
@@ -92,6 +93,7 @@ use crate::base::{CreateRoomFlags, CreateRoomType, EchoLocation, MessageNeed};
 use crate::config::ProxyUrl;
 use crate::message::MessageId;
 use crate::notifications::register_notifications;
+use crate::oauth::oauth_login;
 use crate::prelude::*;
 use crate::preview::{PreviewKind, PreviewManager};
 use crate::verifications;
@@ -1092,9 +1094,10 @@ pub async fn do_first_sync(client: &Client, store: &AsyncProgramStore) -> Result
 
 #[derive(Debug)]
 pub enum LoginStyle {
-    SessionRestore(MatrixSession),
+    SessionRestore(AuthSession),
     Password(String),
     SingleSignOn,
+    OAuth,
 }
 
 pub struct ClientResponse<T>(Receiver<T>);
@@ -1137,6 +1140,9 @@ pub enum WorkerTask {
     CreateDM(OwnedUserId, ClientReply<IambResult<OwnedRoomId>>),
     Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
+    StartSync(ClientReply<IambResult<EditInfo>>),
+    SaveTokens,
+    StartPersistentTokenTask(UnboundedSender<WorkerTask>),
     TypingNotice(OwnedRoomId),
     LoadImage(MediaSource, PreviewKind, Size, Arc<Picker>, Arc<Semaphore>),
 }
@@ -1211,6 +1217,13 @@ impl Debug for WorkerTask {
                     .field(&format_args!("_"))
                     .finish()
             },
+            WorkerTask::StartSync(_) => {
+                f.debug_tuple("WorkerTask::StartSync").field(&format_args!("_")).finish()
+            },
+            WorkerTask::SaveTokens => f.debug_tuple("WorkerTask::SaveTokens").finish(),
+            WorkerTask::StartPersistentTokenTask(tx) => {
+                f.debug_tuple("WorkerTask::RenderImage").field(tx).finish()
+            },
         }
     }
 }
@@ -1271,6 +1284,7 @@ async fn create_client_inner(
             settings.sqlite_cache_dir.as_path(),
             None,
         )
+        .handle_refresh_tokens()
         .request_config(req_config)
         .with_threading_support(matrix_sdk::ThreadingSupport::Enabled { with_subscriptions: false })
         .with_encryption_settings(DEFAULT_ENCRYPTION_SETTINGS);
@@ -1398,6 +1412,14 @@ impl Requester {
         return response.recv();
     }
 
+    pub fn spawn_sync(&self) -> IambResult<EditInfo> {
+        let (reply, response) = oneshot();
+
+        self.tx.send(WorkerTask::StartSync(reply)).unwrap();
+
+        return response.recv();
+    }
+
     pub fn get_inviter(&self, invite: MatrixRoom) -> IambResult<Option<RoomMember>> {
         let (reply, response) = oneshot();
 
@@ -1462,6 +1484,12 @@ impl Requester {
         self.tx.send(WorkerTask::SpaceMembers(space, reply)).unwrap();
 
         return response.recv();
+    }
+
+    pub fn setup_persistent_tokens(&self) {
+        self.tx
+            .send(WorkerTask::StartPersistentTokenTask(self.tx.clone()))
+            .unwrap();
     }
 
     pub fn typing_notice(&self, room_id: OwnedRoomId) {
@@ -1565,7 +1593,7 @@ impl ClientWorker {
             },
             WorkerTask::Login(style, reply) => {
                 assert!(self.initialized);
-                reply.send(self.login_and_sync(style).await);
+                reply.send(self.login(style).await);
             },
             WorkerTask::Logout(user_id, reply) => {
                 assert!(self.initialized);
@@ -1578,6 +1606,10 @@ impl ClientWorker {
             WorkerTask::SpaceMembers(space, reply) => {
                 assert!(self.initialized);
                 reply.send(self.space_members(space).await);
+            },
+            WorkerTask::StartSync(reply) => {
+                assert!(self.initialized);
+                reply.send(self.start_sync());
             },
             WorkerTask::TypingNotice(room_id) => {
                 assert!(self.initialized);
@@ -1594,6 +1626,14 @@ impl ClientWorker {
                     permits,
                     size,
                 ));
+            },
+            WorkerTask::SaveTokens => {
+                assert!(self.initialized);
+                self.save_tokens().await;
+            },
+            WorkerTask::StartPersistentTokenTask(tx) => {
+                assert!(self.initialized);
+                self.setup_persistent_tokens(tx);
             },
         }
     }
@@ -2110,12 +2150,13 @@ impl ClientWorker {
         self.initialized = true;
     }
 
-    async fn login_and_sync(&mut self, style: LoginStyle) -> IambResult<EditInfo> {
+    async fn login(&mut self, style: LoginStyle) -> IambResult<EditInfo> {
         let client = self.client.clone();
 
         match style {
             LoginStyle::SessionRestore(session) => {
                 client.restore_session(session).await.map_err(IambError::from)?;
+                return self.update_profile_on_login(true).await;
             },
             LoginStyle::Password(password) => {
                 let mut login = client
@@ -2152,19 +2193,17 @@ impl ClientWorker {
                 let session = MatrixSession::from(&resp);
                 self.settings.write_session(session)?;
             },
+            LoginStyle::OAuth => {
+                oauth_login(self.client.clone(), &self.settings.profile.user_id).await?;
+                let session = self
+                    .client
+                    .oauth()
+                    .full_session()
+                    .expect("logged in client should have session");
+                self.settings.write_session(session)?;
+            },
         }
-
-        let sync_delay = Duration::from_millis(self.settings.tunables.sync_delay_ms);
-        self.sync_handle = tokio::spawn(async move {
-            loop {
-                let settings = SyncSettings::default();
-                let _ = client.sync(settings).await;
-                tokio::time::sleep(sync_delay).await;
-            }
-        })
-        .into();
-
-        Ok(Some(InfoMessage::from("* Successfully logged in!")))
+        self.update_profile_on_login(false).await
     }
 
     async fn logout(&mut self, user_id: String) -> IambResult<EditInfo> {
@@ -2187,7 +2226,7 @@ impl ClientWorker {
         }
 
         // Send the logout request.
-        if let Err(e) = self.client.matrix_auth().logout().await {
+        if let Err(e) = self.client.logout().await {
             let msg = format!("Failed to logout: {e}");
             let err = UIError::Failure(msg);
 
@@ -2259,5 +2298,97 @@ impl ClientWorker {
         if let Some(room) = self.client.get_room(room_id.as_ref()) {
             let _ = room.typing_notice(true).await;
         }
+    }
+
+    fn start_sync(&mut self) -> IambResult<EditInfo> {
+        let client = self.client.clone();
+        let sync_delay = Duration::from_millis(self.settings.tunables.sync_delay_ms);
+        self.sync_handle = tokio::spawn(async move {
+            loop {
+                let settings = SyncSettings::default();
+                let _ = client.sync(settings).await;
+                tokio::time::sleep(sync_delay).await;
+            }
+        })
+        .into();
+        Ok(Some(InfoMessage::from("Sync task spawned")))
+    }
+
+    fn setup_persistent_tokens(&self, tx: UnboundedSender<WorkerTask>) {
+        let client = self.client.clone();
+
+        tokio::spawn(async move {
+            let mut session_changes_sub = client.subscribe_to_session_changes();
+            while let Ok(change) = session_changes_sub.recv().await {
+                match change {
+                    matrix_sdk::SessionChange::UnknownToken(unknown_token) => {
+                        tracing::warn!(
+                            "client encountered an unknown token: soft logout = {}",
+                            unknown_token.soft_logout
+                        );
+                    },
+                    matrix_sdk::SessionChange::TokensRefreshed => {
+                        if let Err(e) = tx.send(WorkerTask::SaveTokens) {
+                            // Unable to send requests - the worker has probably ended
+                            // quit gracefully
+                            tracing::debug!(
+                                "persistent token task ending - tokens will no longer be saved: {e}"
+                            )
+                        }
+                    },
+                }
+            }
+        });
+    }
+
+    async fn save_tokens(&self) {
+        let auth_api = self.client.auth_api().expect("client should be logged in");
+        match auth_api {
+            AuthApi::OAuth(oauth) => {
+                let session = oauth.full_session().expect("logged in client should have session");
+                if let Err(e) = self.settings.write_session(session) {
+                    tracing::warn!("Failed to persist oauth session: {e}");
+                }
+            },
+            AuthApi::Matrix(matrix) => {
+                let session = matrix.session().expect("logged in client should have session");
+                if let Err(e) = self.settings.write_session(session) {
+                    tracing::warn!("Failed to persist matrix session: {e}");
+                }
+            },
+            _ => {
+                tracing::error!("Unknown login method. Cannot persist tokens");
+            },
+        }
+    }
+
+    async fn update_profile_on_login(&mut self, restored: bool) -> IambResult<EditInfo> {
+        let client = self.client.clone();
+
+        // User may login with different user than in settings, update here
+        // If we've restored the session from an access token, check with the
+        // homeserver who the token belongs to
+        let user = if restored {
+            let whoami = client.whoami().await;
+            if whoami
+                .as_ref()
+                .is_err_and(|e| matches!(e, matrix_sdk::HttpError::RefreshToken(_)))
+            {
+                tracing::error!("Login attempt failed: invalid refresh token loaded from profile.");
+            }
+            &whoami.map_err(IambError::from)?.user_id
+        } else {
+            client.user_id().expect("logged in user should have id")
+        };
+
+        let msg = format!("* Successfully logged in with {}!", user);
+        if user != self.settings.profile.user_id {
+            // Trace warning if this happens
+            tracing::warn!("logged in as a different user than expected");
+            self.settings.profile.user_id = user.to_owned();
+            let store = self.store.as_ref().expect("initialised worker should have store");
+            store.lock().await.application.settings.profile.user_id = user.to_owned();
+        }
+        Ok(Some(InfoMessage::from(msg)))
     }
 }

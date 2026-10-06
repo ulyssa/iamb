@@ -1,5 +1,4 @@
 //! # Logic for loading and validating application configuration
-
 use std::collections::HashSet;
 use std::env;
 use std::fs::File;
@@ -10,11 +9,12 @@ use std::sync::Arc;
 use clap::Parser;
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
-use matrix_sdk::EncryptionState;
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::authentication::oauth::{ClientId, OAuthSession, UserSession};
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{DeviceId, OwnedDeviceId, owned_server_name};
+use matrix_sdk::{AuthSession, EncryptionState, SessionMeta, SessionTokens};
 use modalkit::crossterm;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
@@ -276,6 +276,30 @@ pub struct Session {
     refresh_token: Option<String>,
     user_id: OwnedUserId,
     device_id: OwnedDeviceId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_id: Option<ClientId>,
+}
+
+impl From<Session> for AuthSession {
+    fn from(session: Session) -> Self {
+        if let Some(client_id) = session.client_id {
+            AuthSession::OAuth(Box::new(OAuthSession {
+                client_id,
+                user: UserSession {
+                    meta: SessionMeta {
+                        user_id: session.user_id,
+                        device_id: session.device_id,
+                    },
+                    tokens: SessionTokens {
+                        access_token: session.access_token,
+                        refresh_token: session.refresh_token,
+                    },
+                },
+            }))
+        } else {
+            AuthSession::Matrix(session.into())
+        }
+    }
 }
 
 /// A device ID saved at logout so that the next login can reuse it.
@@ -312,6 +336,19 @@ impl From<MatrixSession> for Session {
             refresh_token: session.tokens.refresh_token,
             user_id: session.meta.user_id,
             device_id: session.meta.device_id,
+            client_id: None,
+        }
+    }
+}
+
+impl From<OAuthSession> for Session {
+    fn from(session: OAuthSession) -> Self {
+        Session {
+            access_token: session.user.tokens.access_token,
+            refresh_token: session.user.tokens.refresh_token,
+            user_id: session.user.meta.user_id,
+            device_id: session.user.meta.device_id,
+            client_id: Some(session.client_id),
         }
     }
 }
@@ -1421,10 +1458,10 @@ impl ApplicationSettings {
         Ok(session)
     }
 
-    pub fn write_session(&self, session: MatrixSession) -> Result<(), IambError> {
+    pub fn write_session(&self, session: impl Into<Session>) -> Result<(), IambError> {
         let file = File::create(self.session_json.as_path())?;
         let writer = BufWriter::new(file);
-        let session = Session::from(session);
+        let session: Session = session.into();
         serde_json::to_writer(writer, &session).map_err(IambError::from)?;
         Ok(())
     }
