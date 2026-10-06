@@ -309,11 +309,38 @@ impl From<Session> for AuthSession {
 /// (#775). Saving the ID lets the next login ask the homeserver for the
 /// same device and keep using that store.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SavedDevice {
-    user_id: OwnedUserId,
-    device_id: OwnedDeviceId,
-    #[serde(skip_serializing_if = "Option::is_none")]
-    client_id: Option<ClientId>,
+#[serde(untagged)]
+pub enum SavedDevice {
+    OAuth {
+        user_id: OwnedUserId,
+        device_id: OwnedDeviceId,
+        client_id: ClientId,
+    },
+    MatrixAuth {
+        user_id: OwnedUserId,
+        device_id: OwnedDeviceId,
+    },
+}
+
+impl SavedDevice {
+    pub fn device_id(&self) -> &OwnedDeviceId {
+        match self {
+            SavedDevice::OAuth { user_id: _, device_id, client_id: _ } => device_id,
+            SavedDevice::MatrixAuth { user_id: _, device_id } => device_id,
+        }
+    }
+    pub fn client_id(&self) -> Option<&ClientId> {
+        match self {
+            SavedDevice::OAuth { user_id: _, device_id: _, client_id } => Some(client_id),
+            SavedDevice::MatrixAuth { user_id: _, device_id: _ } => None,
+        }
+    }
+    pub fn is_users(&self, user: &OwnedUserId) -> bool {
+        match self {
+            SavedDevice::OAuth { user_id, device_id: _, client_id: _ } => user == user_id,
+            SavedDevice::MatrixAuth { user_id, device_id: _ } => user == user_id,
+        }
+    }
 }
 
 impl From<Session> for MatrixSession {
@@ -1471,13 +1498,13 @@ impl ApplicationSettings {
     /// The device ID saved at logout, if it was saved for this profile's
     /// user. A missing or stale file is not an error: the next login then
     /// simply gets a fresh device ID from the homeserver.
-    pub fn read_saved_device(&self) -> Option<OwnedDeviceId> {
+    pub fn read_saved_device(&self) -> Option<SavedDevice> {
         let file = File::open(self.device_json.as_path()).ok()?;
         let reader = BufReader::new(file);
         let saved: SavedDevice = serde_json::from_reader(reader).ok()?;
 
-        if saved.user_id == self.profile.user_id {
-            Some(saved.device_id)
+        if saved.is_users(&self.profile.user_id) {
+            Some(saved)
         } else {
             None
         }
@@ -1490,10 +1517,21 @@ impl ApplicationSettings {
     ) -> Result<(), IambError> {
         let file = File::create(self.device_json.as_path())?;
         let writer = BufWriter::new(file);
-        let saved = SavedDevice {
-            user_id: self.profile.user_id.clone(),
-            device_id: device_id.to_owned(),
-            client_id,
+
+        let saved = match client_id {
+            Some(client) => {
+                SavedDevice::OAuth {
+                    user_id: self.profile.user_id.clone(),
+                    device_id: device_id.to_owned(),
+                    client_id: client,
+                }
+            },
+            None => {
+                SavedDevice::MatrixAuth {
+                    user_id: self.profile.user_id.clone(),
+                    device_id: device_id.to_owned(),
+                }
+            },
         };
         serde_json::to_writer(writer, &saved).map_err(IambError::from)?;
         Ok(())

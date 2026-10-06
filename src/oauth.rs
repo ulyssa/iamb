@@ -15,6 +15,7 @@ use matrix_sdk::utils::local_server::{LocalServerBuilder, LocalServerRedirectHan
 use tokio::io::AsyncBufReadExt;
 use tokio::task::JoinHandle;
 
+use crate::config::SavedDevice;
 use crate::prelude::*;
 
 enum OAuthRedirectResponse {
@@ -22,7 +23,11 @@ enum OAuthRedirectResponse {
     Stdin(UrlOrQuery),
 }
 
-pub async fn oauth_login(client: Client, user_hint: &UserId) -> IambResult<()> {
+pub async fn oauth_login(
+    client: Client,
+    user_hint: &UserId,
+    saved_device: Option<SavedDevice>,
+) -> IambResult<()> {
     let oauth = client.oauth();
 
     match oauth.server_metadata().await {
@@ -32,9 +37,15 @@ pub async fn oauth_login(client: Client, user_hint: &UserId) -> IambResult<()> {
                 server_metadata.issuer
             );
 
+            let mut device = None;
+            if let Some(SavedDevice::OAuth { user_id: _, device_id, client_id }) = saved_device {
+                oauth.restore_registered_client(client_id.clone());
+                device = Some(device_id);
+            }
+
             let (redirect_uri, server_handle) = LocalServerBuilder::new().spawn().await?;
             let OAuthAuthorizationData { url, .. } = oauth
-                .login(redirect_uri, None, Some(client_metadata().into()), None)
+                .login(redirect_uri, device, Some(client_metadata().into()), None)
                 .user_id_hint(user_hint)
                 .build()
                 .await
