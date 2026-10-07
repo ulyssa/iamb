@@ -335,7 +335,7 @@ impl SavedDevice {
             SavedDevice::MatrixAuth { user_id: _, device_id: _ } => None,
         }
     }
-    pub fn is_users(&self, user: &OwnedUserId) -> bool {
+    pub fn is_user(&self, user: &OwnedUserId) -> bool {
         match self {
             SavedDevice::OAuth { user_id, device_id: _, client_id: _ } => user == user_id,
             SavedDevice::MatrixAuth { user_id, device_id: _ } => user == user_id,
@@ -1503,7 +1503,7 @@ impl ApplicationSettings {
         let reader = BufReader::new(file);
         let saved: SavedDevice = serde_json::from_reader(reader).ok()?;
 
-        if saved.is_users(&self.profile.user_id) {
+        if saved.is_user(&self.profile.user_id) {
             Some(saved)
         } else {
             None
