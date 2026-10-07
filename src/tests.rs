@@ -167,6 +167,7 @@ pub fn mock_tunables() -> TunableValues {
         read_receipt_send: true,
         read_receipt_trigger: Default::default(),
         read_receipt_display: true,
+        room_labels: Default::default(),
         request_timeout: 120,
         sort: SortOverrides::default().values(),
         state_event_display: true,

@@ -36,6 +36,7 @@ reaction_display = true
 reaction_shortcode_display = false
 read_receipt_display = true
 read_receipt_send = true
+room_labels = ["membership", "muted", "tags"]
 request_timeout = 10000
 sync_delay_ms = 1000
 typing_notice_display = true
