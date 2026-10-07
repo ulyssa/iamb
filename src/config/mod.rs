@@ -25,11 +25,13 @@ use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize};
 
 use crate::base::{SortColumn, SortFieldRoom, SortFieldSpace, SortFieldUser, SortOrder};
+use crate::keybindings::IambStep;
 use crate::prelude::*;
 
 pub mod theme;
 
 pub type Aliases = IndexMap<String, String>;
+type Keybindings = HashMap<VimModes, HashMap<Keys, UserStep>>;
 type Macros = HashMap<VimModes, HashMap<Keys, Keys>>;
 
 macro_rules! usage {
@@ -215,11 +217,34 @@ macro_rules! deserialize_str_with_visitor {
     };
 }
 
+deserialize_str_with_visitor!(UserStep, UserStepVisitor);
 deserialize_str_with_visitor!(Keys, KeysVisitor);
 deserialize_str_with_visitor!(VimModes, VimModesVisitor);
 deserialize_str_with_visitor!(EncryptionIndicatorLocation, EncryptionIndicatorLocationVisitor);
 deserialize_str_with_visitor!(NotifyVia, NotifyViaVisitor);
 deserialize_str_with_visitor!(ProxyUrl, ProxyUrlVisitor);
+
+#[derive(Clone, Debug)]
+pub struct UserStep(pub IambStep);
+pub struct UserStepVisitor;
+
+impl Visitor<'_> for UserStepVisitor {
+    type Value = UserStep;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid keybinding action using the DSL syntax ")
+    }
+
+    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        match IambStep::from_str(value) {
+            Ok(step) => Ok(UserStep(step)),
+            Err(e) => Err(E::custom(format!("Could not parse keybinding action {value:?}: {e}"))),
+        }
+    }
+}
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct Keys(pub Vec<TerminalKey>, pub String);
@@ -1240,6 +1265,7 @@ pub struct ProfileConfig {
     pub theme: Option<theme::Theme>,
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
+    pub keybindings: Option<Keybindings>,
     pub macros: Option<Macros>,
     pub aliases: Option<Aliases>,
 }
@@ -1251,6 +1277,7 @@ pub struct IambConfig {
     pub settings: Option<Tunables>,
     pub dirs: Option<Directories>,
     pub layout: Option<Layout>,
+    pub keybindings: Option<Keybindings>,
     pub macros: Option<Macros>,
     pub aliases: Option<Aliases>,
     pub theme: Option<theme::Theme>,
@@ -1287,6 +1314,7 @@ pub struct ApplicationSettings {
     pub tunables: TunableValues,
     pub dirs: DirectoryValues,
     pub layout: Layout,
+    pub keybindings: Keybindings,
     pub macros: Macros,
     pub aliases: Aliases,
 
@@ -1336,6 +1364,7 @@ impl ApplicationSettings {
             dirs,
             settings: global,
             layout,
+            keybindings,
             macros,
             aliases,
             theme,
@@ -1381,6 +1410,7 @@ impl ApplicationSettings {
         };
 
         let aliases = merge_maps(profile.aliases.take(), aliases).unwrap_or_default();
+        let keybindings = merge_maps(profile.keybindings.take(), keybindings).unwrap_or_default();
         let macros = merge_maps(profile.macros.take(), macros).unwrap_or_default();
         let layout = profile.layout.take().or(layout).unwrap_or_default();
 
@@ -1448,6 +1478,7 @@ impl ApplicationSettings {
             tunables,
             dirs,
             layout,
+            keybindings,
             macros,
             aliases,
             enable_enhanced_keys: false,
@@ -2049,6 +2080,7 @@ mod tests {
             settings,
             dirs,
             layout,
+            keybindings,
             macros,
             aliases,
             theme,
@@ -2060,6 +2092,7 @@ mod tests {
         assert!(settings.is_some());
         assert!(dirs.is_some());
         assert!(layout.is_some());
+        assert!(keybindings.is_some());
         assert!(macros.is_some());
         assert!(aliases.is_some());
         assert!(theme.is_some());
