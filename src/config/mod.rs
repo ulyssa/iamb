@@ -508,11 +508,11 @@ pub enum SplitDirection {
     Vertical,
 }
 
-impl SplitDirection {
-    pub fn to_axis(self) -> Axis {
-        match self {
-            Self::Horizontal => Axis::Horizontal,
-            Self::Vertical => Axis::Vertical,
+impl From<SplitDirection> for Axis {
+    fn from(dir: SplitDirection) -> Axis {
+        match dir {
+            SplitDirection::Horizontal => Axis::Horizontal,
+            SplitDirection::Vertical => Axis::Vertical,
         }
     }
 }

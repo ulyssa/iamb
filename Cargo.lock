@@ -1622,12 +1622,14 @@ dependencies = [
 
 [[package]]
 name = "editor-types"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9f826643f7fa44f8ba305301de9fba0215aa4d1f069d15a19d98d67bc71570b5"
+checksum = "687ec495f9b4b64810edb5ce1ef7166e79e7cec40bc5ab961d9dcde895e97e4b"
 dependencies = [
+ "anyhow",
  "bitflags 2.13.2",
  "editor-types-macros",
+ "editor-types-parser",
  "enum-map",
  "keybindings",
  "regex",
@@ -1635,12 +1637,11 @@ dependencies = [
 
 [[package]]
 name = "editor-types-macros"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fc2388897d6842fe58a567b8a7b4deabda77ce1129f5a2de88e7b94a88f0c76f"
+checksum = "7b5930990ea80a57334a6999d086d2df28a5b67748c32479f0cb1cca8c5d9461"
 dependencies = [
  "editor-types-parser",
- "nom 8.0.0",
  "proc-macro2",
  "quote",
  "syn 3.0.6",
@@ -1648,12 +1649,14 @@ dependencies = [
 
 [[package]]
 name = "editor-types-parser"
-version = "0.0.5"
+version = "0.0.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "65739071a9f3f74a960551ad8a388d16d2c9546c1e9c0ce011e3c4d9ff93a84d"
+checksum = "86caf8408696409d3d6f58c1165ecc21a39effb55cb5c708742cc0c12f18e7eb"
 dependencies = [
- "nom 8.0.0",
+ "logos",
+ "pomelo",
  "thiserror 2.0.20",
+ "unescape_zero_copy",
 ]
 
 [[package]]
@@ -3226,6 +3229,38 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f9f8bd3e56ce4dfc153cf470fffbfa98c7620958b312ca5c3a4b8d5181fd13c6"
 
 [[package]]
+name = "logos"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "eb2c55a318a87600ea870ff8c2012148b44bf18b74fad48d0f835c38c7d07c5f"
+dependencies = [
+ "logos-derive",
+]
+
+[[package]]
+name = "logos-codegen"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "58b3ffaa284e1350d017a57d04ada118c4583cf260c8fb01e0fe28a2e9cf8970"
+dependencies = [
+ "fnv",
+ "proc-macro2",
+ "quote",
+ "regex-automata",
+ "regex-syntax",
+ "syn 2.0.119",
+]
+
+[[package]]
+name = "logos-derive"
+version = "0.16.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "52d3a9855747c17eaf4383823f135220716ab49bea5fbea7dd42cc9a92f8aa31"
+dependencies = [
+ "logos-codegen",
+]
+
+[[package]]
 name = "loop9"
 version = "0.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3815,10 +3850,11 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.30"
+version = "0.0.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7906e266d10ebe501fa0afb585fcfa180012067679c558460e07014e828ff9d0"
+checksum = "8b83364f3f8da5c3b42911179519ac7dafed42ff09b5be31d2f68ffb6732f287"
 dependencies = [
+ "anyhow",
  "anymap2",
  "arboard",
  "bitflags 2.13.2",
@@ -3839,9 +3875,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit-ratatui"
-version = "0.0.30"
+version = "0.0.31"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc12f79c2070f1bfbadf97f93f338308b25416c1f8b8a943112db4974d7fed15"
+checksum = "b98b10507e0a800195aa26e1d1ff85a68fdfa4a91961456f7d803e1453885e12"
 dependencies = [
  "crossterm 0.29.0",
  "enum-map",
@@ -4515,6 +4551,26 @@ checksum = "6e2d0073b297041425c7c3df6eb4792d598a15323fe63346852b092eca02904c"
 dependencies = [
  "cpufeatures 0.3.1",
  "universal-hash",
+]
+
+[[package]]
+name = "pomelo"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d01bf7978dd0ffcfb13d27e1ec8bd0c488da8491cb40b167795ee365dff60923"
+dependencies = [
+ "pomelo-impl",
+]
+
+[[package]]
+name = "pomelo-impl"
+version = "0.2.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "31d3117854ef63946c9393b70d4f1d17070f9ac6c1484db88c8efaeef4fa1e5c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
 ]
 
 [[package]]
@@ -6683,6 +6739,12 @@ dependencies = [
  "rand 0.10.3",
  "web-time",
 ]
+
+[[package]]
+name = "unescape_zero_copy"
+version = "2.4.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "745c468d775f409baa7ccf0997f0b00672da36145565366ad4a20163b71ad56c"
 
 [[package]]
 name = "unicase"
