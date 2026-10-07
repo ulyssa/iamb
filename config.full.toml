@@ -41,10 +41,11 @@ read_receipt_display = true
 read_receipt_send = true
 request_timeout = 10000
 sync_delay_ms = 1000
-# strftime format for the per-message time (same specifier reference as
-# date_format). The text between the brackets is limited to 8 display columns;
-# shorter values are padded and longer values are truncated.
-# time_format = "%T"
+# strftime format for the per-message time gutter (same specifier reference as
+# date_format). This string is the full gutter text, including brackets and
+# spacing. Column width follows the rendered format. An empty string disables
+# the time display.
+# time_format = "  [%T]"
 typing_notice_display = true
 typing_notice_send = true
 user_gutter_width = 30

@@ -318,17 +318,14 @@ A strftime format string for the time shown beside each message.
 See
 .Lk https://docs.rs/chrono/latest/chrono/format/strftime/index.html
 for the conversion specifiers.
-The formatted text is drawn between brackets in a column that is always 12
-display columns wide, as in
-.Dq "  [HH:MM:SS]" .
-Only 8 of those columns are available for the formatted text, which is the
-width of the default
-.Dq %T
-value.
-Shorter results are padded with trailing spaces and longer results are
-truncated by display width.
+The value is the full gutter text, including any brackets or spacing.
+Its display width, measured by rendering the format for a sample timestamp,
+is the width of the time column and does not change from message to message.
+An empty string disables the time display and reserves no columns.
 Defaults to
-.Dq %T .
+.Dq "  [%T]" ,
+which renders as
+.Dq "  [HH:MM:SS]" .
 .It Sy typing_notice_send
 Defines whether or not the typing state is sent.
 .It Sy typing_notice_display

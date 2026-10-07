@@ -104,44 +104,8 @@ impl Messages {
     }
 }
 
-const fn span_static(s: &'static str) -> Span<'static> {
-    Span {
-        content: Cow::Borrowed(s),
-        style: Style {
-            fg: None,
-            bg: None,
-            add_modifier: StyleModifier::empty(),
-            sub_modifier: StyleModifier::empty(),
-            underline_color: None,
-        },
-    }
-}
-
-const TIME_GUTTER: usize = 12;
-/// Columns used by the `"  ["` prefix and `"]"` suffix around a message time.
-const TIME_GUTTER_CHROME: usize = 4;
-/// Display columns available for `settings.time_format` between the brackets.
-///
-/// The default `"%T"` (`HH:MM:SS`) fills this exactly. Shorter results are
-/// padded with trailing spaces and longer results are truncated by display
-/// width so the rendered span stays [`TIME_GUTTER`] columns wide.
-const TIME_FORMAT_WIDTH: usize = TIME_GUTTER - TIME_GUTTER_CHROME;
 const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
-
-const TIME_GUTTER_EMPTY: &str = "            ";
-const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
-
-/// Fit formatted time text into the fixed time column.
-///
-/// The span is always [`TIME_GUTTER`] display columns: two spaces, an opening
-/// bracket, [`TIME_FORMAT_WIDTH`] columns of text, and a closing bracket.
-fn format_time_gutter(formatted: &str) -> String {
-    let ((taken, width), _) = take_width_grapheme(Cow::Borrowed(formatted), TIME_FORMAT_WIDTH);
-    let pad = space(TIME_FORMAT_WIDTH.saturating_sub(width));
-
-    format!("  [{taken}{pad}]")
-}
 
 const USIZE_TOO_SMALL: bool = usize::BITS < u64::BITS;
 
@@ -258,7 +222,6 @@ impl MessageTimeStamp {
             .as_datetime()
             .format(settings.tunables.time_format.as_str())
             .to_string();
-        let time = format_time_gutter(&time);
 
         Span::styled(time, settings.theme.timeline.time)
     }
@@ -799,7 +762,9 @@ impl<'a> MessageFormatter<'a> {
         match self.cols {
             MessageColumns::Four => {
                 let settings = self.settings;
-                let time = self.time.take().unwrap_or(TIME_GUTTER_EMPTY_SPAN);
+                let time = self.time.take().unwrap_or_else(|| {
+                    space_span(settings.tunables.time_gutter_width(), Style::default())
+                });
 
                 let mut line = vec![user_gutter];
                 line.extend(prev_line.spans);
@@ -1154,13 +1119,14 @@ impl Message {
     ) -> usize {
         let width = viewctx.get_width();
         let user_gutter = settings.tunables.user_gutter_width;
+        let time_gutter = settings.tunables.time_gutter_width();
 
-        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
+        if user_gutter + time_gutter + READ_GUTTER + MIN_MSG_LEN <= width &&
             settings.tunables.read_receipt_display
         {
-            width - user_gutter - TIME_GUTTER - READ_GUTTER
-        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
-            width - user_gutter - TIME_GUTTER
+            width - user_gutter - time_gutter - READ_GUTTER
+        } else if user_gutter + time_gutter + MIN_MSG_LEN <= width {
+            width - user_gutter - time_gutter
         } else if user_gutter + MIN_MSG_LEN <= width {
             width - user_gutter
         } else {
@@ -1179,12 +1145,13 @@ impl Message {
         let date = self.show_date(prev).then(|| self.timestamp.show_date(settings));
         let trackbar = self.show_trackbar(prev, info, settings);
         let user_gutter = settings.tunables.user_gutter_width;
+        let time_gutter = settings.tunables.time_gutter_width();
 
-        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
+        if user_gutter + time_gutter + READ_GUTTER + MIN_MSG_LEN <= width &&
             settings.tunables.read_receipt_display
         {
             let cols = MessageColumns::Four;
-            let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
+            let fill = width - user_gutter - time_gutter - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings, width);
             let time = Some(self.timestamp.show_time(settings));
 
@@ -1215,9 +1182,9 @@ impl Message {
                 read,
                 info,
             }
-        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
+        } else if user_gutter + time_gutter + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
-            let fill = width - user_gutter - TIME_GUTTER;
+            let fill = width - user_gutter - time_gutter;
             let user = self.show_sender(prev, true, info, settings, width);
             let time = Some(self.timestamp.show_time(settings));
             let read = Vec::new();
@@ -2104,38 +2071,42 @@ pub mod tests {
 
         let time = ts.show_time(&settings);
         assert_eq!(time.content.as_ref(), format!("  [{}]", dt.format("%T")));
-        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
+        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), 12);
+        assert_eq!(settings.tunables.time_gutter_width(), 12);
     }
 
     #[test]
-    fn test_show_time_padding_and_truncation() {
+    fn test_time_gutter_width_follows_format() {
         let (ts, dt) = sample_stamp();
         let mut settings = mock_settings();
+        let view = ViewportContext { dimensions: (120, 10), ..Default::default() };
+        let default_cols = Message::message_column_width(&view, &settings);
 
-        // "%H:%M" is 5 columns, padded out to the 8 inside the brackets.
+        // "%H:%M" is five columns and is not padded out to the old gutter.
         settings.tunables.time_format = "%H:%M".to_string();
         let time = ts.show_time(&settings);
-        assert_eq!(time.content.as_ref(), format!("  [{}   ]", dt.format("%H:%M")));
-        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
+        let rendered = dt.format("%H:%M").to_string();
+        assert_eq!(time.content.as_ref(), rendered);
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 5);
+        assert_eq!(settings.tunables.time_gutter_width(), 5);
+        assert_eq!(Message::message_column_width(&view, &settings), default_cols + 7);
 
-        // "YYYY-MM-DD HH:MM:SS" is truncated to the first 8 columns: "YYYY-MM-".
-        settings.tunables.time_format = "%Y-%m-%d %H:%M:%S".to_string();
+        // An empty format hides the time and reserves no column.
+        settings.tunables.time_format = String::new();
         let time = ts.show_time(&settings);
-        assert_eq!(time.content.as_ref(), format!("  [{}]", dt.format("%Y-%m-")));
-        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
+        assert_eq!(time.content.as_ref(), "");
+        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), 0);
+        assert_eq!(settings.tunables.time_gutter_width(), 0);
+        assert_eq!(Message::message_column_width(&view, &settings), default_cols + 12);
 
-        // A wide character that does not fit in the remaining column is dropped
-        // and the gap is padded so the gutter stays TIME_GUTTER columns.
-        settings.tunables.time_format = "1234567あいう".to_string();
+        // Wider than the historical 8-column cap, and a wide character counts as two.
+        settings.tunables.time_format = "%H時%M分".to_string();
         let time = ts.show_time(&settings);
-        assert_eq!(time.content.as_ref(), "  [1234567 ]");
-        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
-
-        // HH=2 + 時=2 + MM=2 + 分=2 = 8 display columns; the seconds are dropped.
-        settings.tunables.time_format = "%H時%M分%S秒".to_string();
-        let time = ts.show_time(&settings);
-        assert_eq!(time.content.as_ref(), format!("  [{}]", dt.format("%H時%M分")));
-        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
+        let rendered = dt.format("%H時%M分").to_string();
+        assert_eq!(time.content.as_ref(), rendered);
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 8);
+        assert_eq!(settings.tunables.time_gutter_width(), 8);
+        assert_eq!(Message::message_column_width(&view, &settings), default_cols + 4);
     }
 
     #[test]

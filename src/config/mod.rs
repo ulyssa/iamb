@@ -7,6 +7,7 @@ use std::process;
 use std::sync::Arc;
 
 use chrono::format::{Item, StrftimeItems};
+use chrono::{DateTime, Local};
 use clap::Parser;
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -84,8 +85,19 @@ const DEFAULT_LOG_LEVEL: &str = "off";
 /// Default date separator, matching the historical hard-coded `"%A, %B %d %Y"`.
 const DEFAULT_DATE_FORMAT: &str = "%A, %B %d %Y";
 
-/// Default per-message time, matching the historical hard-coded `"%T"`.
-const DEFAULT_TIME_FORMAT: &str = "%T";
+/// Default time gutter, preserving the historical `  [HH:MM:SS]` rendering.
+const DEFAULT_TIME_FORMAT: &str = "  [%T]";
+
+/// Unix seconds of the timestamp used to measure time-gutter width.
+///
+/// 2024-01-15 13:25:30 UTC, so numeric fields have their usual widths.
+const TIME_GUTTER_SAMPLE_UNIX: i64 = 1_705_325_130;
+
+fn time_gutter_sample() -> DateTime<Local> {
+    DateTime::from_timestamp(TIME_GUTTER_SAMPLE_UNIX, 0)
+        .unwrap_or_default()
+        .with_timezone(&Local)
+}
 
 fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
@@ -896,6 +908,22 @@ pub struct TunableValues {
     pub time_format: String,
 }
 
+impl TunableValues {
+    /// Display columns reserved for the per-message time gutter.
+    ///
+    /// The width is the display width of [`Self::time_format`] applied to one
+    /// fixed sample timestamp, so a configuration keeps a constant column.
+    /// An empty format reserves nothing and hides the time.
+    pub fn time_gutter_width(&self) -> usize {
+        if self.time_format.is_empty() {
+            return 0;
+        }
+
+        let rendered = time_gutter_sample().format(self.time_format.as_str()).to_string();
+        UnicodeWidthStr::width(rendered.as_str())
+    }
+}
+
 #[derive(Clone, Debug, Default, Deserialize)]
 pub struct Tunables {
     /// Subsection for overriding encryption-related settings.
@@ -954,8 +982,9 @@ pub struct Tunables {
     pub send_on_enter: Option<bool>,
     #[serde(default, deserialize_with = "deserialize_strftime")]
     pub date_format: Option<String>,
-    /// strftime string for the per-message time column. The formatted text is
-    /// padded or truncated to 8 display columns so the gutter stays 12 wide.
+    /// strftime string for the per-message time gutter, including any brackets
+    /// or spacing. The column is as wide as a sample rendering of this string.
+    /// An empty string hides the time.
     #[serde(default, deserialize_with = "deserialize_strftime")]
     pub time_format: Option<String>,
 }
@@ -1758,6 +1787,7 @@ time_format = "%H:%M"
         let values = settings.values();
         assert_eq!(values.date_format, "%Y-%m-%d");
         assert_eq!(values.time_format, "%H:%M");
+        assert_eq!(values.time_gutter_width(), 5);
 
         // Absent keys keep today's formats.
         let settings = parse_settings_toml("[settings]\n").unwrap();
@@ -1765,7 +1795,33 @@ time_format = "%H:%M"
         assert_eq!(settings.time_format, None);
         let values = settings.values();
         assert_eq!(values.date_format, "%A, %B %d %Y");
-        assert_eq!(values.time_format, "%T");
+        assert_eq!(values.time_format, "  [%T]");
+        assert_eq!(values.time_gutter_width(), 12);
+
+        // An empty format is valid and disables the time column.
+        let settings = parse_settings_toml(
+            r#"
+[settings]
+time_format = ""
+"#,
+        )
+        .unwrap();
+        assert_eq!(settings.time_format.as_deref(), Some(""));
+        let values = settings.values();
+        assert_eq!(values.time_format, "");
+        assert_eq!(values.time_gutter_width(), 0);
+
+        // Brackets and spacing are literal gutter text, not added later.
+        let settings = parse_settings_toml(
+            r#"
+[settings]
+time_format = "  [%H:%M]"
+"#,
+        )
+        .unwrap();
+        let values = settings.values();
+        assert_eq!(values.time_format, "  [%H:%M]");
+        assert_eq!(values.time_gutter_width(), 9);
     }
 
     #[test]
