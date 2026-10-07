@@ -37,11 +37,14 @@ pub async fn oauth_login(
                 server_metadata.issuer
             );
 
-            let mut device = None;
-            if let Some(SavedDevice::OAuth { user_id: _, device_id, client_id }) = saved_device {
+            let device = if let Some(SavedDevice::OAuth { user_id: _, device_id, client_id }) =
+                saved_device
+            {
                 oauth.restore_registered_client(client_id.clone());
-                device = Some(device_id);
-            }
+                Some(device_id)
+            } else {
+                None
+            };
 
             let (redirect_uri, server_handle) = LocalServerBuilder::new().spawn().await?;
             let OAuthAuthorizationData { url, .. } = oauth
