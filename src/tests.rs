@@ -199,6 +199,8 @@ pub fn mock_tunables() -> TunableValues {
         ssl_verify: true,
         cache_policy: Default::default(),
         send_on_enter: true,
+        date_format: "%A, %B %d %Y".to_string(),
+        time_format: "%T".to_string(),
     }
 }
 

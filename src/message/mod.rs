@@ -118,11 +118,30 @@ const fn span_static(s: &'static str) -> Span<'static> {
 }
 
 const TIME_GUTTER: usize = 12;
+/// Columns used by the `"  ["` prefix and `"]"` suffix around a message time.
+const TIME_GUTTER_CHROME: usize = 4;
+/// Display columns available for `settings.time_format` between the brackets.
+///
+/// The default `"%T"` (`HH:MM:SS`) fills this exactly. Shorter results are
+/// padded with trailing spaces and longer results are truncated by display
+/// width so the rendered span stays [`TIME_GUTTER`] columns wide.
+const TIME_FORMAT_WIDTH: usize = TIME_GUTTER - TIME_GUTTER_CHROME;
 const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
 
 const TIME_GUTTER_EMPTY: &str = "            ";
 const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
+
+/// Fit formatted time text into the fixed time column.
+///
+/// The span is always [`TIME_GUTTER`] display columns: two spaces, an opening
+/// bracket, [`TIME_FORMAT_WIDTH`] columns of text, and a closing bracket.
+fn format_time_gutter(formatted: &str) -> String {
+    let ((taken, width), _) = take_width_grapheme(Cow::Borrowed(formatted), TIME_FORMAT_WIDTH);
+    let pad = space(TIME_FORMAT_WIDTH.saturating_sub(width));
+
+    format!("  [{taken}{pad}]")
+}
 
 const USIZE_TOO_SMALL: bool = usize::BITS < u64::BITS;
 
@@ -221,7 +240,10 @@ impl MessageTimeStamp {
     }
 
     fn show_date(self, settings: &ApplicationSettings) -> Span<'static> {
-        let time = self.as_datetime().format("%A, %B %d %Y").to_string();
+        let time = self
+            .as_datetime()
+            .format(settings.tunables.date_format.as_str())
+            .to_string();
 
         Span::styled(time, settings.theme.timeline.date)
     }
@@ -232,8 +254,11 @@ impl MessageTimeStamp {
     }
 
     fn show_time(self, settings: &ApplicationSettings) -> Span<'static> {
-        let time = self.as_datetime().format("%T");
-        let time = format!("  [{time}]");
+        let time = self
+            .as_datetime()
+            .format(settings.tunables.time_format.as_str())
+            .to_string();
+        let time = format_time_gutter(&time);
 
         Span::styled(time, settings.theme.timeline.time)
     }
@@ -2058,5 +2083,67 @@ pub mod tests {
         // When disabled, the plain text body is shown exactly as it was sent.
         settings.tunables.message_formatted_display = false;
         assert_eq!(render(&settings), "**hello** <world>");
+    }
+
+    /// `MessageTimeStamp::as_datetime` converts to the local timezone, so
+    /// expectations are computed with the same conversion rather than a
+    /// hard-coded wall clock.
+    fn sample_stamp() -> (MessageTimeStamp, DateTime<LocalTz>) {
+        let millis = MilliSecondsSinceUnixEpoch(UInt::try_from(1_705_325_130_000u64).unwrap());
+        let ts = MessageTimeStamp::from(millis);
+        (ts, ts.as_datetime())
+    }
+
+    #[test]
+    fn test_show_time_and_date_defaults() {
+        let (ts, dt) = sample_stamp();
+        let settings = mock_settings();
+
+        let date = ts.show_date(&settings);
+        assert_eq!(date.content.as_ref(), dt.format("%A, %B %d %Y").to_string());
+
+        let time = ts.show_time(&settings);
+        assert_eq!(time.content.as_ref(), format!("  [{}]", dt.format("%T")));
+        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
+    }
+
+    #[test]
+    fn test_show_time_padding_and_truncation() {
+        let (ts, dt) = sample_stamp();
+        let mut settings = mock_settings();
+
+        // "%H:%M" is 5 columns, padded out to the 8 inside the brackets.
+        settings.tunables.time_format = "%H:%M".to_string();
+        let time = ts.show_time(&settings);
+        assert_eq!(time.content.as_ref(), format!("  [{}   ]", dt.format("%H:%M")));
+        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
+
+        // "YYYY-MM-DD HH:MM:SS" is truncated to the first 8 columns: "YYYY-MM-".
+        settings.tunables.time_format = "%Y-%m-%d %H:%M:%S".to_string();
+        let time = ts.show_time(&settings);
+        assert_eq!(time.content.as_ref(), format!("  [{}]", dt.format("%Y-%m-")));
+        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
+
+        // A wide character that does not fit in the remaining column is dropped
+        // and the gap is padded so the gutter stays TIME_GUTTER columns.
+        settings.tunables.time_format = "1234567あいう".to_string();
+        let time = ts.show_time(&settings);
+        assert_eq!(time.content.as_ref(), "  [1234567 ]");
+        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
+
+        // HH=2 + 時=2 + MM=2 + 分=2 = 8 display columns; the seconds are dropped.
+        settings.tunables.time_format = "%H時%M分%S秒".to_string();
+        let time = ts.show_time(&settings);
+        assert_eq!(time.content.as_ref(), format!("  [{}]", dt.format("%H時%M分")));
+        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), TIME_GUTTER);
+    }
+
+    #[test]
+    fn test_show_custom_date_format() {
+        let (ts, dt) = sample_stamp();
+        let mut settings = mock_settings();
+        settings.tunables.date_format = "%Y-%m-%d".to_string();
+        let date = ts.show_date(&settings);
+        assert_eq!(date.content.as_ref(), dt.format("%Y-%m-%d").to_string());
     }
 }

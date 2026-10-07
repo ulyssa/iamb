@@ -6,6 +6,7 @@ use std::io::{BufReader, BufWriter, Write as _};
 use std::process;
 use std::sync::Arc;
 
+use chrono::format::{Item, StrftimeItems};
 use clap::Parser;
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -79,6 +80,12 @@ const DEFAULT_ICON_UNENC: Cow<'static, str> = Cow::Borrowed("[U] ");
 const DEFAULT_ICON_UNKNOWN: Cow<'static, str> = Cow::Borrowed("[?] ");
 
 const DEFAULT_LOG_LEVEL: &str = "off";
+
+/// Default date separator, matching the historical hard-coded `"%A, %B %d %Y"`.
+const DEFAULT_DATE_FORMAT: &str = "%A, %B %d %Y";
+
+/// Default per-message time, matching the historical hard-coded `"%T"`.
+const DEFAULT_TIME_FORMAT: &str = "%T";
 
 fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
@@ -158,6 +165,21 @@ where
     };
 
     Ok(Some(r))
+}
+
+fn deserialize_strftime<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+
+    // `DelayedFormat`'s `Display` impl returns `fmt::Error` for a bad specifier,
+    // and `.to_string()` then panics. Reject those strings while loading config.
+    if StrftimeItems::new(&value).any(|item| matches!(item, Item::Error)) {
+        return Err(D::Error::custom(format!("invalid strftime format string: {value:?}")));
+    }
+
+    Ok(Some(value))
 }
 
 const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
@@ -870,6 +892,8 @@ pub struct TunableValues {
     pub ssl_verify: bool,
     pub cache_policy: MediaRetentionPolicy,
     pub send_on_enter: bool,
+    pub date_format: String,
+    pub time_format: String,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -928,6 +952,12 @@ pub struct Tunables {
     pub ssl_verify: Option<bool>,
     pub cache_policy: Option<MediaRetentionPolicy>,
     pub send_on_enter: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_strftime")]
+    pub date_format: Option<String>,
+    /// strftime string for the per-message time column. The formatted text is
+    /// padded or truncated to 8 display columns so the gutter stays 12 wide.
+    #[serde(default, deserialize_with = "deserialize_strftime")]
+    pub time_format: Option<String>,
 }
 
 impl Tunables {
@@ -986,6 +1016,8 @@ impl Tunables {
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
             cache_policy: self.cache_policy.or(other.cache_policy),
             send_on_enter: self.send_on_enter.or(other.send_on_enter),
+            date_format: self.date_format.or(other.date_format),
+            time_format: self.time_format.or(other.time_format),
         }
     }
 
@@ -1038,6 +1070,8 @@ impl Tunables {
             ssl_verify: self.ssl_verify.unwrap_or(true),
             cache_policy: self.cache_policy.unwrap_or_default(),
             send_on_enter: self.send_on_enter.unwrap_or(true),
+            date_format: self.date_format.unwrap_or_else(|| DEFAULT_DATE_FORMAT.to_owned()),
+            time_format: self.time_format.unwrap_or_else(|| DEFAULT_TIME_FORMAT.to_owned()),
         }
     }
 }
@@ -1697,6 +1731,64 @@ mod tests {
         .unwrap();
         let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::Rgb(0xff, 0x55, 0xbb)))];
         assert_eq!(res.users, Some(users.into_iter().collect()));
+    }
+
+    fn parse_settings_toml(input: &str) -> Result<Tunables, toml::de::Error> {
+        #[derive(Deserialize)]
+        struct SettingsToml {
+            settings: Tunables,
+        }
+
+        toml::from_str::<SettingsToml>(input).map(|doc| doc.settings)
+    }
+
+    #[test]
+    fn test_parse_tunables_date_time_format() {
+        let settings = parse_settings_toml(
+            r#"
+[settings]
+date_format = "%Y-%m-%d"
+time_format = "%H:%M"
+"#,
+        )
+        .unwrap();
+        assert_eq!(settings.date_format.as_deref(), Some("%Y-%m-%d"));
+        assert_eq!(settings.time_format.as_deref(), Some("%H:%M"));
+
+        let values = settings.values();
+        assert_eq!(values.date_format, "%Y-%m-%d");
+        assert_eq!(values.time_format, "%H:%M");
+
+        // Absent keys keep today's formats.
+        let settings = parse_settings_toml("[settings]\n").unwrap();
+        assert_eq!(settings.date_format, None);
+        assert_eq!(settings.time_format, None);
+        let values = settings.values();
+        assert_eq!(values.date_format, "%A, %B %d %Y");
+        assert_eq!(values.time_format, "%T");
+    }
+
+    #[test]
+    fn test_parse_tunables_date_time_format_invalid() {
+        let err = parse_settings_toml(
+            r#"
+[settings]
+date_format = "%Q"
+"#,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("invalid strftime"), "{msg}");
+
+        let err = parse_settings_toml(
+            r#"
+[settings]
+time_format = "%"
+"#,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("invalid strftime"), "{msg}");
     }
 
     #[test]
