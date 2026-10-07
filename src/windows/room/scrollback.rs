@@ -699,7 +699,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 return Ok(None);
             },
-            EditAction::Yank => {
+            EditAction::Yank(reg, style) => {
                 let range = match motion {
                     EditTarget::CurrentPosition | EditTarget::Selection => {
                         Some(self._range_to(key.into()))
@@ -778,14 +778,9 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     }
 
                     let cell = RegisterCell::new(TargetShape::LineWise, yanked);
+                    let flags = RegisterPutFlags::from(ctx.resolve(style));
                     let register =
-                        ctx.get_register().unwrap_or(store.registers.get_default_register());
-                    let mut flags = RegisterPutFlags::NONE;
-
-                    if ctx.get_register_append() {
-                        flags |= RegisterPutFlags::APPEND;
-                    }
-
+                        ctx.resolve(reg).unwrap_or(store.registers.get_default_register());
                     store.registers.put(&register, cell, flags)?;
                 }
 
@@ -794,8 +789,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
             // Everything else is a modifying action.
             EditAction::ChangeCase(_) => Err(EditError::ReadOnly),
-            EditAction::ChangeNumber(_, _) => Err(EditError::ReadOnly),
-            EditAction::Delete => Err(EditError::ReadOnly),
+            EditAction::ChangeNumber(..) => Err(EditError::ReadOnly),
+            EditAction::Delete(..) => Err(EditError::ReadOnly),
             EditAction::Format => Err(EditError::ReadOnly),
             EditAction::Indent(_) => Err(EditError::ReadOnly),
             EditAction::Join(_) => Err(EditError::ReadOnly),
@@ -873,8 +868,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             CursorAction::Rotate(_, _) => Ok(None),
             CursorAction::Split(_) => Ok(None),
 
-            CursorAction::Restore(_) => {
-                let reg = ctx.get_register().unwrap_or(store.registers.get_default_register());
+            CursorAction::Restore(reg, _) => {
+                let reg = ctx.resolve(reg).unwrap_or(store.registers.get_default_register());
 
                 // Get saved group.
                 let ngroup = store.cursors.get_group(self.id.clone(), &reg)?;
@@ -895,8 +890,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     Err(err)
                 }
             },
-            CursorAction::Save(_) => {
-                let reg = ctx.get_register().unwrap_or(store.registers.get_default_register());
+            CursorAction::Save(reg, _) => {
+                let reg = ctx.resolve(reg).unwrap_or(store.registers.get_default_register());
 
                 // Lists don't have groups; override any previously saved group.
                 let cursor = self.cursor.to_cursor(thread).ok_or_else(|| {

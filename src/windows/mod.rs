@@ -1562,12 +1562,12 @@ impl Display for GenericRoomItem {
 impl ListItem<IambInfo> for GenericRoomItem {
     type Section = ListSectionHeader;
 
-    fn show(
-        &self,
+    fn show<'a>(
+        &'a self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
-        store: &mut ProgramStore,
-    ) -> Text<'_> {
+        store: &'a ProgramStore,
+    ) -> Text<'a> {
         let theme = &store.application.settings.theme;
         let order = store.application.settings.tunables.room_labels.as_slice();
 
@@ -1637,15 +1637,15 @@ impl Display for MemberItem {
 impl ListItem<IambInfo> for MemberItem {
     type Section = ListSectionHeader;
 
-    fn show(
-        &self,
+    fn show<'a>(
+        &'a self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
-        store: &mut ProgramStore,
-    ) -> Text<'_> {
+        store: &'a ProgramStore,
+    ) -> Text<'a> {
         use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
 
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        let info = store.application.rooms.get(&self.room_id);
         let user_id = self.member.user_id();
 
         let theme = &store.application.settings.theme;
@@ -1670,7 +1670,7 @@ impl ListItem<IambInfo> for MemberItem {
         if let Some(name) = name {
             spans.push(Span::styled(name, user_style));
             tags.push(Span::styled(user_id.as_str(), user_style));
-        } else if let Some(display) = info.display_names.get(user_id) {
+        } else if let Some(display) = info.and_then(|i| i.display_names.get(user_id)) {
             spans.push(Span::styled(display.into_owned(), user_style));
             tags.push(Span::styled(user_id.as_str(), user_style));
         } else {
@@ -1783,20 +1783,22 @@ impl Display for PinnedItem {
 impl ListItem<IambInfo> for PinnedItem {
     type Section = &'static str;
 
-    fn show(
-        &self,
+    fn show<'a>(
+        &'a self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
-        store: &mut ProgramStore,
-    ) -> Text<'_> {
-        let info = store.application.rooms.get_or_default(self.room_id.clone());
+        store: &'a ProgramStore,
+    ) -> Text<'a> {
         let settings = &store.application.settings;
-
         let style = store.application.settings.theme.default;
         let style = if selected {
             style.add_modifier(StyleModifier::REVERSED)
         } else {
             style
+        };
+
+        let Some(info) = store.application.rooms.get(&self.room_id) else {
+            return Text::styled("Unable to load room information", style);
         };
 
         let Some(msg) = info.get_pinned(&self.event_id) else {
