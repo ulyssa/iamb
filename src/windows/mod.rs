@@ -31,6 +31,7 @@ use crate::base::{
     SpaceInfo,
     UnreadInfo,
 };
+use crate::config::RoomLabel;
 use crate::config::theme::ThemeRoomsValues;
 use crate::prelude::*;
 use crate::resolve_mxid;
@@ -127,34 +128,6 @@ fn room_name_from_preview(preview: &RoomPreview) -> Cow<'_, str> {
     }
 
     format!("Empty Room (was {name})").into()
-}
-
-fn name_and_labels<'a>(
-    name: &'a str,
-    unread: &UnreadInfo,
-    room_membership: MatrixRoomState,
-    name_style: Style,
-    tags_style: Style,
-) -> (Span<'a>, Vec<Vec<Span<'static>>>) {
-    let name = Span::styled(name, name_style);
-
-    let mut labels = vec![];
-
-    match room_membership {
-        MatrixRoomState::Joined => {},
-        MatrixRoomState::Left => labels.push(vec![Span::styled("Unjoined", tags_style)]),
-        MatrixRoomState::Banned => labels.push(vec![Span::styled("Banned", tags_style)]),
-        MatrixRoomState::Knocked => labels.push(vec![Span::styled("Knocked", tags_style)]),
-        MatrixRoomState::Invited => labels.push(vec![Span::styled("Invited", tags_style)]),
-    }
-
-    if unread.unread_mentions > 0 {
-        labels.push(vec![Span::styled("Unread Mention", tags_style)]);
-    } else if unread.is_unread() {
-        labels.push(vec![Span::styled("Unread", tags_style)]);
-    }
-
-    (name, labels)
 }
 
 /// Sort `Some` to be less than `None` so that list items with values come before those without.
@@ -1390,6 +1363,7 @@ pub struct GenericRoomItem {
     tags: Option<Tags>,
     section: Option<ListSectionHeader>,
     membership: MatrixRoomState,
+    room_flags: RoomInfoFlags,
     unread: UnreadInfo,
     room_type_show: bool,
     room_type: RoomType,
@@ -1407,6 +1381,7 @@ impl GenericRoomItem {
         let name = info.name.clone().unwrap_or_default();
         let alias = room.canonical_alias();
         let mut unread = info.unreads(room);
+        let room_flags = info.flags;
         let tags = info.tags.clone();
 
         if room.is_space() &&
@@ -1434,6 +1409,7 @@ impl GenericRoomItem {
             tags,
             unread,
             membership: room.state(),
+            room_flags,
             room_type,
             room_type_show: true,
             section: None,
@@ -1459,6 +1435,7 @@ impl GenericRoomItem {
             alias: preview.canonical_alias.clone(),
             tags: None,
             membership,
+            room_flags: RoomInfoFlags::NONE,
             unread: Default::default(),
             room_type,
             room_type_show: true,
@@ -1473,6 +1450,64 @@ impl GenericRoomItem {
 
     fn set_section<T: SortedSection>(&mut self, fields: &[SortColumn<T>]) {
         self.section = ListSectionHeader::for_room(self, fields);
+    }
+
+    /// Generate the list of labels to show for this room.
+    fn name_and_labels<'a>(
+        &'a self,
+        name_style: Style,
+        tags_style: Style,
+        order: &[RoomLabel],
+    ) -> (Span<'a>, Vec<Vec<Span<'a>>>) {
+        let name = Span::styled(&self.name, name_style);
+
+        let mut labels = vec![];
+
+        for label in order {
+            match label {
+                RoomLabel::Membership => {
+                    let label = match self.membership {
+                        MatrixRoomState::Joined => None,
+                        MatrixRoomState::Left => Some("Unjoined"),
+                        MatrixRoomState::Banned => Some("Banned"),
+                        MatrixRoomState::Knocked => Some("Knocked"),
+                        MatrixRoomState::Invited => Some("Invited"),
+                    };
+
+                    if let Some(label) = label {
+                        labels.push(vec![Span::styled(label, tags_style)]);
+                    }
+                },
+                RoomLabel::Unread => {
+                    if self.unread.unread_mentions > 0 {
+                        labels.push(vec![Span::styled("Unread Mention", tags_style)]);
+                    } else if self.unread.is_unread() {
+                        labels.push(vec![Span::styled("Unread", tags_style)]);
+                    }
+                },
+                RoomLabel::Muted => {
+                    if self.room_flags.contains(RoomInfoFlags::MUTED) {
+                        labels.push(vec![Span::styled("Muted", tags_style)]);
+                    } else if self.room_flags.contains(RoomInfoFlags::CALMED) {
+                        labels.push(vec![Span::styled("Calmed", tags_style)]);
+                    }
+                },
+                RoomLabel::Type => {
+                    if self.room_type_show &&
+                        let Some(label) = self.room_type.text()
+                    {
+                        labels.push(vec![Span::styled(label, tags_style)]);
+                    }
+                },
+                RoomLabel::Tags => {
+                    if let Some(tags) = &self.tags {
+                        labels.extend(tags.keys().map(|t| tag_to_span(t, tags_style)));
+                    }
+                },
+            }
+        }
+
+        (name, labels)
     }
 }
 
@@ -1534,24 +1569,14 @@ impl ListItem<IambInfo> for GenericRoomItem {
         store: &mut ProgramStore,
     ) -> Text<'_> {
         let theme = &store.application.settings.theme;
+        let order = store.application.settings.tunables.room_labels.as_slice();
 
         let (unreads, name_style, tags_style) = unreads_and_style(&self.unread, &theme.rooms);
         let name_style = selected_style(selected, name_style);
-        let tags_style = selected_style(selected, tags_style);
+        let tags_style = if selected { name_style } else { tags_style };
 
-        let (name, mut labels) =
-            name_and_labels(&self.name, &self.unread, self.membership, name_style, tags_style);
+        let (name, labels) = self.name_and_labels(name_style, tags_style, order);
         let mut spans = vec![unreads, name];
-
-        if let Some(label) = self.room_type.text() &&
-            self.room_type_show
-        {
-            labels.push(vec![Span::styled(label, tags_style)]);
-        }
-
-        if let Some(tags) = &self.tags {
-            labels.extend(tags.keys().map(|t| tag_to_span(t, tags_style)));
-        }
 
         append_tags(labels, &mut spans, tags_style);
         Text::from(Line::from(spans))
@@ -1904,6 +1929,7 @@ mod tests {
             tags: None,
             membership: MatrixRoomState::Joined,
             unread: UnreadInfo::default(),
+            room_flags: RoomInfoFlags::NONE,
             room_type_show: true,
             room_type: RoomType::Room,
             section: None,

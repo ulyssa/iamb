@@ -69,6 +69,14 @@ const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 3] = [
     SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending),
 ];
 
+const DEFAULT_ROOM_LABELS: [RoomLabel; 5] = [
+    RoomLabel::Unread,
+    RoomLabel::Membership,
+    RoomLabel::Tags,
+    RoomLabel::Muted,
+    RoomLabel::Type,
+];
+
 const DEFAULT_ENABLE_TITLE: bool = true;
 const DEFAULT_REQ_TIMEOUT: u64 = 120;
 const DEFAULT_SYNC_FREQUENCY: u64 = 250;
@@ -462,6 +470,18 @@ impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
     }
 }
 
+/// Types of room labels to display in room lists.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum RoomLabel {
+    Membership,
+    Muted,
+    Tags,
+    Type,
+    Unread,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum UserDisplayStyle {
@@ -844,6 +864,7 @@ pub struct TunableValues {
     pub read_receipt_send: bool,
     pub read_receipt_trigger: ReadReceiptTrigger,
     pub read_receipt_display: bool,
+    pub room_labels: Vec<RoomLabel>,
     pub request_timeout: u64,
     pub sort: SortValues,
     pub state_event_display: bool,
@@ -904,6 +925,7 @@ pub struct Tunables {
     pub read_receipt_send: Option<bool>,
     pub read_receipt_trigger: Option<ReadReceiptTrigger>,
     pub read_receipt_display: Option<bool>,
+    pub room_labels: Option<Vec<RoomLabel>>,
     pub request_timeout: Option<u64>,
     pub state_event_display: Option<bool>,
     pub sync_delay_ms: Option<u64>,
@@ -961,6 +983,7 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_trigger: self.read_receipt_trigger.or(other.read_receipt_trigger),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
+            room_labels: self.room_labels.or(other.room_labels),
             request_timeout: self.request_timeout.or(other.request_timeout),
             state_event_display: self.state_event_display.or(other.state_event_display),
             sync_delay_ms: self.sync_delay_ms.or(other.sync_delay_ms),
@@ -1009,6 +1032,7 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_trigger: self.read_receipt_trigger.unwrap_or_default(),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
+            room_labels: self.room_labels.unwrap_or_else(|| DEFAULT_ROOM_LABELS.to_vec()),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             state_event_display: self.state_event_display.unwrap_or(true),
             sync_delay_ms: self.sync_delay_ms.unwrap_or(DEFAULT_SYNC_FREQUENCY),
@@ -1994,6 +2018,13 @@ mod tests {
         );
         assert!(serde_json::from_str::<NotifyVia>(r#""other""#).is_err());
         assert!(serde_json::from_str::<NotifyVia>(r#""""#).is_err());
+    }
+
+    #[test]
+    fn test_parse_room_labels() {
+        assert_eq!(RoomLabel::Membership, serde_json::from_str(r#""membership""#).unwrap());
+        assert_eq!(RoomLabel::Tags, serde_json::from_str(r#""tags""#).unwrap());
+        assert_eq!(RoomLabel::Type, serde_json::from_str(r#""type""#).unwrap());
     }
 
     #[test]

@@ -16,6 +16,7 @@ use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
 use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
+use matrix_sdk::notification_settings::RoomNotificationMode;
 use matrix_sdk::room::RoomMember;
 use matrix_sdk::ruma::OwnedRoomAliasId;
 use matrix_sdk::ruma::api::client::filter::{
@@ -749,8 +750,16 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
         let mut aliases = room.alt_aliases();
         aliases.extend(room.canonical_alias());
 
+        let mut flags = RoomInfoFlags::NONE;
+
+        match room.notification_mode().await {
+            Some(RoomNotificationMode::MentionsAndKeywordsOnly) => flags |= RoomInfoFlags::CALMED,
+            Some(RoomNotificationMode::Mute) => flags |= RoomInfoFlags::MUTED,
+            _ => (),
+        }
+
         pinned.push((room.room_id().to_owned(), room.pinned_event_ids().unwrap_or_default()));
-        names_and_tags.push((room.room_id().to_owned(), name, tags, aliases));
+        names_and_tags.push((room.room_id().to_owned(), name, tags, aliases, flags));
 
         if room.is_direct().await.unwrap_or_default() {
             dms.push(room);
@@ -766,8 +775,8 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     locked.application.sync_info.rooms = rooms;
     locked.application.sync_info.dms = dms;
 
-    for (room_id, name, tags, aliases) in names_and_tags {
-        locked.application.set_room_info(room_id, name, tags, aliases);
+    for (room_id, name, tags, aliases, flags) in names_and_tags {
+        locked.application.set_room_info(room_id, name, tags, aliases, flags);
     }
 
     for (room_id, pinned_events) in pinned {
