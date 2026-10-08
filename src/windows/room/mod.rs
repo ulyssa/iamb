@@ -13,15 +13,18 @@ use matrix_sdk::ruma::events::room::name::RoomNameEventContent;
 use matrix_sdk::ruma::events::room::topic::RoomTopicEventContent;
 use matrix_sdk::ruma::events::tag::TagInfo;
 use matrix_sdk::ruma::room::{AllowRule, Restricted as JoinRestrictions};
+use modalkit::editing::context::EditContext;
 
 use crate::base::{MemberUpdateAction, RoomField};
 use crate::config::EncryptionIndicatorLocation;
 use crate::prelude::*;
 use crate::windows::room::chat::ChatState;
+use crate::windows::room::message::{MessageState, MessageWidget};
 use crate::windows::room::not_joined::{NotJoined, NotJoinedState};
 use crate::windows::room::space::{Space, SpaceState};
 
 mod chat;
+mod message;
 mod not_joined;
 mod scrollback;
 mod space;
@@ -32,6 +35,7 @@ macro_rules! delegate {
             RoomState::NotJoined($id) => $e,
             RoomState::Chat($id) => $e,
             RoomState::Space($id) => $e,
+            RoomState::Message($id) => $e,
         }
     };
 }
@@ -64,16 +68,17 @@ fn hist_visibility_mode(name: impl Into<String>) -> IambResult<HistoryVisibility
 }
 
 pub async fn room_command(
-    id: &RoomId,
+    id: OwnedRoomId,
     act: RoomAction,
     ctx: ProgramContext,
     store: &mut ProgramStore,
+    focused_msg: Option<MessageId>,
 ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
     let worker = &store.application.worker;
 
     match act {
         RoomAction::Follow(cmd, dir) => {
-            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            let room = worker.client.get_room(&id).ok_or(IambError::NotJoined)?;
             let room_id = match dir {
                 MoveDir1D::Next => {
                     let successor = room
@@ -89,14 +94,14 @@ pub async fn room_command(
                 },
             };
 
-            let id = IambId::Room(room_id.to_owned().into(), None);
+            let id = IambId::Room(room_id.to_owned().into(), RoomView::Main);
             let target = OpenTarget::Application(id);
             let act = cmd.switch(target);
 
             Ok(vec![(act, cmd.context.clone())])
         },
         RoomAction::InviteAccept => {
-            if let Some(room) = store.application.worker.client.get_room(id) {
+            if let Some(room) = store.application.worker.client.get_room(&id) {
                 room.join().await.map_err(IambError::from)?;
                 Ok(vec![])
             } else {
@@ -104,7 +109,7 @@ pub async fn room_command(
             }
         },
         RoomAction::InviteReject => {
-            if let Some(room) = store.application.worker.client.get_room(id) {
+            if let Some(room) = store.application.worker.client.get_room(&id) {
                 room.leave().await.map_err(IambError::from)?;
 
                 Ok(vec![])
@@ -113,7 +118,7 @@ pub async fn room_command(
             }
         },
         RoomAction::InviteSend(user) => {
-            if let Some(room) = store.application.worker.client.get_room(id) {
+            if let Some(room) = store.application.worker.client.get_room(&id) {
                 room.invite_user_by_id(user.as_ref()).await.map_err(IambError::from)?;
 
                 Ok(vec![])
@@ -122,22 +127,22 @@ pub async fn room_command(
             }
         },
         RoomAction::KnockAccept(user) => {
-            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            let room = worker.client.get_room(&id).ok_or(IambError::NotJoined)?;
             room.invite_user_by_id(&user).await.map_err(IambError::from)?;
             Ok(vec![])
         },
         RoomAction::KnockReject(user, reason) => {
-            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            let room = worker.client.get_room(&id).ok_or(IambError::NotJoined)?;
             room.kick_user(&user, reason.as_deref()).await.map_err(IambError::from)?;
             Ok(vec![])
         },
         RoomAction::KnockBan(user, reason) => {
-            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            let room = worker.client.get_room(&id).ok_or(IambError::NotJoined)?;
             room.ban_user(&user, reason.as_deref()).await.map_err(IambError::from)?;
             Ok(vec![])
         },
         RoomAction::Leave(skip_confirm) => {
-            if let Some(room) = store.application.worker.client.get_room(id) {
+            if let Some(room) = store.application.worker.client.get_room(&id) {
                 if skip_confirm {
                     room.leave().await.map_err(IambError::from)?;
 
@@ -155,7 +160,7 @@ pub async fn room_command(
             }
         },
         RoomAction::MemberUpdate(mua, user, reason, skip_confirm) => {
-            let Some(room) = store.application.worker.client.get_room(id) else {
+            let Some(room) = store.application.worker.client.get_room(&id) else {
                 return Err(IambError::NotJoined.into());
             };
 
@@ -213,7 +218,7 @@ pub async fn room_command(
             Ok(vec![(act, cmd.context.clone())])
         },
         RoomAction::SetAccess(rule) => {
-            let Some(room) = store.application.worker.client.get_room(id) else {
+            let Some(room) = store.application.worker.client.get_room(&id) else {
                 return Err(IambError::NotJoined.into());
             };
             let rule = rule.into_join_rule(&store.application.worker.client).await?;
@@ -226,7 +231,7 @@ pub async fn room_command(
         RoomAction::SetDirect(is_direct) => {
             let room = store
                 .application
-                .get_joined_room(id)
+                .get_joined_room(&id)
                 .ok_or(UIError::Application(IambError::NotJoined))?;
 
             room.set_is_direct(is_direct).await.map_err(IambError::from)?;
@@ -236,7 +241,7 @@ pub async fn room_command(
         RoomAction::SetUnread(is_unread) => {
             let room = store
                 .application
-                .get_joined_room(id)
+                .get_joined_room(&id)
                 .ok_or(UIError::Application(IambError::NotJoined))?;
 
             room.set_unread_flag(is_unread).await.map_err(IambError::from)?;
@@ -245,7 +250,7 @@ pub async fn room_command(
                 let info = store.application.rooms.get_or_default(id.to_owned());
 
                 info.fully_read(
-                    id.to_owned(),
+                    id,
                     ReceiptThread::Main,
                     worker,
                     &store.application.settings,
@@ -258,7 +263,7 @@ pub async fn room_command(
         RoomAction::Set(field, value) => {
             let room = store
                 .application
-                .get_joined_room(id)
+                .get_joined_room(&id)
                 .ok_or(UIError::Application(IambError::NotJoined))?;
 
             match field {
@@ -287,7 +292,7 @@ pub async fn room_command(
                     let notifications = client.notification_settings().await;
 
                     notifications
-                        .set_room_notification_mode(id, mode)
+                        .set_room_notification_mode(&id, mode)
                         .await
                         .map_err(IambError::from)?;
                 },
@@ -379,7 +384,7 @@ pub async fn room_command(
         RoomAction::Unset(field) => {
             let room = store
                 .application
-                .get_joined_room(id)
+                .get_joined_room(&id)
                 .ok_or(UIError::Application(IambError::NotJoined))?;
 
             match field {
@@ -404,7 +409,7 @@ pub async fn room_command(
                     let notifications = client.notification_settings().await;
 
                     notifications
-                        .delete_user_defined_room_rules(id)
+                        .delete_user_defined_room_rules(&id)
                         .await
                         .map_err(IambError::from)?;
                 },
@@ -475,7 +480,7 @@ pub async fn room_command(
         RoomAction::Show(field) => {
             let room = store
                 .application
-                .get_joined_room(id)
+                .get_joined_room(&id)
                 .ok_or(UIError::Application(IambError::NotJoined))?;
 
             let msg = match field {
@@ -508,7 +513,7 @@ pub async fn room_command(
                 RoomField::NotificationMode => {
                     let client = &store.application.worker.client;
                     let notifications = client.notification_settings().await;
-                    let mode = notifications.get_user_defined_room_notification_mode(id).await;
+                    let mode = notifications.get_user_defined_room_notification_mode(&id).await;
 
                     let level = match mode {
                         Some(RoomNotificationMode::Mute) => "mute",
@@ -612,7 +617,7 @@ pub async fn room_command(
             Ok(vec![(act, ctx)])
         },
         RoomAction::Upgrade(new_version, additional_creators, false) => {
-            let room = worker.client.get_room(id).ok_or(IambError::NotJoined)?;
+            let room = worker.client.get_room(&id).ok_or(IambError::NotJoined)?;
             let alias = room.canonical_alias();
             let name = alias.as_ref().map(|c| c.as_str()).unwrap_or_else(|| id.as_str());
             let msg = format!(
@@ -627,15 +632,26 @@ pub async fn room_command(
             Err(UIError::NeedConfirm(prompt))
         },
         RoomAction::Upgrade(new_version, additional_creators, true) => {
-            let mut request = UpgradeRoomRequest::new(id.to_owned(), new_version);
+            let mut request = UpgradeRoomRequest::new(id, new_version);
             request.additional_creators = additional_creators;
 
             let response = worker.client.send(request).await.map_err(IambError::from)?;
-            let id = IambId::Room(response.replacement_room.into(), None);
+            let id = IambId::Room(response.replacement_room.into(), RoomView::Main);
             let target = OpenTarget::Application(id);
             let act = WindowAction::Switch(target);
 
             Ok(vec![(act.into(), ctx)])
+        },
+        RoomAction::Message(cmd) => {
+            let Some(msg_id) = focused_msg else {
+                return Err(UIError::Failure("No message selected".into()));
+            };
+            let act = Action::Window(WindowAction::Switch(OpenTarget::Application(IambId::Room(
+                id.into(),
+                RoomView::Message(msg_id),
+            ))));
+
+            Ok(vec![(act, cmd.context.clone())])
         },
     }
 }
@@ -649,6 +665,7 @@ pub enum RoomState {
     NotJoined(Box<NotJoinedState>),
     Chat(Box<ChatState>),
     Space(Box<SpaceState>),
+    Message(Box<MessageState>),
 }
 
 impl From<NotJoinedState> for RoomState {
@@ -669,12 +686,22 @@ impl From<SpaceState> for RoomState {
     }
 }
 
+impl From<MessageState> for RoomState {
+    fn from(msg: MessageState) -> Self {
+        RoomState::Message(Box::new(msg))
+    }
+}
+
 impl RoomState {
-    pub fn new(room: MatrixRoom, thread: Option<OwnedEventId>, store: &mut ProgramStore) -> Self {
+    pub fn new(room: MatrixRoom, view: RoomView, store: &mut ProgramStore) -> Self {
         if room.is_space() {
             SpaceState::new(room).into()
         } else {
-            ChatState::new(room, thread, store).into()
+            match view {
+                RoomView::Main => ChatState::new(room, None, store).into(),
+                RoomView::Thread(thread) => ChatState::new(room, Some(thread), store).into(),
+                RoomView::Message(message) => MessageState::new(room, message).into(),
+            }
         }
     }
 
@@ -684,11 +711,17 @@ impl RoomState {
 
     pub fn window_id(&self) -> IambId {
         match self {
-            RoomState::NotJoined(nj) => IambId::Room(nj.alias().to_owned(), None),
+            RoomState::NotJoined(nj) => IambId::Room(nj.alias().to_owned(), RoomView::Main),
             RoomState::Chat(chat) => {
-                IambId::Room(chat.id().to_owned().into(), chat.thread().cloned())
+                IambId::Room(chat.id().to_owned().into(), chat.thread().cloned().into())
             },
-            RoomState::Space(space) => IambId::Room(space.id().to_owned().into(), None),
+            RoomState::Space(space) => IambId::Room(space.id().to_owned().into(), RoomView::Main),
+            RoomState::Message(msg) => {
+                IambId::Room(
+                    msg.room_id().to_owned().into(),
+                    RoomView::Message(msg.id().to_owned()),
+                )
+            },
         }
     }
 
@@ -697,6 +730,7 @@ impl RoomState {
             RoomState::NotJoined(_) => None,
             RoomState::Chat(chat) => Some(chat.room().state()),
             RoomState::Space(space) => Some(space.room().state()),
+            RoomState::Message(msg) => Some(msg.room().state()),
         }
     }
 
@@ -721,6 +755,7 @@ impl RoomState {
             },
             RoomState::Chat(chat) => chat.refresh_room(store),
             RoomState::Space(space) => space.refresh_room(store),
+            RoomState::Message(msg) => msg.refresh_room(store),
         }
     }
 
@@ -799,11 +834,11 @@ impl RoomState {
         act: MessageAction,
         ctx: ProgramContext,
         store: &mut ProgramStore,
-    ) -> IambResult<EditInfo> {
-        if let RoomState::Chat(chat) = self {
-            chat.message_command(act, ctx, store).await
-        } else {
-            Err(IambError::NoSelectedMessage.into())
+    ) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
+        match self {
+            RoomState::Chat(chat) => chat.message_command(act, ctx, store).await,
+            RoomState::Message(msg) => msg.message_command(act, ctx, store).await,
+            _ => Err(IambError::NoSelectedMessage.into()),
         }
     }
 
@@ -877,6 +912,9 @@ impl RoomState {
         {
             spans.push(Span::styled("Thread in ", default_style));
         }
+        if let RoomState::Message(_) = self {
+            spans.push("Message in ".into());
+        }
 
         spans.push(Span::styled(title, title_style));
 
@@ -899,13 +937,17 @@ impl RoomState {
             RoomState::Space(w) => store.application.get_room_title(w.id()).into(),
             RoomState::Chat(w) => store.application.get_room_title(w.id()).into(),
             RoomState::NotJoined(w) => w.get_tab_title(store),
+            RoomState::Message(w) => {
+                let name = store.application.get_room_title(w.room_id());
+
+                Line::from(vec![Span::raw("Message in "), Span::raw(name)])
+            },
         }
     }
 
     pub fn focus_toggle(&mut self) {
-        match self {
-            RoomState::Chat(chat) => chat.focus_toggle(),
-            RoomState::NotJoined(_) | RoomState::Space(_) => return,
+        if let RoomState::Chat(chat) = self {
+            chat.focus_toggle();
         }
     }
 
@@ -913,6 +955,7 @@ impl RoomState {
         match self {
             RoomState::Chat(chat) => Some(chat.room()),
             RoomState::Space(space) => Some(space.room()),
+            RoomState::Message(msg) => Some(msg.room()),
             RoomState::NotJoined(_) => None,
         }
     }
@@ -922,6 +965,7 @@ impl RoomState {
             RoomState::Chat(chat) => Some(chat.id()),
             RoomState::Space(space) => Some(space.id()),
             RoomState::NotJoined(nj) => nj.room_id(store),
+            RoomState::Message(msg) => Some(msg.room_id()),
         }
     }
 }
@@ -1006,6 +1050,9 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::NotJoined(state) => {
                 NotJoined::new(store).render(area, buf, state);
             },
+            RoomState::Message(msg) => {
+                MessageWidget::new(store).focus(focused).render(area, buf, msg)
+            },
             RoomState::Space(space) => {
                 Space::new(store).focus(focused).render(area, buf, space);
             },
@@ -1017,6 +1064,7 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::NotJoined(w) => RoomState::NotJoined(Box::new(w.dup())),
             RoomState::Chat(chat) => RoomState::Chat(Box::new(chat.dup(store))),
             RoomState::Space(space) => RoomState::Space(Box::new(space.dup(store))),
+            RoomState::Message(msg) => RoomState::Message(Box::new(msg.dup(store))),
         }
     }
 
@@ -1025,6 +1073,7 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::NotJoined(_) => true,
             RoomState::Chat(chat) => chat.close(flags, store),
             RoomState::Space(space) => space.close(flags, store),
+            RoomState::Message(msg) => msg.close(flags, store),
         }
     }
 
@@ -1038,6 +1087,7 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::NotJoined(_) => Err(EditError::ReadOnly.into()),
             RoomState::Chat(chat) => chat.write(path, flags, store),
             RoomState::Space(space) => space.write(path, flags, store),
+            RoomState::Message(msg) => msg.write(path, flags, store),
         }
     }
 
@@ -1046,6 +1096,7 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::NotJoined(_) => None,
             RoomState::Chat(chat) => chat.get_completions(),
             RoomState::Space(space) => space.get_completions(),
+            RoomState::Message(msg) => msg.get_completions(),
         }
     }
 
@@ -1054,6 +1105,7 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::NotJoined(_) => None,
             RoomState::Chat(chat) => chat.get_cursor_word(style),
             RoomState::Space(space) => space.get_cursor_word(style),
+            RoomState::Message(msg) => msg.get_cursor_word(style),
         }
     }
 
@@ -1062,6 +1114,7 @@ impl WindowOps<IambInfo> for RoomState {
             RoomState::NotJoined(_) => None,
             RoomState::Chat(chat) => chat.get_selected_word(),
             RoomState::Space(space) => space.get_selected_word(),
+            RoomState::Message(msg) => msg.get_selected_word(),
         }
     }
 }

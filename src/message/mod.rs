@@ -4,11 +4,12 @@ use std::cmp::{Ord, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
 use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{DECIMAL, format_size};
-use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::ruma::UInt;
+use matrix_sdk::ruma::events::Mentions;
 use matrix_sdk::ruma::events::RedactedUnsigned;
 use matrix_sdk::ruma::events::poll::start::RedactedPollStartEvent;
 use matrix_sdk::ruma::events::poll::unstable_start::RedactedUnstablePollStartEvent;
@@ -27,6 +28,7 @@ use matrix_sdk::ruma::events::room::message::{
 use matrix_sdk::ruma::events::room::redaction::SyncRoomRedactionEvent;
 use matrix_sdk::ruma::events::sticker::{OriginalStickerEvent, RedactedStickerEvent, StickerEvent};
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
+use matrix_sdk::ruma::{OwnedTransactionId, UserId};
 use matrix_sdk::send_queue::SendHandle;
 use modalkit::editing::cursor::Cursor;
 use ratatui::symbols::line::{HORIZONTAL, THICK_VERTICAL};
@@ -50,7 +52,7 @@ pub mod poll;
 pub use self::compose::{text_to_message, text_to_text_message_event_content};
 pub use self::html::TreeGenState;
 
-type ProtocolPreview<'a> = (&'a SlicedProtocol, u16, u16);
+type ProtocolPreview = (Arc<SlicedProtocol>, u16, u16);
 
 /// The key used for uniquely identifying messages within a room and its threads.
 ///
@@ -171,9 +173,24 @@ impl MessageId {
     }
 }
 
+impl Display for MessageId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MessageId::Origin(id) => write!(f, "{}", id),
+            MessageId::Local(id) => write!(f, "{}", id),
+        }
+    }
+}
+
 impl From<OwnedEventId> for MessageId {
     fn from(value: OwnedEventId) -> Self {
         Self::Origin(value)
+    }
+}
+
+impl From<OwnedTransactionId> for MessageId {
+    fn from(value: OwnedTransactionId) -> Self {
+        Self::Local(value)
     }
 }
 
@@ -190,7 +207,7 @@ pub enum TimeStampIntError {
 pub struct MessageTimeStamp(pub MilliSecondsSinceUnixEpoch);
 
 impl MessageTimeStamp {
-    fn as_datetime(self) -> DateTime<LocalTz> {
+    pub(crate) fn as_datetime(self) -> DateTime<LocalTz> {
         let time = i64::from(self.0.0) / 1000;
         let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
         time.into()
@@ -470,6 +487,25 @@ impl MessageEvent {
 
     pub fn filename(&self) -> Option<String> {
         self.msgtype().and_then(content_filename)
+    }
+
+    pub fn mentions(&self) -> Option<&Mentions> {
+        match self {
+            MessageEvent::EncryptedOriginal(..) |
+            MessageEvent::EncryptedRedacted(..) |
+            MessageEvent::Redacted(..) |
+            MessageEvent::Sticker(..) |
+            MessageEvent::Poll(..) |
+            MessageEvent::UnstablePoll(..) |
+            MessageEvent::State(..) => None,
+            MessageEvent::Original(ev, edits) => {
+                edits
+                    .last_key_value()
+                    .and_then(|(_, ev)| ev.mentions.as_ref())
+                    .or(ev.content.mentions.as_ref())
+            },
+            MessageEvent::Local(_, _, ev) => ev.mentions.as_ref(),
+        }
     }
 
     fn message_style(&self, settings: &ApplicationSettings) -> Style {
@@ -824,7 +860,7 @@ impl<'a> MessageFormatter<'a> {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-    ) -> Option<ProtocolPreview<'a>> {
+    ) -> Option<ProtocolPreview> {
         let reply_style = if settings.tunables.message_user_color {
             style.patch(settings.get_user_color(&msg.sender))
         } else {
@@ -872,12 +908,12 @@ impl<'a> MessageFormatter<'a> {
 
     fn push_reactions(
         &mut self,
-        counts: Vec<(&'a str, usize, &'a Option<MediaSource>)>,
+        counts: Vec<(&'a str, Vec<&'a UserId>, &'a Option<MediaSource>)>,
         style: Style,
         text: &mut Text<'a>,
         settings: &ApplicationSettings,
         previews: &'a PreviewManager,
-    ) -> Vec<ProtocolPreview<'a>> {
+    ) -> Vec<ProtocolPreview> {
         let mut emojis = printer::TextPrinter::new(self.width(), style, self.settings, self.info);
         let mut reactions = 0;
         let mut protos = Vec::new();
@@ -920,6 +956,8 @@ impl<'a> MessageFormatter<'a> {
 
             emojis.push_str("[", style);
             if let Some(Some(proto)) = proto {
+                let proto = Arc::clone(proto);
+
                 let (x, y) = emojis.cursor_pos();
                 let y = (y + text.lines.len()) as u16;
                 let x = x as u16 + self.cols.user_gutter_width(settings);
@@ -928,7 +966,7 @@ impl<'a> MessageFormatter<'a> {
             }
             emojis.push_str(name, style);
             emojis.push_str(" ", style);
-            emojis.push_span_nobreak(Span::styled(count.to_string(), style));
+            emojis.push_span_nobreak(Span::styled(count.len().to_string(), style));
             emojis.push_str("]", style);
 
             reactions += 1;
@@ -1245,17 +1283,15 @@ impl Message {
     /// Render the message as a [Text] object for the terminal.
     ///
     /// This will also get the image preview Protocol with an x/y offset.
-    pub fn show_with_preview<'a, C>(
+    pub fn show_with_preview<'a>(
         &'a self,
         prev: Option<&Message>,
         selected: bool,
-        vwctx: &ViewportContext<C>,
+        width: usize,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-    ) -> (Text<'a>, Vec<ProtocolPreview<'a>>) {
-        let width = vwctx.get_width();
-
+    ) -> (Text<'a>, Vec<ProtocolPreview>) {
         let style = self.get_render_style(selected, settings);
         let mut fmt = self.get_render_format(prev, width, info, settings);
         let mut text = Text::default();
@@ -1339,16 +1375,16 @@ impl Message {
         (text, protos)
     }
 
-    pub fn show<'a, C>(
+    pub fn show<'a>(
         &'a self,
         prev: Option<&Message>,
         selected: bool,
-        vwctx: &ViewportContext<C>,
+        width: usize,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
     ) -> Text<'a> {
-        self.show_with_preview(prev, selected, vwctx, info, settings, previews).0
+        self.show_with_preview(prev, selected, width, info, settings, previews).0
     }
 
     fn show_msg<'a>(
@@ -1358,7 +1394,7 @@ impl Message {
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
         info: &'a RoomInfo,
-    ) -> (Text<'a>, Option<&'a SlicedProtocol>) {
+    ) -> (Text<'a>, Option<Arc<SlicedProtocol>>) {
         let mut proto = None;
         let placeholder = match self
             .image_preview()
@@ -1372,7 +1408,7 @@ impl Message {
                 placeholder_frame(Some("Downloading..."), width, image_preview_size)
             },
             Some(ImageStatus::Loaded(backend)) => {
-                proto = Some(backend);
+                proto = Some(Arc::clone(backend));
                 placeholder_frame(None, width, &backend.size())
             },
             Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
@@ -1500,6 +1536,26 @@ impl Message {
             .unwrap_or(&orig_content.content.msgtype);
 
         self.html = content_html(content);
+    }
+
+    pub fn find_links(&self) -> Vec<(char, Url)> {
+        let mut links = if let Some(html) = &self.html {
+            html.get_links()
+        } else {
+            vec![]
+        };
+
+        if links.is_empty() {
+            links = linkify::LinkFinder::new()
+                .links(&self.event.body())
+                .filter_map(|u| Url::parse(u.as_str()).ok())
+                .scan(TreeGenState { link_num: 0 }, |state, u| {
+                    state.next_link_char().map(|c| (c, u))
+                })
+                .collect();
+        }
+
+        links
     }
 }
 
@@ -1967,20 +2023,19 @@ pub mod tests {
         let settings = mock_settings();
         let previews = PreviewManager::new(&settings);
         let mut info = mock_room();
-        let vwctx: ViewportContext<MessageCursor> =
-            ViewportContext { dimensions: (60, 5), ..Default::default() };
+        let width = 60;
 
         let prev = mock_message1();
         let msg = mock_message2();
         let user_id = settings.profile.user_id.clone();
 
         // Without a marker, no trackbar is drawn.
-        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        let text = msg.show(Some(&prev), false, width, &info, &settings, &previews);
         assert!(!has_trackbar(&text, 60));
 
         // When the marker names the previous message, the rule leads the message.
         info.set_receipt(ReceiptThread::Main, user_id.clone(), MSG1_EVID.clone());
-        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        let text = msg.show(Some(&prev), false, width, &info, &settings, &previews);
         assert!(has_trackbar(&text, 60));
         assert_eq!(text.lines[0].spans[0].content.as_ref(), HORIZONTAL.repeat(60));
 
@@ -1988,9 +2043,9 @@ pub mod tests {
         // already positioned on the rendered message, not moving an existing marker backwards.
         let mut info = mock_room();
         info.set_receipt(ReceiptThread::Main, user_id.clone(), MSG2_EVID.clone());
-        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        let text = msg.show(Some(&prev), false, width, &info, &settings, &previews);
         assert!(!has_trackbar(&text, 60));
-        let text = prev.show(Some(&msg), false, &vwctx, &info, &settings, &previews);
+        let text = prev.show(Some(&msg), false, width, &info, &settings, &previews);
         assert!(has_trackbar(&text, 60));
     }
 
