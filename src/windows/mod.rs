@@ -1786,7 +1786,7 @@ impl ListItem<IambInfo> for PinnedItem {
     fn show<'a>(
         &'a self,
         selected: bool,
-        _: &ViewportContext<ListCursor>,
+        vwctx: &ViewportContext<ListCursor>,
         store: &'a ProgramStore,
     ) -> Text<'a> {
         let settings = &store.application.settings;
@@ -1811,12 +1811,8 @@ impl ListItem<IambInfo> for PinnedItem {
             return Span::styled(text, style.fg(Color::Gray)).into();
         };
 
-        let sender = settings.get_user_span(&msg.sender, info);
-        let sender = Span::styled(sender.content.into_owned(), sender.style.patch(style));
-        let time = format!(" [{}]: ", msg.timestamp.show_datetime());
-        let body = msg.event.body().lines().next().unwrap_or_default().to_string();
-
-        Line::from(vec![sender, Span::styled(time, style), Span::styled(body, style)]).into()
+        let previews = &store.application.previews;
+        msg.show(None, selected, vwctx, info, settings, previews)
     }
 
     fn get_word(&self) -> Option<String> {
