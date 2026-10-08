@@ -323,22 +323,22 @@ pub enum SavedDevice {
 }
 
 impl SavedDevice {
-    pub fn device_id(&self) -> &OwnedDeviceId {
+    pub fn device_id(&self) -> &DeviceId {
         match self {
-            SavedDevice::OAuth { user_id: _, device_id, client_id: _ } => device_id,
-            SavedDevice::MatrixAuth { user_id: _, device_id } => device_id,
+            SavedDevice::OAuth { device_id, .. } => device_id,
+            SavedDevice::MatrixAuth { device_id, .. } => device_id,
         }
     }
     pub fn client_id(&self) -> Option<&ClientId> {
         match self {
-            SavedDevice::OAuth { user_id: _, device_id: _, client_id } => Some(client_id),
-            SavedDevice::MatrixAuth { user_id: _, device_id: _ } => None,
+            SavedDevice::OAuth { client_id, .. } => Some(client_id),
+            SavedDevice::MatrixAuth { .. } => None,
         }
     }
-    pub fn is_user(&self, user: &OwnedUserId) -> bool {
+    pub fn is_user(&self, user: &UserId) -> bool {
         match self {
-            SavedDevice::OAuth { user_id, device_id: _, client_id: _ } => user == user_id,
-            SavedDevice::MatrixAuth { user_id, device_id: _ } => user == user_id,
+            SavedDevice::OAuth { user_id, .. } => user == user_id,
+            SavedDevice::MatrixAuth { user_id, .. } => user == user_id,
         }
     }
 }

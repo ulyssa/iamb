@@ -37,8 +37,7 @@ pub async fn oauth_login(
                 server_metadata.issuer
             );
 
-            let device = if let Some(SavedDevice::OAuth { user_id: _, device_id, client_id }) =
-                saved_device
+            let device = if let Some(SavedDevice::OAuth { device_id, client_id, .. }) = saved_device
             {
                 oauth.restore_registered_client(client_id.clone());
                 Some(device_id)
