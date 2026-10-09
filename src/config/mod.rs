@@ -90,8 +90,8 @@ const DEFAULT_TIME_FORMAT: &str = "  [%T]";
 
 /// Unix seconds of the timestamp used to measure time-gutter width.
 ///
-/// 2024-01-15 13:25:30 UTC, so numeric fields have their usual widths.
-const TIME_GUTTER_SAMPLE_UNIX: i64 = 1_705_325_130;
+/// 2024-01-17 13:25:30 UTC, so numeric fields have their usual widths.
+const TIME_GUTTER_SAMPLE_UNIX: i64 = 1_705_497_930;
 
 fn time_gutter_sample() -> DateTime<Local> {
     DateTime::from_timestamp(TIME_GUTTER_SAMPLE_UNIX, 0)
