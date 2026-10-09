@@ -577,6 +577,15 @@ impl Application {
         }
 
         let info = match action {
+            IambAction::ChangeTheme(theme) => {
+                let Some(theme) = store.application.settings.themes.get(&theme) else {
+                    let err = format!("Unknown theme: {theme:?}");
+                    return Err(UIError::Failure(err.to_string()));
+                };
+
+                store.application.settings.theme = Arc::new(theme.clone().values());
+                None
+            },
             IambAction::ClearUnreads => {
                 // Clear any notifications we displayed:
                 store.application.open_notifications.clear();

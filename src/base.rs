@@ -745,6 +745,9 @@ pub enum IambAction {
     /// Toggle the focus within the focused room.
     ToggleScrollbackFocus,
 
+    /// Change the current theme.
+    ChangeTheme(String),
+
     /// Clear all unread messages.
     ClearUnreads,
 }
@@ -801,6 +804,7 @@ impl From<TimelineAction> for IambAction {
 impl ApplicationAction for IambAction {
     fn is_edit_sequence(&self, _: &EditContext) -> SequenceStatus {
         match self {
+            IambAction::ChangeTheme(..) => SequenceStatus::Break,
             IambAction::ClearUnreads => SequenceStatus::Break,
             IambAction::Homeserver(..) => SequenceStatus::Break,
             IambAction::Keys(..) => SequenceStatus::Break,
@@ -820,6 +824,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_action(&self, _: &EditContext) -> SequenceStatus {
         match self {
+            IambAction::ChangeTheme(..) => SequenceStatus::Atom,
             IambAction::ClearUnreads => SequenceStatus::Atom,
             IambAction::Homeserver(..) => SequenceStatus::Atom,
             IambAction::Keys(..) => SequenceStatus::Atom,
@@ -839,6 +844,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_selection(&self, _: &EditContext) -> SequenceStatus {
         match self {
+            IambAction::ChangeTheme(..) => SequenceStatus::Ignore,
             IambAction::ClearUnreads => SequenceStatus::Ignore,
             IambAction::Homeserver(..) => SequenceStatus::Ignore,
             IambAction::Keys(..) => SequenceStatus::Ignore,
@@ -858,6 +864,7 @@ impl ApplicationAction for IambAction {
 
     fn is_switchable(&self, _: &EditContext) -> bool {
         match self {
+            IambAction::ChangeTheme(..) => false,
             IambAction::ClearUnreads => false,
             IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
