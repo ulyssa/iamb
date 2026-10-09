@@ -1,4 +1,4 @@
-# doom-ayu-mirage-light theme for iamb
+# doom-ayu-mirage-dark theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -7,12 +7,12 @@
 # If you are looking to remix this file to make a derived theme, the colors were
 # picked and assigned as:
 #
-# COLOR_BG1 => Primary background (#D9D7CE)
-# COLOR_BG2 => Alternate background (#272D38)
-# COLOR_BG3 => Completion menu selected item background (#242B38)
+# COLOR_BG1 => Primary background (#272D38)
+# COLOR_BG2 => Alternate background (#242B38)
+# COLOR_BG3 => Completion menu selected item background (#D9D7CE)
 #
-# COLOR_UI1 => Window border color, text completion menu (#FFD57F)
-# COLOR_UI2 => Window title color (#3D4751)
+# COLOR_UI1 => Window border color, text completion menu (#3D4751)
+# COLOR_UI2 => Window title color (#FFCC66)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FFAE57)
 # COLOR_WARN2 => Redacted messages - typically a red or light orange (#5C6773)
@@ -20,11 +20,11 @@
 #
 # COLOR_GOOD1 => Encrypted indicator - typically a green (#BBE67E)
 #
-# COLOR_TEXT1 => Primary text color (#14161B)
-# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#D4BFFF)
-# COLOR_TEXT3 => Alternate text color (#5CCFE6)
-# COLOR_TEXT4 => Alternate text color (#80D4FF)
-# COLOR_TEXT5 => Alternate text color (#FFCC66)
+# COLOR_TEXT1 => Primary text color (#FFD57F)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#E0E2EA)
+# COLOR_TEXT3 => Alternate text color (#80D4FF)
+# COLOR_TEXT4 => Alternate text color (#D4BFFF)
+# COLOR_TEXT5 => Alternate text color (#5CCFE6)
 #
 # COLOR_PLUS => Extra user colors used for users: 
 [theme.users]
@@ -33,40 +33,40 @@ colors = [
     "#5C6773",
     "#FFC44C",
     "#BBE67E",
+    "#E0E2EA",
+    "#80D4FF",
     "#D4BFFF",
     "#5CCFE6",
-    "#80D4FF",
-    "#FFCC66",
     
 ]
 
 [theme.default]
-color = "#14161B"
-background = "#D9D7CE"
+color = "#FFD57F"
+background = "#272D38"
 
 [theme.completion]
-default.background = "#242B38"
-default.color = "#FFD57F"
-selected.background = "#272D38"
-selected.color = "#14161B"
+default.background = "#D9D7CE"
+default.color = "#3D4751"
+selected.background = "#242B38"
+selected.color = "#FFD57F"
 
 [theme.timeline]
 redacted.color = "#5C6773"
 
 [theme.messages]
-code.color = "#D4BFFF"
-code.background = "#272D38"
-emphasis.color = "#80D4FF"
-strong.color = "#5CCFE6"
+code.color = "#E0E2EA"
+code.background = "#242B38"
+emphasis.color = "#D4BFFF"
+strong.color = "#80D4FF"
 
 [theme.rooms]
-default.color = "#FFCC66"
-unread.color = "#D4BFFF"
-labels.color = "#80D4FF"
+default.color = "#5CCFE6"
+unread.color = "#E0E2EA"
+labels.color = "#D4BFFF"
 
 [theme.windows]
-border.color = "#FFD57F"
-title.color = "#3D4751"
+border.color = "#3D4751"
+title.color = "#FFCC66"
 
 [theme.encryption]
 icon_encrypted.color = "#BBE67E"
