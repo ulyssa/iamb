@@ -25,7 +25,6 @@
 # COLOR_TEXT4 => Alternate text color (#6F6F6F)
 # COLOR_TEXT5 => Alternate text color (#93E0E3)
 #
-# COLOR_PLUS => Extra user colors used for users: 
 [theme.users]
 colors = [
     "#DC8CC3",
@@ -36,7 +35,6 @@ colors = [
     "#7CB8BB",
     "#6F6F6F",
     "#93E0E3",
-    
 ]
 
 [theme.default]

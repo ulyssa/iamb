@@ -2,7 +2,6 @@
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
-
 #
 # If you are looking to remix this file to make a derived theme, the colors were
 # picked and assigned as:
@@ -26,7 +25,6 @@
 # COLOR_TEXT4 => Alternate text color (#8CAAEE)
 # COLOR_TEXT5 => Alternate text color (#949CBB)
 #
-# COLOR_PLUS => Extra user colors used for users: 
 [theme.users]
 colors = [
     "#EF9F76",
@@ -37,7 +35,6 @@ colors = [
     "#CA9EE6",
     "#8CAAEE",
     "#949CBB",
-    
 ]
 
 [theme.default]

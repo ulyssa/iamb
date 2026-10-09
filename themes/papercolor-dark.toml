@@ -2,7 +2,6 @@
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
-
 #
 # If you are looking to remix this file to make a derived theme, the colors were
 # picked and assigned as:
@@ -37,7 +36,8 @@ colors = [
     "#5FAFD7",
     "#FF5FAF",
     "#00AFAF",
-    "#585858", "#5F8787"
+    "#585858",
+    "#5F8787",
 ]
 
 [theme.default]
