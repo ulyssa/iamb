@@ -167,11 +167,13 @@ pub fn mock_tunables() -> TunableValues {
         read_receipt_send: true,
         read_receipt_trigger: Default::default(),
         read_receipt_display: true,
+        room_labels: Default::default(),
         request_timeout: 120,
         sort: SortOverrides::default().values(),
         state_event_display: true,
         sync_delay_ms: 1000,
         terminal: Terminal::default().values(),
+        theme: "default".into(),
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
@@ -233,6 +235,7 @@ pub fn mock_settings() -> ApplicationSettings {
         macros: HashMap::default(),
         aliases: Aliases::default(),
         theme: crate::config::theme::default_theme().values().into(),
+        themes: Default::default(),
         enable_enhanced_keys: false,
     }
 }

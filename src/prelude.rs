@@ -89,6 +89,7 @@ pub use crate::base::{
     RoomAction,
     RoomFocus,
     RoomInfo,
+    RoomInfoFlags,
     SendAction,
     SpaceAction,
     TimelineAction,

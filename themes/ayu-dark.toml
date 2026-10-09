@@ -1,0 +1,76 @@
+# ayu-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#0F1419)
+# COLOR_BG2 => Alternate background (#151A1E)
+# COLOR_BG3 => Completion menu selected item background (#14191F)
+#
+# COLOR_UI1 => Window border color, text completion menu (#5C6773)
+# COLOR_UI2 => Window title color (#E6E1CF)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF7733)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#F29718)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#E7C547)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#B8CC52)
+#
+# COLOR_TEXT1 => Primary text color (#FFEE99)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#E0E2EA)
+# COLOR_TEXT3 => Alternate text color (#FFB454)
+# COLOR_TEXT4 => Alternate text color (#E6B673)
+# COLOR_TEXT5 => Alternate text color (#36A3D9)
+#
+# COLOR_PLUS => Extra user colors used for users: "#2D3640"
+[theme.users]
+colors = [
+    "#FF7733",
+    "#F29718",
+    "#E7C547",
+    "#B8CC52",
+    "#E0E2EA",
+    "#FFB454",
+    "#E6B673",
+    "#36A3D9",
+    "#2D3640"
+]
+
+[theme.default]
+color = "#FFEE99"
+background = "#0F1419"
+
+[theme.completion]
+default.background = "#14191F"
+default.color = "#5C6773"
+selected.background = "#151A1E"
+selected.color = "#FFEE99"
+
+[theme.timeline]
+redacted.color = "#F29718"
+
+[theme.messages]
+code.color = "#E0E2EA"
+code.background = "#151A1E"
+emphasis.color = "#E6B673"
+strong.color = "#FFB454"
+
+[theme.rooms]
+default.color = "#36A3D9"
+unread.color = "#E0E2EA"
+labels.color = "#E6B673"
+
+[theme.windows]
+border.color = "#5C6773"
+title.color = "#E6E1CF"
+
+[theme.encryption]
+icon_encrypted.color = "#B8CC52"
+icon_unencrypted.color = "#FF7733"
+icon_unknown.color = "#E7C547"
+
+[theme.cmdbar]
+error.color = "#FF7733"

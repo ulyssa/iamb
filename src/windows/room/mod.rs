@@ -199,7 +199,7 @@ pub async fn room_command(
             let cmd = cmd.default_relation(MoveDir1D::Next);
 
             let act = match store.application.settings.tunables.members_split {
-                Some(dir) => cmd.default_axis(dir.to_axis()).window(target, None),
+                Some(dir) => cmd.default_axis(dir.into()).window(target, None),
                 None => cmd.switch(target),
             };
 

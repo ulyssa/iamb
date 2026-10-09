@@ -542,6 +542,15 @@ fn complete_iamb_space(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     }
 }
 
+/// Tab completion for `:theme`
+fn complete_iamb_theme(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    if args.len() == 1 {
+        store.settings.themes.complete(&args[0])
+    } else {
+        vec![]
+    }
+}
+
 /// Tab completion for `:spaces`
 fn complete_iamb_spaces(args: Vec<String>) -> Vec<String> {
     match args.len() {
@@ -620,6 +629,8 @@ fn complete_cmdarg(
         "space" => complete_iamb_space(args, store),
 
         "spaces" => complete_iamb_spaces(args),
+
+        "theme" => complete_iamb_theme(args, store),
 
         // XXX: Check whether we can get the id of the focused message to improve completion
         "unreact" if args.len() == 1 => complete_emoji(&args[0], store),

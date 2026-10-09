@@ -1,0 +1,74 @@
+# base16-zenburn-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#383838)
+# COLOR_BG2 => Alternate background (#404040)
+# COLOR_BG3 => Completion menu selected item background (#606060)
+#
+# COLOR_UI1 => Window border color, text completion menu (#000000)
+# COLOR_UI2 => Window title color (#DCDCCC)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#DC8CC3)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#DCA3A3)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#808080)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#5F7F5F)
+#
+# COLOR_TEXT1 => Primary text color (#93E0E3)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#DFAF8F)
+# COLOR_TEXT3 => Alternate text color (#7CB8BB)
+# COLOR_TEXT4 => Alternate text color (#6F6F6F)
+# COLOR_TEXT5 => Alternate text color (#93E0E3)
+#
+[theme.users]
+colors = [
+    "#DC8CC3",
+    "#DCA3A3",
+    "#808080",
+    "#5F7F5F",
+    "#DFAF8F",
+    "#7CB8BB",
+    "#6F6F6F",
+    "#93E0E3",
+]
+
+[theme.default]
+color = "#93E0E3"
+background = "#383838"
+
+[theme.completion]
+default.background = "#606060"
+default.color = "#000000"
+selected.background = "#404040"
+selected.color = "#93E0E3"
+
+[theme.timeline]
+redacted.color = "#DCA3A3"
+
+[theme.messages]
+code.color = "#DFAF8F"
+code.background = "#404040"
+emphasis.color = "#6F6F6F"
+strong.color = "#7CB8BB"
+
+[theme.rooms]
+default.color = "#93E0E3"
+unread.color = "#DFAF8F"
+labels.color = "#6F6F6F"
+
+[theme.windows]
+border.color = "#000000"
+title.color = "#DCDCCC"
+
+[theme.encryption]
+icon_encrypted.color = "#5F7F5F"
+icon_unencrypted.color = "#DC8CC3"
+icon_unknown.color = "#808080"
+
+[theme.cmdbar]
+error.color = "#DC8CC3"

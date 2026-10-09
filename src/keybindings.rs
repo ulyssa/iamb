@@ -9,7 +9,7 @@ use modalkit::env::vim::keybindings::{InputStep, VimBindings};
 use modalkit::keybindings::{EdgeEvent, EdgeRepeat, InputBindings};
 
 use crate::base::{Keybindings, MATRIX_ID_WORD};
-use crate::config::{Keys, SplitDirection, TunableValues};
+use crate::config::{Keys, TunableValues};
 use crate::prelude::*;
 
 pub type IambStep = InputStep<IambInfo>;
@@ -23,6 +23,7 @@ pub fn setup_keybindings(tunables: &TunableValues) -> Keybindings {
     let mut ism = Keybindings::empty();
 
     let vim = VimBindings::default()
+        .default_split(tunables.default_split.into())
         .submit_on_enter(!tunables.send_on_enter)
         .cursor_open(MATRIX_ID_WORD.clone());
 
@@ -78,30 +79,6 @@ impl InputBindings<TerminalKey, IambStep> for ApplicationSettings {
                     bindings.add_mapping(*mode, &input, &step);
                 }
             }
-        }
-
-        if self.tunables.default_split == SplitDirection::Vertical {
-            let ctrl_w = "<C-W>".parse::<TerminalKey>().unwrap();
-            let key_f = "f".parse::<TerminalKey>().unwrap();
-            let ctrl_f = "<C-F>".parse::<TerminalKey>().unwrap();
-
-            let vsplit_open = IambStep::new()
-                .actions(vec![
-                    WindowAction::Split(
-                        OpenTarget::Cursor(MATRIX_ID_WORD.clone()),
-                        Axis::Vertical,
-                        MoveDir1D::Next,
-                        1.into(),
-                    )
-                    .into(),
-                ])
-                .goto(VimMode::Normal);
-
-            let cwf = vec![once(&ctrl_w), once(&key_f)];
-            let cwcf = vec![once(&ctrl_w), once(&ctrl_f)];
-
-            bindings.add_mapping(VimMode::Normal, &cwf, &vsplit_open);
-            bindings.add_mapping(VimMode::Normal, &cwcf, &vsplit_open);
         }
     }
 }

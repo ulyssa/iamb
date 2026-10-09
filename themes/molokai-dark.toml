@@ -1,0 +1,74 @@
+# oh-my-monokai-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#19181A)
+# COLOR_BG2 => Alternate background (#1E1E1E)
+# COLOR_BG3 => Completion menu selected item background (#282828)
+#
+# COLOR_UI1 => Window border color, text completion menu (#E373CE)
+# COLOR_UI2 => Window title color (#F6F6F6)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF3F4F)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#5C6370)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#E5A422)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#727072)
+#
+# COLOR_TEXT1 => Primary text color (#FCFCFA)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#81F900)
+# COLOR_TEXT3 => Alternate text color (#FFD945)
+# COLOR_TEXT4 => Alternate text color (#00DFFF)
+# COLOR_TEXT5 => Alternate text color (#C1C0C0)
+#
+[theme.users]
+colors = [
+    "#FF3F4F",
+    "#5C6370",
+    "#E5A422",
+    "#727072",
+    "#81F900",
+    "#FFD945",
+    "#00DFFF",
+    "#C1C0C0",
+]
+
+[theme.default]
+color = "#FCFCFA"
+background = "#19181A"
+
+[theme.completion]
+default.background = "#282828"
+default.color = "#E373CE"
+selected.background = "#1E1E1E"
+selected.color = "#FCFCFA"
+
+[theme.timeline]
+redacted.color = "#5C6370"
+
+[theme.messages]
+code.color = "#81F900"
+code.background = "#1E1E1E"
+emphasis.color = "#00DFFF"
+strong.color = "#FFD945"
+
+[theme.rooms]
+default.color = "#C1C0C0"
+unread.color = "#81F900"
+labels.color = "#00DFFF"
+
+[theme.windows]
+border.color = "#E373CE"
+title.color = "#F6F6F6"
+
+[theme.encryption]
+icon_encrypted.color = "#727072"
+icon_unencrypted.color = "#FF3F4F"
+icon_unknown.color = "#E5A422"
+
+[theme.cmdbar]
+error.color = "#FF3F4F"

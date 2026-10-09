@@ -82,13 +82,13 @@ version = "4.12"
 optional = true
 
 [dependencies.modalkit]
-version = "0.0.30"
+version = "0.0.31"
 default-features = false
 #git = "https://github.com/ulyssa/modalkit"
 #rev = "31158b7b759ef6f4b3c0d56305fa8a68365d8a96"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.30"
+version = "0.0.31"
 #git = "https://github.com/ulyssa/modalkit"
 #rev = "31158b7b759ef6f4b3c0d56305fa8a68365d8a96"
 

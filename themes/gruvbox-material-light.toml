@@ -1,0 +1,74 @@
+# gruvbox-material-light theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#FBF1C7)
+# COLOR_BG2 => Alternate background (#F4E8BE)
+# COLOR_BG3 => Completion menu selected item background (#F2E5BC)
+#
+# COLOR_UI1 => Window border color, text completion menu (#DDCCAB)
+# COLOR_UI2 => Window title color (#654735)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#C14A4A)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#C35E0A)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#B47109)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#6C782E)
+#
+# COLOR_TEXT1 => Primary text color (#4F3829)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#945E80)
+# COLOR_TEXT3 => Alternate text color (#45707A)
+# COLOR_TEXT4 => Alternate text color (#4C7A5D)
+# COLOR_TEXT5 => Alternate text color (#928374)
+#
+[theme.users]
+colors = [
+    "#C14A4A",
+    "#C35E0A",
+    "#B47109",
+    "#6C782E",
+    "#945E80",
+    "#45707A",
+    "#4C7A5D",
+    "#928374",
+]
+
+[theme.default]
+color = "#4F3829"
+background = "#FBF1C7"
+
+[theme.completion]
+default.background = "#F2E5BC"
+default.color = "#DDCCAB"
+selected.background = "#F4E8BE"
+selected.color = "#4F3829"
+
+[theme.timeline]
+redacted.color = "#C35E0A"
+
+[theme.messages]
+code.color = "#945E80"
+code.background = "#F4E8BE"
+emphasis.color = "#4C7A5D"
+strong.color = "#45707A"
+
+[theme.rooms]
+default.color = "#928374"
+unread.color = "#945E80"
+labels.color = "#4C7A5D"
+
+[theme.windows]
+border.color = "#DDCCAB"
+title.color = "#654735"
+
+[theme.encryption]
+icon_encrypted.color = "#6C782E"
+icon_unencrypted.color = "#C14A4A"
+icon_unknown.color = "#B47109"
+
+[theme.cmdbar]
+error.color = "#C14A4A"

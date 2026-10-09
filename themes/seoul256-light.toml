@@ -1,0 +1,74 @@
+# seoul256-light theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#E1E1E1)
+# COLOR_BG2 => Alternate background (#D9D9D9)
+# COLOR_BG3 => Completion menu selected item background (#D1D0D1)
+#
+# COLOR_UI1 => Window border color, text completion menu (#999872)
+# COLOR_UI2 => Window title color (#009799)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#BE7572)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#9A7372)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#9A7200)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#727100)
+#
+# COLOR_TEXT1 => Primary text color (#616161)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#9A7599)
+# COLOR_TEXT3 => Alternate text color (#719872)
+# COLOR_TEXT4 => Alternate text color (#E19972)
+# COLOR_TEXT5 => Alternate text color (#719899)
+#
+[theme.users]
+colors = [
+    "#BE7572",
+    "#9A7372",
+    "#9A7200",
+    "#727100",
+    "#9A7599",
+    "#719872",
+    "#E19972",
+    "#719899",
+]
+
+[theme.default]
+color = "#616161"
+background = "#E1E1E1"
+
+[theme.completion]
+default.background = "#D1D0D1"
+default.color = "#999872"
+selected.background = "#D9D9D9"
+selected.color = "#616161"
+
+[theme.timeline]
+redacted.color = "#9A7372"
+
+[theme.messages]
+code.color = "#9A7599"
+code.background = "#D9D9D9"
+emphasis.color = "#E19972"
+strong.color = "#719872"
+
+[theme.rooms]
+default.color = "#719899"
+unread.color = "#9A7599"
+labels.color = "#E19972"
+
+[theme.windows]
+border.color = "#999872"
+title.color = "#009799"
+
+[theme.encryption]
+icon_encrypted.color = "#727100"
+icon_unencrypted.color = "#BE7572"
+icon_unknown.color = "#9A7200"
+
+[theme.cmdbar]
+error.color = "#BE7572"

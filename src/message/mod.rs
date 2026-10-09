@@ -1245,11 +1245,11 @@ impl Message {
     /// Render the message as a [Text] object for the terminal.
     ///
     /// This will also get the image preview Protocol with an x/y offset.
-    pub fn show_with_preview<'a>(
+    pub fn show_with_preview<'a, C>(
         &'a self,
         prev: Option<&Message>,
         selected: bool,
-        vwctx: &ViewportContext<MessageCursor>,
+        vwctx: &ViewportContext<C>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
@@ -1339,11 +1339,11 @@ impl Message {
         (text, protos)
     }
 
-    pub fn show<'a>(
+    pub fn show<'a, C>(
         &'a self,
         prev: Option<&Message>,
         selected: bool,
-        vwctx: &ViewportContext<MessageCursor>,
+        vwctx: &ViewportContext<C>,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
@@ -1967,7 +1967,8 @@ pub mod tests {
         let settings = mock_settings();
         let previews = PreviewManager::new(&settings);
         let mut info = mock_room();
-        let vwctx = ViewportContext { dimensions: (60, 5), ..Default::default() };
+        let vwctx: ViewportContext<MessageCursor> =
+            ViewportContext { dimensions: (60, 5), ..Default::default() };
 
         let prev = mock_message1();
         let msg = mock_message2();

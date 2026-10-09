@@ -291,6 +291,27 @@ A message must be sent to the room before marking it read.
 Defines whether or not read confirmations are displayed.
 .It Sy request_timeout
 Defines the maximum time per request in seconds.
+.It Sy room_labels
+Defines which kinds of labels to put next to room names and what order to show the information in.
+This defaults to
+.Sy ["unread",\ "membership",\ "tags",\ "muted",\ "type"] .
+The possible values and the information shown are:
+.Bl -tag -width Ds
+.It Sy membership
+Show whether you're not currently a room member, such as when you're invited to a room.
+.It Sy muted
+Show
+.Dq Muted
+and
+.Dq Calmed
+if the room doesn't notify for all new messages.
+.It Sy tags
+Show if the room has been tagged, such as a Favorite or Low Priority room.
+.It Sy type
+Show if this is a regular room, a DM or a space when the current window shows multiple kinds.
+.It Sy unread
+Show if a non-muted, non-calmed room has unread messages or mentions.
+.El
 .It Sy send_on_enter
 If
 .Sy true
@@ -308,6 +329,10 @@ Defines whether the state events like joined or left are shown.
 .It Sy sync_delay_ms
 How long to wait after a sync completes before doing the next one.
 Defaults to 250 milliseconds.
+.It Sy theme
+Configure which theme to use at startup.
+Defaults to
+.Dq Sy "default" .
 .It Sy terminal
 Subsection for configuring how specific terminal features are used (or not used).
 See

@@ -16,6 +16,7 @@ use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
 use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_handler::Ctx;
+use matrix_sdk::notification_settings::RoomNotificationMode;
 use matrix_sdk::room::RoomMember;
 use matrix_sdk::ruma::OwnedRoomAliasId;
 use matrix_sdk::ruma::api::client::filter::{
@@ -749,8 +750,16 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
         let mut aliases = room.alt_aliases();
         aliases.extend(room.canonical_alias());
 
+        let mut flags = RoomInfoFlags::NONE;
+
+        match room.notification_mode().await {
+            Some(RoomNotificationMode::MentionsAndKeywordsOnly) => flags |= RoomInfoFlags::CALMED,
+            Some(RoomNotificationMode::Mute) => flags |= RoomInfoFlags::MUTED,
+            _ => (),
+        }
+
         pinned.push((room.room_id().to_owned(), room.pinned_event_ids().unwrap_or_default()));
-        names_and_tags.push((room.room_id().to_owned(), name, tags, aliases));
+        names_and_tags.push((room.room_id().to_owned(), name, tags, aliases, flags));
 
         if room.is_direct().await.unwrap_or_default() {
             dms.push(room);
@@ -766,8 +775,8 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     locked.application.sync_info.rooms = rooms;
     locked.application.sync_info.dms = dms;
 
-    for (room_id, name, tags, aliases) in names_and_tags {
-        locked.application.set_room_info(room_id, name, tags, aliases);
+    for (room_id, name, tags, aliases, flags) in names_and_tags {
+        locked.application.set_room_info(room_id, name, tags, aliases, flags);
     }
 
     for (room_id, pinned_events) in pinned {
@@ -2163,8 +2172,8 @@ impl ClientWorker {
                     .matrix_auth()
                     .login_username(&self.settings.profile.user_id, &password)
                     .initial_device_display_name(initial_devname().as_str());
-                if let Some(device_id) = self.settings.read_saved_device() {
-                    login = login.device_id(device_id.as_str());
+                if let Some(device) = self.settings.read_saved_device() {
+                    login = login.device_id(device.device_id().as_str());
                 }
                 let resp = login.send().await.map_err(IambError::from)?;
                 let session = MatrixSession::from(&resp);
@@ -2185,8 +2194,8 @@ impl ClientWorker {
                         }
                     })
                     .initial_device_display_name(initial_devname().as_str());
-                if let Some(device_id) = self.settings.read_saved_device() {
-                    login = login.device_id(device_id.as_str());
+                if let Some(device) = self.settings.read_saved_device() {
+                    login = login.device_id(device.device_id().as_str());
                 }
                 let resp = login.send().await.map_err(IambError::from)?;
 
@@ -2194,7 +2203,12 @@ impl ClientWorker {
                 self.settings.write_session(session)?;
             },
             LoginStyle::OAuth => {
-                oauth_login(self.client.clone(), &self.settings.profile.user_id).await?;
+                oauth_login(
+                    self.client.clone(),
+                    &self.settings.profile.user_id,
+                    self.settings.read_saved_device(),
+                )
+                .await?;
                 let session = self
                     .client
                     .oauth()
@@ -2217,12 +2231,14 @@ impl ClientWorker {
             return Err(err);
         }
 
+        let client_id = self.client.oauth().client_id().cloned();
+
         // Capture the device ID before logging out, while the session is
         // still active. The next login reuses it, which keeps the existing
         // SDK store valid: the store is keyed by user and device ID, and a
         // freshly issued device ID would no longer match it.
         if let Some(device_id) = self.client.device_id() {
-            self.settings.write_saved_device(device_id)?;
+            self.settings.write_saved_device(device_id, client_id)?;
         }
 
         // Send the logout request.

@@ -1,0 +1,74 @@
+# base16-solarized-dark-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#002B36)
+# COLOR_BG2 => Alternate background (#073642)
+# COLOR_BG3 => Completion menu selected item background (#586E75)
+#
+# COLOR_UI1 => Window border color, text completion menu (#657B83)
+# COLOR_UI2 => Window title color (#93A1A1)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#DC322F)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#CB4B16)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#839496)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#859900)
+#
+# COLOR_TEXT1 => Primary text color (#D33682)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#2AA198)
+# COLOR_TEXT3 => Alternate text color (#268BD2)
+# COLOR_TEXT4 => Alternate text color (#6C71C4)
+# COLOR_TEXT5 => Alternate text color (#D33682)
+#
+[theme.users]
+colors = [
+    "#DC322F",
+    "#CB4B16",
+    "#839496",
+    "#859900",
+    "#2AA198",
+    "#268BD2",
+    "#6C71C4",
+    "#D33682",
+]
+
+[theme.default]
+color = "#D33682"
+background = "#002B36"
+
+[theme.completion]
+default.background = "#586E75"
+default.color = "#657B83"
+selected.background = "#073642"
+selected.color = "#D33682"
+
+[theme.timeline]
+redacted.color = "#CB4B16"
+
+[theme.messages]
+code.color = "#2AA198"
+code.background = "#073642"
+emphasis.color = "#6C71C4"
+strong.color = "#268BD2"
+
+[theme.rooms]
+default.color = "#D33682"
+unread.color = "#2AA198"
+labels.color = "#6C71C4"
+
+[theme.windows]
+border.color = "#657B83"
+title.color = "#93A1A1"
+
+[theme.encryption]
+icon_encrypted.color = "#859900"
+icon_unencrypted.color = "#DC322F"
+icon_unknown.color = "#839496"
+
+[theme.cmdbar]
+error.color = "#DC322F"

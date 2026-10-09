@@ -2,6 +2,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use anyhow::Context;
 use ratatui::widgets::BorderType;
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
@@ -104,6 +105,60 @@ pub fn default_theme() -> Theme {
             stylable: Stylable::with_modifiers(StyleModifier::BOLD),
         },
         ..Default::default()
+    }
+}
+
+pub fn find_themes(dir: &Path) -> anyhow::Result<Vec<(String, Theme)>> {
+    let entries = std::fs::read_dir(dir)
+        .with_context(|| format!("Cannot list {} contents", dir.display()))?;
+    let mut themes = vec![];
+
+    for res in entries {
+        let Ok(entry) = res else {
+            continue;
+        };
+
+        let path = entry.path();
+
+        if !path.is_file() {
+            // Skip non-files.
+            continue;
+        }
+
+        if path.extension().is_none_or(|ext| ext != "toml") {
+            // Skip non-`.toml` files.
+            continue;
+        }
+
+        let Some(name) = path.file_stem() else {
+            continue;
+        };
+
+        let file = ThemeFile::load(&path)?;
+        let name = name.to_string_lossy().into_owned();
+        themes.push((name, file.theme));
+    }
+
+    Ok(themes)
+}
+
+/// A restricted subset of `config.toml` that only allows specifying themes.
+///
+/// This exists mainly to prevent people from thinking that values they put
+/// into the theme files are taking effect when they aren't: theme files are
+/// only used for sourcing theme information to prevent any weirdness around
+/// what happens when changing the theme with `:theme`.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeFile {
+    pub theme: Theme,
+}
+
+impl ThemeFile {
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let input = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        toml::de::from_str(&input).with_context(|| format!("failed to read {}", path.display()))
     }
 }
 

@@ -135,12 +135,12 @@ impl fmt::Display for VerifyItem {
 impl ListItem<IambInfo> for VerifyItem {
     type Section = &'static str;
 
-    fn show(
-        &self,
+    fn show<'a>(
+        &'a self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
-        store: &mut ProgramStore,
-    ) -> Text<'_> {
+        store: &'a ProgramStore,
+    ) -> Text<'a> {
         let mut lines = vec![];
         let style = store.application.settings.theme.default;
         let bold = style.bold();

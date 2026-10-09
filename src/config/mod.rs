@@ -6,6 +6,7 @@ use std::io::{BufReader, BufWriter, Write as _};
 use std::process;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use chrono::format::{Item, StrftimeItems};
 use chrono::{DateTime, Local};
 use clap::Parser;
@@ -18,6 +19,7 @@ use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
 use matrix_sdk::ruma::{DeviceId, OwnedDeviceId, owned_server_name};
 use matrix_sdk::{AuthSession, EncryptionState, SessionMeta, SessionTokens};
 use modalkit::crossterm;
+use modalkit::editing::completion::CompletionMap;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
 use ratatui_image::FilterType;
@@ -69,6 +71,14 @@ const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 3] = [
     SortColumn(SortFieldSpace::Room(SortFieldRoom::Space), SortOrder::Ascending),
     SortColumn(SortFieldSpace::Room(SortFieldRoom::Joined), SortOrder::Ascending),
     SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending),
+];
+
+const DEFAULT_ROOM_LABELS: [RoomLabel; 5] = [
+    RoomLabel::Unread,
+    RoomLabel::Membership,
+    RoomLabel::Tags,
+    RoomLabel::Muted,
+    RoomLabel::Type,
 ];
 
 const DEFAULT_ENABLE_TITLE: bool = true;
@@ -206,6 +216,25 @@ where
     }
 
     Ok(Some(value))
+}
+
+/// Load themes from disk, and merge in the configured overrides.
+fn load_themes(
+    themes_dir: &Path,
+    theme_overrides: theme::Theme,
+) -> anyhow::Result<CompletionMap<String, theme::Theme>> {
+    let mut themes = CompletionMap::default();
+
+    // Load from the `themes` directory in the user's configuration directory:
+    theme::find_themes(themes_dir)?.into_iter().for_each(|(n, t)| {
+        let theme = theme_overrides.clone().merge(t).merge(theme::default_theme());
+        themes.insert(n, theme);
+    });
+
+    // Insert a default theme that defaults to using terminal colors:
+    let default_theme = theme_overrides.clone().merge(theme::default_theme());
+    themes.insert("default".into(), default_theme);
+    Ok(themes)
 }
 
 const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
@@ -357,9 +386,38 @@ impl From<Session> for AuthSession {
 /// (#775). Saving the ID lets the next login ask the homeserver for the
 /// same device and keep using that store.
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SavedDevice {
-    user_id: OwnedUserId,
-    device_id: OwnedDeviceId,
+#[serde(untagged)]
+pub enum SavedDevice {
+    OAuth {
+        user_id: OwnedUserId,
+        device_id: OwnedDeviceId,
+        client_id: ClientId,
+    },
+    MatrixAuth {
+        user_id: OwnedUserId,
+        device_id: OwnedDeviceId,
+    },
+}
+
+impl SavedDevice {
+    pub fn device_id(&self) -> &DeviceId {
+        match self {
+            SavedDevice::OAuth { device_id, .. } => device_id,
+            SavedDevice::MatrixAuth { device_id, .. } => device_id,
+        }
+    }
+    pub fn client_id(&self) -> Option<&ClientId> {
+        match self {
+            SavedDevice::OAuth { client_id, .. } => Some(client_id),
+            SavedDevice::MatrixAuth { .. } => None,
+        }
+    }
+    pub fn is_user(&self, user: &UserId) -> bool {
+        match self {
+            SavedDevice::OAuth { user_id, .. } => user == user_id,
+            SavedDevice::MatrixAuth { user_id, .. } => user == user_id,
+        }
+    }
 }
 
 impl From<Session> for MatrixSession {
@@ -510,6 +568,18 @@ impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
     }
 }
 
+/// Types of room labels to display in room lists.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum RoomLabel {
+    Membership,
+    Muted,
+    Tags,
+    Type,
+    Unread,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum UserDisplayStyle {
@@ -536,11 +606,11 @@ pub enum SplitDirection {
     Vertical,
 }
 
-impl SplitDirection {
-    pub fn to_axis(self) -> Axis {
-        match self {
-            Self::Horizontal => Axis::Horizontal,
-            Self::Vertical => Axis::Vertical,
+impl From<SplitDirection> for Axis {
+    fn from(dir: SplitDirection) -> Axis {
+        match dir {
+            SplitDirection::Horizontal => Axis::Horizontal,
+            SplitDirection::Vertical => Axis::Vertical,
         }
     }
 }
@@ -892,10 +962,12 @@ pub struct TunableValues {
     pub read_receipt_send: bool,
     pub read_receipt_trigger: ReadReceiptTrigger,
     pub read_receipt_display: bool,
+    pub room_labels: Vec<RoomLabel>,
     pub request_timeout: u64,
     pub sort: SortValues,
     pub state_event_display: bool,
     pub sync_delay_ms: u64,
+    pub theme: String,
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
     pub users: UserOverrides,
@@ -957,9 +1029,11 @@ pub struct Tunables {
     pub read_receipt_send: Option<bool>,
     pub read_receipt_trigger: Option<ReadReceiptTrigger>,
     pub read_receipt_display: Option<bool>,
+    pub room_labels: Option<Vec<RoomLabel>>,
     pub request_timeout: Option<u64>,
     pub state_event_display: Option<bool>,
     pub sync_delay_ms: Option<u64>,
+    pub theme: Option<String>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
     pub username_display: Option<UserDisplayStyle>,
@@ -1021,9 +1095,11 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_trigger: self.read_receipt_trigger.or(other.read_receipt_trigger),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
+            room_labels: self.room_labels.or(other.room_labels),
             request_timeout: self.request_timeout.or(other.request_timeout),
             state_event_display: self.state_event_display.or(other.state_event_display),
             sync_delay_ms: self.sync_delay_ms.or(other.sync_delay_ms),
+            theme: self.theme.or(other.theme),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
             username_display: self.username_display.or(other.username_display),
@@ -1074,9 +1150,11 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_trigger: self.read_receipt_trigger.unwrap_or_default(),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
+            room_labels: self.room_labels.unwrap_or_else(|| DEFAULT_ROOM_LABELS.to_vec()),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             state_event_display: self.state_event_display.unwrap_or(true),
             sync_delay_ms: self.sync_delay_ms.unwrap_or(DEFAULT_SYNC_FREQUENCY),
+            theme: self.theme.unwrap_or_else(|| "default".to_string()),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
             username_display: self.username_display.unwrap_or_default(),
@@ -1328,6 +1406,7 @@ pub struct ApplicationSettings {
     pub profile_name: String,
     pub profile: ProfileConfig,
     pub theme: Arc<theme::ThemeValues>,
+    pub themes: Arc<CompletionMap<String, theme::Theme>>,
     pub tunables: TunableValues,
     pub dirs: DirectoryValues,
     pub layout: Layout,
@@ -1436,9 +1515,20 @@ impl ApplicationSettings {
         let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
         let dirs = dirs.values();
 
-        let theme = theme.unwrap_or_default().merge(theme::default_theme());
-        let theme = profile.theme.take().unwrap_or_default().merge(theme);
-        let theme = Arc::new(theme.values());
+        let themes_dir = config_dir.join("themes");
+        let overrides = profile.theme.clone().unwrap_or_default().merge(theme.unwrap_or_default());
+        let themes = Arc::new(load_themes(&themes_dir, overrides)?);
+
+        let theme = if let Some(theme) = themes.get(&tunables.theme) {
+            Arc::new(theme.clone().values())
+        } else {
+            let err = anyhow!(
+                "Could not find the {:?} theme; check {}?",
+                tunables.theme,
+                themes_dir.display()
+            );
+            return Err(err.into_boxed_dyn_error());
+        };
 
         // Create directories
         dirs.create_dir_all()?;
@@ -1488,6 +1578,7 @@ impl ApplicationSettings {
             sqlite_cache_dir,
             profile_name,
             profile,
+            themes,
             theme,
             tunables,
             dirs,
@@ -1537,24 +1628,40 @@ impl ApplicationSettings {
     /// The device ID saved at logout, if it was saved for this profile's
     /// user. A missing or stale file is not an error: the next login then
     /// simply gets a fresh device ID from the homeserver.
-    pub fn read_saved_device(&self) -> Option<OwnedDeviceId> {
+    pub fn read_saved_device(&self) -> Option<SavedDevice> {
         let file = File::open(self.device_json.as_path()).ok()?;
         let reader = BufReader::new(file);
         let saved: SavedDevice = serde_json::from_reader(reader).ok()?;
 
-        if saved.user_id == self.profile.user_id {
-            Some(saved.device_id)
+        if saved.is_user(&self.profile.user_id) {
+            Some(saved)
         } else {
             None
         }
     }
 
-    pub fn write_saved_device(&self, device_id: &DeviceId) -> Result<(), IambError> {
+    pub fn write_saved_device(
+        &self,
+        device_id: &DeviceId,
+        client_id: Option<ClientId>,
+    ) -> Result<(), IambError> {
         let file = File::create(self.device_json.as_path())?;
         let writer = BufWriter::new(file);
-        let saved = SavedDevice {
-            user_id: self.profile.user_id.clone(),
-            device_id: device_id.to_owned(),
+
+        let saved = match client_id {
+            Some(client) => {
+                SavedDevice::OAuth {
+                    user_id: self.profile.user_id.clone(),
+                    device_id: device_id.to_owned(),
+                    client_id: client,
+                }
+            },
+            None => {
+                SavedDevice::MatrixAuth {
+                    user_id: self.profile.user_id.clone(),
+                    device_id: device_id.to_owned(),
+                }
+            },
         };
         serde_json::to_writer(writer, &saved).map_err(IambError::from)?;
         Ok(())
@@ -2147,6 +2254,13 @@ time_format = "%"
         );
         assert!(serde_json::from_str::<NotifyVia>(r#""other""#).is_err());
         assert!(serde_json::from_str::<NotifyVia>(r#""""#).is_err());
+    }
+
+    #[test]
+    fn test_parse_room_labels() {
+        assert_eq!(RoomLabel::Membership, serde_json::from_str(r#""membership""#).unwrap());
+        assert_eq!(RoomLabel::Tags, serde_json::from_str(r#""tags""#).unwrap());
+        assert_eq!(RoomLabel::Type, serde_json::from_str(r#""type""#).unwrap());
     }
 
     #[test]
