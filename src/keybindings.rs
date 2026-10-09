@@ -9,7 +9,7 @@ use modalkit::env::vim::keybindings::{InputStep, VimBindings};
 use modalkit::keybindings::{EdgeEvent, EdgeRepeat, InputBindings};
 
 use crate::base::{Keybindings, MATRIX_ID_WORD};
-use crate::config::{Keys, TunableValues};
+use crate::config::{Keys, TunableValues, UserStep};
 use crate::prelude::*;
 
 pub type IambStep = InputStep<IambInfo>;
@@ -69,6 +69,16 @@ pub fn setup_keybindings(tunables: &TunableValues) -> Keybindings {
 
 impl InputBindings<TerminalKey, IambStep> for ApplicationSettings {
     fn setup(&self, bindings: &mut Keybindings) {
+        for (modes, keys) in &self.keybindings {
+            for (Keys(input, _), UserStep(step)) in keys {
+                let input = input.iter().map(once).collect::<Vec<_>>();
+
+                for mode in &modes.0 {
+                    bindings.add_mapping(*mode, &input, step);
+                }
+            }
+        }
+
         for (modes, keys) in &self.macros {
             for (Keys(input, _), Keys(_, run)) in keys {
                 let act = MacroAction::Run(run.clone(), Count::Contextual);

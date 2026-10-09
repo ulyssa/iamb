@@ -99,6 +99,10 @@ split = [
     { "window" = "#iamb-dev:0x.badd.cafe" }
 ]
 
+# Map `S` in Normal mode to run the `:spaces` command:
+[keybindings.n]
+S = "command run -i \"spaces\""
+
 # Map specific key inputs to other keys:
 [macros.insert]
 "jj" = "<Esc>"
