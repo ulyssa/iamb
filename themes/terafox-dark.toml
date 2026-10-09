@@ -1,0 +1,77 @@
+# terafox-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#0F1C1E)
+# COLOR_BG2 => Alternate background (#152528)
+# COLOR_BG3 => Completion menu selected item background (#254147)
+#
+# COLOR_UI1 => Window border color, text completion menu (#6D7F8B)
+# COLOR_UI2 => Window title color (#CBD9D8)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF8349)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#AD5C7C)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#7AA4A1)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#587B7B)
+#
+# COLOR_TEXT1 => Primary text color (#E6EAEA)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#FDA47F)
+# COLOR_TEXT3 => Alternate text color (#A1CDD8)
+# COLOR_TEXT4 => Alternate text color (#73A3B7)
+# COLOR_TEXT5 => Alternate text color (#E6EAEA)
+#
+# COLOR_PLUS => Extra user colors used for users: 
+[theme.users]
+colors = [
+    "#FF8349",
+    "#AD5C7C",
+    "#7AA4A1",
+    "#587B7B",
+    "#FDA47F",
+    "#A1CDD8",
+    "#73A3B7",
+    "#E6EAEA",
+    
+]
+
+[theme.default]
+color = "#E6EAEA"
+background = "#0F1C1E"
+
+[theme.completion]
+default.background = "#254147"
+default.color = "#6D7F8B"
+selected.background = "#152528"
+selected.color = "#E6EAEA"
+
+[theme.timeline]
+redacted.color = "#AD5C7C"
+
+[theme.messages]
+code.color = "#FDA47F"
+code.background = "#152528"
+emphasis.color = "#73A3B7"
+strong.color = "#A1CDD8"
+
+[theme.rooms]
+default.color = "#E6EAEA"
+unread.color = "#FDA47F"
+labels.color = "#73A3B7"
+
+[theme.windows]
+border.color = "#6D7F8B"
+title.color = "#CBD9D8"
+
+[theme.encryption]
+icon_encrypted.color = "#587B7B"
+icon_unencrypted.color = "#FF8349"
+icon_unknown.color = "#7AA4A1"
+
+[theme.cmdbar]
+error.color = "#FF8349"

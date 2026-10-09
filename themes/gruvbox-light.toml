@@ -1,0 +1,77 @@
+# gruvbox-light theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#FBF1C7)
+# COLOR_BG2 => Alternate background (#EBDBB2)
+# COLOR_BG3 => Completion menu selected item background (#3C3836)
+#
+# COLOR_UI1 => Window border color, text completion menu (#D5C4A1)
+# COLOR_UI2 => Window title color (#8F3F71)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#AF3A03)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#9D0006)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#B57614)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#79740E)
+#
+# COLOR_TEXT1 => Primary text color (#14161B)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#076678)
+# COLOR_TEXT3 => Alternate text color (#928374)
+# COLOR_TEXT4 => Alternate text color (#A89984)
+# COLOR_TEXT5 => Alternate text color (#14161B)
+#
+# COLOR_PLUS => Extra user colors used for users: 
+[theme.users]
+colors = [
+    "#AF3A03",
+    "#9D0006",
+    "#B57614",
+    "#79740E",
+    "#076678",
+    "#928374",
+    "#A89984",
+    "#14161B",
+    
+]
+
+[theme.default]
+color = "#14161B"
+background = "#FBF1C7"
+
+[theme.completion]
+default.background = "#3C3836"
+default.color = "#D5C4A1"
+selected.background = "#EBDBB2"
+selected.color = "#14161B"
+
+[theme.timeline]
+redacted.color = "#9D0006"
+
+[theme.messages]
+code.color = "#076678"
+code.background = "#EBDBB2"
+emphasis.color = "#A89984"
+strong.color = "#928374"
+
+[theme.rooms]
+default.color = "#14161B"
+unread.color = "#076678"
+labels.color = "#A89984"
+
+[theme.windows]
+border.color = "#D5C4A1"
+title.color = "#8F3F71"
+
+[theme.encryption]
+icon_encrypted.color = "#79740E"
+icon_unencrypted.color = "#AF3A03"
+icon_unknown.color = "#B57614"
+
+[theme.cmdbar]
+error.color = "#AF3A03"
