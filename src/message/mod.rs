@@ -763,7 +763,7 @@ impl<'a> MessageFormatter<'a> {
             MessageColumns::Four => {
                 let settings = self.settings;
                 let time = self.time.take().unwrap_or_else(|| {
-                    space_span(settings.tunables.time_gutter_width(), Style::default())
+                    space_span(settings.tunables.time_gutter_width, Style::default())
                 });
 
                 let mut line = vec![user_gutter];
@@ -1119,7 +1119,7 @@ impl Message {
     ) -> usize {
         let width = viewctx.get_width();
         let user_gutter = settings.tunables.user_gutter_width;
-        let time_gutter = settings.tunables.time_gutter_width();
+        let time_gutter = settings.tunables.time_gutter_width;
 
         if user_gutter + time_gutter + READ_GUTTER + MIN_MSG_LEN <= width &&
             settings.tunables.read_receipt_display
@@ -1145,7 +1145,7 @@ impl Message {
         let date = self.show_date(prev).then(|| self.timestamp.show_date(settings));
         let trackbar = self.show_trackbar(prev, info, settings);
         let user_gutter = settings.tunables.user_gutter_width;
-        let time_gutter = settings.tunables.time_gutter_width();
+        let time_gutter = settings.tunables.time_gutter_width;
 
         if user_gutter + time_gutter + READ_GUTTER + MIN_MSG_LEN <= width &&
             settings.tunables.read_receipt_display
@@ -1639,6 +1639,7 @@ pub mod tests {
     };
 
     use crate::base::EventLocation;
+    use crate::config::time_gutter_width;
     use crate::tests::*;
 
     #[test]
@@ -2072,7 +2073,7 @@ pub mod tests {
         let time = ts.show_time(&settings);
         assert_eq!(time.content.as_ref(), format!("  [{}]", dt.format("%T")));
         assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), 12);
-        assert_eq!(settings.tunables.time_gutter_width(), 12);
+        assert_eq!(settings.tunables.time_gutter_width, 12);
     }
 
     #[test]
@@ -2084,28 +2085,31 @@ pub mod tests {
 
         // "%H:%M" is five columns and is not padded out to the old gutter.
         settings.tunables.time_format = "%H:%M".to_string();
+        settings.tunables.time_gutter_width = time_gutter_width(&settings.tunables.time_format);
         let time = ts.show_time(&settings);
         let rendered = dt.format("%H:%M").to_string();
         assert_eq!(time.content.as_ref(), rendered);
         assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 5);
-        assert_eq!(settings.tunables.time_gutter_width(), 5);
+        assert_eq!(settings.tunables.time_gutter_width, 5);
         assert_eq!(Message::message_column_width(&view, &settings), default_cols + 7);
 
         // An empty format hides the time and reserves no column.
         settings.tunables.time_format = String::new();
+        settings.tunables.time_gutter_width = time_gutter_width(&settings.tunables.time_format);
         let time = ts.show_time(&settings);
         assert_eq!(time.content.as_ref(), "");
         assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), 0);
-        assert_eq!(settings.tunables.time_gutter_width(), 0);
+        assert_eq!(settings.tunables.time_gutter_width, 0);
         assert_eq!(Message::message_column_width(&view, &settings), default_cols + 12);
 
         // Wider than the historical 8-column cap, and a wide character counts as two.
         settings.tunables.time_format = "%H時%M分".to_string();
+        settings.tunables.time_gutter_width = time_gutter_width(&settings.tunables.time_format);
         let time = ts.show_time(&settings);
         let rendered = dt.format("%H時%M分").to_string();
         assert_eq!(time.content.as_ref(), rendered);
         assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 8);
-        assert_eq!(settings.tunables.time_gutter_width(), 8);
+        assert_eq!(settings.tunables.time_gutter_width, 8);
         assert_eq!(Message::message_column_width(&view, &settings), default_cols + 4);
     }
 

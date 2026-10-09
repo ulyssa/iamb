@@ -99,6 +99,20 @@ fn time_gutter_sample() -> DateTime<Local> {
         .with_timezone(&Local)
 }
 
+/// Display columns reserved for the per-message time gutter.
+///
+/// The width is the display width of `format` applied to one fixed sample
+/// timestamp, so a configuration keeps a constant column. An empty format
+/// reserves nothing and hides the time.
+pub fn time_gutter_width(format: &str) -> usize {
+    if format.is_empty() {
+        return 0;
+    }
+
+    let rendered = time_gutter_sample().format(format).to_string();
+    UnicodeWidthStr::width(rendered.as_str())
+}
+
 fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
 }
@@ -906,22 +920,9 @@ pub struct TunableValues {
     pub send_on_enter: bool,
     pub date_format: String,
     pub time_format: String,
-}
-
-impl TunableValues {
-    /// Display columns reserved for the per-message time gutter.
-    ///
-    /// The width is the display width of [`Self::time_format`] applied to one
-    /// fixed sample timestamp, so a configuration keeps a constant column.
-    /// An empty format reserves nothing and hides the time.
-    pub fn time_gutter_width(&self) -> usize {
-        if self.time_format.is_empty() {
-            return 0;
-        }
-
-        let rendered = time_gutter_sample().format(self.time_format.as_str()).to_string();
-        UnicodeWidthStr::width(rendered.as_str())
-    }
+    /// Display columns reserved for the time gutter, computed from
+    /// `time_format` once when the settings are loaded.
+    pub time_gutter_width: usize,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1051,6 +1052,9 @@ impl Tunables {
     }
 
     fn values(self) -> TunableValues {
+        let time_format = self.time_format.unwrap_or_else(|| DEFAULT_TIME_FORMAT.to_owned());
+        let time_gutter_width = time_gutter_width(&time_format);
+
         TunableValues {
             encryption: self.encryption.values(),
             proxy: self.proxy.unwrap_or_default().values(),
@@ -1100,7 +1104,8 @@ impl Tunables {
             cache_policy: self.cache_policy.unwrap_or_default(),
             send_on_enter: self.send_on_enter.unwrap_or(true),
             date_format: self.date_format.unwrap_or_else(|| DEFAULT_DATE_FORMAT.to_owned()),
-            time_format: self.time_format.unwrap_or_else(|| DEFAULT_TIME_FORMAT.to_owned()),
+            time_format,
+            time_gutter_width,
         }
     }
 }
@@ -1787,7 +1792,7 @@ time_format = "%H:%M"
         let values = settings.values();
         assert_eq!(values.date_format, "%Y-%m-%d");
         assert_eq!(values.time_format, "%H:%M");
-        assert_eq!(values.time_gutter_width(), 5);
+        assert_eq!(values.time_gutter_width, 5);
 
         // Absent keys keep today's formats.
         let settings = parse_settings_toml("[settings]\n").unwrap();
@@ -1796,7 +1801,7 @@ time_format = "%H:%M"
         let values = settings.values();
         assert_eq!(values.date_format, "%A, %B %d %Y");
         assert_eq!(values.time_format, "  [%T]");
-        assert_eq!(values.time_gutter_width(), 12);
+        assert_eq!(values.time_gutter_width, 12);
 
         // An empty format is valid and disables the time column.
         let settings = parse_settings_toml(
@@ -1809,7 +1814,7 @@ time_format = ""
         assert_eq!(settings.time_format.as_deref(), Some(""));
         let values = settings.values();
         assert_eq!(values.time_format, "");
-        assert_eq!(values.time_gutter_width(), 0);
+        assert_eq!(values.time_gutter_width, 0);
 
         // Brackets and spacing are literal gutter text, not added later.
         let settings = parse_settings_toml(
@@ -1821,7 +1826,7 @@ time_format = "  [%H:%M]"
         .unwrap();
         let values = settings.values();
         assert_eq!(values.time_format, "  [%H:%M]");
-        assert_eq!(values.time_gutter_width(), 9);
+        assert_eq!(values.time_gutter_width, 9);
     }
 
     #[test]
