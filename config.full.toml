@@ -20,6 +20,9 @@ password_file = "/path/to/password"
 url = "https://matrix-client.matrix.org"
 
 [settings]
+# strftime format for the date separator. See
+# https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+# date_format = "%A, %B %d %Y"
 default_markup = "markdown"
 default_register = "\""
 default_room = "#iamb-users:0x.badd.cafe"
@@ -39,6 +42,11 @@ read_receipt_send = true
 room_labels = ["membership", "muted", "tags"]
 request_timeout = 10000
 sync_delay_ms = 1000
+# strftime format for the per-message time gutter (same specifier reference as
+# date_format). This string is the full gutter text, including brackets and
+# spacing. Column width follows the rendered format. An empty string disables
+# the time display.
+# time_format = "  [%T]"
 typing_notice_display = true
 typing_notice_send = true
 user_gutter_width = 30

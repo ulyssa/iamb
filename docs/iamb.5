@@ -142,6 +142,13 @@ Specifying this object will replace the upstream defaults and possibly lead to u
 Possible keys and their effect are documented at:
 .br
 .Lk https://docs.rs/matrix-sdk/latest/matrix_sdk/media/struct.MediaRetentionPolicy.html#fields
+.It Sy date_format
+A strftime format string for the date separator between messages from different days.
+See
+.Lk https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+for the conversion specifiers.
+Defaults to
+.Dq "%A, %B %d %Y" .
 .It Sy default_markup
 Controls how text in the message bar is interpreted by default.
 Possible values are
@@ -331,6 +338,19 @@ Subsection for configuring how specific terminal features are used (or not used)
 See
 .Sx TERMINAL
 for more details.
+.It Sy time_format
+A strftime format string for the time shown beside each message.
+See
+.Lk https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+for the conversion specifiers.
+The value is the full gutter text, including any brackets or spacing.
+Its display width, measured by rendering the format for a sample timestamp,
+is the width of the time column and does not change from message to message.
+An empty string disables the time display and reserves no columns.
+Defaults to
+.Dq "  [%T]" ,
+which renders as
+.Dq "  [HH:MM:SS]" .
 .It Sy typing_notice_send
 Defines whether or not the typing state is sent.
 .It Sy typing_notice_display

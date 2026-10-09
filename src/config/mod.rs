@@ -7,6 +7,8 @@ use std::process;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use chrono::format::{Item, StrftimeItems};
+use chrono::{DateTime, Local};
 use clap::Parser;
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
@@ -90,6 +92,37 @@ const DEFAULT_ICON_UNKNOWN: Cow<'static, str> = Cow::Borrowed("[?] ");
 
 const DEFAULT_LOG_LEVEL: &str = "off";
 
+/// Default date separator, matching the historical hard-coded `"%A, %B %d %Y"`.
+const DEFAULT_DATE_FORMAT: &str = "%A, %B %d %Y";
+
+/// Default time gutter, preserving the historical `  [HH:MM:SS]` rendering.
+const DEFAULT_TIME_FORMAT: &str = "  [%T]";
+
+/// Unix seconds of the timestamp used to measure time-gutter width.
+///
+/// 2024-01-17 13:25:30 UTC, so numeric fields have their usual widths.
+const TIME_GUTTER_SAMPLE_UNIX: i64 = 1_705_497_930;
+
+fn time_gutter_sample() -> DateTime<Local> {
+    DateTime::from_timestamp(TIME_GUTTER_SAMPLE_UNIX, 0)
+        .unwrap_or_default()
+        .with_timezone(&Local)
+}
+
+/// Display columns reserved for the per-message time gutter.
+///
+/// The width is the display width of `format` applied to one fixed sample
+/// timestamp, so a configuration keeps a constant column. An empty format
+/// reserves nothing and hides the time.
+pub fn time_gutter_width(format: &str) -> usize {
+    if format.is_empty() {
+        return 0;
+    }
+
+    let rendered = time_gutter_sample().format(format).to_string();
+    UnicodeWidthStr::width(rendered.as_str())
+}
+
 fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
 }
@@ -168,6 +201,21 @@ where
     };
 
     Ok(Some(r))
+}
+
+fn deserialize_strftime<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+
+    // `DelayedFormat`'s `Display` impl returns `fmt::Error` for a bad specifier,
+    // and `.to_string()` then panics. Reject those strings while loading config.
+    if StrftimeItems::new(&value).any(|item| matches!(item, Item::Error)) {
+        return Err(D::Error::custom(format!("invalid strftime format string: {value:?}")));
+    }
+
+    Ok(Some(value))
 }
 
 /// Load themes from disk, and merge in the configured overrides.
@@ -942,6 +990,11 @@ pub struct TunableValues {
     pub ssl_verify: bool,
     pub cache_policy: MediaRetentionPolicy,
     pub send_on_enter: bool,
+    pub date_format: String,
+    pub time_format: String,
+    /// Display columns reserved for the time gutter, computed from
+    /// `time_format` once when the settings are loaded.
+    pub time_gutter_width: usize,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1002,6 +1055,13 @@ pub struct Tunables {
     pub ssl_verify: Option<bool>,
     pub cache_policy: Option<MediaRetentionPolicy>,
     pub send_on_enter: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_strftime")]
+    pub date_format: Option<String>,
+    /// strftime string for the per-message time gutter, including any brackets
+    /// or spacing. The column is as wide as a sample rendering of this string.
+    /// An empty string hides the time.
+    #[serde(default, deserialize_with = "deserialize_strftime")]
+    pub time_format: Option<String>,
 }
 
 impl Tunables {
@@ -1062,10 +1122,15 @@ impl Tunables {
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
             cache_policy: self.cache_policy.or(other.cache_policy),
             send_on_enter: self.send_on_enter.or(other.send_on_enter),
+            date_format: self.date_format.or(other.date_format),
+            time_format: self.time_format.or(other.time_format),
         }
     }
 
     fn values(self) -> TunableValues {
+        let time_format = self.time_format.unwrap_or_else(|| DEFAULT_TIME_FORMAT.to_owned());
+        let time_gutter_width = time_gutter_width(&time_format);
+
         TunableValues {
             encryption: self.encryption.values(),
             proxy: self.proxy.unwrap_or_default().values(),
@@ -1116,6 +1181,9 @@ impl Tunables {
             ssl_verify: self.ssl_verify.unwrap_or(true),
             cache_policy: self.cache_policy.unwrap_or_default(),
             send_on_enter: self.send_on_enter.unwrap_or(true),
+            date_format: self.date_format.unwrap_or_else(|| DEFAULT_DATE_FORMAT.to_owned()),
+            time_format,
+            time_gutter_width,
         }
     }
 }
@@ -1804,6 +1872,91 @@ mod tests {
         .unwrap();
         let users = vec![(user_id!("@a:b.c").to_owned(), expect(Color::Rgb(0xff, 0x55, 0xbb)))];
         assert_eq!(res.users, Some(users.into_iter().collect()));
+    }
+
+    fn parse_settings_toml(input: &str) -> Result<Tunables, toml::de::Error> {
+        #[derive(Deserialize)]
+        struct SettingsToml {
+            settings: Tunables,
+        }
+
+        toml::from_str::<SettingsToml>(input).map(|doc| doc.settings)
+    }
+
+    #[test]
+    fn test_parse_tunables_date_time_format() {
+        let settings = parse_settings_toml(
+            r#"
+[settings]
+date_format = "%Y-%m-%d"
+time_format = "%H:%M"
+"#,
+        )
+        .unwrap();
+        assert_eq!(settings.date_format.as_deref(), Some("%Y-%m-%d"));
+        assert_eq!(settings.time_format.as_deref(), Some("%H:%M"));
+
+        let values = settings.values();
+        assert_eq!(values.date_format, "%Y-%m-%d");
+        assert_eq!(values.time_format, "%H:%M");
+        assert_eq!(values.time_gutter_width, 5);
+
+        // Absent keys keep today's formats.
+        let settings = parse_settings_toml("[settings]\n").unwrap();
+        assert_eq!(settings.date_format, None);
+        assert_eq!(settings.time_format, None);
+        let values = settings.values();
+        assert_eq!(values.date_format, "%A, %B %d %Y");
+        assert_eq!(values.time_format, "  [%T]");
+        assert_eq!(values.time_gutter_width, 12);
+
+        // An empty format is valid and disables the time column.
+        let settings = parse_settings_toml(
+            r#"
+[settings]
+time_format = ""
+"#,
+        )
+        .unwrap();
+        assert_eq!(settings.time_format.as_deref(), Some(""));
+        let values = settings.values();
+        assert_eq!(values.time_format, "");
+        assert_eq!(values.time_gutter_width, 0);
+
+        // Brackets and spacing are literal gutter text, not added later.
+        let settings = parse_settings_toml(
+            r#"
+[settings]
+time_format = "  [%H:%M]"
+"#,
+        )
+        .unwrap();
+        let values = settings.values();
+        assert_eq!(values.time_format, "  [%H:%M]");
+        assert_eq!(values.time_gutter_width, 9);
+    }
+
+    #[test]
+    fn test_parse_tunables_date_time_format_invalid() {
+        let err = parse_settings_toml(
+            r#"
+[settings]
+date_format = "%Q"
+"#,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("invalid strftime"), "{msg}");
+
+        let err = parse_settings_toml(
+            r#"
+[settings]
+time_format = "%"
+"#,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("invalid strftime"), "{msg}");
     }
 
     #[test]
