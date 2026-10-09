@@ -1,0 +1,74 @@
+# nightfox-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#131A24)
+# COLOR_BG2 => Alternate background (#192330)
+# COLOR_BG3 => Completion menu selected item background (#29394F)
+#
+# COLOR_UI1 => Window border color, text completion menu (#738091)
+# COLOR_UI2 => Window title color (#63CDCF)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#F4A261)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#AEAFB0)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#DBC074)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#81B29A)
+#
+# COLOR_TEXT1 => Primary text color (#CDCECF)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#86ABDC)
+# COLOR_TEXT3 => Alternate text color (#9D79D6)
+# COLOR_TEXT4 => Alternate text color (#71839B)
+# COLOR_TEXT5 => Alternate text color (#CDCECF)
+#
+[theme.users]
+colors = [
+    "#F4A261",
+    "#AEAFB0",
+    "#DBC074",
+    "#81B29A",
+    "#86ABDC",
+    "#9D79D6",
+    "#71839B",
+    "#CDCECF",
+]
+
+[theme.default]
+color = "#CDCECF"
+background = "#131A24"
+
+[theme.completion]
+default.background = "#29394F"
+default.color = "#738091"
+selected.background = "#192330"
+selected.color = "#CDCECF"
+
+[theme.timeline]
+redacted.color = "#AEAFB0"
+
+[theme.messages]
+code.color = "#86ABDC"
+code.background = "#192330"
+emphasis.color = "#71839B"
+strong.color = "#9D79D6"
+
+[theme.rooms]
+default.color = "#CDCECF"
+unread.color = "#86ABDC"
+labels.color = "#71839B"
+
+[theme.windows]
+border.color = "#738091"
+title.color = "#63CDCF"
+
+[theme.encryption]
+icon_encrypted.color = "#81B29A"
+icon_unencrypted.color = "#F4A261"
+icon_unknown.color = "#DBC074"
+
+[theme.cmdbar]
+error.color = "#F4A261"

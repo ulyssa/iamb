@@ -1,4 +1,4 @@
-# tokyonight-dark theme for iamb
+# tokyonight-storm-dark theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -13,8 +13,8 @@
 # COLOR_UI1 => Window border color, text completion menu (#3B4261)
 # COLOR_UI2 => Window title color (#C0CAF5)
 #
-# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF8349)
-# COLOR_WARN2 => Redacted messages - typically a red or light orange (#737AA2)
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF9E64)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#565F89)
 # COLOR_WARN3 => Unknown encryption status - typically a yellow (#2AC3DE)
 #
 # COLOR_GOOD1 => Encrypted indicator - typically a green (#9ECE6A)
@@ -23,18 +23,18 @@
 # COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#A9B1D6)
 # COLOR_TEXT3 => Alternate text color (#BB9AF7)
 # COLOR_TEXT4 => Alternate text color (#7AA2F7)
-# COLOR_TEXT5 => Alternate text color (#565F89)
+# COLOR_TEXT5 => Alternate text color (#89DDFF)
 #
 [theme.users]
 colors = [
-    "#FF8349",
-    "#737AA2",
+    "#FF9E64",
+    "#565F89",
     "#2AC3DE",
     "#9ECE6A",
     "#A9B1D6",
     "#BB9AF7",
     "#7AA2F7",
-    "#565F89",
+    "#89DDFF",
 ]
 
 [theme.default]
@@ -48,7 +48,7 @@ selected.background = "#24283B"
 selected.color = "#89DDFF"
 
 [theme.timeline]
-redacted.color = "#737AA2"
+redacted.color = "#565F89"
 
 [theme.messages]
 code.color = "#A9B1D6"
@@ -57,7 +57,7 @@ emphasis.color = "#7AA2F7"
 strong.color = "#BB9AF7"
 
 [theme.rooms]
-default.color = "#565F89"
+default.color = "#89DDFF"
 unread.color = "#A9B1D6"
 labels.color = "#7AA2F7"
 
@@ -67,8 +67,8 @@ title.color = "#C0CAF5"
 
 [theme.encryption]
 icon_encrypted.color = "#9ECE6A"
-icon_unencrypted.color = "#FF8349"
+icon_unencrypted.color = "#FF9E64"
 icon_unknown.color = "#2AC3DE"
 
 [theme.cmdbar]
-error.color = "#FF8349"
+error.color = "#FF9E64"

@@ -1,0 +1,74 @@
+# nordfox-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#232831)
+# COLOR_BG2 => Alternate background (#2E3440)
+# COLOR_BG3 => Completion menu selected item background (#444C5E)
+#
+# COLOR_UI1 => Window border color, text completion menu (#60728A)
+# COLOR_UI2 => Window title color (#88C0D0)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#C9826B)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#7E8188)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#EBCB8B)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#A3BE8C)
+#
+# COLOR_TEXT1 => Primary text color (#CDCECF)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#ABB1BB)
+# COLOR_TEXT3 => Alternate text color (#8CAFD2)
+# COLOR_TEXT4 => Alternate text color (#B48EAD)
+# COLOR_TEXT5 => Alternate text color (#CDCECF)
+#
+[theme.users]
+colors = [
+    "#C9826B",
+    "#7E8188",
+    "#EBCB8B",
+    "#A3BE8C",
+    "#ABB1BB",
+    "#8CAFD2",
+    "#B48EAD",
+    "#CDCECF",
+]
+
+[theme.default]
+color = "#CDCECF"
+background = "#232831"
+
+[theme.completion]
+default.background = "#444C5E"
+default.color = "#60728A"
+selected.background = "#2E3440"
+selected.color = "#CDCECF"
+
+[theme.timeline]
+redacted.color = "#7E8188"
+
+[theme.messages]
+code.color = "#ABB1BB"
+code.background = "#2E3440"
+emphasis.color = "#B48EAD"
+strong.color = "#8CAFD2"
+
+[theme.rooms]
+default.color = "#CDCECF"
+unread.color = "#ABB1BB"
+labels.color = "#B48EAD"
+
+[theme.windows]
+border.color = "#60728A"
+title.color = "#88C0D0"
+
+[theme.encryption]
+icon_encrypted.color = "#A3BE8C"
+icon_unencrypted.color = "#C9826B"
+icon_unknown.color = "#EBCB8B"
+
+[theme.cmdbar]
+error.color = "#C9826B"
