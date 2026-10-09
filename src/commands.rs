@@ -654,6 +654,22 @@ fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     }
 }
 
+fn iamb_theme(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    if let Some(theme) = args.pop() {
+        let theme = IambAction::ChangeTheme(theme);
+        let step = CommandStep::Continue(theme.into(), ctx.context.clone());
+        return Ok(step);
+    } else {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+}
+
 fn iamb_welcome(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     if !desc.arg.text.is_empty() {
         return Result::Err(CommandError::InvalidArgument);
@@ -1256,6 +1272,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_invites,
     });
     cmds.add_command(ProgramCommand { name: "self".into(), aliases: vec![], f: iamb_self });
+    cmds.add_command(ProgramCommand {
+        name: "theme".into(),
+        aliases: vec![],
+        f: iamb_theme,
+    });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),
         aliases: vec![],
