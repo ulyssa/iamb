@@ -1,4 +1,4 @@
-# kanagawa-wave-dark theme for iamb
+# kanagawa-dark theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -25,7 +25,7 @@
 # COLOR_TEXT4 => Alternate text color (#9CABCA)
 # COLOR_TEXT5 => Alternate text color (#7E9CD8)
 #
-# COLOR_PLUS => Extra user colors used for users: "#54546D", "#727169"
+# COLOR_PLUS => Extra colors used for user names: #54546D #727169
 [theme.users]
 colors = [
     "#D27E99",
@@ -61,8 +61,12 @@ strong.color = "#7FB4CA"
 
 [theme.rooms]
 default.color = "#7E9CD8"
-unread.color = "#C8C093"
 labels.color = "#9CABCA"
+unread.name.color = "#C8C093"
+unread.number.color = "#9CABCA"
+mention.number.color = "#D27E99"
+notification.number.color = "#C0A36E"
+marked_unread.number.color = "#98BB6C"
 
 [theme.windows]
 border.color = "#957FB8"

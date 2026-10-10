@@ -1,4 +1,4 @@
-# PaperColor-light theme for iamb
+# papercolor-light theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -24,6 +24,7 @@
 # COLOR_TEXT3 => Alternate text color (#D70087)
 # COLOR_TEXT4 => Alternate text color (#AF5F00)
 # COLOR_TEXT5 => Alternate text color (#0087AF)
+#
 #
 [theme.users]
 colors = [
@@ -58,8 +59,12 @@ strong.color = "#D70087"
 
 [theme.rooms]
 default.color = "#0087AF"
-unread.color = "#005FAF"
 labels.color = "#AF5F00"
+unread.name.color = "#005FAF"
+unread.number.color = "#AF5F00"
+mention.number.color = "#D70000"
+notification.number.color = "#878787"
+marked_unread.number.color = "#5F8700"
 
 [theme.windows]
 border.color = "#B2B2B2"

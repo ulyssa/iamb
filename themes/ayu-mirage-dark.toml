@@ -1,4 +1,4 @@
-# doom-ayu-mirage-dark theme for iamb
+# ayu-mirage-dark theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -24,6 +24,7 @@
 # COLOR_TEXT3 => Alternate text color (#80D4FF)
 # COLOR_TEXT4 => Alternate text color (#D4BFFF)
 # COLOR_TEXT5 => Alternate text color (#5CCFE6)
+#
 #
 [theme.users]
 colors = [
@@ -58,8 +59,12 @@ strong.color = "#80D4FF"
 
 [theme.rooms]
 default.color = "#5CCFE6"
-unread.color = "#E0E2EA"
 labels.color = "#D4BFFF"
+unread.name.color = "#E0E2EA"
+unread.number.color = "#D4BFFF"
+mention.number.color = "#FFAE57"
+notification.number.color = "#FFC44C"
+marked_unread.number.color = "#BBE67E"
 
 [theme.windows]
 border.color = "#3D4751"

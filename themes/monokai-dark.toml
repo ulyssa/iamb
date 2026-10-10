@@ -1,4 +1,4 @@
-# oh-my-monokai-dark theme for iamb
+# monokai-dark theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -24,6 +24,7 @@
 # COLOR_TEXT3 => Alternate text color (#FFD945)
 # COLOR_TEXT4 => Alternate text color (#00DFFF)
 # COLOR_TEXT5 => Alternate text color (#C1C0C0)
+#
 #
 [theme.users]
 colors = [
@@ -58,8 +59,12 @@ strong.color = "#FFD945"
 
 [theme.rooms]
 default.color = "#C1C0C0"
-unread.color = "#81F900"
 labels.color = "#00DFFF"
+unread.name.color = "#81F900"
+unread.number.color = "#00DFFF"
+mention.number.color = "#FF3F4F"
+notification.number.color = "#E5A422"
+marked_unread.number.color = "#727072"
 
 [theme.windows]
 border.color = "#E373CE"

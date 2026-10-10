@@ -25,6 +25,7 @@
 # COLOR_TEXT4 => Alternate text color (#EA76CB)
 # COLOR_TEXT5 => Alternate text color (#04A5E5)
 #
+#
 [theme.users]
 colors = [
     # Latte
@@ -153,8 +154,12 @@ strong.color = "#7287FD"
 
 [theme.rooms]
 default.color = "#04A5E5"
-unread.color = "#1E66F5"
 labels.color = "#EA76CB"
+unread.name.color = "#1E66F5"
+unread.number.color = "#EA76CB"
+mention.number.color = "#FE640B"
+notification.number.color = "#7C7F93"
+marked_unread.number.color = "#40A02B"
 
 [theme.windows]
 border.color = "#BCC0CC"

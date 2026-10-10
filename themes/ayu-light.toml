@@ -1,4 +1,4 @@
-# doom-ayu-light-light theme for iamb
+# ayu-light theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -25,7 +25,7 @@
 # COLOR_TEXT4 => Alternate text color (#36A3D9)
 # COLOR_TEXT5 => Alternate text color (#E6B673)
 #
-# COLOR_PLUS => Extra user colors used for users: "#D9D8D7"
+# COLOR_PLUS => Extra colors used for user names: #D9D8D7
 [theme.users]
 colors = [
     "#FF6A00",
@@ -36,7 +36,7 @@ colors = [
     "#F29718",
     "#36A3D9",
     "#E6B673",
-    "#D9D8D7"
+    "#D9D8D7",
 ]
 
 [theme.default]
@@ -60,8 +60,12 @@ strong.color = "#F29718"
 
 [theme.rooms]
 default.color = "#E6B673"
-unread.color = "#A37ACC"
 labels.color = "#36A3D9"
+unread.name.color = "#A37ACC"
+unread.number.color = "#36A3D9"
+mention.number.color = "#FF6A00"
+notification.number.color = "#E7C547"
+marked_unread.number.color = "#86B300"
 
 [theme.windows]
 border.color = "#ABB0B6"
