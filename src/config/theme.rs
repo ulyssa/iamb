@@ -109,8 +109,10 @@ pub fn default_theme() -> Theme {
 }
 
 pub fn find_themes(dir: &Path) -> anyhow::Result<Vec<(String, Theme)>> {
-    let entries = std::fs::read_dir(dir)
-        .with_context(|| format!("Cannot list {} contents", dir.display()))?;
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(vec![]);
+    };
+
     let mut themes = vec![];
 
     for res in entries {
