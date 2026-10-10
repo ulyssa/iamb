@@ -59,6 +59,10 @@ pub fn default_theme() -> Theme {
                 modifiers: vec![ModifierChange::Remove(StyleModifier::REVERSED)],
             },
         },
+        cmdbar: ThemeCommandBar {
+            error: Stylable::fg(Color::Red),
+            ..Default::default()
+        },
         timeline: ThemeTimeline {
             date: Stylable::with_modifiers(StyleModifier::BOLD),
             unread_marker: Stylable::with_modifiers(StyleModifier::DIM),

@@ -92,7 +92,6 @@ use tracing::{Instrument as _, error, warn};
 
 use crate::base::{CreateRoomFlags, CreateRoomType, EchoLocation, MessageNeed};
 use crate::config::ProxyUrl;
-use crate::message::MessageId;
 use crate::notifications::register_notifications;
 use crate::oauth::oauth_login;
 use crate::prelude::*;

@@ -602,6 +602,9 @@ pub enum RoomAction {
     /// Open the members window.
     Members(Box<CommandContext>),
 
+    /// Open the message info window.
+    Message(Box<CommandContext>),
+
     /// Open the pinned messages window.
     Pinned(Box<CommandContext>),
 
@@ -1512,27 +1515,23 @@ impl RoomInfo {
     }
 
     /// Get the reactions and their counts for a message.
-    pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize, &Option<MediaSource>)> {
+    pub fn get_reactions(
+        &self,
+        event_id: &EventId,
+    ) -> Vec<(&str, Vec<&UserId>, &Option<MediaSource>)> {
         if let Some(reacts) = self.reactions.get(event_id) {
-            let mut counts = HashMap::new();
-
-            let mut seen_user_reactions = BTreeSet::new();
+            let mut reactions = BTreeMap::new();
 
             for (key, user, source) in reacts.values() {
-                if !seen_user_reactions.contains(&(key, user)) {
-                    seen_user_reactions.insert((key, user));
-                    let count = counts.entry(key.as_str()).or_insert((0, source));
-                    count.0 += 1;
-                }
+                let react =
+                    reactions.entry(key.as_str()).or_insert_with(|| (BTreeSet::new(), source));
+                react.0.insert(user.deref());
             }
 
-            let mut reactions = counts
-                .into_iter()
-                .map(|(key, (count, source))| (key, count, source))
-                .collect::<Vec<_>>();
-            reactions.sort_by_key(|item| (item.0, item.1));
-
             reactions
+                .into_iter()
+                .map(|(key, (users, source))| (key, users.into_iter().collect::<Vec<_>>(), source))
+                .collect::<Vec<_>>()
         } else {
             vec![]
         }
@@ -1569,6 +1568,44 @@ impl RoomInfo {
         let root = loc.to_thread_root();
 
         self.get_thread_mut(root.map(ToOwned::to_owned)).get_mut(key)
+    }
+
+    /// Map an event identifier to its [`MessageKey`] and thread root.
+    fn get_message_thread_key(
+        &self,
+        message_id: &MessageId,
+    ) -> Option<(Option<&EventId>, &MessageKey)> {
+        let event_id = match message_id {
+            MessageId::Local(id) => {
+                let loc = self.echo_keys.get(id)?;
+                match loc {
+                    EchoLocation::Message(root, key) => return Some((root.as_deref(), key)),
+                    EchoLocation::Replaced(event_id) => event_id,
+                }
+            },
+            MessageId::Origin(event_id) => event_id,
+        };
+
+        let loc = self.keys.get(event_id)?;
+
+        Some((loc.to_thread_root(), loc.to_message_key()?))
+    }
+
+    /// Get an event for an identifier.
+    pub fn get_message(&self, message_id: &MessageId) -> Option<&Message> {
+        let (root, key) = self.get_message_thread_key(message_id)?;
+
+        self.get_thread(root)?.get(key)
+    }
+
+    /// Get an event for an identifier as mutable.
+    pub fn get_message_mut(&mut self, message_id: &MessageId) -> Option<&mut Message> {
+        let (root, key) = self.get_message_thread_key(message_id)?;
+
+        let root = root.map(ToOwned::to_owned);
+        let key = key.to_owned();
+
+        self.get_thread_mut(root).get_mut(&key)
     }
 
     pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
@@ -2287,7 +2324,7 @@ impl RoomInfo {
 
     /// Checks if a given user has reacted with the given emoji on the given event
     pub fn user_reactions_contains(
-        &mut self,
+        &self,
         user_id: &UserId,
         event_id: &EventId,
         emoji: &str,
@@ -2600,11 +2637,39 @@ impl ChatStore {
 
 impl ApplicationStore for ChatStore {}
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum RoomView {
+    /// The main timeline is shown.
+    Main,
+    /// A thread is shown.
+    Thread(OwnedEventId),
+    /// A single message is shown.
+    Message(MessageId),
+}
+
+impl From<Option<OwnedEventId>> for RoomView {
+    fn from(thread: Option<OwnedEventId>) -> Self {
+        match thread {
+            Some(thread) => Self::Thread(thread),
+            None => Self::Main,
+        }
+    }
+}
+
+impl From<Option<&OwnedEventId>> for RoomView {
+    fn from(thread: Option<&OwnedEventId>) -> Self {
+        match thread {
+            Some(thread) => Self::Thread(thread.to_owned()),
+            None => Self::Main,
+        }
+    }
+}
+
 /// Identified used to track window content.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IambId {
-    /// A Matrix room, with an optional thread to show.
-    Room(OwnedRoomOrAliasId, Option<OwnedEventId>),
+    /// A Matrix room, with an item that is shown.
+    Room(OwnedRoomOrAliasId, RoomView),
 
     /// The `:dms` window.
     DirectList,
@@ -2646,13 +2711,17 @@ pub enum IambId {
 impl Display for IambId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IambId::Room(alias, None) => {
+            IambId::Room(alias, RoomView::Main) => {
                 let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
-                write!(f, "iamb://room/{}", encoded)
+                write!(f, "iamb://room/{encoded}")
             },
-            IambId::Room(alias, Some(thread)) => {
+            IambId::Room(alias, RoomView::Thread(thread)) => {
                 let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
-                write!(f, "iamb://room/{}/threads/{thread}", encoded)
+                write!(f, "iamb://room/{encoded}/threads/{thread}")
+            },
+            IambId::Room(alias, RoomView::Message(message)) => {
+                let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
+                write!(f, "iamb://room/{encoded}/messages/{message}")
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -2729,7 +2798,7 @@ impl Visitor<'_> for IambIdVisitor {
                             return Err(E::custom(format!("Invalid room identifier: {decoded:?}")));
                         };
 
-                        Ok(IambId::Room(room_id, None))
+                        Ok(IambId::Room(room_id, RoomView::Main))
                     },
                     [alias, "threads", thread_root] => {
                         let decoded = percent_decode(alias.as_bytes()).decode_utf8_lossy();
@@ -2741,7 +2810,19 @@ impl Visitor<'_> for IambIdVisitor {
                             return Err(E::custom("Invalid thread root identifier"));
                         };
 
-                        Ok(IambId::Room(room_id, Some(thread_root)))
+                        Ok(IambId::Room(room_id, RoomView::Thread(thread_root)))
+                    },
+                    [alias, "messages", message] => {
+                        let decoded = percent_decode(alias.as_bytes()).decode_utf8_lossy();
+                        let Ok(room_id) = OwnedRoomOrAliasId::try_from(decoded.as_ref()) else {
+                            return Err(E::custom("Invalid room identifier: {decoded:?}"));
+                        };
+
+                        let message_id = OwnedEventId::try_from(message)
+                            .map(Into::into)
+                            .unwrap_or_else(|_| OwnedTransactionId::from(message).into());
+
+                        Ok(IambId::Room(room_id, RoomView::Message(message_id)))
                     },
                     [room_id, "pinned"] => {
                         let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
@@ -2880,7 +2961,7 @@ pub enum IambBufferId {
     Command(CommandType),
 
     /// The message buffer or a specific message in a room.
-    Room(OwnedRoomId, Option<OwnedEventId>, RoomFocus),
+    Room(OwnedRoomId, RoomView, RoomFocus),
 
     /// The `:dms` window.
     DirectList,
@@ -2924,9 +3005,7 @@ impl IambBufferId {
     pub fn to_window(&self) -> Option<IambId> {
         let id = match self {
             IambBufferId::Command(_) => return None,
-            IambBufferId::Room(room, thread, _) => {
-                IambId::Room(room.clone().into(), thread.clone())
-            },
+            IambBufferId::Room(room, view, _) => IambId::Room(room.clone().into(), view.clone()),
             IambBufferId::DirectList => IambId::DirectList,
             IambBufferId::MemberList(room) => IambId::MemberList(room.clone()),
             IambBufferId::PinnedList(room) => IambId::PinnedList(room.clone()),
@@ -2967,7 +3046,7 @@ pub mod tests {
 
     use matrix_sdk::ruma::events::reaction::ReactionEventContent;
     use matrix_sdk::ruma::events::relation::Annotation;
-    use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, owned_event_id};
+    use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, owned_event_id, owned_user_id};
     use pretty_assertions::assert_eq;
     use ratatui::style::Color;
     use serde_json::{Map, Value};
@@ -3043,7 +3122,13 @@ pub mod tests {
             .into_iter()
             .map(|(key, count, _)| (key, count))
             .collect();
-        assert_eq!(reacts, vec![("🏠", 1), ("🙂", 2)]);
+        assert_eq!(reacts, vec![
+            ("🏠", vec![owned_user_id!("@foo:example.com").deref()]),
+            ("🙂", vec![
+                owned_user_id!("@bar:example.com").deref(),
+                owned_user_id!("@foo:example.com").deref(),
+            ],)
+        ]);
     }
 
     #[test]
@@ -3319,7 +3404,7 @@ pub mod tests {
     #[test]
     fn test_alias_window_id() {
         let room_id = TEST_ROOM1_ALIAS.clone();
-        let id = IambId::Room(room_id.into(), None);
+        let id = IambId::Room(room_id.into(), RoomView::Main);
 
         // Hash gets replaced during encoding:
         let exp = "iamb://room/%23room1%3Aexample%2Ecom";

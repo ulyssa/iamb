@@ -18,11 +18,13 @@ use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
 use matrix_sdk::ruma::room::RoomType as MatrixRoomType;
 use matrix_sdk::ruma::{RoomAliasId, RoomOrAliasId};
+use modalkit::editing::context::EditContext;
 use modalkit_ratatui::Window;
 use modalkit_ratatui::list::{List, ListCursor, ListItem, ListState};
 use ratatui::prelude::Stylize;
 
 use crate::base::{
+    RoomView,
     SortColumn,
     SortFieldRoom,
     SortFieldSpace,
@@ -464,7 +466,7 @@ fn room_prompt(
 ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
     match act {
         PromptAction::Submit => {
-            let room = IambId::Room(room_id.to_owned().into(), None);
+            let room = IambId::Room(room_id.to_owned().into(), RoomView::Main);
             let open = WindowAction::Switch(OpenTarget::Application(room));
             let acts = vec![(open.into(), ctx.clone())];
 
@@ -548,7 +550,7 @@ impl IambWindow {
         act: MessageAction,
         ctx: ProgramContext,
         store: &mut ProgramStore,
-    ) -> IambResult<EditInfo> {
+    ) -> IambResult<Vec<(Action<IambInfo>, EditContext)>> {
         if let IambWindow::Room(w) = self {
             w.message_command(act, ctx, store).await
         } else {
@@ -591,11 +593,18 @@ impl IambWindow {
             _ => None,
         };
 
-        if let Some(id) = id {
-            room_command(id, act, ctx, store).await
-        } else {
+        let Some(id) = id else {
             return Err(IambError::NoSelectedRoomOrSpace.into());
-        }
+        };
+        let id = id.to_owned();
+
+        let msg_id = match self {
+            IambWindow::Room(RoomState::Chat(chat)) => chat.current_message(store),
+            IambWindow::Room(RoomState::Message(message)) => Some(message.id().to_owned()),
+            _ => None,
+        };
+
+        room_command(id, act, ctx, store, msg_id).await
     }
 
     pub async fn join_command(
@@ -1313,7 +1322,7 @@ impl Window<IambInfo> for IambWindow {
             return Err(UIError::Failure("Could not parse room identifier".to_string()));
         };
 
-        let id = IambId::Room(room_alias, None);
+        let id = IambId::Room(room_alias, RoomView::Main);
         IambWindow::open(id, store)
     }
 
@@ -1812,7 +1821,7 @@ impl ListItem<IambInfo> for PinnedItem {
         };
 
         let previews = &store.application.previews;
-        msg.show(None, selected, vwctx, info, settings, previews)
+        msg.show(None, selected, vwctx.get_width(), info, settings, previews)
     }
 
     fn get_word(&self) -> Option<String> {
@@ -1835,7 +1844,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for PinnedItem {
                     .and_then(|(thread, _)| thread)
                     .map(ToOwned::to_owned);
 
-                let room = IambId::Room(self.room_id.clone().into(), thread);
+                let room = IambId::Room(self.room_id.clone().into(), thread.into());
                 let open = WindowAction::Switch(OpenTarget::Application(room));
                 let jump = IambAction::from(TimelineAction::GotoEvent(self.event_id.clone()));
 
