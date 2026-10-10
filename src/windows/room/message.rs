@@ -494,8 +494,8 @@ impl ListItem<IambInfo> for MessageInfoItem {
                         user.push_str("..");
                     }
                 } else if user.len() + date.len() >= width {
-                    let date_width = width - user.len();
-                    std::mem::drop(date.drain(..=date.len().saturating_sub(date_width) + 2));
+                    let date_width = width.saturating_sub(user.len() + 2);
+                    std::mem::drop(date.drain(..date.len().saturating_sub(date_width)));
                     if date_width >= 2 {
                         date.insert_str(0, "..");
                     }
@@ -609,5 +609,48 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MessageInfoItem {
                 Err(err)
             },
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::tests::*;
+
+    #[tokio::test]
+    async fn test_message_header_truncate() {
+        let store = mock_store().await;
+        let room_id = TEST_ROOM1_ID.clone();
+        let user_id = TEST_USER1.clone();
+        let msg_key = MSG1_KEY.clone();
+        let item = MessageInfoItem::Header(room_id, user_id.clone(), msg_key.ts);
+
+        let mut viewctx = ViewportContext::new();
+        viewctx.dimensions.1 = 10;
+
+        // Too narrow for anything:
+        viewctx.dimensions.0 = 0;
+        let text = item.show(false, &viewctx, &store);
+        assert_eq!(text.width(), viewctx.get_width());
+
+        // One column:
+        viewctx.dimensions.0 = 1;
+        let text = item.show(false, &viewctx, &store);
+        assert_eq!(text.width(), viewctx.get_width());
+
+        // Just wide enough for the username:
+        viewctx.dimensions.0 = user_id.as_str().len();
+        let text = item.show(false, &viewctx, &store);
+        assert_eq!(text.width(), viewctx.get_width());
+
+        // Just wide enough for the username and "..":
+        viewctx.dimensions.0 = user_id.as_str().len() + 2;
+        let text = item.show(false, &viewctx, &store);
+        assert_eq!(text.width(), viewctx.get_width());
+
+        // Just wide enough for the username, ".." and some of the date:
+        viewctx.dimensions.0 = user_id.as_str().len() + 2 + 4;
+        let text = item.show(false, &viewctx, &store);
+        assert_eq!(text.width(), viewctx.get_width());
     }
 }

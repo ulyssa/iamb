@@ -646,10 +646,10 @@ pub async fn room_command(
             let Some(msg_id) = focused_msg else {
                 return Err(UIError::Failure("No message selected".into()));
             };
-            let act = Action::Window(WindowAction::Switch(OpenTarget::Application(IambId::Room(
-                id.into(),
-                RoomView::Message(msg_id),
-            ))));
+
+            let id = IambId::Room(id.into(), RoomView::Message(msg_id));
+            let target = OpenTarget::Application(id);
+            let act = cmd.switch(target);
 
             Ok(vec![(act, cmd.context.clone())])
         },
