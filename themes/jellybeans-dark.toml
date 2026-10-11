@@ -1,4 +1,4 @@
-# jellybeans-muted-dark theme for iamb
+# jellybeans-dark theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -25,7 +25,7 @@
 # COLOR_TEXT4 => Alternate text color (#C2BDB8)
 # COLOR_TEXT5 => Alternate text color (#B8AED3)
 #
-# COLOR_PLUS => Extra user colors used for users: "#617B87"
+# COLOR_PLUS => Extra colors used for user names: #617B87
 [theme.users]
 colors = [
     "#C88A77",
@@ -36,7 +36,7 @@ colors = [
     "#A6C3D9",
     "#C2BDB8",
     "#B8AED3",
-    "#617B87"
+    "#617B87",
 ]
 
 [theme.default]
@@ -60,8 +60,12 @@ strong.color = "#A6C3D9"
 
 [theme.rooms]
 default.color = "#B8AED3"
-unread.color = "#EACE98"
 labels.color = "#C2BDB8"
+unread.name.color = "#EACE98"
+unread.number.color = "#C2BDB8"
+mention.number.color = "#C88A77"
+notification.number.color = "#58534F"
+marked_unread.number.color = "#909C6E"
 
 [theme.windows]
 border.color = "#83ADC3"

@@ -70,6 +70,7 @@ pub fn default_theme() -> Theme {
         },
         rooms: ThemeRooms {
             unread: ThemeRoomsUnreads {
+                name: Stylable::fg(Color::Cyan),
                 number: Stylable::fg(Color::Gray),
                 ..Default::default()
             },
@@ -636,10 +637,13 @@ impl ThemeRooms {
     fn values(self, base: Style) -> ThemeRoomsValues {
         let default = base.patch(self.default);
         let labels = default.patch(self.labels);
-        let unread = self.unread.values(default, labels);
-        let notification = self.notification.values(default, labels);
-        let mention = self.mention.values(default, labels);
-        let marked_unread = self.marked_unread.values(default, labels);
+
+        // Apply any inherited unread styling to the more specific notification types:
+        let unread = self.unread;
+        let notification = self.notification.merge(unread.clone()).values(default, labels);
+        let mention = self.mention.merge(unread.clone()).values(default, labels);
+        let marked_unread = self.marked_unread.merge(unread.clone()).values(default, labels);
+        let unread = unread.values(default, labels);
 
         ThemeRoomsValues {
             default,

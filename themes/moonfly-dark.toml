@@ -25,6 +25,7 @@
 # COLOR_TEXT4 => Alternate text color (#80A0FF)
 # COLOR_TEXT5 => Alternate text color (#79DAC8)
 #
+#
 [theme.users]
 colors = [
     "#E65E72",
@@ -58,8 +59,12 @@ strong.color = "#CF87E8"
 
 [theme.rooms]
 default.color = "#79DAC8"
-unread.color = "#74B2FF"
 labels.color = "#80A0FF"
+unread.name.color = "#74B2FF"
+unread.number.color = "#80A0FF"
+mention.number.color = "#E65E72"
+notification.number.color = "#C6C684"
+marked_unread.number.color = "#626262"
 
 [theme.windows]
 border.color = "#949494"

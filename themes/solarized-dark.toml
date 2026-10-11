@@ -1,4 +1,4 @@
-# base16-solarized-dark-dark theme for iamb
+# solarized-dark theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -24,6 +24,7 @@
 # COLOR_TEXT3 => Alternate text color (#268BD2)
 # COLOR_TEXT4 => Alternate text color (#6C71C4)
 # COLOR_TEXT5 => Alternate text color (#D33682)
+#
 #
 [theme.users]
 colors = [
@@ -58,8 +59,12 @@ strong.color = "#268BD2"
 
 [theme.rooms]
 default.color = "#D33682"
-unread.color = "#2AA198"
 labels.color = "#6C71C4"
+unread.name.color = "#2AA198"
+unread.number.color = "#6C71C4"
+mention.number.color = "#DC322F"
+notification.number.color = "#839496"
+marked_unread.number.color = "#859900"
 
 [theme.windows]
 border.color = "#657B83"

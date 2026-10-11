@@ -1,4 +1,4 @@
-# base16-zenburn-dark theme for iamb
+# zenburn-dark theme for iamb
 #
 # You can place this directly in your `~/.config/iamb/themes` directory to make it
 # discoverable, or copy its contents directly into your `config.toml`.
@@ -24,6 +24,7 @@
 # COLOR_TEXT3 => Alternate text color (#7CB8BB)
 # COLOR_TEXT4 => Alternate text color (#6F6F6F)
 # COLOR_TEXT5 => Alternate text color (#93E0E3)
+#
 #
 [theme.users]
 colors = [
@@ -58,8 +59,12 @@ strong.color = "#7CB8BB"
 
 [theme.rooms]
 default.color = "#93E0E3"
-unread.color = "#DFAF8F"
 labels.color = "#6F6F6F"
+unread.name.color = "#DFAF8F"
+unread.number.color = "#6F6F6F"
+mention.number.color = "#DC8CC3"
+notification.number.color = "#808080"
+marked_unread.number.color = "#5F7F5F"
 
 [theme.windows]
 border.color = "#000000"

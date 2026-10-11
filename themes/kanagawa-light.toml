@@ -25,7 +25,7 @@
 # COLOR_TEXT4 => Alternate text color (#6693BF)
 # COLOR_TEXT5 => Alternate text color (#4E8CA2)
 #
-# COLOR_PLUS => Extra user colors used for users: "#8A8980", "#A09CAC"
+# COLOR_PLUS => Extra colors used for user names: #8A8980 #A09CAC
 [theme.users]
 colors = [
     "#B35B79",
@@ -61,8 +61,12 @@ strong.color = "#545464"
 
 [theme.rooms]
 default.color = "#4E8CA2"
-unread.color = "#4D699B"
 labels.color = "#6693BF"
+unread.name.color = "#4D699B"
+unread.number.color = "#6693BF"
+mention.number.color = "#B35B79"
+notification.number.color = "#77713F"
+marked_unread.number.color = "#6F894E"
 
 [theme.windows]
 border.color = "#836F4A"
