@@ -15,27 +15,30 @@
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF5874)
 # COLOR_WARN2 => Redacted messages - typically a red or light orange (#F78C6C)
-# COLOR_WARN3 => Unknown encryption status - typically a yellow (#ECC48D)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#E3D18A)
 #
 # COLOR_GOOD1 => Encrypted indicator - typically a green (#7FDBCA)
 #
 # COLOR_TEXT1 => Primary text color (#7C8F8F)
 # COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#82AAFF)
 # COLOR_TEXT3 => Alternate text color (#C792EA)
-# COLOR_TEXT4 => Alternate text color (#7FDBCA)
-# COLOR_TEXT5 => Alternate text color (#7FDBCA)
+# COLOR_TEXT4 => Alternate text color (#ECC48D)
+# COLOR_TEXT5 => Alternate text color (#D6DEEB)
 #
-#
+# COLOR_PLUS => Extra colors used for user names: #21C7A8 #A1AAB8 #AE81FF
 [theme.users]
 colors = [
     "#FF5874",
     "#F78C6C",
-    "#ECC48D",
+    "#E3D18A",
     "#7FDBCA",
     "#82AAFF",
     "#C792EA",
-    "#7FDBCA",
-    "#7FDBCA",
+    "#ECC48D",
+    "#D6DEEB",
+    "#21C7A8",
+    "#A1AAB8",
+    "#AE81FF",
 ]
 
 [theme.default]
@@ -54,16 +57,16 @@ redacted.color = "#F78C6C"
 [theme.messages]
 code.color = "#82AAFF"
 code.background = "#092236"
-emphasis.color = "#7FDBCA"
+emphasis.color = "#ECC48D"
 strong.color = "#C792EA"
 
 [theme.rooms]
-default.color = "#7FDBCA"
-labels.color = "#7FDBCA"
+default.color = "#D6DEEB"
+labels.color = "#ECC48D"
 unread.name.color = "#82AAFF"
-unread.number.color = "#7FDBCA"
+unread.number.color = "#ECC48D"
 mention.number.color = "#FF5874"
-notification.number.color = "#ECC48D"
+notification.number.color = "#E3D18A"
 marked_unread.number.color = "#7FDBCA"
 
 [theme.windows]
@@ -73,7 +76,7 @@ title.color = "#C3CCDC"
 [theme.encryption]
 icon_encrypted.color = "#7FDBCA"
 icon_unencrypted.color = "#FF5874"
-icon_unknown.color = "#ECC48D"
+icon_unknown.color = "#E3D18A"
 
 [theme.cmdbar]
 error.color = "#FF5874"
