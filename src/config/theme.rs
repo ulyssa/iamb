@@ -10,14 +10,129 @@ use serde::{Deserialize, Deserializer};
 
 use crate::prelude::*;
 
-pub fn default_theme() -> Theme {
+/// Which kind of terminal background the default colors should suit.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "lowercase")]
+pub enum Palette {
+    /// Ask the terminal for its background color, falling back to dark.
+    #[default]
+    Auto,
+    Dark,
+    Light,
+}
+
+impl Palette {
+    /// Turn [Palette::Auto] into [Palette::Dark] or [Palette::Light].
+    ///
+    /// This queries the terminal, so it must run before the TUI starts reading input.
+    pub fn resolve(self) -> Palette {
+        match self {
+            Palette::Auto => {
+                match query_background().map(is_light) {
+                    Some(true) => Palette::Light,
+                    _ => Palette::Dark,
+                }
+            },
+            p => p,
+        }
+    }
+}
+
+/// Ask the terminal for its background color via OSC 11.
+///
+/// A Primary Device Attributes request is sent afterwards, which every terminal answers, so
+/// terminals that ignore OSC 11 don't make us wait for the full timeout.
+#[cfg(unix)]
+fn query_background() -> Option<String> {
+    use std::io::{IsTerminal, Read, Write};
+    use std::time::{Duration, Instant};
+
+    use modalkit::crossterm::terminal::{disable_raw_mode, enable_raw_mode};
+
+    if !std::io::stdin().is_terminal() || !std::io::stdout().is_terminal() {
+        return None;
+    }
+
+    enable_raw_mode().ok()?;
+
+    let mut stdout = std::io::stdout();
+    let sent = stdout.write_all(b"\x1b]11;?\x1b\\\x1b[c").and_then(|_| stdout.flush());
+
+    let mut reply = Vec::new();
+    let deadline = Instant::now() + Duration::from_millis(500);
+
+    while sent.is_ok() {
+        let left = deadline.saturating_duration_since(Instant::now());
+        let mut fds = libc::pollfd {
+            fd: libc::STDIN_FILENO,
+            events: libc::POLLIN,
+            revents: 0,
+        };
+
+        if left.is_zero() || unsafe { libc::poll(&mut fds, 1, left.as_millis() as i32) } <= 0 {
+            break;
+        }
+
+        let mut buf = [0u8; 64];
+        match std::io::stdin().read(&mut buf) {
+            Ok(n) if n > 0 => reply.extend_from_slice(&buf[..n]),
+            _ => break,
+        }
+
+        // The device attributes reply ("ESC [ ? ... c") always comes last.
+        if let Some(i) = reply.windows(3).rposition(|w| w == b"\x1b[?") &&
+            reply[i..].contains(&b'c')
+        {
+            break;
+        }
+    }
+
+    let _ = disable_raw_mode();
+
+    let reply = String::from_utf8_lossy(&reply);
+    let start = reply.find("]11;")? + 4;
+    let end = reply[start..].find(['\x07', '\x1b'])? + start;
+    Some(reply[start..end].to_string())
+}
+
+#[cfg(not(unix))]
+fn query_background() -> Option<String> {
+    None
+}
+
+/// Whether an OSC 11 color reply like `rgb:ffff/ffff/dddd` is a light color.
+fn is_light(color: String) -> bool {
+    let Some(rgb) = color.strip_prefix("rgb:") else {
+        return false;
+    };
+
+    let channels = rgb
+        .split('/')
+        .map(|c| {
+            let max = 16f64.powi(c.len() as i32) - 1.0;
+            u32::from_str_radix(c, 16).ok().map(|v| v as f64 / max)
+        })
+        .collect::<Option<Vec<_>>>();
+
+    match channels.as_deref() {
+        Some([r, g, b]) => 0.2126 * r + 0.7152 * g + 0.0722 * b > 0.5,
+        _ => false,
+    }
+}
+
+pub fn default_theme(palette: Palette) -> Theme {
+    let code = match palette {
+        Palette::Light => Stylable::fg_bg(Color::Indexed(236), Color::Indexed(254)),
+        _ => Stylable::fg_bg(Color::Indexed(252), Color::Indexed(236)),
+    };
+
     Theme {
         messages: ThemeMessages {
             blockquote: LineStylable {
                 line: Some(LineName::Thick),
                 stylable: Stylable::fg(Color::Indexed(236)),
             },
-            code: Stylable::bg(Color::Indexed(236)),
+            code,
             code_block: LineStylable {
                 line: Some(LineName::Plain),
                 stylable: Stylable::default(),
@@ -294,10 +409,10 @@ struct Stylable {
 }
 
 impl Stylable {
-    fn bg(c: Color) -> Self {
+    fn fg_bg(fg: Color, bg: Color) -> Self {
         Self {
-            background: Some(c),
-            color: None,
+            background: Some(bg),
+            color: Some(fg),
             modifiers: vec![],
         }
     }
@@ -1082,6 +1197,27 @@ impl ThemeUsersValues {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_is_light() {
+        assert!(is_light("rgb:ffff/ffff/ffff".into()));
+        assert!(is_light("rgb:fd/f6/e3".into()));
+        assert!(!is_light("rgb:0000/0000/0000".into()));
+        assert!(!is_light("rgb:1e1e/1e1e/2e2e".into()));
+        assert!(!is_light("rgba:ffff/ffff/ffff/ffff".into()));
+        assert!(!is_light("rgb:zz/ff/ff".into()));
+    }
+
+    #[test]
+    fn test_default_code_palette() {
+        let dark = default_theme(Palette::Dark).values().messages.code;
+        assert_eq!(dark.fg, Some(Color::Indexed(252)));
+        assert_eq!(dark.bg, Some(Color::Indexed(236)));
+
+        let light = default_theme(Palette::Light).values().messages.code;
+        assert_eq!(light.fg, Some(Color::Indexed(236)));
+        assert_eq!(light.bg, Some(Color::Indexed(254)));
+    }
 
     #[test]
     fn test_remove_modifier() {
