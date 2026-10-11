@@ -70,6 +70,7 @@ pub fn default_theme() -> Theme {
         },
         rooms: ThemeRooms {
             unread: ThemeRoomsUnreads {
+                name: Stylable::fg(Color::Cyan),
                 number: Stylable::fg(Color::Gray),
                 ..Default::default()
             },
