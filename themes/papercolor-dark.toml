@@ -13,58 +13,58 @@
 # COLOR_UI1 => Window border color, text completion menu (#AF87D7)
 # COLOR_UI2 => Window title color (#AFD700)
 #
-# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#D7875F)
-# COLOR_WARN2 => Redacted messages - typically a red or light orange (#808080)
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF5FAF)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#FFFF00)
 # COLOR_WARN3 => Unknown encryption status - typically a yellow (#D7AF5F)
 #
 # COLOR_GOOD1 => Encrypted indicator - typically a green (#5FAF5F)
 #
-# COLOR_TEXT1 => Primary text color (#FFFF00)
-# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#D0D0D0)
+# COLOR_TEXT1 => Primary text color (#808080)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#00AFAF)
 # COLOR_TEXT3 => Alternate text color (#5FAFD7)
-# COLOR_TEXT4 => Alternate text color (#FF5FAF)
-# COLOR_TEXT5 => Alternate text color (#00AFAF)
+# COLOR_TEXT4 => Alternate text color (#D7875F)
+# COLOR_TEXT5 => Alternate text color (#D0D0D0)
 #
 # COLOR_PLUS => Extra colors used for user names: #585858 #5F8787
 [theme.users]
 colors = [
-    "#D7875F",
-    "#808080",
+    "#FF5FAF",
+    "#FFFF00",
     "#D7AF5F",
     "#5FAF5F",
-    "#D0D0D0",
-    "#5FAFD7",
-    "#FF5FAF",
     "#00AFAF",
+    "#5FAFD7",
+    "#D7875F",
+    "#D0D0D0",
     "#585858",
     "#5F8787",
 ]
 
 [theme.default]
-color = "#FFFF00"
+color = "#808080"
 background = "#1C1C1C"
 
 [theme.completion]
 default.background = "#C6C6C6"
 default.color = "#AF87D7"
 selected.background = "#303030"
-selected.color = "#FFFF00"
+selected.color = "#808080"
 
 [theme.timeline]
-redacted.color = "#808080"
+redacted.color = "#FFFF00"
 
 [theme.messages]
-code.color = "#D0D0D0"
+code.color = "#00AFAF"
 code.background = "#303030"
-emphasis.color = "#FF5FAF"
+emphasis.color = "#D7875F"
 strong.color = "#5FAFD7"
 
 [theme.rooms]
-default.color = "#00AFAF"
-labels.color = "#FF5FAF"
-unread.name.color = "#D0D0D0"
-unread.number.color = "#FF5FAF"
-mention.number.color = "#D7875F"
+default.color = "#D0D0D0"
+labels.color = "#D7875F"
+unread.name.color = "#00AFAF"
+unread.number.color = "#D7875F"
+mention.number.color = "#FF5FAF"
 notification.number.color = "#D7AF5F"
 marked_unread.number.color = "#5FAF5F"
 
@@ -74,8 +74,8 @@ title.color = "#AFD700"
 
 [theme.encryption]
 icon_encrypted.color = "#5FAF5F"
-icon_unencrypted.color = "#D7875F"
+icon_unencrypted.color = "#FF5FAF"
 icon_unknown.color = "#D7AF5F"
 
 [theme.cmdbar]
-error.color = "#D7875F"
+error.color = "#FF5FAF"
