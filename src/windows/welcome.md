@@ -1,3 +1,8 @@
+---
+id: welcome
+aliases: []
+tags: []
+---
 # Welcome to iamb!
 
 ## Useful Keybindings
@@ -35,6 +40,7 @@ The different subcommands are:
 ## Other Useful Commands
 
 - `:welcome` will take you back to this screen
+- `:theme NAME` will switch to another theme
 
 ## Additional Configuration
 
@@ -42,6 +48,11 @@ You can customize iamb in your `$CONFIG_DIR/iamb/config.toml` file, where
 `$CONFIG_DIR` is your system's per-user configuration directory. For example,
 this is typically `~/.config/iamb/config.toml` on systems that use the XDG
 Base Directory Specification.
+
+Themes are loaded from `.toml` files in `$CONFIG_DIR/iamb/themes`, and you can
+find example themes in the `themes` directory of the iamb repository. If code
+in messages is hard to read, set `palette = "light"` or `palette = "dark"` in
+the `[settings]` section to match your terminal's background.
 
 See the manual pages or <https://iamb.chat> for more details on how to
 further configure or use iamb.
