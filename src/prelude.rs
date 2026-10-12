@@ -35,6 +35,7 @@ pub use matrix_sdk::ruma::{
     OwnedServerName,
     OwnedUserId,
     RoomId,
+    ServerName,
     UserId,
     profile::{ProfileFieldName, ProfileFieldValue},
     room::JoinRule,
