@@ -19,6 +19,7 @@ use matrix_sdk::ruma::events::room::encrypted::{
     RoomEncryptedEvent,
 };
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation;
+use matrix_sdk::ruma::events::room::message::sanitize::remove_plain_reply_fallback;
 use matrix_sdk::ruma::events::room::message::{
     FormattedBody,
     MessageFormat,
@@ -388,13 +389,7 @@ pub fn strip_reply_fallback(msgtype: &mut MessageType) {
         return;
     };
 
-    if !content.body.starts_with('>') {
-        return;
-    }
-
-    let new_body = content.body.lines().skip_while(|line| line.starts_with('>')).collect();
-
-    content.body = new_body;
+    content.body = remove_plain_reply_fallback(&content.body).to_owned();
 }
 
 fn content_html(msgtype: &MessageType) -> Option<StyleTree> {
@@ -1702,6 +1697,7 @@ pub mod tests {
         FileInfo,
         FileMessageEventContent,
         ImageMessageEventContent,
+        TextMessageEventContent,
         VideoInfo,
         VideoMessageEventContent,
     };
@@ -1731,6 +1727,15 @@ pub mod tests {
             Relation::Thread(Thread::without_fallback(root));
         assert!(!has_reply_fallback(Some(&thread_without_fallback)));
         assert!(!has_reply_fallback(None));
+    }
+
+    #[test]
+    fn test_strip_reply_fallback() {
+        let body = "> <@user:example.org> quoted text\n> more quoted text\n\nreply";
+        let mut msgtype = MessageType::Text(TextMessageEventContent::plain(body));
+
+        strip_reply_fallback(&mut msgtype);
+        assert_eq!(msgtype.body(), "reply");
     }
 
     #[test]
