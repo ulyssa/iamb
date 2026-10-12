@@ -71,6 +71,7 @@ unicode-segmentation = "1.7"
 unicode-width = "0.2"
 url = {version = "2.5.8", features = ["serde"]}
 percent-encoding = "2.3.2"
+xdg = "3.0.0"
 
 [dependencies.comrak]
 version = "0.55.0"
@@ -135,6 +136,8 @@ assets = [
     # Manual pages:
     ["docs/iamb.1", "usr/share/man/man1/iamb.1", "644"],
     ["docs/iamb.5", "usr/share/man/man5/iamb.5", "644"],
+    # Packaged themes:
+    [ "themes/*.toml", "usr/share/iamb/themes/", "644" ],
     # Other assets:
     ["iamb.desktop", "usr/share/applications/iamb.desktop", "644"],
     ["config.example.toml", "usr/share/iamb/config.example.toml", "644"],
@@ -151,6 +154,8 @@ assets = [
     # Manual pages:
     { source = "docs/iamb.1", dest = "/usr/share/man/man1/iamb.1", mode = "644" },
     { source = "docs/iamb.5", dest = "/usr/share/man/man5/iamb.5", mode = "644" },
+    # Packaged themes:
+    { source = "themes/*.toml", dest = "/usr/share/iamb/themes/", mode = "644" },
     # Other assets:
     { source = "iamb.desktop", dest = "/usr/share/applications/iamb.desktop", mode = "644" },
     { source = "config.example.toml", dest = "/usr/share/iamb/config.example.toml", mode = "644"},

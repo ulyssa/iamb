@@ -1120,4 +1120,34 @@ mod tests {
         let res: LineName = serde_json::from_str(r#""double-dashed-heavy""#).unwrap();
         assert_eq!(res, LineName::DoubleDashedHeavy);
     }
+
+    #[test]
+    fn test_load_packaged_themes() {
+        let dir = Path::new("themes");
+        let mut count = 0;
+
+        for entry in std::fs::read_dir(dir).expect("can read themes") {
+            let path = entry.expect("can read theme file").path();
+
+            if path.extension().is_none_or(|ext| ext != "toml") {
+                continue;
+            }
+
+            let file = ThemeFile::load(&path)
+                .with_context(|| format!("failed to parse {}", path.display()))
+                .expect("parsed theme");
+            assert!(file.theme.default.background.is_some());
+            assert!(file.theme.default.color.is_some());
+
+            count += 1;
+        }
+
+        // We don't hardcode the theme count so that adding new themes doesn't
+        // require updating this test every time, but we do check that we have
+        // seen enough that if something major changes (like renaming every
+        // file to no longer end in `.toml`) then we will notice and fix this
+        // test to account for it and continue asserting that the tests remain
+        // valid.
+        assert!(count > 40, "we should process >40 themes");
+    }
 }

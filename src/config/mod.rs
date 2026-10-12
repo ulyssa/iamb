@@ -225,11 +225,26 @@ fn load_themes(
 ) -> anyhow::Result<CompletionMap<String, theme::Theme>> {
     let mut themes = CompletionMap::default();
 
-    // Load from the `themes` directory in the user's configuration directory:
-    theme::find_themes(themes_dir)?.into_iter().for_each(|(n, t)| {
+    let mut insert = |n, t| {
         let theme = theme_overrides.clone().merge(t).merge(theme::default_theme());
         themes.insert(n, theme);
-    });
+    };
+
+    let mut load_dir = |d: &Path| -> anyhow::Result<()> {
+        theme::find_themes(d)?.into_iter().for_each(|(n, t)| insert(n, t));
+        Ok(())
+    };
+
+    // Load themes from the shared directory first for systems with XDG_DATA_DIRS:
+    #[cfg(any(unix, target_os = "redox"))]
+    xdg::BaseDirectories::new()
+        .get_data_dirs()
+        .into_iter()
+        .map(|p| p.join("iamb/themes"))
+        .try_for_each(|p| load_dir(&p))?;
+
+    // Load from the `themes` directory in the user's configuration directory:
+    load_dir(themes_dir)?;
 
     // Insert a default theme that defaults to using terminal colors:
     let default_theme = theme_overrides.clone().merge(theme::default_theme());
