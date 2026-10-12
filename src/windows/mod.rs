@@ -194,14 +194,8 @@ fn room_cmp<T: RoomLikeItem>(
         SortFieldRoom::Alias => some_cmp(a.alias(), b.alias(), Ord::cmp),
         SortFieldRoom::RoomId => a.room_id().cmp(b.room_id()),
         SortFieldRoom::Server => {
-            let a = a
-                .alias()
-                .map(RoomAliasId::server_name)
-                .or_else(|| a.room_id().server_name());
-            let b = b
-                .alias()
-                .map(RoomAliasId::server_name)
-                .or_else(|| b.room_id().server_name());
+            let a = a.server_name();
+            let b = b.server_name();
             some_cmp(a, b, Ord::cmp)
         },
         SortFieldRoom::Unread => {
@@ -349,10 +343,26 @@ impl SortedSection for SortFieldRoom {
             SortFieldRoom::LowPriority if room.has_tag(TagName::LowPriority) => {
                 ListSectionHeader::LowPriority
             },
+            SortFieldRoom::Server => {
+                let server = room.server_name()?;
+                ListSectionHeader::Server(server.to_string())
+            },
             SortFieldRoom::Space if room.room_type().is_space() => ListSectionHeader::Spaces,
             SortFieldRoom::Mentions if room.has_mention() => ListSectionHeader::UnreadMentions,
             SortFieldRoom::Notifications if room.has_notification() => ListSectionHeader::Unreads,
             SortFieldRoom::Unread if room.is_unread() => ListSectionHeader::Unreads,
+
+            // Since the values that these fields sort on are almost always unique to every room,
+            // we don't do much useful sorting after this and can't provide visually useful section
+            // grouping. We return a value here to ensure they all get grouped together at this point
+            // and so that we don't wind up applying any further section headers afterwards, since it
+            // will likely result in frequent alternation (for example, duplicate "Unread"/"Favorite"
+            // sections).
+            SortFieldRoom::Alias |
+            SortFieldRoom::Name |
+            SortFieldRoom::Recent |
+            SortFieldRoom::RoomId => ListSectionHeader::Rooms,
+
             _ => return None,
         };
 
@@ -397,6 +407,7 @@ pub enum ListSectionHeader {
     ModeratorsPlus,
     NotJoined,
     Rooms,
+    Server(String),
     Spaces,
     UnreadMentions,
     Unreads,
@@ -437,6 +448,7 @@ impl From<ListSectionHeader> for Line<'static> {
             ListSectionHeader::ModeratorsPlus => Line::raw("Moderators++").bold(),
             ListSectionHeader::NotJoined => Line::raw("Not Joined").bold(),
             ListSectionHeader::Rooms => Line::raw("Rooms").bold(),
+            ListSectionHeader::Server(s) => Line::raw(format!("Server: {s}")).bold(),
             ListSectionHeader::Spaces => Line::raw("Spaces").bold(),
             ListSectionHeader::Unreads => Line::raw("Unreads").bold(),
             ListSectionHeader::UnreadMentions => Line::raw("Unread Mentions").bold(),
@@ -456,6 +468,12 @@ trait RoomLikeItem {
     fn alias(&self) -> Option<&RoomAliasId>;
     fn name(&self) -> &str;
     fn membership(&self) -> MatrixRoomState;
+
+    fn server_name(&self) -> Option<&ServerName> {
+        self.alias()
+            .map(RoomAliasId::server_name)
+            .or_else(|| self.room_id().server_name())
+    }
 }
 
 #[inline]
@@ -2138,7 +2156,7 @@ mod tests {
     }
 
     #[test]
-    fn sort_room_servers() {
+    fn test_sort_room_servers() {
         let mut collator = Collator::default();
         let collator = &mut collator;
         let server1 = server_name!("a.com");
