@@ -202,9 +202,12 @@ Possible values are:
 .Dq Sy trace ,
 .Dq Sy debug ,
 .Dq Sy info ,
-.Dq Sy warn
-(the default), and
-.Dq Sy error .
+.Dq Sy warn ,
+.Dq Sy error ,
+and
+.Dq Sy off
+(the default), which disables logging entirely.
+Note that this means no log files are written unless you adjust the level yourself.
 Also supports the syntax defined by
 .Lk https://docs.rs/tracing_subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
 .It Sy max_log_files
