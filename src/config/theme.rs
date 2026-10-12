@@ -12,6 +12,7 @@ use crate::prelude::*;
 
 pub fn default_theme() -> Theme {
     Theme {
+        selected: Stylable::with_modifiers(StyleModifier::REVERSED),
         messages: ThemeMessages {
             blockquote: LineStylable {
                 line: Some(LineName::Thick),
@@ -384,6 +385,10 @@ pub struct Theme {
     #[serde(default)]
     default: Stylable,
 
+    /// Default styling to layer on top of selected list items.
+    #[serde(default)]
+    selected: Stylable,
+
     /// Configuration for styling the command bar.
     #[serde(default)]
     cmdbar: ThemeCommandBar,
@@ -429,6 +434,7 @@ impl Theme {
     pub fn merge(self, other: Self) -> Self {
         Self {
             default: self.default.merge(other.default),
+            selected: self.selected.merge(other.selected),
             cmdbar: self.cmdbar.merge(other.cmdbar),
             encryption: self.encryption.merge(other.encryption),
             msgbar: self.msgbar.merge(other.msgbar),
@@ -447,6 +453,7 @@ impl Theme {
 
         ThemeValues {
             default: base,
+            selected: Style::from(self.selected),
             cmdbar: self.cmdbar.values(base),
             encryption: self.encryption.values(base),
             msgbar: self.msgbar.values(base),
@@ -465,6 +472,9 @@ impl Theme {
 pub struct ThemeValues {
     /// Styling to use when nothing more specific applies.
     pub default: Style,
+
+    /// Styling to patch on top of selected list items.
+    pub selected: Style,
 
     /// Styling for the command bar.
     pub cmdbar: ThemeCommandBarValues,
@@ -495,6 +505,16 @@ pub struct ThemeValues {
 
     /// Styling for the completion menu.
     pub completion: ThemeCompletionValues,
+}
+
+impl ThemeValues {
+    pub fn selected(&self, style: Style, selected: bool) -> Style {
+        if selected {
+            style.patch(self.selected)
+        } else {
+            style
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]

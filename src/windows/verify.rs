@@ -144,7 +144,7 @@ impl ListItem<IambInfo> for VerifyItem {
         let mut lines = vec![];
         let style = store.application.settings.theme.default;
         let bold = style.bold();
-        let selected = super::selected_style(selected, style);
+        let selected = store.application.settings.theme.selected(style, selected);
 
         let mut other_device = None;
         let state = match self.request.state() {

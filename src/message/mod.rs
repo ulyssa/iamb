@@ -1103,10 +1103,6 @@ impl Message {
     fn get_render_style(&self, selected: bool, settings: &ApplicationSettings) -> Style {
         let mut style = self.event.message_style(settings);
 
-        if selected {
-            style = style.add_modifier(StyleModifier::REVERSED)
-        }
-
         if matches!(self.event, MessageEvent::Local(..)) {
             style = style.add_modifier(StyleModifier::ITALIC);
         }
@@ -1114,6 +1110,12 @@ impl Message {
         if settings.tunables.message_user_color {
             let color = settings.get_user_color(&self.sender);
             style = style.fg(color);
+        }
+
+        if selected {
+            // Apply last, so that if the user or theme specified selected colors
+            // for selected messages then it will get put on top of the user color:
+            style = style.patch(settings.theme.selected);
         }
 
         return style;
