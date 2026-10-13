@@ -48,15 +48,6 @@ pub mod welcome;
 const MEMBER_FETCH_DEBOUNCE: Duration = Duration::from_secs(5);
 const ROOM_PREVIEW_DEBOUNCE: Duration = Duration::from_secs(15);
 
-#[inline]
-pub fn selected_style(selected: bool, style: Style) -> Style {
-    if selected {
-        style.add_modifier(StyleModifier::REVERSED)
-    } else {
-        style
-    }
-}
-
 /// Returns the number span with width 4 and the style for name and tags.
 fn unreads_and_style(
     unread: &UnreadInfo,
@@ -1599,7 +1590,7 @@ impl ListItem<IambInfo> for GenericRoomItem {
         let order = store.application.settings.tunables.room_labels.as_slice();
 
         let (unreads, name_style, tags_style) = unreads_and_style(&self.unread, &theme.rooms);
-        let name_style = selected_style(selected, name_style);
+        let name_style = theme.selected(name_style, selected);
         let tags_style = if selected { name_style } else { tags_style };
 
         let (name, labels) = self.name_and_labels(name_style, tags_style, order);
@@ -1678,12 +1669,12 @@ impl ListItem<IambInfo> for MemberItem {
         let theme = &store.application.settings.theme;
 
         let (color, name) = store.application.settings.get_user_overrides(self.member.user_id());
-        let user_style = theme.users.style(user_id.as_str(), color);
+        let user_style = theme.selected(theme.users.style(user_id.as_str(), color), selected);
         let color = user_style.fg.unwrap_or(Color::Reset);
 
         let style = if selected {
             // Ensure the whole item has the same color as `user_style` when it's selected:
-            theme.default.fg(color).add_modifier(StyleModifier::REVERSED)
+            theme.default.fg(color).patch(theme.selected)
         } else {
             theme.default
         };
@@ -1818,11 +1809,7 @@ impl ListItem<IambInfo> for PinnedItem {
     ) -> Text<'a> {
         let settings = &store.application.settings;
         let style = store.application.settings.theme.default;
-        let style = if selected {
-            style.add_modifier(StyleModifier::REVERSED)
-        } else {
-            style
-        };
+        let style = store.application.settings.theme.selected(style, selected);
 
         let Some(info) = store.application.rooms.get(&self.room_id) else {
             return Text::styled("Unable to load room information", style);

@@ -6,7 +6,6 @@ use crate::prelude::*;
 use crate::preview::ImageStatus;
 use crate::util::space;
 use crate::windows::room::chat;
-use crate::windows::selected_style;
 
 /// State needed for rendering [MessageWidget].
 pub(crate) struct MessageState {
@@ -472,8 +471,10 @@ impl ListItem<IambInfo> for MessageInfoItem {
         viewctx: &ViewportContext<ListCursor>,
         store: &'a ProgramStore,
     ) -> Text<'a> {
-        let style = store.application.settings.theme.timeline.default;
-        let style = selected_style(selected, style);
+        let theme = &store.application.settings.theme;
+        let style = theme.timeline.default;
+        let style = theme.selected(style, selected);
+
         match self {
             MessageInfoItem::Header(room_id, user_id, timestamp) => {
                 let info = store.application.rooms.get(room_id);
@@ -502,9 +503,9 @@ impl ListItem<IambInfo> for MessageInfoItem {
                 }
 
                 let padding = width - user.len() - date.len();
-                let date_style = store.application.settings.theme.timeline.date;
+                let date_style = theme.timeline.date;
 
-                let line = Span::styled(user, style.patch(user_style)) +
+                let line = Span::styled(user, theme.selected(user_style, selected)) +
                     Span::raw(space(padding)) +
                     Span::styled(date, date_style);
                 line.into()
@@ -531,7 +532,8 @@ impl ListItem<IambInfo> for MessageInfoItem {
             MessageInfoItem::User(_, room_id, user_id) => {
                 let info = store.application.rooms.get(room_id);
                 let user = store.application.settings.get_user_span_maybe(user_id, info);
-                let user_span = Span::styled(user.content.into_owned(), style.patch(user.style));
+                let user_span =
+                    Span::styled(user.content.into_owned(), theme.selected(user.style, selected));
 
                 Text::from(Span::raw("- ") + user_span)
             },
