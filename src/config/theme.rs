@@ -3,6 +3,7 @@ use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
 use anyhow::Context;
+use palette::Hsl;
 use ratatui::widgets::BorderType;
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
@@ -93,7 +94,7 @@ pub fn default_theme() -> Theme {
             ..Default::default()
         },
         users: ThemeUsers {
-            colors: Some(vec![
+            colors: Some(UserColors::Palette(vec![
                 Color::Blue,
                 Color::Cyan,
                 Color::Green,
@@ -107,7 +108,7 @@ pub fn default_theme() -> Theme {
                 Color::Red,
                 Color::Reset,
                 Color::Yellow,
-            ]),
+            ])),
             stylable: Stylable::with_modifiers(StyleModifier::BOLD),
         },
         ..Default::default()
@@ -1043,8 +1044,60 @@ pub struct ThemeWindowsValues {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum UserColors {
+    RainbowDark,
+    RainbowLight,
+    #[default]
+    #[serde(skip)]
+    Unset,
+    #[serde(untagged)]
+    Palette(Vec<Color>),
+}
+
+impl UserColors {
+    fn hash(user_id: &str) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        user_id.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn hash_to_color(hash: f64, l_base: f64) -> Color {
+        let h = hash % 360.0;
+        let s = hash % 60.0 + 40.0;
+        let l = hash % 35.0 + l_base;
+        let hsl: Hsl = Hsl::new(h as f32, s as f32 / 100.0, l as f32 / 100.0);
+        Color::from_hsl(hsl)
+    }
+
+    fn color(&self, user_id: &str) -> Option<Color> {
+        let color = match self {
+            Self::Unset => return None,
+            Self::Palette(colors) => {
+                if colors.is_empty() {
+                    return None;
+                } else {
+                    let hash = Self::hash(user_id) as usize;
+                    colors[hash % colors.len()]
+                }
+            },
+            Self::RainbowDark => {
+                let hash = Self::hash(user_id);
+                Self::hash_to_color(hash as f64, 15.0)
+            },
+            Self::RainbowLight => {
+                let hash = Self::hash(user_id);
+                Self::hash_to_color(hash as f64, 50.0)
+            },
+        };
+
+        Some(color)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
 struct ThemeUsers {
-    colors: Option<Vec<Color>>,
+    colors: Option<UserColors>,
     #[serde(flatten)]
     stylable: Stylable,
 }
@@ -1058,8 +1111,8 @@ impl ThemeUsers {
     }
 
     fn values(self, base: Style) -> ThemeUsersValues {
-        let colors = self.colors.unwrap_or_default();
         let style = base.patch(self.stylable);
+        let colors = self.colors.unwrap_or_default();
 
         ThemeUsersValues { colors, style }
     }
@@ -1067,20 +1120,13 @@ impl ThemeUsers {
 
 #[derive(Clone, Debug, Default)]
 pub struct ThemeUsersValues {
-    colors: Vec<Color>,
+    colors: UserColors,
     style: Style,
 }
 
 impl ThemeUsersValues {
     pub fn color(&self, user_id: &str) -> Color {
-        if self.colors.is_empty() {
-            return self.style.fg.unwrap_or(Color::Reset);
-        }
-
-        let mut hasher = DefaultHasher::new();
-        user_id.hash(&mut hasher);
-        let color = hasher.finish() as usize % self.colors.len();
-        self.colors[color]
+        self.colors.color(user_id).or(self.style.fg).unwrap_or(Color::Reset)
     }
 
     pub fn style(&self, user_id: &str, explicit: Option<Color>) -> Style {
@@ -1089,12 +1135,11 @@ impl ThemeUsersValues {
         if let Some(c) = explicit {
             // Use explicit color from config file:
             style.fg(c)
-        } else if self.colors.is_empty() {
-            // User has explicitly set an empty array:
-            style
+        } else if let Some(c) = self.colors.color(user_id) {
+            // Apply the user color we hashed to:
+            style.fg(c)
         } else {
-            // Hash on user ID to pick a color from the array:
-            style.fg(self.color(user_id))
+            style
         }
     }
 }
