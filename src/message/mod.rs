@@ -19,6 +19,7 @@ use matrix_sdk::ruma::events::room::encrypted::{
     RoomEncryptedEvent,
 };
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContentWithoutRelation;
+use matrix_sdk::ruma::events::room::message::sanitize::remove_plain_reply_fallback;
 use matrix_sdk::ruma::events::room::message::{
     FormattedBody,
     MessageFormat,
@@ -96,7 +97,9 @@ impl Messages {
     pub fn insert_message(&mut self, key: MessageKey, msg: impl Into<Message>) {
         let mut msg = msg.into();
         if let MessageEvent::Original(ev, edits) = &mut msg.event {
-            strip_reply_fallback(&mut ev.content.msgtype);
+            if has_reply_fallback(ev.content.relates_to.as_ref()) {
+                strip_reply_fallback(&mut ev.content.msgtype);
+            }
             for edit in edits.values_mut() {
                 strip_reply_fallback(&mut edit.msgtype);
             }
@@ -372,18 +375,21 @@ fn redaction_reason_event(ev: SyncRoomRedactionEvent) -> Option<String> {
     ev.content.reason
 }
 
+fn has_reply_fallback(
+    relation: Option<&Relation<RoomMessageEventContentWithoutRelation>>,
+) -> bool {
+    matches!(
+        relation,
+        Some(Relation::Reply(_) | Relation::Thread(Thread { in_reply_to: Some(_), .. }))
+    )
+}
+
 pub fn strip_reply_fallback(msgtype: &mut MessageType) {
     let MessageType::Text(content) = msgtype else {
         return;
     };
 
-    if !content.body.starts_with('>') {
-        return;
-    }
-
-    let new_body = content.body.lines().skip_while(|line| line.starts_with('>')).collect();
-
-    content.body = new_body;
+    content.body = remove_plain_reply_fallback(&content.body).to_owned();
 }
 
 fn content_html(msgtype: &MessageType) -> Option<StyleTree> {
@@ -1685,6 +1691,7 @@ impl Display for Message {
 pub mod tests {
     use super::*;
 
+    use matrix_sdk::ruma::events::relation::Reply;
     use matrix_sdk::ruma::events::room::ImageInfo;
     use matrix_sdk::ruma::events::room::message::{
         AudioInfo,
@@ -1692,6 +1699,7 @@ pub mod tests {
         FileInfo,
         FileMessageEventContent,
         ImageMessageEventContent,
+        TextMessageEventContent,
         VideoInfo,
         VideoMessageEventContent,
     };
@@ -1699,6 +1707,38 @@ pub mod tests {
     use crate::base::EventLocation;
     use crate::config::time_gutter_width;
     use crate::tests::*;
+
+    #[test]
+    fn test_has_reply_fallback() {
+        let root = OwnedEventId::try_from("$root:example.org").unwrap();
+        let target = OwnedEventId::try_from("$target:example.org").unwrap();
+
+        let reply: Relation<RoomMessageEventContentWithoutRelation> =
+            Relation::Reply(Reply::with_event_id(target.clone()));
+        assert!(has_reply_fallback(Some(&reply)));
+
+        let thread_reply: Relation<RoomMessageEventContentWithoutRelation> =
+            Relation::Thread(Thread::reply(root.clone(), target.clone()));
+        assert!(has_reply_fallback(Some(&thread_reply)));
+
+        let thread_fallback: Relation<RoomMessageEventContentWithoutRelation> =
+            Relation::Thread(Thread::plain(root.clone(), target));
+        assert!(has_reply_fallback(Some(&thread_fallback)));
+
+        let thread_without_fallback: Relation<RoomMessageEventContentWithoutRelation> =
+            Relation::Thread(Thread::without_fallback(root));
+        assert!(!has_reply_fallback(Some(&thread_without_fallback)));
+        assert!(!has_reply_fallback(None));
+    }
+
+    #[test]
+    fn test_strip_reply_fallback() {
+        let body = "> <@user:example.org> quoted text\n> more quoted text\n\nreply";
+        let mut msgtype = MessageType::Text(TextMessageEventContent::plain(body));
+
+        strip_reply_fallback(&mut msgtype);
+        assert_eq!(msgtype.body(), "reply");
+    }
 
     #[test]
     fn test_mc_cmp() {
