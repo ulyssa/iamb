@@ -15,11 +15,13 @@ use matrix_sdk::ruma::events::poll::unstable_start::{
 use matrix_sdk::ruma::events::reaction::ReactionEvent;
 use matrix_sdk::ruma::events::relation::Replacement;
 use matrix_sdk::ruma::events::room::encrypted::RoomEncryptedEvent;
+use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::events::room::message::RelationWithoutReplacement;
 use matrix_sdk::ruma::events::room::message::{
     RoomMessageEvent,
     RoomMessageEventContentWithoutRelation,
 };
+use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
 use matrix_sdk::ruma::events::room::redaction::{
     OriginalSyncRoomRedactionEvent,
     SyncRoomRedactionEvent,
@@ -1183,6 +1185,78 @@ struct DisplayNameUsers {
     inactive: HashSet<OwnedUserId>,
 }
 
+/// Information about a user within a specific room.
+#[derive(Clone, Debug)]
+pub struct MemberSummary {
+    /// The member's user identifier.
+    pub user_id: OwnedUserId,
+
+    /// The member's display name in this room, if they have one.
+    pub display_name: Option<String>,
+
+    /// The member's power level in the room.
+    pub power_level: UserPowerLevel,
+
+    /// The member's current room membership (joined/invited/knocked/etc).
+    pub membership: MembershipState,
+}
+
+impl MemberSummary {
+    /// The display name to show for this member, falling back to their localpart.
+    pub fn name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or_else(|| self.user_id.localpart())
+    }
+
+    /// A short description to show for the user's membership state.
+    pub fn membership_label(&self) -> Option<&'static str> {
+        match self.membership {
+            MembershipState::Ban => Some("banned"),
+            MembershipState::Invite => Some("invited"),
+            MembershipState::Knock => Some("wants to join"),
+            MembershipState::Leave => Some("left"),
+            _ => None,
+        }
+    }
+
+    /// Get the member's current state.
+    pub fn membership(&self) -> &MembershipState {
+        &self.membership
+    }
+
+    /// Get the member's power level in the room.
+    pub fn power_level(&self) -> UserPowerLevel {
+        self.power_level
+    }
+
+    /// Get the user identifier.
+    pub fn user_id(&self) -> &UserId {
+        self.user_id.as_ref()
+    }
+
+    /// Whether this member has joined the room.
+    pub fn is_join(&self) -> bool {
+        self.membership == MembershipState::Join
+    }
+
+    /// Whether this member has been invited to the room.
+    pub fn is_invite(&self) -> bool {
+        self.membership == MembershipState::Invite
+    }
+
+    /// Whether this member has knocked on the room.
+    pub fn is_knock(&self) -> bool {
+        self.membership == MembershipState::Knock
+    }
+
+    /// Whether this member should be counted as active in the room.
+    ///
+    /// We show active room members in `:members`, use them for display name disambiguation,
+    /// and so on.
+    pub fn is_active(&self) -> bool {
+        self.is_join() || self.is_invite() || self.is_knock()
+    }
+}
+
 /// Track the display names for users and render any needed disambiguation for
 /// those with overlapping names.
 #[derive(Default)]
@@ -1366,6 +1440,12 @@ pub struct RoomInfo {
     /// The display names for users in this room.
     pub display_names: DisplayNameStore,
 
+    /// Cached information about the members in this room.
+    ///
+    /// Note that this includes members who have left or been banned, so you may need to
+    /// filter out values when iterating over it, depending on the use case.
+    pub memberships: HashMap<OwnedUserId, MemberSummary>,
+
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
 
@@ -1398,6 +1478,7 @@ impl Default for RoomInfo {
             fetch_last: Default::default(),
             users_typing: Default::default(),
             display_names: Default::default(),
+            memberships: Default::default(),
             draw_last: Default::default(),
             pinned_events: Default::default(),
             pinned_previews: Default::default(),
