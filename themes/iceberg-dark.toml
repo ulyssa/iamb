@@ -8,33 +8,33 @@
 #
 # COLOR_BG1 => Primary background (#17171B)
 # COLOR_BG2 => Alternate background (#161821)
-# COLOR_BG3 => Completion menu selected item background (#1E2132)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#C6C8D1)
 #
-# COLOR_UI1 => Window border color, text completion menu (#444B71)
-# COLOR_UI2 => Window title color (#C6C8D1)
+# COLOR_UI1 => Window border color, completion menu background (#444B71)
+# COLOR_UI2 => Window title color (#818596)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#E2A478)
-# COLOR_WARN2 => Redacted messages - typically a red or light orange (#818596)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#6B7089)
 # COLOR_WARN3 => Unknown encryption status - typically a yellow (#89B8C2)
 #
 # COLOR_GOOD1 => Encrypted indicator - typically a green (#B4BE82)
 #
 # COLOR_TEXT1 => Primary text color (#CDD1E6)
-# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#84A0C6)
-# COLOR_TEXT3 => Alternate text color (#A093C7)
-# COLOR_TEXT4 => Alternate text color (#6B7089)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#A093C7)
+# COLOR_TEXT3 => Alternate text color (#84A0C6)
+# COLOR_TEXT4 => Alternate text color (#C6C8D1)
 # COLOR_TEXT5 => Alternate text color (#CDD1E6)
 #
 #
 [theme.users]
 colors = [
     "#E2A478",
-    "#818596",
+    "#6B7089",
     "#89B8C2",
     "#B4BE82",
-    "#84A0C6",
     "#A093C7",
-    "#6B7089",
+    "#84A0C6",
+    "#C6C8D1",
     "#CDD1E6",
 ]
 
@@ -43,32 +43,32 @@ color = "#CDD1E6"
 background = "#17171B"
 
 [theme.completion]
-default.background = "#1E2132"
+default.background = "#C6C8D1"
 default.color = "#444B71"
 selected.background = "#161821"
 selected.color = "#CDD1E6"
 
 [theme.timeline]
-redacted.color = "#818596"
+redacted.color = "#6B7089"
 
 [theme.messages]
-code.color = "#84A0C6"
+code.color = "#A093C7"
 code.background = "#161821"
-emphasis.color = "#6B7089"
-strong.color = "#A093C7"
+emphasis.color = "#C6C8D1"
+strong.color = "#84A0C6"
 
 [theme.rooms]
 default.color = "#CDD1E6"
-labels.color = "#6B7089"
-unread.name.color = "#84A0C6"
-unread.number.color = "#6B7089"
+labels.color = "#C6C8D1"
+unread.name.color = "#A093C7"
+unread.number.color = "#C6C8D1"
 mention.number.color = "#E2A478"
 notification.number.color = "#89B8C2"
 marked_unread.number.color = "#B4BE82"
 
 [theme.windows]
 border.color = "#444B71"
-title.color = "#C6C8D1"
+title.color = "#818596"
 
 [theme.encryption]
 icon_encrypted.color = "#B4BE82"

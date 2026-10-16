@@ -8,9 +8,9 @@
 #
 # COLOR_BG1 => Primary background (#F7F3EB)
 # COLOR_BG2 => Alternate background (#EBE7DF)
-# COLOR_BG3 => Completion menu selected item background (#47463F)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#47463F)
 #
-# COLOR_UI1 => Window border color, text completion menu (#475B68)
+# COLOR_UI1 => Window border color, completion menu background (#8FBFDC)
 # COLOR_UI2 => Window title color (#222120)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#8C594A)
@@ -20,22 +20,23 @@
 # COLOR_GOOD1 => Encrypted indicator - typically a green (#6D7F59)
 #
 # COLOR_TEXT1 => Primary text color (#0F0E0D)
-# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#2D2C2A)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#655683)
 # COLOR_TEXT3 => Alternate text color (#334A84)
 # COLOR_TEXT4 => Alternate text color (#3C5971)
-# COLOR_TEXT5 => Alternate text color (#655683)
+# COLOR_TEXT5 => Alternate text color (#2D2C2A)
 #
-# COLOR_PLUS => Extra colors used for user names: #5C5650
+# COLOR_PLUS => Extra colors used for user names: #475B68 #5C5650
 [theme.users]
 colors = [
     "#8C594A",
     "#787775",
     "#A28853",
     "#6D7F59",
-    "#2D2C2A",
+    "#655683",
     "#334A84",
     "#3C5971",
-    "#655683",
+    "#2D2C2A",
+    "#475B68",
     "#5C5650",
 ]
 
@@ -45,7 +46,7 @@ background = "#F7F3EB"
 
 [theme.completion]
 default.background = "#47463F"
-default.color = "#475B68"
+default.color = "#8FBFDC"
 selected.background = "#EBE7DF"
 selected.color = "#0F0E0D"
 
@@ -53,22 +54,22 @@ selected.color = "#0F0E0D"
 redacted.color = "#787775"
 
 [theme.messages]
-code.color = "#2D2C2A"
+code.color = "#655683"
 code.background = "#EBE7DF"
 emphasis.color = "#3C5971"
 strong.color = "#334A84"
 
 [theme.rooms]
-default.color = "#655683"
+default.color = "#2D2C2A"
 labels.color = "#3C5971"
-unread.name.color = "#2D2C2A"
+unread.name.color = "#655683"
 unread.number.color = "#3C5971"
 mention.number.color = "#8C594A"
 notification.number.color = "#A28853"
 marked_unread.number.color = "#6D7F59"
 
 [theme.windows]
-border.color = "#475B68"
+border.color = "#8FBFDC"
 title.color = "#222120"
 
 [theme.encryption]

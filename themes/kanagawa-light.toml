@@ -8,9 +8,9 @@
 #
 # COLOR_BG1 => Primary background (#F2ECBC)
 # COLOR_BG2 => Alternate background (#D5CEA3)
-# COLOR_BG3 => Completion menu selected item background (#E7DBA0)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#E7DBA0)
 #
-# COLOR_UI1 => Window border color, text completion menu (#836F4A)
+# COLOR_UI1 => Window border color, completion menu background (#836F4A)
 # COLOR_UI2 => Window title color (#624C83)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#B35B79)

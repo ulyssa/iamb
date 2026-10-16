@@ -8,14 +8,14 @@
 #
 # COLOR_BG1 => Primary background (#1E2030)
 # COLOR_BG2 => Alternate background (#222436)
-# COLOR_BG3 => Completion menu selected item background (#2F334D)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#2F334D)
 #
-# COLOR_UI1 => Window border color, text completion menu (#636DA6)
+# COLOR_UI1 => Window border color, completion menu background (#636DA6)
 # COLOR_UI2 => Window title color (#C8D3F5)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF966C)
 # COLOR_WARN2 => Redacted messages - typically a red or light orange (#828BB8)
-# COLOR_WARN3 => Unknown encryption status - typically a yellow (#3B4261)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#2AC3DE)
 #
 # COLOR_GOOD1 => Encrypted indicator - typically a green (#C3E88D)
 #
@@ -30,7 +30,7 @@
 colors = [
     "#FF966C",
     "#828BB8",
-    "#3B4261",
+    "#2AC3DE",
     "#C3E88D",
     "#65BCFF",
     "#C099FF",
@@ -63,7 +63,7 @@ labels.color = "#82AAFF"
 unread.name.color = "#65BCFF"
 unread.number.color = "#82AAFF"
 mention.number.color = "#FF966C"
-notification.number.color = "#3B4261"
+notification.number.color = "#2AC3DE"
 marked_unread.number.color = "#C3E88D"
 
 [theme.windows]
@@ -73,7 +73,7 @@ title.color = "#C8D3F5"
 [theme.encryption]
 icon_encrypted.color = "#C3E88D"
 icon_unencrypted.color = "#FF966C"
-icon_unknown.color = "#3B4261"
+icon_unknown.color = "#2AC3DE"
 
 [theme.cmdbar]
 error.color = "#FF966C"
