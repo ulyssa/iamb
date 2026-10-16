@@ -8,9 +8,9 @@
 #
 # COLOR_BG1 => Primary background (#1E2030)
 # COLOR_BG2 => Alternate background (#24273A)
-# COLOR_BG3 => Completion menu selected item background (#303347)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#303347)
 #
-# COLOR_UI1 => Window border color, text completion menu (#494D64)
+# COLOR_UI1 => Window border color, completion menu background (#7DC4E4)
 # COLOR_UI2 => Window title color (#91D7E3)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#F5A97F)
@@ -136,7 +136,7 @@ background = "#1E2030"
 
 [theme.completion]
 default.background = "#303347"
-default.color = "#494D64"
+default.color = "#7DC4E4"
 selected.background = "#24273A"
 selected.color = "#CAD3F5"
 
@@ -159,7 +159,7 @@ notification.number.color = "#939AB7"
 marked_unread.number.color = "#A6DA95"
 
 [theme.windows]
-border.color = "#494D64"
+border.color = "#7DC4E4"
 title.color = "#91D7E3"
 
 [theme.encryption]

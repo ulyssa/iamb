@@ -8,9 +8,9 @@
 #
 # COLOR_BG1 => Primary background (#0F1419)
 # COLOR_BG2 => Alternate background (#151A1E)
-# COLOR_BG3 => Completion menu selected item background (#14191F)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#14191F)
 #
-# COLOR_UI1 => Window border color, text completion menu (#5C6773)
+# COLOR_UI1 => Window border color, completion menu background (#5C6773)
 # COLOR_UI2 => Window title color (#E6E1CF)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF7733)
@@ -25,7 +25,7 @@
 # COLOR_TEXT4 => Alternate text color (#E6B673)
 # COLOR_TEXT5 => Alternate text color (#36A3D9)
 #
-# COLOR_PLUS => Extra colors used for user names: #2D3640
+# COLOR_PLUS => Extra colors used for user names: #D9D8D7
 [theme.users]
 colors = [
     "#FF7733",
@@ -36,7 +36,7 @@ colors = [
     "#FFB454",
     "#E6B673",
     "#36A3D9",
-    "#2D3640",
+    "#D9D8D7",
 ]
 
 [theme.default]

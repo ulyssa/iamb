@@ -8,9 +8,9 @@
 #
 # COLOR_BG1 => Primary background (#FBF1C7)
 # COLOR_BG2 => Alternate background (#F4E8BE)
-# COLOR_BG3 => Completion menu selected item background (#F2E5BC)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#F2E5BC)
 #
-# COLOR_UI1 => Window border color, text completion menu (#DDCCAB)
+# COLOR_UI1 => Window border color, completion menu background (#45707A)
 # COLOR_UI2 => Window title color (#654735)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#C14A4A)
@@ -21,11 +21,11 @@
 #
 # COLOR_TEXT1 => Primary text color (#4F3829)
 # COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#945E80)
-# COLOR_TEXT3 => Alternate text color (#45707A)
+# COLOR_TEXT3 => Alternate text color (#7C6F64)
 # COLOR_TEXT4 => Alternate text color (#4C7A5D)
-# COLOR_TEXT5 => Alternate text color (#928374)
+# COLOR_TEXT5 => Alternate text color (#AE5858)
 #
-#
+# COLOR_PLUS => Extra colors used for user names: #6F8352 #928374 #A96B2C
 [theme.users]
 colors = [
     "#C14A4A",
@@ -33,9 +33,12 @@ colors = [
     "#B47109",
     "#6C782E",
     "#945E80",
-    "#45707A",
+    "#7C6F64",
     "#4C7A5D",
+    "#AE5858",
+    "#6F8352",
     "#928374",
+    "#A96B2C",
 ]
 
 [theme.default]
@@ -44,7 +47,7 @@ background = "#FBF1C7"
 
 [theme.completion]
 default.background = "#F2E5BC"
-default.color = "#DDCCAB"
+default.color = "#45707A"
 selected.background = "#F4E8BE"
 selected.color = "#4F3829"
 
@@ -55,10 +58,10 @@ redacted.color = "#C35E0A"
 code.color = "#945E80"
 code.background = "#F4E8BE"
 emphasis.color = "#4C7A5D"
-strong.color = "#45707A"
+strong.color = "#7C6F64"
 
 [theme.rooms]
-default.color = "#928374"
+default.color = "#AE5858"
 labels.color = "#4C7A5D"
 unread.name.color = "#945E80"
 unread.number.color = "#4C7A5D"
@@ -67,7 +70,7 @@ notification.number.color = "#B47109"
 marked_unread.number.color = "#6C782E"
 
 [theme.windows]
-border.color = "#DDCCAB"
+border.color = "#45707A"
 title.color = "#654735"
 
 [theme.encryption]

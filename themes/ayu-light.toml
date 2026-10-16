@@ -6,11 +6,11 @@
 # If you are looking to remix this file to make a derived theme, the colors were
 # picked and assigned as:
 #
-# COLOR_BG1 => Primary background (#FFFFFF)
+# COLOR_BG1 => Primary background (#F8F9FA)
 # COLOR_BG2 => Alternate background (#FAFAFA)
-# COLOR_BG3 => Completion menu selected item background (#F3F3F3)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#FFFFFF)
 #
-# COLOR_UI1 => Window border color, text completion menu (#ABB0B6)
+# COLOR_UI1 => Window border color, completion menu background (#ABB0B6)
 # COLOR_UI2 => Window title color (#5C6773)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF6A00)
@@ -25,7 +25,7 @@
 # COLOR_TEXT4 => Alternate text color (#36A3D9)
 # COLOR_TEXT5 => Alternate text color (#E6B673)
 #
-# COLOR_PLUS => Extra colors used for user names: #D9D8D7
+# COLOR_PLUS => Extra colors used for user names: #2D3640
 [theme.users]
 colors = [
     "#FF6A00",
@@ -36,15 +36,15 @@ colors = [
     "#F29718",
     "#36A3D9",
     "#E6B673",
-    "#D9D8D7",
+    "#2D3640",
 ]
 
 [theme.default]
 color = "#14161B"
-background = "#FFFFFF"
+background = "#F8F9FA"
 
 [theme.completion]
-default.background = "#F3F3F3"
+default.background = "#FFFFFF"
 default.color = "#ABB0B6"
 selected.background = "#FAFAFA"
 selected.color = "#14161B"

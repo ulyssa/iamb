@@ -1,0 +1,79 @@
+# everforest-light theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#F4F0D9)
+# COLOR_BG2 => Alternate background (#FDF6E3)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#5C6A72)
+#
+# COLOR_UI1 => Window border color, completion menu background (#BDC3AF)
+# COLOR_UI2 => Window title color (#3A94C5)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#F85552)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#F57D26)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#DFA000)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#8DA101)
+#
+# COLOR_TEXT1 => Primary text color (#5C6A72)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#DF69BA)
+# COLOR_TEXT3 => Alternate text color (#939F91)
+# COLOR_TEXT4 => Alternate text color (#5C6A72)
+# COLOR_TEXT5 => Alternate text color (#5C6A72)
+#
+#
+[theme.users]
+colors = [
+    "#F85552",
+    "#F57D26",
+    "#DFA000",
+    "#8DA101",
+    "#DF69BA",
+    "#939F91",
+    "#5C6A72",
+    "#5C6A72",
+]
+
+[theme.default]
+color = "#5C6A72"
+background = "#F4F0D9"
+
+[theme.completion]
+default.background = "#5C6A72"
+default.color = "#BDC3AF"
+selected.background = "#FDF6E3"
+selected.color = "#5C6A72"
+
+[theme.timeline]
+redacted.color = "#F57D26"
+
+[theme.messages]
+code.color = "#DF69BA"
+code.background = "#FDF6E3"
+emphasis.color = "#5C6A72"
+strong.color = "#939F91"
+
+[theme.rooms]
+default.color = "#5C6A72"
+labels.color = "#5C6A72"
+unread.name.color = "#DF69BA"
+unread.number.color = "#5C6A72"
+mention.number.color = "#F85552"
+notification.number.color = "#DFA000"
+marked_unread.number.color = "#8DA101"
+
+[theme.windows]
+border.color = "#BDC3AF"
+title.color = "#3A94C5"
+
+[theme.encryption]
+icon_encrypted.color = "#8DA101"
+icon_unencrypted.color = "#F85552"
+icon_unknown.color = "#DFA000"
+
+[theme.cmdbar]
+error.color = "#F85552"

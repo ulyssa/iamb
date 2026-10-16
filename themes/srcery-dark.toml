@@ -1,0 +1,79 @@
+# srcery-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#121110)
+# COLOR_BG2 => Alternate background (#1C1B19)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#121110)
+#
+# COLOR_UI1 => Window border color, completion menu background (#2C78BF)
+# COLOR_UI2 => Window title color (#EF2F27)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF5C8F)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#FBB829)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#917E6B)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#98BC37)
+#
+# COLOR_TEXT1 => Primary text color (#FCE8C3)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#68A8E4)
+# COLOR_TEXT3 => Alternate text color (#C5B088)
+# COLOR_TEXT4 => Alternate text color (#FCE8C3)
+# COLOR_TEXT5 => Alternate text color (#FCE8C3)
+#
+#
+[theme.users]
+colors = [
+    "#FF5C8F",
+    "#FBB829",
+    "#917E6B",
+    "#98BC37",
+    "#68A8E4",
+    "#C5B088",
+    "#FCE8C3",
+    "#FCE8C3",
+]
+
+[theme.default]
+color = "#FCE8C3"
+background = "#121110"
+
+[theme.completion]
+default.background = "#121110"
+default.color = "#2C78BF"
+selected.background = "#1C1B19"
+selected.color = "#FCE8C3"
+
+[theme.timeline]
+redacted.color = "#FBB829"
+
+[theme.messages]
+code.color = "#68A8E4"
+code.background = "#1C1B19"
+emphasis.color = "#FCE8C3"
+strong.color = "#C5B088"
+
+[theme.rooms]
+default.color = "#FCE8C3"
+labels.color = "#FCE8C3"
+unread.name.color = "#68A8E4"
+unread.number.color = "#FCE8C3"
+mention.number.color = "#FF5C8F"
+notification.number.color = "#917E6B"
+marked_unread.number.color = "#98BC37"
+
+[theme.windows]
+border.color = "#2C78BF"
+title.color = "#EF2F27"
+
+[theme.encryption]
+icon_encrypted.color = "#98BC37"
+icon_unencrypted.color = "#FF5C8F"
+icon_unknown.color = "#917E6B"
+
+[theme.cmdbar]
+error.color = "#FF5C8F"

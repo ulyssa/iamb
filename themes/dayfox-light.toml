@@ -6,23 +6,23 @@
 # If you are looking to remix this file to make a derived theme, the colors were
 # picked and assigned as:
 #
-# COLOR_BG1 => Primary background (#F6F2EE)
-# COLOR_BG2 => Alternate background (#E4DCD4)
-# COLOR_BG3 => Completion menu selected item background (#D3C7BB)
+# COLOR_BG1 => Primary background (#E4DCD4)
+# COLOR_BG2 => Alternate background (#F6F2EE)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#F6F2EE)
 #
-# COLOR_UI1 => Window border color, text completion menu (#287980)
-# COLOR_UI2 => Window title color (#223D90)
+# COLOR_UI1 => Window border color, completion menu background (#223D90)
+# COLOR_UI2 => Window title color (#396847)
 #
 # COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#AC5402)
 # COLOR_WARN2 => Redacted messages - typically a red or light orange (#955F61)
-# COLOR_WARN3 => Unknown encryption status - typically a yellow (#837A72)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#287980)
 #
-# COLOR_GOOD1 => Encrypted indicator - typically a green (#396847)
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#837A72)
 #
 # COLOR_TEXT1 => Primary text color (#3D2B5A)
-# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#643F61)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#824D5B)
 # COLOR_TEXT3 => Alternate text color (#6E33CE)
-# COLOR_TEXT4 => Alternate text color (#824D5B)
+# COLOR_TEXT4 => Alternate text color (#643F61)
 # COLOR_TEXT5 => Alternate text color (#3D2B5A)
 #
 #
@@ -30,50 +30,50 @@
 colors = [
     "#AC5402",
     "#955F61",
+    "#287980",
     "#837A72",
-    "#396847",
-    "#643F61",
-    "#6E33CE",
     "#824D5B",
+    "#6E33CE",
+    "#643F61",
     "#3D2B5A",
 ]
 
 [theme.default]
 color = "#3D2B5A"
-background = "#F6F2EE"
+background = "#E4DCD4"
 
 [theme.completion]
-default.background = "#D3C7BB"
-default.color = "#287980"
-selected.background = "#E4DCD4"
+default.background = "#F6F2EE"
+default.color = "#223D90"
+selected.background = "#F6F2EE"
 selected.color = "#3D2B5A"
 
 [theme.timeline]
 redacted.color = "#955F61"
 
 [theme.messages]
-code.color = "#643F61"
-code.background = "#E4DCD4"
-emphasis.color = "#824D5B"
+code.color = "#824D5B"
+code.background = "#F6F2EE"
+emphasis.color = "#643F61"
 strong.color = "#6E33CE"
 
 [theme.rooms]
 default.color = "#3D2B5A"
-labels.color = "#824D5B"
-unread.name.color = "#643F61"
-unread.number.color = "#824D5B"
+labels.color = "#643F61"
+unread.name.color = "#824D5B"
+unread.number.color = "#643F61"
 mention.number.color = "#AC5402"
-notification.number.color = "#837A72"
-marked_unread.number.color = "#396847"
+notification.number.color = "#287980"
+marked_unread.number.color = "#837A72"
 
 [theme.windows]
-border.color = "#287980"
-title.color = "#223D90"
+border.color = "#223D90"
+title.color = "#396847"
 
 [theme.encryption]
-icon_encrypted.color = "#396847"
+icon_encrypted.color = "#837A72"
 icon_unencrypted.color = "#AC5402"
-icon_unknown.color = "#837A72"
+icon_unknown.color = "#287980"
 
 [theme.cmdbar]
 error.color = "#AC5402"
