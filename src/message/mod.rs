@@ -1206,7 +1206,11 @@ impl Message {
                     let receipt_thread = self.receipt_thread(info);
                     let threaded = info.read_event_users(receipt_thread, event_id);
                     let unthreaded = info.read_event_users(ReceiptThread::Unthreaded, event_id);
-                    threaded.chain(unthreaded).map(|user_id| user_id.to_owned()).collect()
+                    threaded
+                        .chain(unthreaded)
+                        .filter(|user_id| **user_id != settings.profile.user_id)
+                        .map(|user_id| user_id.to_owned())
+                        .collect()
                 })
                 .unwrap_or_default();
 
