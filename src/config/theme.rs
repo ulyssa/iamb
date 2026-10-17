@@ -143,9 +143,15 @@ pub fn find_themes(dir: &Path) -> anyhow::Result<Vec<(String, Theme)>> {
             continue;
         };
 
-        let file = ThemeFile::load(&path)?;
-        let name = name.to_string_lossy().into_owned();
-        themes.push((name, file.theme));
+        match ThemeFile::load(&path) {
+            Ok(file) => {
+                let name = name.to_string_lossy().into_owned();
+                themes.push((name, file.theme));
+            },
+            Err(err) => {
+                tracing::error!(?err, "failed to load theme file at {}", path.display());
+            },
+        };
     }
 
     Ok(themes)
