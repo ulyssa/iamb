@@ -59,15 +59,14 @@ fn unreads_and_style(
         (unread.unread_notifications, &theme.notification)
     } else if unread.unread_messages > 0 {
         (unread.unread_messages, &theme.unread)
+    } else if unread.unread_mark {
+        let style = &theme.marked_unread;
+        return (Span::styled("  U ", style.number), style.name, style.labels);
     } else {
         return (Span::styled("    ", theme.default), theme.default, theme.labels);
     };
 
-    if unread.unread_mark {
-        let style = &theme.marked_unread;
-
-        (Span::styled("  U ", style.number), style.name, style.labels)
-    } else if value > 99 {
+    if value > 99 {
         (Span::styled("99+ ", style.number), style.name, style.labels)
     } else {
         (Span::styled(format!(" {:2} ", value), style.number), style.name, style.labels)
