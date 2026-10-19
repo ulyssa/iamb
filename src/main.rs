@@ -178,7 +178,7 @@ fn setup_screen(
     if let Some((id, via)) = initial_room {
         match resolve_mxid(store, id, via) {
             Ok(id) => {
-                return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
+                return Ok(ScreenState::new(IambWindow::open(id, OpenFlags::NONE, store)?, cmd));
             },
             Err(err) => {
                 store.application.draw_error = Some(format!("layout restore: {err}"));
@@ -215,8 +215,8 @@ fn setup_screen(
     let win = settings
         .tunables
         .default_room
-        .and_then(|room| IambWindow::find(room, store).ok())
-        .or_else(|| IambWindow::open(IambId::Welcome, store).ok())
+        .and_then(|room| IambWindow::find(room, OpenFlags::NONE, store).ok())
+        .or_else(|| IambWindow::open(IambId::Welcome, OpenFlags::NONE, store).ok())
         .unwrap();
 
     return Ok(ScreenState::new(win, cmd));
@@ -486,7 +486,7 @@ impl Application {
                         // Switch to the right window.
                         if let Some(winid) = content.to_window() {
                             let open = OpenTarget::Application(winid);
-                            let open = WindowAction::Switch(open);
+                            let open = WindowAction::Switch(open, OpenFlags::NONE);
                             let _ = self.screen.window_command(&open, &ctx, store)?;
 
                             // Run command again.
@@ -664,7 +664,7 @@ impl Application {
                     match resolve_mxid(store, id.to_owned(), via.to_vec()) {
                         Ok(id) => {
                             let target = OpenTarget::Application(id);
-                            let action = WindowAction::Switch(target);
+                            let action = WindowAction::Switch(target, OpenFlags::NONE);
 
                             self.action_prepend(vec![(action.into(), ctx)]);
                             None
@@ -708,7 +708,7 @@ impl Application {
                 let room_id = create_room(client, alias, vis, flags).await?;
                 let room = IambId::Room(room_id.into(), RoomView::Main);
                 let target = OpenTarget::Application(room);
-                let action = WindowAction::Switch(target);
+                let action = WindowAction::Switch(target, OpenFlags::NONE);
 
                 Ok(vec![(action.into(), ctx)])
             },

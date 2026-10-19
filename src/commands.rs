@@ -705,7 +705,8 @@ fn iamb_join(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Ok(step);
     }
 
-    let open = ctx.switch(args.remove(0));
+    let flags = OpenFlags::FORCE;
+    let open = ctx.with_open_flags(flags).switch(args.remove(0));
     let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
@@ -1368,7 +1369,7 @@ mod tests {
 
         let mut cmds = setup_commands(&aliases).unwrap();
 
-        let act = WindowAction::Switch(OpenTarget::Application(IambId::ChatList));
+        let act = WindowAction::Switch(OpenTarget::Application(IambId::ChatList), OpenFlags::NONE);
         let expected = vec![(act.into(), ctx.clone())];
 
         assert_eq!(cmds.input_cmd("c", ctx.clone()).unwrap(), expected);
@@ -1381,7 +1382,8 @@ mod tests {
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd(":verify", ctx.clone()).unwrap();
-        let act = WindowAction::Switch(OpenTarget::Application(IambId::VerifyList));
+        let act =
+            WindowAction::Switch(OpenTarget::Application(IambId::VerifyList), OpenFlags::NONE);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd(":verify request @user1:example.com", ctx.clone()).unwrap();
@@ -1439,11 +1441,12 @@ mod tests {
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("join #foobar:example.com", ctx.clone()).unwrap();
-        let act = WindowAction::Switch(OpenTarget::Name("#foobar:example.com".into()));
+        let act =
+            WindowAction::Switch(OpenTarget::Name("#foobar:example.com".into()), OpenFlags::FORCE);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("join #", ctx.clone()).unwrap();
-        let act = WindowAction::Switch(OpenTarget::Alternate);
+        let act = WindowAction::Switch(OpenTarget::Alternate, OpenFlags::FORCE);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("join", ctx.clone()).unwrap();

@@ -475,7 +475,7 @@ fn room_prompt(
     match act {
         PromptAction::Submit => {
             let room = IambId::Room(room_id.to_owned().into(), RoomView::Main);
-            let open = WindowAction::Switch(OpenTarget::Application(room));
+            let open = WindowAction::Switch(OpenTarget::Application(room), OpenFlags::NONE);
             let acts = vec![(open.into(), ctx.clone())];
 
             Ok(acts)
@@ -622,7 +622,7 @@ impl IambWindow {
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         if let IambWindow::Room(w) = self {
-            w.join_command(act, ctx, store).await
+            w.join_command(act, ctx, store)
         } else {
             return Err(IambError::NoSelectedRoom.into());
         }
@@ -1213,22 +1213,33 @@ impl Window<IambInfo> for IambWindow {
         }
     }
 
-    fn open(id: IambId, store: &mut ProgramStore) -> IambResult<Self> {
+    fn open(id: IambId, flags: OpenFlags, store: &mut ProgramStore) -> IambResult<Self> {
         match id {
             IambId::Room(alias_id, thread) => {
                 let alias: &RoomOrAliasId = &alias_id;
+
+                let preview = |alias_id, store: &mut ProgramStore| -> RoomState {
+                    let mut unjoined = RoomState::not_joined(alias_id, store);
+                    if flags.contains(OpenFlags::FORCE) {
+                        unjoined.join(store);
+                    }
+                    unjoined.into()
+                };
+
                 let room_id = match <&RoomId>::try_from(alias) {
                     Ok(room_id) => room_id,
                     Err(alias) => {
                         if let Some(room_id) = store.application.aliases.get(alias) {
                             room_id
                         } else {
-                            return Ok(RoomState::not_joined(alias_id, store).into());
+                            return Ok(preview(alias_id, store).into());
                         }
                     },
                 };
 
-                if let Some(room) = store.application.worker.client.get_room(room_id) {
+                if let Some(room) = store.application.worker.client.get_room(room_id) &&
+                    room.state() != MatrixRoomState::Left
+                {
                     store.application.need_load.need_members(room_id.to_owned());
 
                     let room = RoomState::new(room, thread, store);
@@ -1236,7 +1247,7 @@ impl Window<IambInfo> for IambWindow {
                     return Ok(room.into());
                 }
 
-                return Ok(RoomState::not_joined(alias_id, store).into());
+                return Ok(preview(alias_id, store).into());
             },
             IambId::DirectList => {
                 let list = RoomListState::new(IambBufferId::DirectList, vec![]);
@@ -1305,7 +1316,7 @@ impl Window<IambInfo> for IambWindow {
         }
     }
 
-    fn find(name: String, store: &mut ProgramStore) -> IambResult<Self> {
+    fn find(name: String, flags: OpenFlags, store: &mut ProgramStore) -> IambResult<Self> {
         let room_alias = if let Ok(alias) = <&RoomAliasId>::try_from(name.as_str()) {
             if let Some(room_id) = store.application.aliases.get(alias) {
                 room_id.to_owned().into()
@@ -1322,27 +1333,27 @@ impl Window<IambInfo> for IambWindow {
             }
         } else if let Ok(uri) = MatrixUri::parse(name.as_str()) {
             let id = resolve_mxid(store, uri.id().to_owned(), uri.via().to_owned())?;
-            return IambWindow::open(id, store);
+            return IambWindow::open(id, flags, store);
         } else if let Ok(uri) = MatrixToUri::parse(name.as_str()) {
             let id = resolve_mxid(store, uri.id().to_owned(), uri.via().to_owned())?;
-            return IambWindow::open(id, store);
+            return IambWindow::open(id, flags, store);
         } else {
             return Err(UIError::Failure("Could not parse room identifier".to_string()));
         };
 
         let id = IambId::Room(room_alias, RoomView::Main);
-        IambWindow::open(id, store)
+        IambWindow::open(id, flags, store)
     }
 
-    fn posn(index: usize, _: &mut ProgramStore) -> IambResult<Self> {
+    fn posn(index: usize, _: OpenFlags, _: &mut ProgramStore) -> IambResult<Self> {
         let msg = format!("Cannot find indexed buffer (index = {index})");
         let err = UIError::Unimplemented(msg);
 
         Err(err)
     }
 
-    fn unnamed(store: &mut ProgramStore) -> IambResult<Self> {
-        Self::open(IambId::RoomList, store)
+    fn unnamed(flags: OpenFlags, store: &mut ProgramStore) -> IambResult<Self> {
+        Self::open(IambId::RoomList, flags, store)
     }
 }
 
@@ -1849,7 +1860,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for PinnedItem {
                     .map(ToOwned::to_owned);
 
                 let room = IambId::Room(self.room_id.clone().into(), thread.into());
-                let open = WindowAction::Switch(OpenTarget::Application(room));
+                let open = WindowAction::Switch(OpenTarget::Application(room), OpenFlags::NONE);
                 let jump = IambAction::from(TimelineAction::GotoEvent(self.event_id.clone()));
 
                 Ok(vec![(open.into(), ctx.clone()), (jump.into(), ctx.clone())])

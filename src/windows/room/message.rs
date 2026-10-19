@@ -99,9 +99,13 @@ impl MessageState {
                     let msg = "Selected message is not a reply";
                     return Err(UIError::Failure(msg.into()));
                 };
-                let act = Action::Window(WindowAction::Switch(OpenTarget::Application(
-                    IambId::Room(self.room_id().to_owned().into(), RoomView::Message(reply.into())),
-                )));
+                let act = Action::Window(WindowAction::Switch(
+                    OpenTarget::Application(IambId::Room(
+                        self.room_id().to_owned().into(),
+                        RoomView::Message(reply.into()),
+                    )),
+                    OpenFlags::NONE,
+                ));
 
                 Ok(vec![(act, ctx)])
             },
@@ -581,7 +585,8 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MessageInfoItem {
                             room_id.to_owned().into(),
                             RoomView::Thread(event_id.to_owned()),
                         );
-                        let open = WindowAction::Switch(OpenTarget::Application(id));
+                        let open =
+                            WindowAction::Switch(OpenTarget::Application(id), OpenFlags::NONE);
                         Ok(vec![(open.into(), ctx.clone())])
                     },
                     MessageInfoItem::Message(_, MessageId::Local(_)) => {

@@ -1622,9 +1622,9 @@ dependencies = [
 
 [[package]]
 name = "editor-types"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "687ec495f9b4b64810edb5ce1ef7166e79e7cec40bc5ab961d9dcde895e97e4b"
+checksum = "f674ce4e9257322235aba6dfef5001601a392d4d6a55ce5fee0b2f6ccc59f939"
 dependencies = [
  "anyhow",
  "bitflags 2.13.2",
@@ -1637,9 +1637,9 @@ dependencies = [
 
 [[package]]
 name = "editor-types-macros"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b5930990ea80a57334a6999d086d2df28a5b67748c32479f0cb1cca8c5d9461"
+checksum = "edea356fa2bc1811afa475bdcca520fcfbdd364da11b1aaa98a8a959d19fa599"
 dependencies = [
  "editor-types-parser",
  "proc-macro2",
@@ -1649,9 +1649,9 @@ dependencies = [
 
 [[package]]
 name = "editor-types-parser"
-version = "0.0.6"
+version = "0.0.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "86caf8408696409d3d6f58c1165ecc21a39effb55cb5c708742cc0c12f18e7eb"
+checksum = "866198f9356c6a256e272da4ff2c8305c0f2e2d5608a6e0e0b1416e67e1cca9e"
 dependencies = [
  "logos",
  "pomelo",
@@ -3852,9 +3852,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit"
-version = "0.0.31"
+version = "0.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8b83364f3f8da5c3b42911179519ac7dafed42ff09b5be31d2f68ffb6732f287"
+checksum = "7b65714e623849687ac7730864ca2e5ec08265f0e4666bb51a23c8ebe604cfce"
 dependencies = [
  "anyhow",
  "anymap2",
@@ -3877,9 +3877,9 @@ dependencies = [
 
 [[package]]
 name = "modalkit-ratatui"
-version = "0.0.31"
+version = "0.0.32"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b98b10507e0a800195aa26e1d1ff85a68fdfa4a91961456f7d803e1453885e12"
+checksum = "40ef715586403fb4ff1fccf77ef0742940d39abe24bf5f653a2586376edaefc6"
 dependencies = [
  "crossterm 0.29.0",
  "enum-map",
