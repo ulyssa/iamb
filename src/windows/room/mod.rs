@@ -20,8 +20,10 @@ use crate::config::EncryptionIndicatorLocation;
 use crate::prelude::*;
 use crate::windows::room::chat::ChatState;
 use crate::windows::room::message::{MessageState, MessageWidget};
-use crate::windows::room::not_joined::{NotJoined, NotJoinedState};
+use crate::windows::room::not_joined::NotJoined;
 use crate::windows::room::space::{Space, SpaceState};
+
+pub use crate::windows::room::not_joined::NotJoinedState;
 
 mod chat;
 mod message;
@@ -638,7 +640,7 @@ pub async fn room_command(
             let response = worker.client.send(request).await.map_err(IambError::from)?;
             let id = IambId::Room(response.replacement_room.into(), RoomView::Main);
             let target = OpenTarget::Application(id);
-            let act = WindowAction::Switch(target);
+            let act = WindowAction::Switch(target, OpenFlags::NONE);
 
             Ok(vec![(act.into(), ctx)])
         },
@@ -705,8 +707,8 @@ impl RoomState {
         }
     }
 
-    pub fn not_joined(alias: OwnedRoomOrAliasId, store: &mut ProgramStore) -> Self {
-        Self::from(NotJoinedState::new(alias, store))
+    pub fn not_joined(alias: OwnedRoomOrAliasId, store: &mut ProgramStore) -> NotJoinedState {
+        NotJoinedState::new(alias, store)
     }
 
     pub fn window_id(&self) -> IambId {
@@ -744,7 +746,7 @@ impl RoomState {
             } else {
                 room.room_id().to_owned().into()
             };
-            *self = Self::not_joined(alias_id, store);
+            *self = Self::not_joined(alias_id, store).into();
         }
 
         match self {
@@ -855,14 +857,14 @@ impl RoomState {
         }
     }
 
-    pub async fn join_command(
+    pub fn join_command(
         &mut self,
         act: JoinAction,
         ctx: ProgramContext,
         store: &mut ProgramStore,
     ) -> IambResult<Vec<(Action<IambInfo>, ProgramContext)>> {
         if let RoomState::NotJoined(nj) = self {
-            nj.join_command(act, ctx, store).await
+            nj.join_command(act, ctx, store)
         } else {
             Err(IambError::NoSelectedSpace.into())
         }
