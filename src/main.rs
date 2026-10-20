@@ -585,7 +585,11 @@ impl Application {
                     return Err(UIError::Failure(err.to_string()));
                 };
 
-                store.application.settings.theme = Arc::new(theme.clone().values());
+                self.dirty = true;
+                self.theme = Arc::new(theme.clone().values());
+                store.application.settings.theme = self.theme.clone();
+                self.screen.clear_message();
+
                 None
             },
             IambAction::ClearUnreads => {
