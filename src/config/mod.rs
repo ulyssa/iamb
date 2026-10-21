@@ -252,13 +252,21 @@ fn load_themes(
     Ok(themes)
 }
 
-const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
-    None => env!("CARGO_PKG_VERSION"),
-    Some(_) => concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")"),
-};
+struct IambVersion;
+
+impl From<IambVersion> for clap::builder::Str {
+    fn from(_: IambVersion) -> Self {
+        let version: Cow<'static, str> = match option_env!("VERGEN_GIT_SHA") {
+            None => env!("CARGO_PKG_VERSION").into(),
+            Some(sha) => format!("{} ({sha})", env!("CARGO_PKG_VERSION")).into(),
+        };
+
+        version.into()
+    }
+}
 
 #[derive(Parser)]
-#[clap(version = VERSION, about, long_about = None)]
+#[clap(version = IambVersion, about, long_about = None)]
 #[clap(propagate_version = true)]
 pub struct Iamb {
     #[clap(long, value_parser)]
