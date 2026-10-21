@@ -148,7 +148,7 @@ assets = [
 ]
 
 [package.metadata.generate-rpm]
-version = "0.14.0-alpha.1"
+version = "0.14.0_alpha.1"
 assets = [
     # Binary:
     { source = "target/release/iamb", dest = "/usr/bin/iamb", mode = "755" },
