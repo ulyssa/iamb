@@ -1,6 +1,6 @@
 [package]
 name = "iamb"
-version = "0.0.13"
+version = "0.13.1"
 edition = "2024"
 authors = ["Ulyssa <git@ulyssa.dev>"]
 repository = "https://github.com/ulyssa/iamb"
