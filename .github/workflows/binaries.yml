@@ -33,12 +33,13 @@ jobs:
       RUSTC_WRAPPER: "sccache"
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       with:
         submodules: true
     - name: Install Rust (stable)
-      uses: dtolnay/rust-toolchain@stable
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
       with:
+          toolchain: stable
           targets: ${{ env.TARGET }}
     - name: Install C cross-compilation toolchain
       if: matrix.platform == 'ubuntu-latest'
@@ -46,7 +47,7 @@ jobs:
         sudo apt-get update
         sudo apt install -f -y build-essential crossbuild-essential-arm64 musl-dev
         # Cross-compilation env vars for x86_64-unknown-linux-musl
-        echo CARGO_TARGET_AARCH64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc >> $GITHUB_ENV
+        echo CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc >> $GITHUB_ENV
         echo AR_x86_64_unknown_linux_musl=x86_64-linux-gnu-ar >> $GITHUB_ENV
         echo CC_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc >> $GITHUB_ENV
         echo CXX_x86_64_unknown_linux_musl=x86_64-linux-gnu-g++ >> $GITHUB_ENV
@@ -71,6 +72,15 @@ jobs:
         path: |
           ./target/${{ env.TARGET }}/release/iamb
           ./target/${{ env.TARGET }}/release/iamb.exe
+    - name: 'Package: tgz'
+      run: |
+        cargo +stable install --locked cargo-tar
+        cargo +stable tar --target ${{ env.TARGET }}
+    - name: 'Upload: tgz'
+      uses: actions/upload-artifact@v4
+      with:
+        name: iamb-${{ env.TARGET }}-tgz
+        path: ./target/tar/iamb*-${{ env.TARGET }}.tar.gz
     - name: 'Package: deb'
       if: matrix.platform == 'ubuntu-latest'
       run: |
