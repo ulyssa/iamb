@@ -33,7 +33,7 @@ features = ["build"]
 anyhow = "1.0"
 bitflags = "2.3"
 chrono = "0.4"
-clap = {version = "^4.6", features = ["derive"]}
+clap = { version = "^4.6", features = ["derive", "string"] }
 clap_complete = "^4.6"
 css-color-parser = "0.1.2"
 dirs = "7.0"
