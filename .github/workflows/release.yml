@@ -1,0 +1,117 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*.*.*"
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  prep-release:
+    runs-on: 'ubuntu-slim'
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Create draft release
+        run: |
+          gh release create ${TAG} --draft=true --target ${{ github.sha }} --title ${TAG}
+        env:
+          TAG: ${{ github.ref_name }}
+          GH_TOKEN: ${{ github.token }}
+
+  build:
+    needs: prep-release
+    strategy:
+      matrix:
+        platform: [ubuntu-latest, windows-latest, macos-latest]
+        arch: [x86_64, aarch64]
+        exclude:
+          - platform: windows-latest
+            arch: aarch64
+        include:
+          - platform: ubuntu-latest
+            arch: x86_64
+            triple: unknown-linux-musl
+          - platform: ubuntu-latest
+            arch: aarch64
+            triple: unknown-linux-gnu
+          - platform: macos-latest
+            triple: apple-darwin
+          - platform: windows-latest
+            triple: pc-windows-msvc
+      fail-fast: false
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+    env:
+      TARGET: ${{ matrix.arch }}-${{ matrix.triple }}
+    steps:
+    - name: Checkout
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+    - name: Install Rust (stable)
+      uses: dtolnay/rust-toolchain@683b588c487a69d01f6c6ddf40f036ff682cc2c8
+      with:
+          toolchain: stable
+          targets: ${{ env.TARGET }}
+    - name: Install C cross-compilation toolchain
+      if: matrix.platform == 'ubuntu-latest'
+      run: |
+        sudo apt-get update
+        sudo apt install -f -y build-essential crossbuild-essential-arm64 musl-dev
+        # Cross-compilation env vars for x86_64-unknown-linux-musl
+        echo CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=x86_64-linux-musl-gcc >> $GITHUB_ENV
+        echo AR_x86_64_unknown_linux_musl=x86_64-linux-gnu-ar >> $GITHUB_ENV
+        echo CC_x86_64_unknown_linux_musl=x86_64-linux-musl-gcc >> $GITHUB_ENV
+        echo CXX_x86_64_unknown_linux_musl=x86_64-linux-gnu-g++ >> $GITHUB_ENV
+        # Cross-compilation env vars for aarch64-unknown-linux-gnu
+        echo CARGO_TARGET_AARCH64_UNKNOWN_LINUX_GNU_LINKER=aarch64-linux-gnu-gcc >> $GITHUB_ENV
+        echo AR_aarch64_unknown_linux_gnu=aarch64-linux-gnu-ar >> $GITHUB_ENV
+        echo CC_aarch64_unknown_linux_gnu=aarch64-linux-gnu-gcc >> $GITHUB_ENV
+        echo CXX_aarch64_unknown_linux_gnu=aarch64-linux-gnu-g++ >> $GITHUB_ENV
+    - name: 'Build: binary'
+      run: |
+        cargo +stable build --profile=release-lto --locked --target=${{ env.TARGET }}
+    - name: 'Package: tgz'
+      run: |
+        cargo +stable install --locked cargo-tar
+        cargo +stable tar --profile=release-lto --target ${{ env.TARGET }}
+    - name: 'Upload: tgz'
+      run: |
+        gh release upload ${TAG} ./target/tar/iamb*-${{ env.TARGET }}.tar.gz
+      env:
+        TAG: ${{ github.ref_name }}
+        GH_TOKEN: ${{ github.token }}
+    - name: 'Package: deb'
+      if: matrix.platform == 'ubuntu-latest'
+      run: |
+        cargo +stable install --locked cargo-deb
+        cargo +stable deb --profile=release-lto --no-strip --target ${{ env.TARGET }}
+    - name: 'Upload: deb'
+      if: matrix.platform == 'ubuntu-latest'
+      run: |
+        gh release upload ${TAG} ./target/${{ env.TARGET }}/debian/iamb*.deb
+      env:
+        TAG: ${{ github.ref_name }}
+        GH_TOKEN: ${{ github.token }}
+    - name: 'Package: rpm'
+      if: matrix.platform == 'ubuntu-latest'
+      run: |
+        cargo +stable install --locked cargo-generate-rpm
+        cargo +stable generate-rpm --profile=release-lto --target ${{ env.TARGET }}
+    - name: 'Upload: rpm'
+      if: matrix.platform == 'ubuntu-latest'
+      run: |
+        gh release upload ${TAG} ./target/${{ env.TARGET }}/generate-rpm/iamb*.rpm
+      env:
+        TAG: ${{ github.ref_name }}
+        GH_TOKEN: ${{ github.token }}

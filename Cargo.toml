@@ -164,3 +164,21 @@ assets = [
     { source = "docs/iamb.svg", dest = "/usr/share/icons/hicolor/scalable/apps/iamb.svg", mode = "644"},
     { source = "docs/iamb.metainfo.xml", dest = "/usr/share/metainfo/iamb.metainfo.xml", mode = "644"},
 ]
+
+[package.metadata.tar]
+format = "tar.gz"
+assets = [
+    # License:
+    { source = "LICENSE", dest = "LICENSE", mode = "644" },
+    # Manual pages:
+    { source = "docs/iamb.1", dest = "docs/iamb.1", mode = "644" },
+    { source = "docs/iamb.5", dest = "docs/iamb.5", mode = "644" },
+    # Packaged themes:
+    { source = "themes/*.toml", dest = "themes/", mode = "644" },
+    # Other assets:
+    { source = "iamb.desktop", dest = "assets/iamb.desktop", mode = "644" },
+    { source = "config.example.toml", dest = "assets/config.example.toml", mode = "644"},
+    { source = "config.full.toml", dest = "assets/config.full.toml", mode = "644"},
+    { source = "docs/iamb.svg", dest = "assets/iamb.svg", mode = "644"},
+    { source = "docs/iamb.metainfo.xml", dest = "assets/iamb.metainfo.xml", mode = "644"},
+]
