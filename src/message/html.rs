@@ -1178,7 +1178,7 @@ pub mod tests {
         let s = "<blockquote>Hello world!</blockquote>";
         let tree = parse_matrix_html(s);
         let text = tree.to_text(10, Style::default(), &settings, &info);
-        let style = Style::new().fg(Color::Indexed(236));
+        let style = Style::new().fg(Color::Cyan);
         assert_eq!(text.lines.len(), 2);
         assert_eq!(
             text.lines[0],

@@ -17,9 +17,9 @@ pub fn default_theme() -> Theme {
         messages: ThemeMessages {
             blockquote: LineStylable {
                 line: Some(LineName::Thick),
-                stylable: Stylable::fg(Color::Indexed(236)),
+                stylable: Stylable::fg(Color::Cyan),
             },
-            code: Stylable::bg(Color::Indexed(236)),
+            code: Stylable::fg(Color::Cyan),
             code_block: LineStylable {
                 line: Some(LineName::Plain),
                 stylable: Stylable::default(),
@@ -302,14 +302,6 @@ struct Stylable {
 }
 
 impl Stylable {
-    fn bg(c: Color) -> Self {
-        Self {
-            background: Some(c),
-            color: None,
-            modifiers: vec![],
-        }
-    }
-
     fn fg(c: Color) -> Self {
         Self {
             background: None,
