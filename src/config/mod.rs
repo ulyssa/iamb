@@ -222,18 +222,17 @@ where
 fn load_themes(
     themes_dir: &Path,
     theme_overrides: theme::Theme,
-    palette: theme::Palette,
 ) -> anyhow::Result<CompletionMap<String, theme::Theme>> {
     let mut themes = CompletionMap::default();
 
     // Load from the `themes` directory in the user's configuration directory:
     theme::find_themes(themes_dir)?.into_iter().for_each(|(n, t)| {
-        let theme = theme_overrides.clone().merge(t).merge(theme::default_theme(palette));
+        let theme = theme_overrides.clone().merge(t).merge(theme::default_theme());
         themes.insert(n, theme);
     });
 
     // Insert a default theme that defaults to using terminal colors:
-    let default_theme = theme_overrides.clone().merge(theme::default_theme(palette));
+    let default_theme = theme_overrides.clone().merge(theme::default_theme());
     themes.insert("default".into(), default_theme);
     Ok(themes)
 }
@@ -968,7 +967,6 @@ pub struct TunableValues {
     pub sort: SortValues,
     pub state_event_display: bool,
     pub sync_delay_ms: u64,
-    pub palette: theme::Palette,
     pub theme: String,
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
@@ -1035,7 +1033,6 @@ pub struct Tunables {
     pub request_timeout: Option<u64>,
     pub state_event_display: Option<bool>,
     pub sync_delay_ms: Option<u64>,
-    pub palette: Option<theme::Palette>,
     pub theme: Option<String>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
@@ -1102,7 +1099,6 @@ impl Tunables {
             request_timeout: self.request_timeout.or(other.request_timeout),
             state_event_display: self.state_event_display.or(other.state_event_display),
             sync_delay_ms: self.sync_delay_ms.or(other.sync_delay_ms),
-            palette: self.palette.or(other.palette),
             theme: self.theme.or(other.theme),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
@@ -1158,7 +1154,6 @@ impl Tunables {
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             state_event_display: self.state_event_display.unwrap_or(true),
             sync_delay_ms: self.sync_delay_ms.unwrap_or(DEFAULT_SYNC_FREQUENCY),
-            palette: self.palette.unwrap_or_default(),
             theme: self.theme.unwrap_or_else(|| "default".to_string()),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
@@ -1522,8 +1517,7 @@ impl ApplicationSettings {
 
         let themes_dir = config_dir.join("themes");
         let overrides = profile.theme.clone().unwrap_or_default().merge(theme.unwrap_or_default());
-        let palette = tunables.palette.resolve();
-        let themes = Arc::new(load_themes(&themes_dir, overrides, palette)?);
+        let themes = Arc::new(load_themes(&themes_dir, overrides)?);
 
         let theme = if let Some(theme) = themes.get(&tunables.theme) {
             Arc::new(theme.clone().values())

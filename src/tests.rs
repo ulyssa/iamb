@@ -173,7 +173,6 @@ pub fn mock_tunables() -> TunableValues {
         state_event_display: true,
         sync_delay_ms: 1000,
         terminal: Terminal::default().values(),
-        palette: crate::config::theme::Palette::Dark,
         theme: "default".into(),
         typing_notice_send: true,
         typing_notice_display: true,
@@ -235,9 +234,7 @@ pub fn mock_settings() -> ApplicationSettings {
         layout: Default::default(),
         macros: HashMap::default(),
         aliases: Aliases::default(),
-        theme: crate::config::theme::default_theme(crate::config::theme::Palette::Dark)
-            .values()
-            .into(),
+        theme: crate::config::theme::default_theme().values().into(),
         themes: Default::default(),
         enable_enhanced_keys: false,
     }
