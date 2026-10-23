@@ -601,15 +601,30 @@ async fn load_older(client: &Client, store: &AsyncProgramStore) -> usize {
         .await
 }
 
-async fn members_load(client: &Client, room_id: &RoomId) -> IambResult<Vec<RoomMember>> {
-    if let Some(room) = client.get_room(room_id) {
-        Ok(room
-            .members_no_sync(RoomMemberships::all())
-            .await
-            .map_err(IambError::from)?)
-    } else {
-        Err(IambError::UnknownRoom(room_id.to_owned()).into())
+fn member_summary(member: &RoomMember) -> MemberSummary {
+    MemberSummary {
+        user_id: member.user_id().to_owned(),
+        display_name: member.display_name().map(ToOwned::to_owned),
+        power_level: member.power_level(),
+        membership: member.membership().clone(),
     }
+}
+
+/// Fetch all known members of the room regardless of current `MembershipState`.
+async fn members_load(client: &Client, room_id: &RoomId) -> IambResult<Vec<MemberSummary>> {
+    let Some(room) = client.get_room(room_id) else {
+        return Err(IambError::UnknownRoom(room_id.to_owned()).into());
+    };
+
+    let members = room
+        .members(RoomMemberships::all())
+        .await
+        .map_err(IambError::from)?
+        .iter()
+        .map(member_summary)
+        .collect();
+
+    Ok(members)
 }
 
 fn member_active(state: &MembershipState) -> bool {
@@ -618,7 +633,7 @@ fn member_active(state: &MembershipState) -> bool {
 
 fn members_insert(
     room_id: OwnedRoomId,
-    res: IambResult<Vec<RoomMember>>,
+    res: IambResult<Vec<MemberSummary>>,
     store: &mut ProgramStore,
 ) {
     if let Ok(members) = res {
@@ -626,11 +641,12 @@ fn members_insert(
         let info = rooms.get_or_default(room_id);
 
         for member in members {
-            let user_id = member.user_id().to_owned();
-            let name = member.display_name().map(|s| s.to_owned());
-            let is_active = member_active(member.membership());
-
-            info.display_names.set(user_id, name, is_active);
+            info.display_names.set(
+                member.user_id.clone(),
+                member.display_name.clone(),
+                member.is_active(),
+            );
+            info.memberships.insert(member.user_id.clone(), member);
         }
     }
     // else ???
@@ -1146,7 +1162,6 @@ pub enum WorkerTask {
     ResolveAlias(OwnedRoomAliasId, ClientReply<IambResult<OwnedRoomId>>),
     JoinRoom(OwnedRoomOrAliasId, Vec<OwnedServerName>, ClientReply<IambResult<OwnedRoomId>>),
     CreateDM(OwnedUserId, ClientReply<IambResult<OwnedRoomId>>),
-    Members(OwnedRoomId, ClientReply<IambResult<Vec<RoomMember>>>),
     SpaceMembers(OwnedRoomId, ClientReply<IambResult<Vec<OwnedRoomId>>>),
     StartSync(ClientReply<IambResult<EditInfo>>),
     SaveTokens,
@@ -1198,12 +1213,6 @@ impl Debug for WorkerTask {
             WorkerTask::CreateDM(user_id, _) => {
                 f.debug_tuple("WorkerTask::CreateDM")
                     .field(user_id)
-                    .field(&format_args!("_"))
-                    .finish()
-            },
-            WorkerTask::Members(room_id, _) => {
-                f.debug_tuple("WorkerTask::Members")
-                    .field(room_id)
                     .field(&format_args!("_"))
                     .finish()
             },
@@ -1478,14 +1487,6 @@ impl Requester {
         return response.recv();
     }
 
-    pub fn members(&self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
-        let (reply, response) = oneshot();
-
-        self.tx.send(WorkerTask::Members(room_id, reply)).unwrap();
-
-        return response.recv();
-    }
-
     pub fn space_members(&self, space: OwnedRoomId) -> IambResult<Vec<OwnedRoomId>> {
         let (reply, response) = oneshot();
 
@@ -1606,10 +1607,6 @@ impl ClientWorker {
             WorkerTask::Logout(user_id, reply) => {
                 assert!(self.initialized);
                 reply.send(self.logout(user_id).await);
-            },
-            WorkerTask::Members(room_id, reply) => {
-                assert!(self.initialized);
-                reply.send(self.members(room_id).await);
             },
             WorkerTask::SpaceMembers(space, reply) => {
                 assert!(self.initialized);
@@ -2283,17 +2280,6 @@ impl ClientWorker {
 
                 return Err(err);
             },
-        }
-    }
-
-    async fn members(&mut self, room_id: OwnedRoomId) -> IambResult<Vec<RoomMember>> {
-        if let Some(room) = self.client.get_room(room_id.as_ref()) {
-            Ok(room
-                .members(RoomMemberships::ACTIVE | RoomMemberships::KNOCK)
-                .await
-                .map_err(IambError::from)?)
-        } else {
-            Err(IambError::UnknownRoom(room_id).into())
         }
     }
 

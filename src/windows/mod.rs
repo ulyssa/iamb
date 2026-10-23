@@ -13,7 +13,6 @@ use std::fmt::{self, Write as _};
 
 use feruca::Collator;
 use matrix_sdk::RoomHeroWithProfile;
-use matrix_sdk::room::RoomMember;
 use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
 use matrix_sdk::ruma::room::RoomType as MatrixRoomType;
@@ -771,27 +770,42 @@ impl WindowOps<IambInfo> for IambWindow {
                     .render(area, buf, state);
             },
             IambWindow::MemberList(state, room_id, last_fetch) => {
-                let need_fetch = match last_fetch {
-                    Some(i) => i.elapsed() >= MEMBER_FETCH_DEBOUNCE,
-                    None => true,
-                };
-
-                if need_fetch && let Ok(mems) = worker.members(room_id.clone()) {
-                    let mut items = mems
-                        .into_iter()
-                        .map(|m| MemberItem::new(m, room_id.clone()))
-                        .collect::<Vec<_>>();
-                    let fields = &settings.tunables.sort.members;
-                    items.sort_by(|a, b| user_fields_cmp(a, b, fields));
-                    items.iter_mut().for_each(|i| i.set_section(fields));
-                    state.set(items);
+                if last_fetch.is_none_or(|i| i.elapsed() >= MEMBER_FETCH_DEBOUNCE) {
+                    store.application.need_load.need_members(room_id.clone());
                     *last_fetch = Some(Instant::now());
                 }
 
+                let info = store.application.rooms.get_or_default(room_id.clone());
+
+                let mut items = info
+                    .memberships
+                    .values()
+                    .filter(|m| m.is_active())
+                    .map(|m| MemberItem::new(m.clone(), room_id.clone()))
+                    .collect::<Vec<_>>();
+
+                let settings = &store.application.settings;
+                let fields = &settings.tunables.sort.members;
+                items.sort_by(|a, b| user_fields_cmp(a, b, fields));
+                items.iter_mut().for_each(|i| i.set_section(fields));
+
+                state.set(items);
                 state.set_ignorecase(settings.tunables.ignorecase);
 
+                let synced = store
+                    .application
+                    .worker
+                    .client
+                    .get_room(room_id)
+                    .is_some_and(|room| room.are_members_synced());
+                let empty = if synced {
+                    "No users here yet!"
+                } else {
+                    "Loading members..."
+                };
+
                 List::new(store)
-                    .empty_message("No users here yet!")
+                    .empty_message(empty)
                     .empty_alignment(Alignment::Center)
                     .focus(focused)
                     .style(default_list_style)
@@ -1633,13 +1647,13 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for GenericRoomItem {
 
 #[derive(Clone)]
 pub struct MemberItem {
-    member: RoomMember,
+    member: MemberSummary,
     room_id: OwnedRoomId,
     section: Option<ListSectionHeader>,
 }
 
 impl MemberItem {
-    fn new(member: RoomMember, room_id: OwnedRoomId) -> Self {
+    fn new(member: MemberSummary, room_id: OwnedRoomId) -> Self {
         Self { member, room_id, section: None }
     }
 
@@ -1648,11 +1662,11 @@ impl MemberItem {
     }
 
     fn is_knock(&self) -> bool {
-        self.member.membership() == &MembershipState::Knock
+        self.member.is_knock()
     }
 
     fn is_invite(&self) -> bool {
-        self.member.membership() == &MembershipState::Invite
+        self.member.is_invite()
     }
 }
 
@@ -1886,6 +1900,72 @@ mod tests {
     use super::*;
 
     use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, room_alias_id, server_name};
+
+    use crate::tests::{TEST_ROOM1_ID, TEST_USER1, TEST_USER2};
+
+    fn member(user_id: OwnedUserId, power_level: i32, membership: MembershipState) -> MemberItem {
+        let member = MemberSummary {
+            user_id,
+            display_name: None,
+            power_level: UserPowerLevel::Int(power_level.into()),
+            membership,
+        };
+
+        MemberItem::new(member, TEST_ROOM1_ID.clone())
+    }
+
+    #[test]
+    fn test_member_sort_by_power_level() {
+        let fields = vec![SortColumn(SortFieldUser::PowerLevel, SortOrder::Ascending)];
+
+        let mut items = [
+            member(TEST_USER1.clone(), 0, MembershipState::Join),
+            member(TEST_USER2.clone(), 100, MembershipState::Join),
+        ];
+        items.sort_by(|a, b| user_fields_cmp(a, b, &fields));
+
+        // Higher power levels sort towards the top.
+        assert_eq!(items[0].member.user_id, TEST_USER2.clone());
+        assert_eq!(items[1].member.user_id, TEST_USER1.clone());
+
+        // Room creators technically have a power level greater than 100:
+        let mut creator = member(TEST_USER1.clone(), 0, MembershipState::Join);
+        creator.member.power_level = UserPowerLevel::Infinite;
+
+        let mut items = [
+            member(TEST_USER2.clone(), 100, MembershipState::Join),
+            creator,
+        ];
+        items.sort_by(|a, b| user_fields_cmp(a, b, &fields));
+        assert_eq!(items[0].member.power_level, UserPowerLevel::Infinite);
+    }
+
+    #[test]
+    fn test_member_sections() {
+        let fields = vec![SortColumn(SortFieldUser::PowerLevel, SortOrder::Ascending)];
+
+        let mut admin = member(TEST_USER1.clone(), 100, MembershipState::Join);
+        admin.set_section(&fields);
+        assert_eq!(admin.get_section(), Some(&ListSectionHeader::Admins));
+
+        let mut moderator = member(TEST_USER1.clone(), 50, MembershipState::Join);
+        moderator.set_section(&fields);
+        assert_eq!(moderator.get_section(), Some(&ListSectionHeader::Moderators));
+
+        let mut moderator_plus = member(TEST_USER1.clone(), 75, MembershipState::Join);
+        moderator_plus.set_section(&fields);
+        assert_eq!(moderator_plus.get_section(), Some(&ListSectionHeader::ModeratorsPlus));
+
+        // Anything else falls back to the generic section:
+        let mut regular = member(TEST_USER1.clone(), 0, MembershipState::Join);
+        regular.set_section(&fields);
+        assert_eq!(regular.get_section(), Some(&ListSectionHeader::Users));
+
+        let mut creator = member(TEST_USER1.clone(), 0, MembershipState::Join);
+        creator.member.power_level = UserPowerLevel::Infinite;
+        creator.set_section(&fields);
+        assert_eq!(creator.get_section(), Some(&ListSectionHeader::Admins));
+    }
 
     #[derive(Debug, Eq, PartialEq)]
     pub(super) struct TestRoomItem {

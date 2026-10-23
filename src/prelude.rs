@@ -83,6 +83,7 @@ pub use crate::base::{
     IambInfo,
     IambResult,
     JoinAction,
+    MemberSummary,
     MessageAction,
     ProgramAction,
     ProgramContext,
