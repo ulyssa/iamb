@@ -1,0 +1,82 @@
+# nightfly-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#011627)
+# COLOR_BG2 => Alternate background (#092236)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#252C3F)
+#
+# COLOR_UI1 => Window border color, completion menu background (#4B6479)
+# COLOR_UI2 => Window title color (#C3CCDC)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#FF5874)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#F78C6C)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#E3D18A)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#7FDBCA)
+#
+# COLOR_TEXT1 => Primary text color (#7C8F8F)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#82AAFF)
+# COLOR_TEXT3 => Alternate text color (#C792EA)
+# COLOR_TEXT4 => Alternate text color (#ECC48D)
+# COLOR_TEXT5 => Alternate text color (#D6DEEB)
+#
+# COLOR_PLUS => Extra colors used for user names: #21C7A8 #A1AAB8 #AE81FF
+[theme.users]
+colors = [
+    "#FF5874",
+    "#F78C6C",
+    "#E3D18A",
+    "#7FDBCA",
+    "#82AAFF",
+    "#C792EA",
+    "#ECC48D",
+    "#D6DEEB",
+    "#21C7A8",
+    "#A1AAB8",
+    "#AE81FF",
+]
+
+[theme.default]
+color = "#7C8F8F"
+background = "#011627"
+
+[theme.completion]
+default.background = "#252C3F"
+default.color = "#4B6479"
+selected.background = "#092236"
+selected.color = "#7C8F8F"
+
+[theme.timeline]
+redacted.color = "#F78C6C"
+
+[theme.messages]
+code.color = "#82AAFF"
+code.background = "#092236"
+emphasis.color = "#ECC48D"
+strong.color = "#C792EA"
+
+[theme.rooms]
+default.color = "#D6DEEB"
+labels.color = "#ECC48D"
+unread.name.color = "#82AAFF"
+unread.number.color = "#ECC48D"
+mention.number.color = "#FF5874"
+notification.number.color = "#E3D18A"
+marked_unread.number.color = "#7FDBCA"
+
+[theme.windows]
+border.color = "#4B6479"
+title.color = "#C3CCDC"
+
+[theme.encryption]
+icon_encrypted.color = "#7FDBCA"
+icon_unencrypted.color = "#FF5874"
+icon_unknown.color = "#E3D18A"
+
+[theme.cmdbar]
+error.color = "#FF5874"

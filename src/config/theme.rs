@@ -2,6 +2,9 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 
+use anyhow::Context;
+use palette::Hsl;
+use ratatui::widgets::BorderType;
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer};
@@ -10,8 +13,17 @@ use crate::prelude::*;
 
 pub fn default_theme() -> Theme {
     Theme {
+        selected: Stylable::with_modifiers(StyleModifier::REVERSED),
         messages: ThemeMessages {
-            code: Stylable::bg(Color::Indexed(236)),
+            blockquote: LineStylable {
+                line: Some(LineName::Thick),
+                stylable: Stylable::fg(Color::Cyan),
+            },
+            code: Stylable::fg(Color::Cyan),
+            code_block: LineStylable {
+                line: Some(LineName::Plain),
+                stylable: Stylable::default(),
+            },
             emphasis: Stylable::with_modifiers(StyleModifier::ITALIC),
             strikethrough: Stylable::with_modifiers(StyleModifier::CROSSED_OUT),
             strong: Stylable::with_modifiers(StyleModifier::BOLD),
@@ -29,9 +41,28 @@ pub fn default_theme() -> Theme {
             title_focused: Stylable::without_modifiers(StyleModifier::DIM),
         },
         windows: ThemeWindows {
-            border: Stylable::with_modifiers(StyleModifier::DIM),
-            border_focused: Stylable::without_modifiers(StyleModifier::DIM),
+            border: Stylable::with_modifiers(StyleModifier::DIM).into(),
+            border_focused: Stylable::without_modifiers(StyleModifier::DIM).into(),
             title: Stylable::with_modifiers(StyleModifier::BOLD),
+            ..Default::default()
+        },
+        completion: ThemeCompletion {
+            default: Stylable {
+                color: Some(Color::Reset),
+                background: Some(Color::Reset),
+                modifiers: vec![
+                    ModifierChange::Remove(StyleModifier::all()),
+                    ModifierChange::Insert(StyleModifier::REVERSED),
+                ],
+            },
+            selected: Stylable {
+                color: Some(Color::Yellow),
+                background: Some(Color::Black),
+                modifiers: vec![ModifierChange::Remove(StyleModifier::REVERSED)],
+            },
+        },
+        cmdbar: ThemeCommandBar {
+            error: Stylable::fg(Color::Red),
             ..Default::default()
         },
         timeline: ThemeTimeline {
@@ -40,11 +71,30 @@ pub fn default_theme() -> Theme {
             ..Default::default()
         },
         rooms: ThemeRooms {
-            unread: Stylable::with_modifiers(StyleModifier::BOLD),
+            unread: ThemeRoomsUnreads {
+                name: Stylable::fg(Color::Cyan),
+                number: Stylable::fg(Color::Gray),
+                ..Default::default()
+            },
+            notification: ThemeRoomsUnreads {
+                name: Stylable::with_modifiers(StyleModifier::BOLD),
+                number: Stylable::fg(Color::Yellow),
+                ..Default::default()
+            },
+            mention: ThemeRoomsUnreads {
+                name: Stylable::with_modifiers(StyleModifier::BOLD),
+                number: Stylable::fg(Color::Red),
+                ..Default::default()
+            },
+            marked_unread: ThemeRoomsUnreads {
+                name: Stylable::with_modifiers(StyleModifier::BOLD),
+                number: Stylable::fg(Color::Green),
+                ..Default::default()
+            },
             ..Default::default()
         },
         users: ThemeUsers {
-            colors: Some(vec![
+            colors: Some(UserColors::Palette(vec![
                 Color::Blue,
                 Color::Cyan,
                 Color::Green,
@@ -58,10 +108,123 @@ pub fn default_theme() -> Theme {
                 Color::Red,
                 Color::Reset,
                 Color::Yellow,
-            ]),
+            ])),
             stylable: Stylable::with_modifiers(StyleModifier::BOLD),
         },
         ..Default::default()
+    }
+}
+
+pub fn find_themes(dir: &Path) -> anyhow::Result<Vec<(String, Theme)>> {
+    let Ok(entries) = std::fs::read_dir(dir) else {
+        return Ok(vec![]);
+    };
+
+    let mut themes = vec![];
+
+    for res in entries {
+        let Ok(entry) = res else {
+            continue;
+        };
+
+        let path = entry.path();
+
+        if !path.is_file() {
+            // Skip non-files.
+            continue;
+        }
+
+        if path.extension().is_none_or(|ext| ext != "toml") {
+            // Skip non-`.toml` files.
+            continue;
+        }
+
+        let Some(name) = path.file_stem() else {
+            continue;
+        };
+
+        match ThemeFile::load(&path) {
+            Ok(file) => {
+                let name = name.to_string_lossy().into_owned();
+                themes.push((name, file.theme));
+            },
+            Err(err) => {
+                tracing::error!(?err, "failed to load theme file at {}", path.display());
+            },
+        };
+    }
+
+    Ok(themes)
+}
+
+/// A restricted subset of `config.toml` that only allows specifying themes.
+///
+/// This exists mainly to prevent people from thinking that values they put
+/// into the theme files are taking effect when they aren't: theme files are
+/// only used for sourcing theme information to prevent any weirdness around
+/// what happens when changing the theme with `:theme`.
+#[derive(Clone, Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ThemeFile {
+    pub theme: Theme,
+}
+
+impl ThemeFile {
+    pub fn load(path: &Path) -> anyhow::Result<Self> {
+        let input = std::fs::read_to_string(path)
+            .with_context(|| format!("failed to read {}", path.display()))?;
+        toml::de::from_str(&input).with_context(|| format!("failed to read {}", path.display()))
+    }
+}
+
+/// Internal variant to get lowercase, hyphenated config options.
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+pub enum LineName {
+    #[default]
+    Plain,
+    Rounded,
+    Double,
+    Thick,
+    DoubleDashedLight,
+    DoubleDashedHeavy,
+    TripleDashedLight,
+    TripleDashedHeavy,
+    QuadrupleDashedLight,
+    QuadrupleDashedHeavy,
+}
+
+impl LineName {
+    pub fn to_table_set(&self) -> &'static ratatui::symbols::line::Set<'static> {
+        match self {
+            Self::Plain => &ratatui::symbols::line::NORMAL,
+            Self::Rounded => &ratatui::symbols::line::ROUNDED,
+            Self::Double => &ratatui::symbols::line::DOUBLE,
+            Self::Thick => &ratatui::symbols::line::THICK,
+            Self::DoubleDashedLight => &ratatui::symbols::line::LIGHT_DOUBLE_DASHED,
+            Self::DoubleDashedHeavy => &ratatui::symbols::line::HEAVY_DOUBLE_DASHED,
+            Self::TripleDashedLight => &ratatui::symbols::line::LIGHT_TRIPLE_DASHED,
+            Self::TripleDashedHeavy => &ratatui::symbols::line::HEAVY_TRIPLE_DASHED,
+            Self::QuadrupleDashedLight => &ratatui::symbols::line::LIGHT_QUADRUPLE_DASHED,
+            Self::QuadrupleDashedHeavy => &ratatui::symbols::line::HEAVY_QUADRUPLE_DASHED,
+        }
+    }
+}
+
+impl From<LineName> for BorderType {
+    fn from(name: LineName) -> Self {
+        match name {
+            LineName::Plain => Self::Plain,
+            LineName::Rounded => Self::Rounded,
+            LineName::Double => Self::Double,
+            LineName::Thick => Self::Thick,
+            LineName::DoubleDashedLight => Self::LightDoubleDashed,
+            LineName::DoubleDashedHeavy => Self::HeavyDoubleDashed,
+            LineName::TripleDashedLight => Self::LightTripleDashed,
+            LineName::TripleDashedHeavy => Self::HeavyTripleDashed,
+            LineName::QuadrupleDashedLight => Self::LightQuadrupleDashed,
+            LineName::QuadrupleDashedHeavy => Self::HeavyQuadrupleDashed,
+        }
     }
 }
 
@@ -139,14 +302,6 @@ struct Stylable {
 }
 
 impl Stylable {
-    fn bg(c: Color) -> Self {
-        Self {
-            background: Some(c),
-            color: None,
-            modifiers: vec![],
-        }
-    }
-
     fn fg(c: Color) -> Self {
         Self {
             background: None,
@@ -201,10 +356,37 @@ impl From<Stylable> for Style {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+struct LineStylable {
+    #[serde(rename = "line")]
+    line: Option<LineName>,
+    #[serde(flatten)]
+    stylable: Stylable,
+}
+
+impl LineStylable {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            line: self.line.or(other.line),
+            stylable: self.stylable.merge(other.stylable),
+        }
+    }
+}
+
+impl From<Stylable> for LineStylable {
+    fn from(stylable: Stylable) -> Self {
+        Self { stylable, line: None }
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
 pub struct Theme {
     /// Default styling when others aren't specified.
     #[serde(default)]
     default: Stylable,
+
+    /// Default styling to layer on top of selected list items.
+    #[serde(default)]
+    selected: Stylable,
 
     /// Configuration for styling the command bar.
     #[serde(default)]
@@ -241,12 +423,17 @@ pub struct Theme {
     /// Configuration for styling windows.
     #[serde(default)]
     windows: ThemeWindows,
+
+    /// Configuration for the completion menu.
+    #[serde(default)]
+    completion: ThemeCompletion,
 }
 
 impl Theme {
     pub fn merge(self, other: Self) -> Self {
         Self {
             default: self.default.merge(other.default),
+            selected: self.selected.merge(other.selected),
             cmdbar: self.cmdbar.merge(other.cmdbar),
             encryption: self.encryption.merge(other.encryption),
             msgbar: self.msgbar.merge(other.msgbar),
@@ -256,6 +443,7 @@ impl Theme {
             rooms: self.rooms.merge(other.rooms),
             users: self.users.merge(other.users),
             windows: self.windows.merge(other.windows),
+            completion: self.completion.merge(other.completion),
         }
     }
 
@@ -264,6 +452,7 @@ impl Theme {
 
         ThemeValues {
             default: base,
+            selected: Style::from(self.selected),
             cmdbar: self.cmdbar.values(base),
             encryption: self.encryption.values(base),
             msgbar: self.msgbar.values(base),
@@ -273,6 +462,7 @@ impl Theme {
             tabs: self.tabs.values(base),
             users: self.users.values(base),
             windows: self.windows.values(base),
+            completion: self.completion.values(base),
         }
     }
 }
@@ -281,6 +471,9 @@ impl Theme {
 pub struct ThemeValues {
     /// Styling to use when nothing more specific applies.
     pub default: Style,
+
+    /// Styling to patch on top of selected list items.
+    pub selected: Style,
 
     /// Styling for the command bar.
     pub cmdbar: ThemeCommandBarValues,
@@ -308,6 +501,19 @@ pub struct ThemeValues {
 
     /// Styling for rendering windows.
     pub windows: ThemeWindowsValues,
+
+    /// Styling for the completion menu.
+    pub completion: ThemeCompletionValues,
+}
+
+impl ThemeValues {
+    pub fn selected(&self, style: Style, selected: bool) -> Style {
+        if selected {
+            style.patch(self.selected)
+        } else {
+            style
+        }
+    }
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -316,10 +522,19 @@ struct ThemeMessages {
     default: Stylable,
 
     #[serde(default)]
+    blockquote: LineStylable,
+
+    #[serde(default)]
     code: Stylable,
 
     #[serde(default)]
-    code_block: Stylable,
+    code_block: LineStylable,
+
+    #[serde(default)]
+    ruler: LineStylable,
+
+    #[serde(default)]
+    table: LineStylable,
 
     #[serde(default)]
     emphasis: Stylable,
@@ -338,8 +553,11 @@ impl ThemeMessages {
     fn merge(self, other: Self) -> Self {
         Self {
             default: self.default.merge(other.default),
+            blockquote: self.blockquote.merge(other.blockquote),
             code: self.code.merge(other.code),
             code_block: self.code_block.merge(other.code_block),
+            ruler: self.ruler.merge(other.ruler),
+            table: self.table.merge(other.table),
             emphasis: self.emphasis.merge(other.emphasis),
             strong: self.strong.merge(other.strong),
             strikethrough: self.strikethrough.merge(other.strikethrough),
@@ -349,17 +567,33 @@ impl ThemeMessages {
 
     fn values(self, base: Style) -> ThemeMessagesValues {
         let default = base.patch(self.default);
-        let code = default.patch(self.code);
-        let code_block = code.patch(self.code_block);
+        let blockquote = default.patch(self.blockquote.stylable);
+        let ruler = default.patch(self.ruler.stylable);
+        let table = default.patch(self.table.stylable);
         let emphasis = default.patch(self.emphasis);
         let strong = default.patch(self.strong);
         let strikethrough = default.patch(self.strikethrough);
         let underlined = default.patch(self.underlined);
 
+        let code = default.patch(self.code);
+        let code_block = code.patch(self.code_block.stylable);
+
+        let blockquote_line = self.blockquote.line.unwrap_or_default();
+        let code_block_line = self.code_block.line.unwrap_or_default().into();
+        let ruler_line = self.ruler.line.unwrap_or_default();
+        let table_line = self.table.line.unwrap_or_default();
+
         ThemeMessagesValues {
             default,
+            blockquote,
+            blockquote_line,
             code,
             code_block,
+            code_block_line,
+            ruler,
+            ruler_line,
+            table,
+            table_line,
             emphasis,
             strong,
             strikethrough,
@@ -371,8 +605,15 @@ impl ThemeMessages {
 #[derive(Clone, Debug, Default)]
 pub struct ThemeMessagesValues {
     pub default: Style,
+    pub blockquote: Style,
+    pub blockquote_line: LineName,
     pub code: Style,
     pub code_block: Style,
+    pub code_block_line: BorderType,
+    pub ruler: Style,
+    pub ruler_line: LineName,
+    pub table: Style,
+    pub table_line: LineName,
     pub emphasis: Style,
     pub strong: Style,
     pub strikethrough: Style,
@@ -387,9 +628,17 @@ struct ThemeRooms {
     #[serde(default)]
     labels: Stylable,
 
-    // XXX: use different colors for "mention", "notification", "muted room"
     #[serde(default)]
-    unread: Stylable,
+    unread: ThemeRoomsUnreads,
+
+    #[serde(default)]
+    notification: ThemeRoomsUnreads,
+
+    #[serde(default)]
+    mention: ThemeRoomsUnreads,
+
+    #[serde(default)]
+    marked_unread: ThemeRoomsUnreads,
 }
 
 impl ThemeRooms {
@@ -398,15 +647,31 @@ impl ThemeRooms {
             default: self.default.merge(other.default),
             labels: self.labels.merge(other.labels),
             unread: self.unread.merge(other.unread),
+            notification: self.notification.merge(other.notification),
+            mention: self.mention.merge(other.mention),
+            marked_unread: self.marked_unread.merge(other.marked_unread),
         }
     }
 
     fn values(self, base: Style) -> ThemeRoomsValues {
         let default = base.patch(self.default);
         let labels = default.patch(self.labels);
-        let unread = default.patch(self.unread);
 
-        ThemeRoomsValues { default, labels, unread }
+        // Apply any inherited unread styling to the more specific notification types:
+        let unread = self.unread;
+        let notification = self.notification.merge(unread.clone()).values(default, labels);
+        let mention = self.mention.merge(unread.clone()).values(default, labels);
+        let marked_unread = self.marked_unread.merge(unread.clone()).values(default, labels);
+        let unread = unread.values(default, labels);
+
+        ThemeRoomsValues {
+            default,
+            labels,
+            unread,
+            notification,
+            mention,
+            marked_unread,
+        }
     }
 }
 
@@ -414,7 +679,47 @@ impl ThemeRooms {
 pub struct ThemeRoomsValues {
     pub default: Style,
     pub labels: Style,
-    pub unread: Style,
+    pub unread: ThemeRoomsUnreadsValues,
+    pub notification: ThemeRoomsUnreadsValues,
+    pub mention: ThemeRoomsUnreadsValues,
+    pub marked_unread: ThemeRoomsUnreadsValues,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
+struct ThemeRoomsUnreads {
+    #[serde(default)]
+    name: Stylable,
+
+    #[serde(default)]
+    number: Stylable,
+
+    #[serde(default)]
+    labels: Stylable,
+}
+
+impl ThemeRoomsUnreads {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            name: self.name.merge(other.name),
+            number: self.number.merge(other.number),
+            labels: self.labels.merge(other.labels),
+        }
+    }
+
+    fn values(self, base: Style, labels_base: Style) -> ThemeRoomsUnreadsValues {
+        let name = base.patch(self.name);
+        let number = base.patch(self.number);
+        let labels = labels_base.patch(self.labels);
+
+        ThemeRoomsUnreadsValues { name, number, labels }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ThemeRoomsUnreadsValues {
+    pub name: Style,
+    pub number: Style,
+    pub labels: Style,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -525,6 +830,9 @@ struct ThemeCommandBar {
     default: Stylable,
 
     #[serde(default)]
+    completions: Stylable,
+
+    #[serde(default)]
     prompt: Stylable,
 
     #[serde(default)]
@@ -538,6 +846,7 @@ impl ThemeCommandBar {
     fn merge(self, other: Self) -> Self {
         Self {
             default: self.default.merge(other.default),
+            completions: self.completions.merge(other.completions),
             prompt: self.prompt.merge(other.prompt),
             info: self.info.merge(other.info),
             error: self.error.merge(other.error),
@@ -546,16 +855,18 @@ impl ThemeCommandBar {
 
     fn values(self, base: Style) -> ThemeCommandBarValues {
         let default = base.patch(self.default);
+        let completions = default.patch(self.completions);
         let prompt = default.patch(self.prompt);
         let info = default.patch(self.info);
         let error = default.patch(self.error);
-        ThemeCommandBarValues { default, prompt, info, error }
+        ThemeCommandBarValues { default, completions, prompt, info, error }
     }
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct ThemeCommandBarValues {
     pub default: Style,
+    pub completions: Style,
     pub prompt: Style,
     pub info: Style,
     pub error: Style,
@@ -645,15 +956,46 @@ pub struct ThemeTimelineValues {
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+struct ThemeCompletion {
+    #[serde(default)]
+    default: Stylable,
+
+    #[serde(default)]
+    selected: Stylable,
+}
+
+impl ThemeCompletion {
+    fn merge(self, other: Self) -> Self {
+        Self {
+            default: self.default.merge(other.default),
+            selected: self.selected.merge(other.selected),
+        }
+    }
+
+    fn values(self, base: Style) -> ThemeCompletionValues {
+        let default = base.patch(self.default);
+        let selected = default.patch(self.selected);
+
+        ThemeCompletionValues { default, selected }
+    }
+}
+
+#[derive(Clone, Debug, Default)]
+pub struct ThemeCompletionValues {
+    pub default: Style,
+    pub selected: Style,
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
 struct ThemeWindows {
     #[serde(default)]
     default: Stylable,
 
     #[serde(default)]
-    border: Stylable,
+    border: LineStylable,
 
     #[serde(default)]
-    border_focused: Stylable,
+    border_focused: LineStylable,
 
     #[serde(default)]
     title: Stylable,
@@ -671,11 +1013,21 @@ impl ThemeWindows {
 
     fn values(self, base: Style) -> ThemeWindowsValues {
         let default = base.patch(self.default);
-        let border = default.patch(self.border);
-        let border_focused = border.patch(self.border_focused);
+        let border = default.patch(self.border.stylable);
+        let border_focused = border.patch(self.border_focused.stylable);
         let title = default.patch(self.title);
+        let border_line: BorderType = self.border.line.unwrap_or_default().into();
+        let border_focused_line =
+            self.border_focused.line.map(BorderType::from).unwrap_or(border_line);
 
-        ThemeWindowsValues { default, border, border_focused, title }
+        ThemeWindowsValues {
+            default,
+            border,
+            border_line,
+            border_focused,
+            border_focused_line,
+            title,
+        }
     }
 }
 
@@ -683,13 +1035,67 @@ impl ThemeWindows {
 pub struct ThemeWindowsValues {
     pub default: Style,
     pub border: Style,
+    pub border_line: BorderType,
     pub border_focused: Style,
+    pub border_focused_line: BorderType,
     pub title: Style,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum UserColors {
+    RainbowDark,
+    RainbowLight,
+    #[default]
+    #[serde(skip)]
+    Unset,
+    #[serde(untagged)]
+    Palette(Vec<Color>),
+}
+
+impl UserColors {
+    fn hash(user_id: &str) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        user_id.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    fn hash_to_color(hash: f64, l_base: f64) -> Color {
+        let h = hash % 360.0;
+        let s = hash % 60.0 + 40.0;
+        let l = hash % 35.0 + l_base;
+        let hsl: Hsl = Hsl::new(h as f32, s as f32 / 100.0, l as f32 / 100.0);
+        Color::from_hsl(hsl)
+    }
+
+    fn color(&self, user_id: &str) -> Option<Color> {
+        let color = match self {
+            Self::Unset => return None,
+            Self::Palette(colors) => {
+                if colors.is_empty() {
+                    return None;
+                } else {
+                    let hash = Self::hash(user_id) as usize;
+                    colors[hash % colors.len()]
+                }
+            },
+            Self::RainbowDark => {
+                let hash = Self::hash(user_id);
+                Self::hash_to_color(hash as f64, 15.0)
+            },
+            Self::RainbowLight => {
+                let hash = Self::hash(user_id);
+                Self::hash_to_color(hash as f64, 50.0)
+            },
+        };
+
+        Some(color)
+    }
+}
+
+#[derive(Clone, Debug, Default, Deserialize)]
 struct ThemeUsers {
-    colors: Option<Vec<Color>>,
+    colors: Option<UserColors>,
     #[serde(flatten)]
     stylable: Stylable,
 }
@@ -703,8 +1109,8 @@ impl ThemeUsers {
     }
 
     fn values(self, base: Style) -> ThemeUsersValues {
-        let colors = self.colors.unwrap_or_default();
         let style = base.patch(self.stylable);
+        let colors = self.colors.unwrap_or_default();
 
         ThemeUsersValues { colors, style }
     }
@@ -712,20 +1118,13 @@ impl ThemeUsers {
 
 #[derive(Clone, Debug, Default)]
 pub struct ThemeUsersValues {
-    colors: Vec<Color>,
+    colors: UserColors,
     style: Style,
 }
 
 impl ThemeUsersValues {
     pub fn color(&self, user_id: &str) -> Color {
-        if self.colors.is_empty() {
-            return self.style.fg.unwrap_or(Color::Reset);
-        }
-
-        let mut hasher = DefaultHasher::new();
-        user_id.hash(&mut hasher);
-        let color = hasher.finish() as usize % self.colors.len();
-        self.colors[color]
+        self.colors.color(user_id).or(self.style.fg).unwrap_or(Color::Reset)
     }
 
     pub fn style(&self, user_id: &str, explicit: Option<Color>) -> Style {
@@ -734,12 +1133,11 @@ impl ThemeUsersValues {
         if let Some(c) = explicit {
             // Use explicit color from config file:
             style.fg(c)
-        } else if self.colors.is_empty() {
-            // User has explicitly set an empty array:
-            style
+        } else if let Some(c) = self.colors.color(user_id) {
+            // Apply the user color we hashed to:
+            style.fg(c)
         } else {
-            // Hash on user ID to pick a color from the array:
-            style.fg(self.color(user_id))
+            style
         }
     }
 }
@@ -769,5 +1167,50 @@ mod tests {
         assert_eq!(values.windows.border, Style::default().fg(Color::Green).bold());
         assert_eq!(values.windows.border_focused, Style::default().fg(Color::Green).not_bold());
         assert_eq!(values.windows.title, Style::default().fg(Color::Red).bold());
+    }
+
+    #[test]
+    fn test_border_names() {
+        let res: LineName = serde_json::from_str(r#""plain""#).unwrap();
+        assert_eq!(res, LineName::Plain);
+
+        let res: LineName = serde_json::from_str(r#""rounded""#).unwrap();
+        assert_eq!(res, LineName::Rounded);
+
+        let res: LineName = serde_json::from_str(r#""double-dashed-light""#).unwrap();
+        assert_eq!(res, LineName::DoubleDashedLight);
+
+        let res: LineName = serde_json::from_str(r#""double-dashed-heavy""#).unwrap();
+        assert_eq!(res, LineName::DoubleDashedHeavy);
+    }
+
+    #[test]
+    fn test_load_packaged_themes() {
+        let dir = Path::new("themes");
+        let mut count = 0;
+
+        for entry in std::fs::read_dir(dir).expect("can read themes") {
+            let path = entry.expect("can read theme file").path();
+
+            if path.extension().is_none_or(|ext| ext != "toml") {
+                continue;
+            }
+
+            let file = ThemeFile::load(&path)
+                .with_context(|| format!("failed to parse {}", path.display()))
+                .expect("parsed theme");
+            assert!(file.theme.default.background.is_some());
+            assert!(file.theme.default.color.is_some());
+
+            count += 1;
+        }
+
+        // We don't hardcode the theme count so that adding new themes doesn't
+        // require updating this test every time, but we do check that we have
+        // seen enough that if something major changes (like renaming every
+        // file to no longer end in `.toml`) then we will notice and fix this
+        // test to account for it and continue asserting that the tests remain
+        // valid.
+        assert!(count > 40, "we should process >40 themes");
     }
 }

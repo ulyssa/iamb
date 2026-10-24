@@ -133,16 +133,18 @@ impl fmt::Display for VerifyItem {
 }
 
 impl ListItem<IambInfo> for VerifyItem {
-    fn show(
-        &self,
+    type Section = &'static str;
+
+    fn show<'a>(
+        &'a self,
         selected: bool,
         _: &ViewportContext<ListCursor>,
-        store: &mut ProgramStore,
-    ) -> Text<'_> {
+        store: &'a ProgramStore,
+    ) -> Text<'a> {
         let mut lines = vec![];
         let style = store.application.settings.theme.default;
         let bold = style.bold();
-        let selected = super::selected_style(selected, style);
+        let selected = store.application.settings.theme.selected(style, selected);
 
         let mut other_device = None;
         let state = match self.request.state() {

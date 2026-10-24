@@ -5,7 +5,6 @@
 //! contents).
 
 use crate::base::RoomInfo;
-use crate::config::TunableValues;
 use crate::prelude::*;
 use crate::util::{
     replace_emojis_in_line,

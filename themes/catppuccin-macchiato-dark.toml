@@ -1,0 +1,171 @@
+# catppuccin-macchiato-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#1E2030)
+# COLOR_BG2 => Alternate background (#24273A)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#303347)
+#
+# COLOR_UI1 => Window border color, completion menu background (#7DC4E4)
+# COLOR_UI2 => Window title color (#91D7E3)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#F5A97F)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#F0C6C6)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#939AB7)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#A6DA95)
+#
+# COLOR_TEXT1 => Primary text color (#CAD3F5)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#F5BDE6)
+# COLOR_TEXT3 => Alternate text color (#B7BDF8)
+# COLOR_TEXT4 => Alternate text color (#C6A0F6)
+# COLOR_TEXT5 => Alternate text color (#8AADF4)
+#
+#
+[theme.users]
+colors = [
+    # Latte
+    "#04A5E5",
+    "#179299",
+    "#1E66F5",
+    "#209FB5",
+    "#40A02B",
+    "#4C4F69",
+    "#5C5F77",
+    "#6C6F85",
+    "#7287FD",
+    "#7C7F93",
+    "#8839EF",
+    "#8C8FA1",
+    "#9CA0B0",
+    "#ACB0BE",
+    "#BCC0CC",
+    "#CCD0DA",
+    "#D20F39",
+    "#DC8A78",
+    "#DCE0E8",
+    "#DD7878",
+    "#DF8E1D",
+    "#E64553",
+    "#E6E9EF",
+    "#EA76CB",
+    "#EFF1F5",
+    "#FE640B",
+
+    # Frappé
+    "#414559",
+    "#51576D",
+    "#626880",
+    "#737994",
+    "#81C8BE",
+    "#838BA7",
+    "#85C1DC",
+    "#8CAAEE",
+    "#949CBB",
+    "#99D1DB",
+    "#A5ADCE",
+    "#A6D189",
+    "#B5BFE2",
+    "#BABBF1",
+    "#C6D0F5",
+    "#CA9EE6",
+    "#E5C890",
+    "#E78284",
+    "#EA999C",
+    "#EEBEBE",
+    "#EF9F76",
+    "#F2D5CF",
+    "#F4B8E4",
+
+    # Macchiato
+    "#494D64",
+    "#5B6078",
+    "#6E738D",
+    "#7DC4E4",
+    "#8087A2",
+    "#8AADF4",
+    "#8BD5CA",
+    "#91D7E3",
+    "#939AB7",
+    "#A5ADCB",
+    "#A6DA95",
+    "#B7BDF8",
+    "#B8C0E0",
+    "#C6A0F6",
+    "#CAD3F5",
+    "#ED8796",
+    "#EE99A0",
+    "#EED49F",
+    "#F0C6C6",
+    "#F4DBD6",
+    "#F5A97F",
+    "#F5BDE6",
+
+    # Mocha
+    "#45475A",
+    "#585B70",
+    "#6C7086",
+    "#74C7EC",
+    "#7F849C",
+    "#89B4FA",
+    "#89DCEB",
+    "#9399B2",
+    "#94E2D5",
+    "#A6ADC8",
+    "#A6E3A1",
+    "#B4BEFE",
+    "#BAC2DE",
+    "#CBA6F7",
+    "#CDD6F4",
+    "#EBA0AC",
+    "#F2CDCD",
+    "#F38BA8",
+    "#F5C2E7",
+    "#F5E0DC",
+    "#F9E2AF",
+    "#FAB387",
+]
+
+[theme.default]
+color = "#CAD3F5"
+background = "#1E2030"
+
+[theme.completion]
+default.background = "#303347"
+default.color = "#7DC4E4"
+selected.background = "#24273A"
+selected.color = "#CAD3F5"
+
+[theme.timeline]
+redacted.color = "#F0C6C6"
+
+[theme.messages]
+code.color = "#F5BDE6"
+code.background = "#24273A"
+emphasis.color = "#C6A0F6"
+strong.color = "#B7BDF8"
+
+[theme.rooms]
+default.color = "#8AADF4"
+labels.color = "#C6A0F6"
+unread.name.color = "#F5BDE6"
+unread.number.color = "#C6A0F6"
+mention.number.color = "#F5A97F"
+notification.number.color = "#939AB7"
+marked_unread.number.color = "#A6DA95"
+
+[theme.windows]
+border.color = "#7DC4E4"
+title.color = "#91D7E3"
+
+[theme.encryption]
+icon_encrypted.color = "#A6DA95"
+icon_unencrypted.color = "#F5A97F"
+icon_unknown.color = "#939AB7"
+
+[theme.cmdbar]
+error.color = "#F5A97F"

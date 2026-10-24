@@ -1,0 +1,79 @@
+# seoul256-light theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#D9D9D9)
+# COLOR_BG2 => Alternate background (#E1E1E1)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#E1E1E1)
+#
+# COLOR_UI1 => Window border color, completion menu background (#719899)
+# COLOR_UI2 => Window title color (#727100)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#BE7572)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#E19972)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#999872)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#9A7200)
+#
+# COLOR_TEXT1 => Primary text color (#616161)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#9A7372)
+# COLOR_TEXT3 => Alternate text color (#9A7599)
+# COLOR_TEXT4 => Alternate text color (#009799)
+# COLOR_TEXT5 => Alternate text color (#719872)
+#
+#
+[theme.users]
+colors = [
+    "#BE7572",
+    "#E19972",
+    "#999872",
+    "#9A7200",
+    "#9A7372",
+    "#9A7599",
+    "#009799",
+    "#719872",
+]
+
+[theme.default]
+color = "#616161"
+background = "#D9D9D9"
+
+[theme.completion]
+default.background = "#E1E1E1"
+default.color = "#719899"
+selected.background = "#E1E1E1"
+selected.color = "#616161"
+
+[theme.timeline]
+redacted.color = "#E19972"
+
+[theme.messages]
+code.color = "#9A7372"
+code.background = "#E1E1E1"
+emphasis.color = "#009799"
+strong.color = "#9A7599"
+
+[theme.rooms]
+default.color = "#719872"
+labels.color = "#009799"
+unread.name.color = "#9A7372"
+unread.number.color = "#009799"
+mention.number.color = "#BE7572"
+notification.number.color = "#999872"
+marked_unread.number.color = "#9A7200"
+
+[theme.windows]
+border.color = "#719899"
+title.color = "#727100"
+
+[theme.encryption]
+icon_encrypted.color = "#9A7200"
+icon_unencrypted.color = "#BE7572"
+icon_unknown.color = "#999872"
+
+[theme.cmdbar]
+error.color = "#BE7572"

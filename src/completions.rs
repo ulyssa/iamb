@@ -380,6 +380,16 @@ fn complete_iamb_verify(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     }
 }
 
+/// Tab completion for `:ignore`
+fn complete_iamb_ignore(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    let subcmds = ["set", "unset", "show"];
+    match args.len() {
+        1 => complete_choices(&args[0], &subcmds),
+        2 if subcmds[0..2].contains(&args[0].as_str()) => complete_users(args[1].as_str(), store),
+        _ => vec![],
+    }
+}
+
 /// Tab completion for `:self`
 fn complete_iamb_self(args: Vec<String>) -> Vec<String> {
     let subcmds = ["avatar", "name", "nick", "timezone", "tz"];
@@ -532,6 +542,23 @@ fn complete_iamb_space(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     }
 }
 
+/// Tab completion for `:theme`
+fn complete_iamb_theme(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    if args.len() == 1 {
+        store.settings.themes.complete(&args[0])
+    } else {
+        vec![]
+    }
+}
+
+/// Tab completion for `:spaces`
+fn complete_iamb_spaces(args: Vec<String>) -> Vec<String> {
+    match args.len() {
+        1 if "toplevel".starts_with(&args[0]) => vec!["toplevel".to_string()],
+        _ => vec![],
+    }
+}
+
 /// Tab completion for `:logout`
 fn complete_iamb_logout(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     let id = store.settings.profile.user_id.as_str();
@@ -577,6 +604,7 @@ fn complete_cmdarg(
 
         "follow" => complete_choices(&args[0], &["next", "previous"]),
 
+        "ignore" => complete_iamb_ignore(args, store),
         "invite" => complete_iamb_invite(args, store),
 
         "join" if args.len() == 1 => complete_matrix_names(&args[0], store),
@@ -600,6 +628,10 @@ fn complete_cmdarg(
 
         "space" => complete_iamb_space(args, store),
 
+        "spaces" => complete_iamb_spaces(args),
+
+        "theme" => complete_iamb_theme(args, store),
+
         // XXX: Check whether we can get the id of the focused message to improve completion
         "unreact" if args.len() == 1 => complete_emoji(&args[0], store),
         "unreact" => vec![],
@@ -621,8 +653,8 @@ fn complete_cmdarg(
 
         // These have no arguments
         "cancel" | "chats" | "dms" | "editor" | "edit" | "forget" | "invites" | "leave" |
-        "members" | "mentions" | "pin" | "pinned" | "unpin" | "replied" | "reply" | "rooms" |
-        "spaces" | "welcome" => vec![],
+        "members" | "mentions" | "message" | "pin" | "pinned" | "unpin" | "replied" | "reply" |
+        "rooms" | "welcome" => vec![],
 
         "abo" | "aboveleft" | "bel" | "belowright" | "hor" | "horizontal" | "lefta" |
         "leftabove" | "rightb" | "rightbelow" | "tab" | "vert" | "vertical" => {
@@ -777,7 +809,12 @@ impl Completer<IambInfo> for IambCompleter {
     ) -> Vec<String> {
         match content {
             IambBufferId::Command(CommandType::Command) => complete_cmdbar(text, cursor, store),
-            IambBufferId::Command(CommandType::Search) => vec![],
+            IambBufferId::Command(
+                CommandType::Application |
+                CommandType::Content |
+                CommandType::Search |
+                CommandType::Shell,
+            ) => vec![],
             IambBufferId::Room(room_id, _, RoomFocus::MessageBar) => {
                 complete_msgbar(text, cursor, store, room_id)
             },
@@ -788,6 +825,7 @@ impl Completer<IambInfo> for IambCompleter {
             IambBufferId::PinnedList(_) => vec![],
             IambBufferId::RoomList => vec![],
             IambBufferId::SpaceList => vec![],
+            IambBufferId::ToplevelSpaceList => vec![],
             IambBufferId::VerifyList => vec![],
             IambBufferId::Welcome => vec![],
             IambBufferId::ChatList => vec![],

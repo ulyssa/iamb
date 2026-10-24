@@ -5,7 +5,7 @@
 .\"
 .\" You can preview this file with:
 .\"     $ man ./docs/iamb.1
-.Dd Sep 19, 2026
+.Dd Oct 21, 2026
 .Dt IAMB 1
 .Os
 .Sh NAME
@@ -65,6 +65,8 @@ Log out of
 View a list of joined rooms.
 .It Sy ":spaces"
 View a list of joined spaces.
+.It Sy ":spaces toplevel"
+View a list of joined spaces that are not children of other joined spaces.
 .It Sy ":unreads"
 View a list of unread rooms.
 .It Sy ":unreads clear"
@@ -73,6 +75,8 @@ Mark all rooms as read.
 View a list of rooms with mentions of the current user.
 .It Sy ":invites"
 View a list of rooms you are invited to.
+.It Sy ":theme [name]"
+Change the current theme.
 .It Sy ":welcome"
 View the startup Welcome window.
 .It Sy ":forget"
@@ -86,6 +90,19 @@ Export and encrypt keys to
 .It Sy ":keys import [path] [passphrase]"
 Import and decrypt keys from
 .Pa path .
+Passphrases containing spaces or command metacharacters should be quoted.
+Inside double quotes, escape
+.Ql \
+and
+.Ql "
+with a backslash.
+For unquoted arguments, escape spaces,
+.Ql \ ,
+.Ql # ,
+.Ql % ,
+.Ql | ,
+and
+.Ql " .
 .It Sy ":verify"
 View a list of ongoing E2EE verifications.
 .It Sy ":verify accept [key]"
@@ -106,6 +123,8 @@ Recover the encryption secrets from the backup on your homeserver, verifying thi
 
 .Sh "MESSAGE COMMANDS"
 .Bl -tag -width Ds
+.It Sy ":message"
+View more information about the focused message.
 .It Sy ":download [path]"
 Download an attachment from the selected message and save it to the optional path.
 .It Sy ":open [path]"
@@ -150,6 +169,12 @@ and
 Follow the tombstone information to the upgraded room.
 .It Sy ":follow previous"
 Follow the room creation information to the pre-upgraded room.
+.It Sy ":ignore set [user]"
+Add a user to your account's ignore list.
+.It Sy ":ignore unset [user]"
+Remove a user from your account's ignore list.
+.It Sy ":ignore show"
+Show all users in your account's ignore list.
 .It Sy ":invite accept"
 Accept an invitation to the currently focused room.
 .It Sy ":invite reject"
@@ -160,6 +185,8 @@ Send an invitation to a user to join the currently focused room.
 Join the focused preview room.
 .It Sy ":join [room]"
 Join a room or open it if you are already joined.
+This accepts a room id, room alias, user id, matrix uri, or matrix.to link.
+If the argument refers to a user, a dm room with them is opened/created.
 .It Sy ":knock"
 Request to join the focused preview room.
 .It Sy ":knock accept [user]"
@@ -232,7 +259,9 @@ Note that
 .Dq mentions
 and
 .Dq keywords
-are aliases for the same behaviour.
+are aliases for the same behaviour, and the room will be labeled
+.Dq Calmed
+in room lists.
 .It Sy ":room notify unset"
 Unset any room-level notification configuration.
 .It Sy ":room notify show"
@@ -311,6 +340,13 @@ Set the avatar URL for your profile.
 Unset the avatar for your profile.
 .It Sy ":self avatar show"
 Show the current avatar URL for your profile.
+.It Sy ":self invites set [allow|block]"
+Set whether others are allowed to send you invites.
+.It Sy ":self invites unset"
+Shorthand for
+.Sy ":self invites set allow" .
+.It Sy ":self invites show"
+Show whether other users are currently allowed to send you invites.
 .It Sy ":self name set [nickname]"
 Set the display name for your profile.
 .It Sy ":self name unset"

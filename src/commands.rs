@@ -49,6 +49,38 @@ fn tag_name(name: String) -> Result<TagName, CommandError> {
     Ok(tag)
 }
 
+fn iamb_ignore(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut iter = desc.arg.strings()?.into_iter();
+    let action = iter.next().ok_or(CommandError::InvalidArgument)?;
+    let arg = iter.next();
+
+    if iter.next().is_some() {
+        return Err(CommandError::InvalidArgument);
+    }
+
+    let act: IambAction = match (action.as_str(), arg) {
+        ("set", Some(user)) => HomeserverAction::AccountSet(AccountField::Ignore, user).into(),
+        ("set", None) => return Err(CommandError::InvalidArgument),
+
+        ("show", None) => HomeserverAction::AccountShow(AccountField::Ignore).into(),
+        ("show", Some(_)) => return Err(CommandError::InvalidArgument),
+
+        ("unset", Some(user)) => {
+            HomeserverAction::AccountUnset(AccountField::Ignore, Some(user)).into()
+        },
+        ("unset", None) => return Err(CommandError::InvalidArgument),
+
+        (op, _) => {
+            let msg = format!("unknown `:ignore` operation: {op:?}");
+            return Err(CommandError::Error(msg));
+        },
+    };
+
+    let step = CommandStep::Continue(act.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_invite(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let args = desc.arg.strings()?;
 
@@ -498,6 +530,17 @@ fn iamb_invites(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     return Ok(step);
 }
 
+fn iamb_message(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    if !desc.arg.text.is_empty() {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    let open = IambAction::Room(RoomAction::Message(ctx.clone().into()));
+    let step = CommandStep::Continue(open.into(), ctx.context.clone());
+
+    return Ok(step);
+}
+
 fn iamb_self(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
     let mut iter = desc.arg.strings()?.into_iter();
     let field = iter.next().ok_or(CommandError::InvalidArgument)?;
@@ -534,6 +577,22 @@ fn iamb_self(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
             HomeserverAction::ProfileFieldUnset(ProfileFieldName::AvatarUrl).into()
         },
         ("avatar", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self invites show
+        ("invites", "show", None) => HomeserverAction::AccountShow(AccountField::Invites).into(),
+        ("invites", "show", Some(_)) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self invites set
+        ("invites", "set", Some(s)) => {
+            HomeserverAction::AccountSet(AccountField::Invites, s).into()
+        },
+        ("invites", "set", None) => return Result::Err(CommandError::InvalidArgument),
+
+        // :self invites unset
+        ("invites", "unset", None) => {
+            HomeserverAction::AccountUnset(AccountField::Invites, None).into()
+        },
+        ("invites", "unset", Some(_)) => return Result::Err(CommandError::InvalidArgument),
 
         // :self name show
         ("name" | "nick", "show", None) => {
@@ -583,14 +642,43 @@ fn iamb_self(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
 }
 
 fn iamb_spaces(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
-    if !desc.arg.text.is_empty() {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
         return Result::Err(CommandError::InvalidArgument);
     }
 
-    let open = ctx.switch(OpenTarget::Application(IambId::SpaceList));
-    let step = CommandStep::Continue(open, ctx.context.clone());
+    match args.pop().as_deref() {
+        Some("toplevel") => {
+            let open = ctx.switch(OpenTarget::Application(IambId::ToplevelSpaceList));
+            let step = CommandStep::Continue(open, ctx.context.clone());
 
-    return Ok(step);
+            return Ok(step);
+        },
+        Some(_) => return Result::Err(CommandError::InvalidArgument),
+        None => {
+            let open = ctx.switch(OpenTarget::Application(IambId::SpaceList));
+            let step = CommandStep::Continue(open, ctx.context.clone());
+
+            return Ok(step);
+        },
+    }
+}
+
+fn iamb_theme(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
+    let mut args = desc.arg.strings()?;
+
+    if args.len() > 1 {
+        return Result::Err(CommandError::InvalidArgument);
+    }
+
+    if let Some(theme) = args.pop() {
+        let theme = IambAction::ChangeTheme(theme);
+        let step = CommandStep::Continue(theme.into(), ctx.context.clone());
+        return Ok(step);
+    } else {
+        return Result::Err(CommandError::InvalidArgument);
+    }
 }
 
 fn iamb_welcome(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
@@ -617,7 +705,8 @@ fn iamb_join(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
         return Ok(step);
     }
 
-    let open = ctx.switch(args.remove(0));
+    let flags = OpenFlags::FORCE;
+    let open = ctx.with_open_flags(flags).switch(args.remove(0));
     let step = CommandStep::Continue(open, ctx.context.clone());
 
     return Ok(step);
@@ -1111,6 +1200,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_forget,
     });
     cmds.add_command(ProgramCommand {
+        name: "ignore".into(),
+        aliases: vec![],
+        f: iamb_ignore,
+    });
+    cmds.add_command(ProgramCommand {
         name: "invite".into(),
         aliases: vec![],
         f: iamb_invite,
@@ -1165,6 +1259,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
     });
     cmds.add_command(ProgramCommand { name: "room".into(), aliases: vec![], f: iamb_room });
     cmds.add_command(ProgramCommand {
+        name: "message".into(),
+        aliases: vec![],
+        f: iamb_message,
+    });
+    cmds.add_command(ProgramCommand {
         name: "space".into(),
         aliases: vec![],
         f: iamb_space,
@@ -1190,6 +1289,11 @@ pub fn add_iamb_commands(cmds: &mut ProgramCommands) {
         f: iamb_invites,
     });
     cmds.add_command(ProgramCommand { name: "self".into(), aliases: vec![], f: iamb_self });
+    cmds.add_command(ProgramCommand {
+        name: "theme".into(),
+        aliases: vec![],
+        f: iamb_theme,
+    });
     cmds.add_command(ProgramCommand {
         name: "unreact".into(),
         aliases: vec![],
@@ -1265,7 +1369,7 @@ mod tests {
 
         let mut cmds = setup_commands(&aliases).unwrap();
 
-        let act = WindowAction::Switch(OpenTarget::Application(IambId::ChatList));
+        let act = WindowAction::Switch(OpenTarget::Application(IambId::ChatList), OpenFlags::NONE);
         let expected = vec![(act.into(), ctx.clone())];
 
         assert_eq!(cmds.input_cmd("c", ctx.clone()).unwrap(), expected);
@@ -1278,7 +1382,8 @@ mod tests {
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd(":verify", ctx.clone()).unwrap();
-        let act = WindowAction::Switch(OpenTarget::Application(IambId::VerifyList));
+        let act =
+            WindowAction::Switch(OpenTarget::Application(IambId::VerifyList), OpenFlags::NONE);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd(":verify request @user1:example.com", ctx.clone()).unwrap();
@@ -1336,11 +1441,12 @@ mod tests {
         let ctx = EditContext::default();
 
         let res = cmds.input_cmd("join #foobar:example.com", ctx.clone()).unwrap();
-        let act = WindowAction::Switch(OpenTarget::Name("#foobar:example.com".into()));
+        let act =
+            WindowAction::Switch(OpenTarget::Name("#foobar:example.com".into()), OpenFlags::FORCE);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("join #", ctx.clone()).unwrap();
-        let act = WindowAction::Switch(OpenTarget::Alternate);
+        let act = WindowAction::Switch(OpenTarget::Alternate, OpenFlags::FORCE);
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd("join", ctx.clone()).unwrap();

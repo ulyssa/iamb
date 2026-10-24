@@ -1,20 +1,25 @@
 //! # Logic for loading and validating application configuration
-
+use std::collections::HashSet;
 use std::env;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write as _};
 use std::process;
 use std::sync::Arc;
 
+use anyhow::anyhow;
+use chrono::format::{Item, StrftimeItems};
+use chrono::{DateTime, Local};
 use clap::Parser;
 use indexmap::IndexMap;
 use lazy_static::lazy_static;
-use matrix_sdk::EncryptionState;
 use matrix_sdk::authentication::matrix::MatrixSession;
+use matrix_sdk::authentication::oauth::{ClientId, OAuthSession, UserSession};
 use matrix_sdk::media::MediaRetentionPolicy;
 use matrix_sdk::reqwest::header::{HeaderMap, HeaderValue};
-use matrix_sdk::ruma::{OwnedDeviceId, owned_server_name};
+use matrix_sdk::ruma::{DeviceId, OwnedDeviceId, owned_server_name};
+use matrix_sdk::{AuthSession, EncryptionState, SessionMeta, SessionTokens};
 use modalkit::crossterm;
+use modalkit::editing::completion::CompletionMap;
 use modalkit::env::vim::VimMode;
 use modalkit::keybindings::InputKey;
 use ratatui_image::FilterType;
@@ -23,7 +28,7 @@ use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize};
 
-use crate::base::{SortColumn, SortFieldRoom, SortFieldUser, SortOrder};
+use crate::base::{SortColumn, SortFieldRoom, SortFieldSpace, SortFieldUser, SortOrder};
 use crate::prelude::*;
 
 pub mod theme;
@@ -49,12 +54,31 @@ const DEFAULT_MEMBERS_SORT: [SortColumn<SortFieldUser>; 4] = [
     SortColumn(SortFieldUser::UserId, SortOrder::Ascending),
 ];
 
-const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 5] = [
+const DEFAULT_ROOM_SORT: [SortColumn<SortFieldRoom>; 10] = [
     SortColumn(SortFieldRoom::Favorite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Invite, SortOrder::Ascending),
     SortColumn(SortFieldRoom::LowPriority, SortOrder::Ascending),
-    SortColumn(SortFieldRoom::Unread, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Mentions, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Notifications, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Joined, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Space, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Direct, SortOrder::Ascending),
+    SortColumn(SortFieldRoom::Recent, SortOrder::Ascending),
     SortColumn(SortFieldRoom::Name, SortOrder::Ascending),
+];
+
+const DEFAULT_SPACE_SORT: [SortColumn<SortFieldSpace>; 3] = [
+    SortColumn(SortFieldSpace::Room(SortFieldRoom::Space), SortOrder::Ascending),
+    SortColumn(SortFieldSpace::Room(SortFieldRoom::Joined), SortOrder::Ascending),
+    SortColumn(SortFieldSpace::SpaceOrder, SortOrder::Ascending),
+];
+
+const DEFAULT_ROOM_LABELS: [RoomLabel; 5] = [
+    RoomLabel::Unread,
+    RoomLabel::Membership,
+    RoomLabel::Tags,
+    RoomLabel::Muted,
+    RoomLabel::Type,
 ];
 
 const DEFAULT_ENABLE_TITLE: bool = true;
@@ -66,11 +90,38 @@ const DEFAULT_ICON_ENC: Cow<'static, str> = Cow::Borrowed("[E] ");
 const DEFAULT_ICON_UNENC: Cow<'static, str> = Cow::Borrowed("[U] ");
 const DEFAULT_ICON_UNKNOWN: Cow<'static, str> = Cow::Borrowed("[?] ");
 
-const DEFAULT_LOG_LEVEL: &str = if cfg!(feature = "max_level_error") {
-    "error"
-} else {
-    "warn"
-};
+const DEFAULT_LOG_LEVEL: &str = "off";
+
+/// Default date separator, matching the historical hard-coded `"%A, %B %d %Y"`.
+const DEFAULT_DATE_FORMAT: &str = "%A, %B %d %Y";
+
+/// Default time gutter, preserving the historical `  [HH:MM:SS]` rendering.
+const DEFAULT_TIME_FORMAT: &str = "  [%T]";
+
+/// Unix seconds of the timestamp used to measure time-gutter width.
+///
+/// 2024-01-17 13:25:30 UTC, so numeric fields have their usual widths.
+const TIME_GUTTER_SAMPLE_UNIX: i64 = 1_705_497_930;
+
+fn time_gutter_sample() -> DateTime<Local> {
+    DateTime::from_timestamp(TIME_GUTTER_SAMPLE_UNIX, 0)
+        .unwrap_or_default()
+        .with_timezone(&Local)
+}
+
+/// Display columns reserved for the per-message time gutter.
+///
+/// The width is the display width of `format` applied to one fixed sample
+/// timestamp, so a configuration keeps a constant column. An empty format
+/// reserves nothing and hides the time.
+pub fn time_gutter_width(format: &str) -> usize {
+    if format.is_empty() {
+        return 0;
+    }
+
+    let rendered = time_gutter_sample().format(format).to_string();
+    UnicodeWidthStr::width(rendered.as_str())
+}
 
 fn is_profile_char(c: char) -> bool {
     c.is_ascii_alphanumeric() || c == '.' || c == '-'
@@ -127,7 +178,7 @@ fn deserialize_register<'de, D>(deserializer: D) -> Result<Option<Register>, D::
 where
     D: serde::de::Deserializer<'de>,
 {
-    let r = <&'de str>::deserialize(deserializer)?;
+    let r = String::deserialize(deserializer)?;
 
     if r.len() > 1 {
         return Err(D::Error::custom("expected a single character to specify a register"));
@@ -152,13 +203,70 @@ where
     Ok(Some(r))
 }
 
-const VERSION: &str = match option_env!("VERGEN_GIT_SHA") {
-    None => env!("CARGO_PKG_VERSION"),
-    Some(_) => concat!(env!("CARGO_PKG_VERSION"), " (", env!("VERGEN_GIT_SHA"), ")"),
-};
+fn deserialize_strftime<'de, D>(deserializer: D) -> Result<Option<String>, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let value = String::deserialize(deserializer)?;
+
+    // `DelayedFormat`'s `Display` impl returns `fmt::Error` for a bad specifier,
+    // and `.to_string()` then panics. Reject those strings while loading config.
+    if StrftimeItems::new(&value).any(|item| matches!(item, Item::Error)) {
+        return Err(D::Error::custom(format!("invalid strftime format string: {value:?}")));
+    }
+
+    Ok(Some(value))
+}
+
+/// Load themes from disk, and merge in the configured overrides.
+fn load_themes(
+    themes_dir: &Path,
+    theme_overrides: theme::Theme,
+) -> anyhow::Result<CompletionMap<String, theme::Theme>> {
+    let mut themes = CompletionMap::default();
+
+    let mut insert = |n, t| {
+        let theme = theme_overrides.clone().merge(t).merge(theme::default_theme());
+        themes.insert(n, theme);
+    };
+
+    let mut load_dir = |d: &Path| -> anyhow::Result<()> {
+        theme::find_themes(d)?.into_iter().for_each(|(n, t)| insert(n, t));
+        Ok(())
+    };
+
+    // Load themes from the shared directory first for systems with XDG_DATA_DIRS:
+    #[cfg(any(unix, target_os = "redox"))]
+    xdg::BaseDirectories::new()
+        .get_data_dirs()
+        .into_iter()
+        .map(|p| p.join("iamb/themes"))
+        .try_for_each(|p| load_dir(&p))?;
+
+    // Load from the `themes` directory in the user's configuration directory:
+    load_dir(themes_dir)?;
+
+    // Insert a default theme that defaults to using terminal colors:
+    let default_theme = theme_overrides.clone().merge(theme::default_theme());
+    themes.insert("default".into(), default_theme);
+    Ok(themes)
+}
+
+struct IambVersion;
+
+impl From<IambVersion> for clap::builder::Str {
+    fn from(_: IambVersion) -> Self {
+        let version: Cow<'static, str> = match option_env!("VERGEN_GIT_SHA") {
+            None => env!("CARGO_PKG_VERSION").into(),
+            Some(sha) => format!("{} ({sha})", env!("CARGO_PKG_VERSION")).into(),
+        };
+
+        version.into()
+    }
+}
 
 #[derive(Parser)]
-#[clap(version = VERSION, about, long_about = None)]
+#[clap(version = IambVersion, about, long_about = None)]
 #[clap(propagate_version = true)]
 pub struct Iamb {
     #[clap(long, value_parser)]
@@ -268,6 +376,71 @@ pub struct Session {
     refresh_token: Option<String>,
     user_id: OwnedUserId,
     device_id: OwnedDeviceId,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    client_id: Option<ClientId>,
+}
+
+impl From<Session> for AuthSession {
+    fn from(session: Session) -> Self {
+        if let Some(client_id) = session.client_id {
+            AuthSession::OAuth(Box::new(OAuthSession {
+                client_id,
+                user: UserSession {
+                    meta: SessionMeta {
+                        user_id: session.user_id,
+                        device_id: session.device_id,
+                    },
+                    tokens: SessionTokens {
+                        access_token: session.access_token,
+                        refresh_token: session.refresh_token,
+                    },
+                },
+            }))
+        } else {
+            AuthSession::Matrix(session.into())
+        }
+    }
+}
+
+/// A device ID saved at logout so that the next login can reuse it.
+///
+/// The SDK store is keyed by user and device ID, so logging back in with
+/// a freshly issued device ID would leave the existing store unusable
+/// (#775). Saving the ID lets the next login ask the homeserver for the
+/// same device and keep using that store.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum SavedDevice {
+    OAuth {
+        user_id: OwnedUserId,
+        device_id: OwnedDeviceId,
+        client_id: ClientId,
+    },
+    MatrixAuth {
+        user_id: OwnedUserId,
+        device_id: OwnedDeviceId,
+    },
+}
+
+impl SavedDevice {
+    pub fn device_id(&self) -> &DeviceId {
+        match self {
+            SavedDevice::OAuth { device_id, .. } => device_id,
+            SavedDevice::MatrixAuth { device_id, .. } => device_id,
+        }
+    }
+    pub fn client_id(&self) -> Option<&ClientId> {
+        match self {
+            SavedDevice::OAuth { client_id, .. } => Some(client_id),
+            SavedDevice::MatrixAuth { .. } => None,
+        }
+    }
+    pub fn is_user(&self, user: &UserId) -> bool {
+        match self {
+            SavedDevice::OAuth { user_id, .. } => user == user_id,
+            SavedDevice::MatrixAuth { user_id, .. } => user == user_id,
+        }
+    }
 }
 
 impl From<Session> for MatrixSession {
@@ -292,6 +465,19 @@ impl From<MatrixSession> for Session {
             refresh_token: session.tokens.refresh_token,
             user_id: session.meta.user_id,
             device_id: session.meta.device_id,
+            client_id: None,
+        }
+    }
+}
+
+impl From<OAuthSession> for Session {
+    fn from(session: OAuthSession) -> Self {
+        Session {
+            access_token: session.user.tokens.access_token,
+            refresh_token: session.user.tokens.refresh_token,
+            user_id: session.user.meta.user_id,
+            device_id: session.user.meta.device_id,
+            client_id: Some(session.client_id),
         }
     }
 }
@@ -405,6 +591,18 @@ impl Visitor<'_> for EncryptionIndicatorLocationVisitor {
     }
 }
 
+/// Types of room labels to display in room lists.
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "kebab-case")]
+#[repr(u8)]
+pub enum RoomLabel {
+    Membership,
+    Muted,
+    Tags,
+    Type,
+    Unread,
+}
+
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
 #[serde(rename_all = "lowercase")]
 pub enum UserDisplayStyle {
@@ -431,11 +629,11 @@ pub enum SplitDirection {
     Vertical,
 }
 
-impl SplitDirection {
-    pub fn to_axis(self) -> Axis {
-        match self {
-            Self::Horizontal => Axis::Horizontal,
-            Self::Vertical => Axis::Vertical,
+impl From<SplitDirection> for Axis {
+    fn from(dir: SplitDirection) -> Axis {
+        match dir {
+            SplitDirection::Horizontal => Axis::Horizontal,
+            SplitDirection::Vertical => Axis::Vertical,
         }
     }
 }
@@ -700,6 +898,7 @@ pub struct SortValues {
     pub rooms: Vec<SortColumn<SortFieldRoom>>,
     pub spaces: Vec<SortColumn<SortFieldRoom>>,
     pub members: Vec<SortColumn<SortFieldUser>>,
+    pub space: Vec<SortColumn<SortFieldSpace>>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -709,6 +908,7 @@ pub struct SortOverrides {
     pub rooms: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub spaces: Option<Vec<SortColumn<SortFieldRoom>>>,
     pub members: Option<Vec<SortColumn<SortFieldUser>>>,
+    pub space: Option<Vec<SortColumn<SortFieldSpace>>>,
 }
 
 impl SortOverrides {
@@ -719,6 +919,7 @@ impl SortOverrides {
             rooms: profile.rooms.or(global.rooms),
             spaces: profile.spaces.or(global.spaces),
             members: profile.members.or(global.members),
+            space: profile.space.or(global.space),
         }
     }
 
@@ -728,8 +929,9 @@ impl SortOverrides {
         let dms = self.dms.unwrap_or_else(|| rooms.clone());
         let spaces = self.spaces.unwrap_or_else(|| rooms.clone());
         let members = self.members.unwrap_or_else(|| Vec::from(DEFAULT_MEMBERS_SORT));
+        let space = self.space.unwrap_or_else(|| Vec::from(DEFAULT_SPACE_SORT));
 
-        SortValues { rooms, members, chats, dms, spaces }
+        SortValues { rooms, members, chats, dms, spaces, space }
     }
 }
 
@@ -783,10 +985,12 @@ pub struct TunableValues {
     pub read_receipt_send: bool,
     pub read_receipt_trigger: ReadReceiptTrigger,
     pub read_receipt_display: bool,
+    pub room_labels: Vec<RoomLabel>,
     pub request_timeout: u64,
     pub sort: SortValues,
     pub state_event_display: bool,
     pub sync_delay_ms: u64,
+    pub theme: String,
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
     pub users: UserOverrides,
@@ -794,7 +998,7 @@ pub struct TunableValues {
     pub message_user_color: bool,
     pub default_register: Option<Register>,
     pub default_room: Option<String>,
-    pub default_via: Vec<OwnedServerName>,
+    pub default_via: HashSet<OwnedServerName>,
     pub open_command: Option<Vec<String>>,
     pub mouse: Mouse,
     pub notifications: Notifications,
@@ -809,6 +1013,11 @@ pub struct TunableValues {
     pub ssl_verify: bool,
     pub cache_policy: MediaRetentionPolicy,
     pub send_on_enter: bool,
+    pub date_format: String,
+    pub time_format: String,
+    /// Display columns reserved for the time gutter, computed from
+    /// `time_format` once when the settings are loaded.
+    pub time_gutter_width: usize,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -843,9 +1052,11 @@ pub struct Tunables {
     pub read_receipt_send: Option<bool>,
     pub read_receipt_trigger: Option<ReadReceiptTrigger>,
     pub read_receipt_display: Option<bool>,
+    pub room_labels: Option<Vec<RoomLabel>>,
     pub request_timeout: Option<u64>,
     pub state_event_display: Option<bool>,
     pub sync_delay_ms: Option<u64>,
+    pub theme: Option<String>,
     pub typing_notice_send: Option<bool>,
     pub typing_notice_display: Option<bool>,
     pub username_display: Option<UserDisplayStyle>,
@@ -867,6 +1078,13 @@ pub struct Tunables {
     pub ssl_verify: Option<bool>,
     pub cache_policy: Option<MediaRetentionPolicy>,
     pub send_on_enter: Option<bool>,
+    #[serde(default, deserialize_with = "deserialize_strftime")]
+    pub date_format: Option<String>,
+    /// strftime string for the per-message time gutter, including any brackets
+    /// or spacing. The column is as wide as a sample rendering of this string.
+    /// An empty string hides the time.
+    #[serde(default, deserialize_with = "deserialize_strftime")]
+    pub time_format: Option<String>,
 }
 
 impl Tunables {
@@ -900,9 +1118,11 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.or(other.read_receipt_send),
             read_receipt_trigger: self.read_receipt_trigger.or(other.read_receipt_trigger),
             read_receipt_display: self.read_receipt_display.or(other.read_receipt_display),
+            room_labels: self.room_labels.or(other.room_labels),
             request_timeout: self.request_timeout.or(other.request_timeout),
             state_event_display: self.state_event_display.or(other.state_event_display),
             sync_delay_ms: self.sync_delay_ms.or(other.sync_delay_ms),
+            theme: self.theme.or(other.theme),
             typing_notice_send: self.typing_notice_send.or(other.typing_notice_send),
             typing_notice_display: self.typing_notice_display.or(other.typing_notice_display),
             username_display: self.username_display.or(other.username_display),
@@ -925,10 +1145,15 @@ impl Tunables {
             ssl_verify: self.ssl_verify.or(other.ssl_verify),
             cache_policy: self.cache_policy.or(other.cache_policy),
             send_on_enter: self.send_on_enter.or(other.send_on_enter),
+            date_format: self.date_format.or(other.date_format),
+            time_format: self.time_format.or(other.time_format),
         }
     }
 
     fn values(self) -> TunableValues {
+        let time_format = self.time_format.unwrap_or_else(|| DEFAULT_TIME_FORMAT.to_owned());
+        let time_gutter_width = time_gutter_width(&time_format);
+
         TunableValues {
             encryption: self.encryption.values(),
             proxy: self.proxy.unwrap_or_default().values(),
@@ -948,16 +1173,22 @@ impl Tunables {
             read_receipt_send: self.read_receipt_send.unwrap_or(true),
             read_receipt_trigger: self.read_receipt_trigger.unwrap_or_default(),
             read_receipt_display: self.read_receipt_display.unwrap_or(true),
+            room_labels: self.room_labels.unwrap_or_else(|| DEFAULT_ROOM_LABELS.to_vec()),
             request_timeout: self.request_timeout.unwrap_or(DEFAULT_REQ_TIMEOUT),
             state_event_display: self.state_event_display.unwrap_or(true),
             sync_delay_ms: self.sync_delay_ms.unwrap_or(DEFAULT_SYNC_FREQUENCY),
+            theme: self.theme.unwrap_or_else(|| "default".to_string()),
             typing_notice_send: self.typing_notice_send.unwrap_or(true),
             typing_notice_display: self.typing_notice_display.unwrap_or(true),
             username_display: self.username_display.unwrap_or_default(),
             message_user_color: self.message_user_color.unwrap_or(false),
             default_register: self.default_register,
             default_room: self.default_room,
-            default_via: self.default_via.unwrap_or_else(|| vec![DEFAULT_VIA_SERVER.clone()]),
+            default_via: self
+                .default_via
+                .unwrap_or_else(|| vec![DEFAULT_VIA_SERVER.clone()])
+                .into_iter()
+                .collect(),
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),
@@ -973,6 +1204,9 @@ impl Tunables {
             ssl_verify: self.ssl_verify.unwrap_or(true),
             cache_policy: self.cache_policy.unwrap_or_default(),
             send_on_enter: self.send_on_enter.unwrap_or(true),
+            date_format: self.date_format.unwrap_or_else(|| DEFAULT_DATE_FORMAT.to_owned()),
+            time_format,
+            time_gutter_width,
         }
     }
 }
@@ -1187,6 +1421,7 @@ impl IambConfig {
 pub struct ApplicationSettings {
     pub layout_json: PathBuf,
     pub session_json: PathBuf,
+    pub device_json: PathBuf,
     pub session_json_old: PathBuf,
     pub sled_dir: PathBuf,
     pub sqlite_dir: PathBuf,
@@ -1194,6 +1429,7 @@ pub struct ApplicationSettings {
     pub profile_name: String,
     pub profile: ProfileConfig,
     pub theme: Arc<theme::ThemeValues>,
+    pub themes: Arc<CompletionMap<String, theme::Theme>>,
     pub tunables: TunableValues,
     pub dirs: DirectoryValues,
     pub layout: Layout,
@@ -1302,9 +1538,20 @@ impl ApplicationSettings {
         let dirs = profile.dirs.take().unwrap_or_default().merge(dirs);
         let dirs = dirs.values();
 
-        let theme = theme.unwrap_or_default().merge(theme::default_theme());
-        let theme = profile.theme.take().unwrap_or_default().merge(theme);
-        let theme = Arc::new(theme.values());
+        let themes_dir = config_dir.join("themes");
+        let overrides = profile.theme.clone().unwrap_or_default().merge(theme.unwrap_or_default());
+        let themes = Arc::new(load_themes(&themes_dir, overrides)?);
+
+        let theme = if let Some(theme) = themes.get(&tunables.theme) {
+            Arc::new(theme.clone().values())
+        } else {
+            let err = anyhow!(
+                "Could not find the {:?} theme; check {}?",
+                tunables.theme,
+                themes_dir.display()
+            );
+            return Err(err.into_boxed_dyn_error());
+        };
 
         // Create directories
         dirs.create_dir_all()?;
@@ -1327,6 +1574,9 @@ impl ApplicationSettings {
         let mut session_json = profile_data_dir.clone();
         session_json.push("session.json");
 
+        let mut device_json = profile_data_dir;
+        device_json.push("device.json");
+
         let mut session_json_old = profile_dir;
         session_json_old.push("session.json");
 
@@ -1345,11 +1595,13 @@ impl ApplicationSettings {
             sled_dir,
             layout_json,
             session_json,
+            device_json,
             session_json_old,
             sqlite_dir,
             sqlite_cache_dir,
             profile_name,
             profile,
+            themes,
             theme,
             tunables,
             dirs,
@@ -1388,11 +1640,53 @@ impl ApplicationSettings {
         Ok(session)
     }
 
-    pub fn write_session(&self, session: MatrixSession) -> Result<(), IambError> {
+    pub fn write_session(&self, session: impl Into<Session>) -> Result<(), IambError> {
         let file = File::create(self.session_json.as_path())?;
         let writer = BufWriter::new(file);
-        let session = Session::from(session);
+        let session: Session = session.into();
         serde_json::to_writer(writer, &session).map_err(IambError::from)?;
+        Ok(())
+    }
+
+    /// The device ID saved at logout, if it was saved for this profile's
+    /// user. A missing or stale file is not an error: the next login then
+    /// simply gets a fresh device ID from the homeserver.
+    pub fn read_saved_device(&self) -> Option<SavedDevice> {
+        let file = File::open(self.device_json.as_path()).ok()?;
+        let reader = BufReader::new(file);
+        let saved: SavedDevice = serde_json::from_reader(reader).ok()?;
+
+        if saved.is_user(&self.profile.user_id) {
+            Some(saved)
+        } else {
+            None
+        }
+    }
+
+    pub fn write_saved_device(
+        &self,
+        device_id: &DeviceId,
+        client_id: Option<ClientId>,
+    ) -> Result<(), IambError> {
+        let file = File::create(self.device_json.as_path())?;
+        let writer = BufWriter::new(file);
+
+        let saved = match client_id {
+            Some(client) => {
+                SavedDevice::OAuth {
+                    user_id: self.profile.user_id.clone(),
+                    device_id: device_id.to_owned(),
+                    client_id: client,
+                }
+            },
+            None => {
+                SavedDevice::MatrixAuth {
+                    user_id: self.profile.user_id.clone(),
+                    device_id: device_id.to_owned(),
+                }
+            },
+        };
+        serde_json::to_writer(writer, &saved).map_err(IambError::from)?;
         Ok(())
     }
 
@@ -1442,7 +1736,11 @@ impl ApplicationSettings {
         self.theme.users.style(user_id.as_str(), color)
     }
 
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
+    pub fn get_user_span_maybe<'a>(
+        &self,
+        user_id: &'a UserId,
+        info: Option<&'a RoomInfo>,
+    ) -> Span<'a> {
         let (color, name) = self.get_user_overrides(user_id);
 
         let style = self.theme.users.style(user_id.as_str(), color);
@@ -1451,7 +1749,7 @@ impl ApplicationSettings {
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
             (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
             (None, UserDisplayStyle::DisplayName) => {
-                if let Some(name) = info.display_names.get(user_id) {
+                if let Some(name) = info.and_then(|info| info.display_names.get(user_id)) {
                     name
                 } else {
                     Cow::Borrowed(user_id.as_str())
@@ -1460,6 +1758,10 @@ impl ApplicationSettings {
         };
 
         Span::styled(name, style)
+    }
+
+    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
+        self.get_user_span_maybe(user_id, Some(info))
     }
 }
 
@@ -1611,6 +1913,91 @@ mod tests {
         assert_eq!(res.users, Some(users.into_iter().collect()));
     }
 
+    fn parse_settings_toml(input: &str) -> Result<Tunables, toml::de::Error> {
+        #[derive(Deserialize)]
+        struct SettingsToml {
+            settings: Tunables,
+        }
+
+        toml::from_str::<SettingsToml>(input).map(|doc| doc.settings)
+    }
+
+    #[test]
+    fn test_parse_tunables_date_time_format() {
+        let settings = parse_settings_toml(
+            r#"
+[settings]
+date_format = "%Y-%m-%d"
+time_format = "%H:%M"
+"#,
+        )
+        .unwrap();
+        assert_eq!(settings.date_format.as_deref(), Some("%Y-%m-%d"));
+        assert_eq!(settings.time_format.as_deref(), Some("%H:%M"));
+
+        let values = settings.values();
+        assert_eq!(values.date_format, "%Y-%m-%d");
+        assert_eq!(values.time_format, "%H:%M");
+        assert_eq!(values.time_gutter_width, 5);
+
+        // Absent keys keep today's formats.
+        let settings = parse_settings_toml("[settings]\n").unwrap();
+        assert_eq!(settings.date_format, None);
+        assert_eq!(settings.time_format, None);
+        let values = settings.values();
+        assert_eq!(values.date_format, "%A, %B %d %Y");
+        assert_eq!(values.time_format, "  [%T]");
+        assert_eq!(values.time_gutter_width, 12);
+
+        // An empty format is valid and disables the time column.
+        let settings = parse_settings_toml(
+            r#"
+[settings]
+time_format = ""
+"#,
+        )
+        .unwrap();
+        assert_eq!(settings.time_format.as_deref(), Some(""));
+        let values = settings.values();
+        assert_eq!(values.time_format, "");
+        assert_eq!(values.time_gutter_width, 0);
+
+        // Brackets and spacing are literal gutter text, not added later.
+        let settings = parse_settings_toml(
+            r#"
+[settings]
+time_format = "  [%H:%M]"
+"#,
+        )
+        .unwrap();
+        let values = settings.values();
+        assert_eq!(values.time_format, "  [%H:%M]");
+        assert_eq!(values.time_gutter_width, 9);
+    }
+
+    #[test]
+    fn test_parse_tunables_date_time_format_invalid() {
+        let err = parse_settings_toml(
+            r#"
+[settings]
+date_format = "%Q"
+"#,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("invalid strftime"), "{msg}");
+
+        let err = parse_settings_toml(
+            r#"
+[settings]
+time_format = "%"
+"#,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("invalid strftime"), "{msg}");
+    }
+
     #[test]
     fn test_parse_tunables_username_display() {
         let res: Tunables = serde_json::from_str("{\"username_display\": \"username\"}").unwrap();
@@ -1659,6 +2046,28 @@ mod tests {
         ]);
         assert_eq!(res.sort.rooms, Vec::from(DEFAULT_ROOM_SORT));
         assert_eq!(res.sort.dms, Vec::from(DEFAULT_ROOM_SORT));
+    }
+
+    #[test]
+    fn test_parse_default_members_sort() {
+        let sort: Vec<SortColumn<SortFieldUser>> =
+            serde_json::from_str(r#"["power","knock","~invite","id"]"#).unwrap();
+        assert_eq!(sort.as_slice(), &DEFAULT_MEMBERS_SORT[..]);
+    }
+
+    #[test]
+    fn test_parse_default_rooms_sort() {
+        let sort: Vec<SortColumn<SortFieldRoom>> =
+            serde_json::from_str(r#"["favorite","invite","lowpriority","mentions","notifications","joined","space","dm","recent","name"]"#)
+                .unwrap();
+        assert_eq!(sort.as_slice(), &DEFAULT_ROOM_SORT[..]);
+    }
+
+    #[test]
+    fn test_parse_default_space_sort() {
+        let sort: Vec<SortColumn<SortFieldSpace>> =
+            serde_json::from_str(r#"["space","joined","spaceorder"]"#).unwrap();
+        assert_eq!(sort.as_slice(), &DEFAULT_SPACE_SORT[..]);
     }
 
     #[test]
@@ -1887,6 +2296,13 @@ mod tests {
     }
 
     #[test]
+    fn test_parse_room_labels() {
+        assert_eq!(RoomLabel::Membership, serde_json::from_str(r#""membership""#).unwrap());
+        assert_eq!(RoomLabel::Tags, serde_json::from_str(r#""tags""#).unwrap());
+        assert_eq!(RoomLabel::Type, serde_json::from_str(r#""type""#).unwrap());
+    }
+
+    #[test]
     fn test_parse_cursor_shape() {
         assert_eq!(CursorShape::Auto, CursorShape::default());
         assert_eq!(CursorShape::Auto, serde_json::from_str(r#""auto""#).unwrap());
@@ -1899,8 +2315,8 @@ mod tests {
 
     #[test]
     fn test_load_example_config_toml() {
-        let path = PathBuf::from("config.example.toml");
-        let config = IambConfig::load_toml(&path).expect("can load example_config.toml");
+        let path = PathBuf::from("config.full.toml");
+        let config = IambConfig::load_toml(&path).expect("can load config.full.toml");
 
         let IambConfig {
             profiles,

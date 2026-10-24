@@ -4,11 +4,12 @@ use std::cmp::{Ord, PartialOrd};
 use std::collections::hash_map::DefaultHasher;
 use std::convert::TryInto;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 use chrono::{DateTime, Local as LocalTz};
 use humansize::{DECIMAL, format_size};
-use matrix_sdk::ruma::OwnedTransactionId;
 use matrix_sdk::ruma::UInt;
+use matrix_sdk::ruma::events::Mentions;
 use matrix_sdk::ruma::events::RedactedUnsigned;
 use matrix_sdk::ruma::events::poll::start::RedactedPollStartEvent;
 use matrix_sdk::ruma::events::poll::unstable_start::RedactedUnstablePollStartEvent;
@@ -27,6 +28,7 @@ use matrix_sdk::ruma::events::room::message::{
 use matrix_sdk::ruma::events::room::redaction::SyncRoomRedactionEvent;
 use matrix_sdk::ruma::events::sticker::{OriginalStickerEvent, RedactedStickerEvent, StickerEvent};
 use matrix_sdk::ruma::events::{AnyRedactionEvent, MessageLikeEvent};
+use matrix_sdk::ruma::{OwnedTransactionId, UserId};
 use matrix_sdk::send_queue::SendHandle;
 use modalkit::editing::cursor::Cursor;
 use ratatui::symbols::line::{HORIZONTAL, THICK_VERTICAL};
@@ -50,7 +52,7 @@ pub mod poll;
 pub use self::compose::{text_to_message, text_to_text_message_event_content};
 pub use self::html::TreeGenState;
 
-type ProtocolPreview<'a> = (&'a SlicedProtocol, u16, u16);
+type ProtocolPreview = (Arc<SlicedProtocol>, u16, u16);
 
 /// The key used for uniquely identifying messages within a room and its threads.
 ///
@@ -104,25 +106,8 @@ impl Messages {
     }
 }
 
-const fn span_static(s: &'static str) -> Span<'static> {
-    Span {
-        content: Cow::Borrowed(s),
-        style: Style {
-            fg: None,
-            bg: None,
-            add_modifier: StyleModifier::empty(),
-            sub_modifier: StyleModifier::empty(),
-            underline_color: None,
-        },
-    }
-}
-
-const TIME_GUTTER: usize = 12;
 const READ_GUTTER: usize = 5;
 const MIN_MSG_LEN: usize = 30;
-
-const TIME_GUTTER_EMPTY: &str = "            ";
-const TIME_GUTTER_EMPTY_SPAN: Span<'static> = span_static(TIME_GUTTER_EMPTY);
 
 const USIZE_TOO_SMALL: bool = usize::BITS < u64::BITS;
 
@@ -188,9 +173,24 @@ impl MessageId {
     }
 }
 
+impl Display for MessageId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            MessageId::Origin(id) => write!(f, "{}", id),
+            MessageId::Local(id) => write!(f, "{}", id),
+        }
+    }
+}
+
 impl From<OwnedEventId> for MessageId {
     fn from(value: OwnedEventId) -> Self {
         Self::Origin(value)
+    }
+}
+
+impl From<OwnedTransactionId> for MessageId {
+    fn from(value: OwnedTransactionId) -> Self {
+        Self::Local(value)
     }
 }
 
@@ -207,7 +207,7 @@ pub enum TimeStampIntError {
 pub struct MessageTimeStamp(pub MilliSecondsSinceUnixEpoch);
 
 impl MessageTimeStamp {
-    fn as_datetime(self) -> DateTime<LocalTz> {
+    pub(crate) fn as_datetime(self) -> DateTime<LocalTz> {
         let time = i64::from(self.0.0) / 1000;
         let time = DateTime::from_timestamp(time, 0).unwrap_or_default();
         time.into()
@@ -221,7 +221,10 @@ impl MessageTimeStamp {
     }
 
     fn show_date(self, settings: &ApplicationSettings) -> Span<'static> {
-        let time = self.as_datetime().format("%A, %B %d %Y").to_string();
+        let time = self
+            .as_datetime()
+            .format(settings.tunables.date_format.as_str())
+            .to_string();
 
         Span::styled(time, settings.theme.timeline.date)
     }
@@ -232,8 +235,10 @@ impl MessageTimeStamp {
     }
 
     fn show_time(self, settings: &ApplicationSettings) -> Span<'static> {
-        let time = self.as_datetime().format("%T");
-        let time = format!("  [{time}]");
+        let time = self
+            .as_datetime()
+            .format(settings.tunables.time_format.as_str())
+            .to_string();
 
         Span::styled(time, settings.theme.timeline.time)
     }
@@ -482,6 +487,25 @@ impl MessageEvent {
 
     pub fn filename(&self) -> Option<String> {
         self.msgtype().and_then(content_filename)
+    }
+
+    pub fn mentions(&self) -> Option<&Mentions> {
+        match self {
+            MessageEvent::EncryptedOriginal(..) |
+            MessageEvent::EncryptedRedacted(..) |
+            MessageEvent::Redacted(..) |
+            MessageEvent::Sticker(..) |
+            MessageEvent::Poll(..) |
+            MessageEvent::UnstablePoll(..) |
+            MessageEvent::State(..) => None,
+            MessageEvent::Original(ev, edits) => {
+                edits
+                    .last_key_value()
+                    .and_then(|(_, ev)| ev.mentions.as_ref())
+                    .or(ev.content.mentions.as_ref())
+            },
+            MessageEvent::Local(_, _, ev) => ev.mentions.as_ref(),
+        }
     }
 
     fn message_style(&self, settings: &ApplicationSettings) -> Style {
@@ -774,7 +798,9 @@ impl<'a> MessageFormatter<'a> {
         match self.cols {
             MessageColumns::Four => {
                 let settings = self.settings;
-                let time = self.time.take().unwrap_or(TIME_GUTTER_EMPTY_SPAN);
+                let time = self.time.take().unwrap_or_else(|| {
+                    space_span(settings.tunables.time_gutter_width, Style::default())
+                });
 
                 let mut line = vec![user_gutter];
                 line.extend(prev_line.spans);
@@ -835,7 +861,7 @@ impl<'a> MessageFormatter<'a> {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-    ) -> Option<ProtocolPreview<'a>> {
+    ) -> Option<ProtocolPreview> {
         let reply_style = if settings.tunables.message_user_color {
             style.patch(settings.get_user_color(&msg.sender))
         } else {
@@ -883,12 +909,12 @@ impl<'a> MessageFormatter<'a> {
 
     fn push_reactions(
         &mut self,
-        counts: Vec<(&'a str, usize, &'a Option<MediaSource>)>,
+        counts: Vec<(&'a str, Vec<&'a UserId>, &'a Option<MediaSource>)>,
         style: Style,
         text: &mut Text<'a>,
         settings: &ApplicationSettings,
         previews: &'a PreviewManager,
-    ) -> Vec<ProtocolPreview<'a>> {
+    ) -> Vec<ProtocolPreview> {
         let mut emojis = printer::TextPrinter::new(self.width(), style, self.settings, self.info);
         let mut reactions = 0;
         let mut protos = Vec::new();
@@ -931,6 +957,8 @@ impl<'a> MessageFormatter<'a> {
 
             emojis.push_str("[", style);
             if let Some(Some(proto)) = proto {
+                let proto = Arc::clone(proto);
+
                 let (x, y) = emojis.cursor_pos();
                 let y = (y + text.lines.len()) as u16;
                 let x = x as u16 + self.cols.user_gutter_width(settings);
@@ -939,7 +967,7 @@ impl<'a> MessageFormatter<'a> {
             }
             emojis.push_str(name, style);
             emojis.push_str(" ", style);
-            emojis.push_span_nobreak(Span::styled(count.to_string(), style));
+            emojis.push_span_nobreak(Span::styled(count.len().to_string(), style));
             emojis.push_str("]", style);
 
             reactions += 1;
@@ -1076,10 +1104,6 @@ impl Message {
     fn get_render_style(&self, selected: bool, settings: &ApplicationSettings) -> Style {
         let mut style = self.event.message_style(settings);
 
-        if selected {
-            style = style.add_modifier(StyleModifier::REVERSED)
-        }
-
         if matches!(self.event, MessageEvent::Local(..)) {
             style = style.add_modifier(StyleModifier::ITALIC);
         }
@@ -1087,6 +1111,12 @@ impl Message {
         if settings.tunables.message_user_color {
             let color = settings.get_user_color(&self.sender);
             style = style.fg(color);
+        }
+
+        if selected {
+            // Apply last, so that if the user or theme specified selected colors
+            // for selected messages then it will get put on top of the user color:
+            style = style.patch(settings.theme.selected);
         }
 
         return style;
@@ -1130,13 +1160,14 @@ impl Message {
     ) -> usize {
         let width = viewctx.get_width();
         let user_gutter = settings.tunables.user_gutter_width;
+        let time_gutter = settings.tunables.time_gutter_width;
 
-        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
+        if user_gutter + time_gutter + READ_GUTTER + MIN_MSG_LEN <= width &&
             settings.tunables.read_receipt_display
         {
-            width - user_gutter - TIME_GUTTER - READ_GUTTER
-        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
-            width - user_gutter - TIME_GUTTER
+            width - user_gutter - time_gutter - READ_GUTTER
+        } else if user_gutter + time_gutter + MIN_MSG_LEN <= width {
+            width - user_gutter - time_gutter
         } else if user_gutter + MIN_MSG_LEN <= width {
             width - user_gutter
         } else {
@@ -1155,12 +1186,13 @@ impl Message {
         let date = self.show_date(prev).then(|| self.timestamp.show_date(settings));
         let trackbar = self.show_trackbar(prev, info, settings);
         let user_gutter = settings.tunables.user_gutter_width;
+        let time_gutter = settings.tunables.time_gutter_width;
 
-        if user_gutter + TIME_GUTTER + READ_GUTTER + MIN_MSG_LEN <= width &&
+        if user_gutter + time_gutter + READ_GUTTER + MIN_MSG_LEN <= width &&
             settings.tunables.read_receipt_display
         {
             let cols = MessageColumns::Four;
-            let fill = width - user_gutter - TIME_GUTTER - READ_GUTTER;
+            let fill = width - user_gutter - time_gutter - READ_GUTTER;
             let user = self.show_sender(prev, true, info, settings, width);
             let time = Some(self.timestamp.show_time(settings));
 
@@ -1175,7 +1207,11 @@ impl Message {
                     let receipt_thread = self.receipt_thread(info);
                     let threaded = info.read_event_users(receipt_thread, event_id);
                     let unthreaded = info.read_event_users(ReceiptThread::Unthreaded, event_id);
-                    threaded.chain(unthreaded).map(|user_id| user_id.to_owned()).collect()
+                    threaded
+                        .chain(unthreaded)
+                        .filter(|user_id| **user_id != settings.profile.user_id)
+                        .map(|user_id| user_id.to_owned())
+                        .collect()
                 })
                 .unwrap_or_default();
 
@@ -1191,9 +1227,9 @@ impl Message {
                 read,
                 info,
             }
-        } else if user_gutter + TIME_GUTTER + MIN_MSG_LEN <= width {
+        } else if user_gutter + time_gutter + MIN_MSG_LEN <= width {
             let cols = MessageColumns::Three;
-            let fill = width - user_gutter - TIME_GUTTER;
+            let fill = width - user_gutter - time_gutter;
             let user = self.show_sender(prev, true, info, settings, width);
             let time = Some(self.timestamp.show_time(settings));
             let read = Vec::new();
@@ -1258,13 +1294,11 @@ impl Message {
         &'a self,
         prev: Option<&Message>,
         selected: bool,
-        vwctx: &ViewportContext<MessageCursor>,
+        width: usize,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-    ) -> (Text<'a>, Vec<ProtocolPreview<'a>>) {
-        let width = vwctx.get_width();
-
+    ) -> (Text<'a>, Vec<ProtocolPreview>) {
         let style = self.get_render_style(selected, settings);
         let mut fmt = self.get_render_format(prev, width, info, settings);
         let mut text = Text::default();
@@ -1352,12 +1386,12 @@ impl Message {
         &'a self,
         prev: Option<&Message>,
         selected: bool,
-        vwctx: &ViewportContext<MessageCursor>,
+        width: usize,
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
     ) -> Text<'a> {
-        self.show_with_preview(prev, selected, vwctx, info, settings, previews).0
+        self.show_with_preview(prev, selected, width, info, settings, previews).0
     }
 
     fn show_msg<'a>(
@@ -1367,7 +1401,7 @@ impl Message {
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
         info: &'a RoomInfo,
-    ) -> (Text<'a>, Option<&'a SlicedProtocol>) {
+    ) -> (Text<'a>, Option<Arc<SlicedProtocol>>) {
         let mut proto = None;
         let placeholder = match self
             .image_preview()
@@ -1381,7 +1415,7 @@ impl Message {
                 placeholder_frame(Some("Downloading..."), width, image_preview_size)
             },
             Some(ImageStatus::Loaded(backend)) => {
-                proto = Some(backend);
+                proto = Some(Arc::clone(backend));
                 placeholder_frame(None, width, &backend.size())
             },
             Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
@@ -1509,6 +1543,26 @@ impl Message {
             .unwrap_or(&orig_content.content.msgtype);
 
         self.html = content_html(content);
+    }
+
+    pub fn find_links(&self) -> Vec<(char, Url)> {
+        let mut links = if let Some(html) = &self.html {
+            html.get_links()
+        } else {
+            vec![]
+        };
+
+        if links.is_empty() {
+            links = linkify::LinkFinder::new()
+                .links(&self.event.body())
+                .filter_map(|u| Url::parse(u.as_str()).ok())
+                .scan(TreeGenState { link_num: 0 }, |state, u| {
+                    state.next_link_char().map(|c| (c, u))
+                })
+                .collect();
+        }
+
+        links
     }
 }
 
@@ -1648,6 +1702,7 @@ pub mod tests {
     };
 
     use crate::base::EventLocation;
+    use crate::config::time_gutter_width;
     use crate::tests::*;
 
     #[test]
@@ -1975,19 +2030,19 @@ pub mod tests {
         let settings = mock_settings();
         let previews = PreviewManager::new(&settings);
         let mut info = mock_room();
-        let vwctx = ViewportContext { dimensions: (60, 5), ..Default::default() };
+        let width = 60;
 
         let prev = mock_message1();
         let msg = mock_message2();
         let user_id = settings.profile.user_id.clone();
 
         // Without a marker, no trackbar is drawn.
-        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        let text = msg.show(Some(&prev), false, width, &info, &settings, &previews);
         assert!(!has_trackbar(&text, 60));
 
         // When the marker names the previous message, the rule leads the message.
         info.set_receipt(ReceiptThread::Main, user_id.clone(), MSG1_EVID.clone());
-        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        let text = msg.show(Some(&prev), false, width, &info, &settings, &previews);
         assert!(has_trackbar(&text, 60));
         assert_eq!(text.lines[0].spans[0].content.as_ref(), HORIZONTAL.repeat(60));
 
@@ -1995,9 +2050,9 @@ pub mod tests {
         // already positioned on the rendered message, not moving an existing marker backwards.
         let mut info = mock_room();
         info.set_receipt(ReceiptThread::Main, user_id.clone(), MSG2_EVID.clone());
-        let text = msg.show(Some(&prev), false, &vwctx, &info, &settings, &previews);
+        let text = msg.show(Some(&prev), false, width, &info, &settings, &previews);
         assert!(!has_trackbar(&text, 60));
-        let text = prev.show(Some(&msg), false, &vwctx, &info, &settings, &previews);
+        let text = prev.show(Some(&msg), false, width, &info, &settings, &previews);
         assert!(has_trackbar(&text, 60));
     }
 
@@ -2059,5 +2114,74 @@ pub mod tests {
         // When disabled, the plain text body is shown exactly as it was sent.
         settings.tunables.message_formatted_display = false;
         assert_eq!(render(&settings), "**hello** <world>");
+    }
+
+    /// `MessageTimeStamp::as_datetime` converts to the local timezone, so
+    /// expectations are computed with the same conversion rather than a
+    /// hard-coded wall clock.
+    fn sample_stamp() -> (MessageTimeStamp, DateTime<LocalTz>) {
+        let millis = MilliSecondsSinceUnixEpoch(UInt::try_from(1_705_325_130_000u64).unwrap());
+        let ts = MessageTimeStamp::from(millis);
+        (ts, ts.as_datetime())
+    }
+
+    #[test]
+    fn test_show_time_and_date_defaults() {
+        let (ts, dt) = sample_stamp();
+        let settings = mock_settings();
+
+        let date = ts.show_date(&settings);
+        assert_eq!(date.content.as_ref(), dt.format("%A, %B %d %Y").to_string());
+
+        let time = ts.show_time(&settings);
+        assert_eq!(time.content.as_ref(), format!("  [{}]", dt.format("%T")));
+        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), 12);
+        assert_eq!(settings.tunables.time_gutter_width, 12);
+    }
+
+    #[test]
+    fn test_time_gutter_width_follows_format() {
+        let (ts, dt) = sample_stamp();
+        let mut settings = mock_settings();
+        let view = ViewportContext { dimensions: (120, 10), ..Default::default() };
+        let default_cols = Message::message_column_width(&view, &settings);
+
+        // "%H:%M" is five columns and is not padded out to the old gutter.
+        settings.tunables.time_format = "%H:%M".to_string();
+        settings.tunables.time_gutter_width = time_gutter_width(&settings.tunables.time_format);
+        let time = ts.show_time(&settings);
+        let rendered = dt.format("%H:%M").to_string();
+        assert_eq!(time.content.as_ref(), rendered);
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 5);
+        assert_eq!(settings.tunables.time_gutter_width, 5);
+        assert_eq!(Message::message_column_width(&view, &settings), default_cols + 7);
+
+        // An empty format hides the time and reserves no column.
+        settings.tunables.time_format = String::new();
+        settings.tunables.time_gutter_width = time_gutter_width(&settings.tunables.time_format);
+        let time = ts.show_time(&settings);
+        assert_eq!(time.content.as_ref(), "");
+        assert_eq!(UnicodeWidthStr::width(time.content.as_ref()), 0);
+        assert_eq!(settings.tunables.time_gutter_width, 0);
+        assert_eq!(Message::message_column_width(&view, &settings), default_cols + 12);
+
+        // Wider than the historical 8-column cap, and a wide character counts as two.
+        settings.tunables.time_format = "%H時%M分".to_string();
+        settings.tunables.time_gutter_width = time_gutter_width(&settings.tunables.time_format);
+        let time = ts.show_time(&settings);
+        let rendered = dt.format("%H時%M分").to_string();
+        assert_eq!(time.content.as_ref(), rendered);
+        assert_eq!(UnicodeWidthStr::width(rendered.as_str()), 8);
+        assert_eq!(settings.tunables.time_gutter_width, 8);
+        assert_eq!(Message::message_column_width(&view, &settings), default_cols + 4);
+    }
+
+    #[test]
+    fn test_show_custom_date_format() {
+        let (ts, dt) = sample_stamp();
+        let mut settings = mock_settings();
+        settings.tunables.date_format = "%Y-%m-%d".to_string();
+        let date = ts.show_date(&settings);
+        assert_eq!(date.content.as_ref(), dt.format("%Y-%m-%d").to_string());
     }
 }

@@ -15,15 +15,18 @@ use matrix_sdk::ruma::events::poll::unstable_start::{
 use matrix_sdk::ruma::events::reaction::ReactionEvent;
 use matrix_sdk::ruma::events::relation::Replacement;
 use matrix_sdk::ruma::events::room::encrypted::RoomEncryptedEvent;
+use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::events::room::message::RelationWithoutReplacement;
 use matrix_sdk::ruma::events::room::message::{
     RoomMessageEvent,
     RoomMessageEventContentWithoutRelation,
 };
+use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
 use matrix_sdk::ruma::events::room::redaction::{
     OriginalSyncRoomRedactionEvent,
     SyncRoomRedactionEvent,
 };
+use matrix_sdk::ruma::events::space::child::SpaceChildEventContent;
 use matrix_sdk::ruma::events::sticker::{StickerEvent, StickerEventContent};
 use matrix_sdk::ruma::events::{MessageLikeEvent, OriginalMessageLikeEvent};
 use matrix_sdk::ruma::presence::PresenceState;
@@ -246,11 +249,33 @@ pub enum SortFieldRoom {
     /// Sort rooms by whether they have unread messages.
     Unread,
 
+    /// Sort rooms by whether they have unread notifications.
+    Notifications,
+
+    /// Sort rooms by whether they have unread mentions.
+    Mentions,
+
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
 
+    /// Sort rooms by whether they are direct messages.
+    Direct,
+
+    /// Sort rooms by whether they are spaces.
+    Space,
+
     /// Sort rooms by whether they are invites.
     Invite,
+
+    /// Sort rooms by whether the user has joined them.
+    Joined,
+}
+
+/// Fields that space children can be sorted by.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SortFieldSpace {
+    Room(SortFieldRoom),
+    SpaceOrder,
 }
 
 /// Fields that users can be sorted by.
@@ -314,14 +339,65 @@ impl Visitor<'_> for SortRoomVisitor {
             "lowpriority" => SortFieldRoom::LowPriority,
             "recent" => SortFieldRoom::Recent,
             "unread" => SortFieldRoom::Unread,
+            "notifications" => SortFieldRoom::Notifications,
+            "mentions" => SortFieldRoom::Mentions,
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
+            "dm" => SortFieldRoom::Direct,
             "id" => SortFieldRoom::RoomId,
             "server" => SortFieldRoom::Server,
+            "space" => SortFieldRoom::Space,
             "invite" => SortFieldRoom::Invite,
+            "joined" => SortFieldRoom::Joined,
             _ => {
                 let msg = format!("Unknown sort field: {value:?}");
                 return Err(E::custom(msg));
+            },
+        };
+
+        Ok(SortColumn(field, order))
+    }
+}
+
+impl<'de> Deserialize<'de> for SortColumn<SortFieldSpace> {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        deserializer.deserialize_str(SortSpaceVisitor)
+    }
+}
+
+/// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
+struct SortSpaceVisitor;
+
+impl Visitor<'_> for SortSpaceVisitor {
+    type Value = SortColumn<SortFieldSpace>;
+
+    fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+        formatter.write_str("a valid field for sorting space children")
+    }
+
+    fn visit_str<E>(self, mut value: &str) -> Result<Self::Value, E>
+    where
+        E: SerdeError,
+    {
+        if value.is_empty() {
+            return Err(E::custom("Invalid sort field"));
+        }
+
+        let order = if value.starts_with('~') {
+            value = &value[1..];
+            SortOrder::Descending
+        } else {
+            SortOrder::Ascending
+        };
+
+        let field = match value {
+            "spaceorder" => SortFieldSpace::SpaceOrder,
+            _ => {
+                let room_column = SortRoomVisitor.visit_str(value)?;
+                SortFieldSpace::Room(room_column.0)
             },
         };
 
@@ -378,6 +454,16 @@ impl Visitor<'_> for SortUserVisitor {
 
         Ok(SortColumn(field, order))
     }
+}
+
+/// An account property.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AccountField {
+    /// The account's ignore list.
+    Ignore,
+
+    /// Set whether other user's are allowed to invite the user to rooms.
+    Invites,
 }
 
 /// A room property.
@@ -518,6 +604,9 @@ pub enum RoomAction {
     /// Open the members window.
     Members(Box<CommandContext>),
 
+    /// Open the message info window.
+    Message(Box<CommandContext>),
+
     /// Open the pinned messages window.
     Pinned(Box<CommandContext>),
 
@@ -579,6 +668,15 @@ pub enum SendAction {
 pub enum HomeserverAction {
     /// Create a new room with an optional localpart.
     CreateRoom(Option<String>, CreateRoomType, CreateRoomFlags),
+
+    /// Update an account property.
+    AccountSet(AccountField, String),
+
+    /// Show information about an account property.
+    AccountShow(AccountField),
+
+    /// Remove a user from the account's ignore list.
+    AccountUnset(AccountField, Option<String>),
 
     /// "Knock" on a room, aka "request to join".
     KnockSend(OwnedRoomOrAliasId, Option<String>),
@@ -652,6 +750,9 @@ pub enum IambAction {
     /// Toggle the focus within the focused room.
     ToggleScrollbackFocus,
 
+    /// Change the current theme.
+    ChangeTheme(String),
+
     /// Clear all unread messages.
     ClearUnreads,
 }
@@ -708,6 +809,7 @@ impl From<TimelineAction> for IambAction {
 impl ApplicationAction for IambAction {
     fn is_edit_sequence(&self, _: &EditContext) -> SequenceStatus {
         match self {
+            IambAction::ChangeTheme(..) => SequenceStatus::Break,
             IambAction::ClearUnreads => SequenceStatus::Break,
             IambAction::Homeserver(..) => SequenceStatus::Break,
             IambAction::Keys(..) => SequenceStatus::Break,
@@ -727,6 +829,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_action(&self, _: &EditContext) -> SequenceStatus {
         match self {
+            IambAction::ChangeTheme(..) => SequenceStatus::Atom,
             IambAction::ClearUnreads => SequenceStatus::Atom,
             IambAction::Homeserver(..) => SequenceStatus::Atom,
             IambAction::Keys(..) => SequenceStatus::Atom,
@@ -746,6 +849,7 @@ impl ApplicationAction for IambAction {
 
     fn is_last_selection(&self, _: &EditContext) -> SequenceStatus {
         match self {
+            IambAction::ChangeTheme(..) => SequenceStatus::Ignore,
             IambAction::ClearUnreads => SequenceStatus::Ignore,
             IambAction::Homeserver(..) => SequenceStatus::Ignore,
             IambAction::Keys(..) => SequenceStatus::Ignore,
@@ -765,6 +869,7 @@ impl ApplicationAction for IambAction {
 
     fn is_switchable(&self, _: &EditContext) -> bool {
         match self {
+            IambAction::ChangeTheme(..) => false,
             IambAction::ClearUnreads => false,
             IambAction::Homeserver(..) => false,
             IambAction::Message(..) => false,
@@ -844,7 +949,7 @@ pub enum IambError {
     InvalidNotificationLevel(String),
 
     /// An invalid user identifier was specified.
-    #[error("Invalid user identifier: {0}")]
+    #[error("Invalid user identifier: {0:?}")]
     InvalidUserId(String),
 
     /// An invalid user identifier was specified.
@@ -978,12 +1083,18 @@ impl From<matrix_sdk::event_cache::EventCacheError> for IambError {
     }
 }
 
+impl From<matrix_sdk::authentication::oauth::OAuthError> for IambError {
+    fn from(value: matrix_sdk::authentication::oauth::OAuthError) -> Self {
+        Self::from(matrix_sdk::Error::from(value))
+    }
+}
+
 impl ApplicationError for IambError {}
 
 /// Indicates where an [EventId] lives in the [ChatStore].
 #[derive(Clone)]
 pub enum EventLocation {
-    /// The [EventId] belongs to a message.
+    /// The [EventId] belongs to a message like event.
     ///
     /// If the first argument is [None], then it's part of the main scrollback. When [Some],
     /// it specifies which thread it's in reply to.
@@ -991,9 +1102,6 @@ pub enum EventLocation {
 
     /// The [EventId] belongs to a reaction to the given event.
     Reaction(OwnedEventId),
-
-    /// The [EventId] belongs to a state event in the main timeline of the room.
-    State(MessageKey),
 
     /// The [EventId] belongs to an edit for the given event and has key [MessageKey].
     Edit(OwnedEventId, MessageKey),
@@ -1006,7 +1114,6 @@ impl EventLocation {
     fn to_message_key(&self) -> Option<&MessageKey> {
         match self {
             EventLocation::Message(_, key) => Some(key),
-            EventLocation::State(key) => Some(key),
             _ => None,
         }
     }
@@ -1049,8 +1156,22 @@ impl UnreadInfo {
         self.unread_mentions > 0
     }
 
+    pub fn has_notification(&self) -> bool {
+        self.unread_notifications > 0
+    }
+
     pub fn latest(&self) -> Option<&MessageTimeStamp> {
         self.latest.as_ref()
+    }
+}
+
+impl std::ops::AddAssign<Self> for UnreadInfo {
+    fn add_assign(&mut self, rhs: Self) {
+        self.unread_mark |= rhs.unread_mark;
+        self.unread_messages += rhs.unread_messages;
+        self.unread_notifications += rhs.unread_notifications;
+        self.unread_mentions += rhs.unread_mentions;
+        self.latest = self.latest.max(rhs.latest);
     }
 }
 
@@ -1062,6 +1183,78 @@ struct DisplayNameUsers {
 
     /// Left and knocking users. Are always disambiguated.
     inactive: HashSet<OwnedUserId>,
+}
+
+/// Information about a user within a specific room.
+#[derive(Clone, Debug)]
+pub struct MemberSummary {
+    /// The member's user identifier.
+    pub user_id: OwnedUserId,
+
+    /// The member's display name in this room, if they have one.
+    pub display_name: Option<String>,
+
+    /// The member's power level in the room.
+    pub power_level: UserPowerLevel,
+
+    /// The member's current room membership (joined/invited/knocked/etc).
+    pub membership: MembershipState,
+}
+
+impl MemberSummary {
+    /// The display name to show for this member, falling back to their localpart.
+    pub fn name(&self) -> &str {
+        self.display_name.as_deref().unwrap_or_else(|| self.user_id.localpart())
+    }
+
+    /// A short description to show for the user's membership state.
+    pub fn membership_label(&self) -> Option<&'static str> {
+        match self.membership {
+            MembershipState::Ban => Some("banned"),
+            MembershipState::Invite => Some("invited"),
+            MembershipState::Knock => Some("wants to join"),
+            MembershipState::Leave => Some("left"),
+            _ => None,
+        }
+    }
+
+    /// Get the member's current state.
+    pub fn membership(&self) -> &MembershipState {
+        &self.membership
+    }
+
+    /// Get the member's power level in the room.
+    pub fn power_level(&self) -> UserPowerLevel {
+        self.power_level
+    }
+
+    /// Get the user identifier.
+    pub fn user_id(&self) -> &UserId {
+        self.user_id.as_ref()
+    }
+
+    /// Whether this member has joined the room.
+    pub fn is_join(&self) -> bool {
+        self.membership == MembershipState::Join
+    }
+
+    /// Whether this member has been invited to the room.
+    pub fn is_invite(&self) -> bool {
+        self.membership == MembershipState::Invite
+    }
+
+    /// Whether this member has knocked on the room.
+    pub fn is_knock(&self) -> bool {
+        self.membership == MembershipState::Knock
+    }
+
+    /// Whether this member should be counted as active in the room.
+    ///
+    /// We show active room members in `:members`, use them for display name disambiguation,
+    /// and so on.
+    pub fn is_active(&self) -> bool {
+        self.is_join() || self.is_invite() || self.is_knock()
+    }
 }
 
 /// Track the display names for users and render any needed disambiguation for
@@ -1181,6 +1374,21 @@ impl DisplayNameStore {
     }
 }
 
+bitflags::bitflags! {
+    /// Additional information about a room.
+    #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+    pub struct RoomInfoFlags: u32 {
+        /// No flags specified.
+        const NONE = 0b00000000;
+
+        /// All notifications for this room have been muted.
+        const MUTED = 0b00000001;
+
+        /// Non-mention/keyword notifications for this room have been muted.
+        const CALMED = 0b00000010;
+    }
+}
+
 /// Information about room's the user's joined.
 pub struct RoomInfo {
     /// The display name for this room.
@@ -1188,6 +1396,8 @@ pub struct RoomInfo {
 
     /// The tags placed on this room.
     pub tags: Option<Tags>,
+
+    pub flags: RoomInfoFlags,
 
     /// A map of event IDs to where they are stored in this struct.
     pub keys: HashMap<OwnedEventId, EventLocation>,
@@ -1230,6 +1440,12 @@ pub struct RoomInfo {
     /// The display names for users in this room.
     pub display_names: DisplayNameStore,
 
+    /// Cached information about the members in this room.
+    ///
+    /// Note that this includes members who have left or been banned, so you may need to
+    /// filter out values when iterating over it, depending on the use case.
+    pub memberships: HashMap<OwnedUserId, MemberSummary>,
+
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
 
@@ -1251,6 +1467,7 @@ impl Default for RoomInfo {
             name: Default::default(),
             tags: Default::default(),
             keys: Default::default(),
+            flags: Default::default(),
             echo_keys: Default::default(),
             event_receipts: Default::default(),
             user_receipts: Default::default(),
@@ -1261,6 +1478,7 @@ impl Default for RoomInfo {
             fetch_last: Default::default(),
             users_typing: Default::default(),
             display_names: Default::default(),
+            memberships: Default::default(),
             draw_last: Default::default(),
             pinned_events: Default::default(),
             pinned_previews: Default::default(),
@@ -1371,34 +1589,30 @@ impl RoomInfo {
 
     pub fn get_receipt_thread(&self, event_id: &EventId) -> Option<ReceiptThread> {
         match self.keys.get(event_id)? {
-            EventLocation::Message(None, _) | EventLocation::State(_) => Some(ReceiptThread::Main),
+            EventLocation::Message(None, _) => Some(ReceiptThread::Main),
             EventLocation::Message(Some(root), _) => Some(ReceiptThread::Thread(root.clone())),
             _ => None,
         }
     }
 
     /// Get the reactions and their counts for a message.
-    pub fn get_reactions(&self, event_id: &EventId) -> Vec<(&str, usize, &Option<MediaSource>)> {
+    pub fn get_reactions(
+        &self,
+        event_id: &EventId,
+    ) -> Vec<(&str, Vec<&UserId>, &Option<MediaSource>)> {
         if let Some(reacts) = self.reactions.get(event_id) {
-            let mut counts = HashMap::new();
-
-            let mut seen_user_reactions = BTreeSet::new();
+            let mut reactions = BTreeMap::new();
 
             for (key, user, source) in reacts.values() {
-                if !seen_user_reactions.contains(&(key, user)) {
-                    seen_user_reactions.insert((key, user));
-                    let count = counts.entry(key.as_str()).or_insert((0, source));
-                    count.0 += 1;
-                }
+                let react =
+                    reactions.entry(key.as_str()).or_insert_with(|| (BTreeSet::new(), source));
+                react.0.insert(user.deref());
             }
 
-            let mut reactions = counts
-                .into_iter()
-                .map(|(key, (count, source))| (key, count, source))
-                .collect::<Vec<_>>();
-            reactions.sort_by_key(|item| (item.0, item.1));
-
             reactions
+                .into_iter()
+                .map(|(key, (users, source))| (key, users.into_iter().collect::<Vec<_>>(), source))
+                .collect::<Vec<_>>()
         } else {
             vec![]
         }
@@ -1435,6 +1649,44 @@ impl RoomInfo {
         let root = loc.to_thread_root();
 
         self.get_thread_mut(root.map(ToOwned::to_owned)).get_mut(key)
+    }
+
+    /// Map an event identifier to its [`MessageKey`] and thread root.
+    fn get_message_thread_key(
+        &self,
+        message_id: &MessageId,
+    ) -> Option<(Option<&EventId>, &MessageKey)> {
+        let event_id = match message_id {
+            MessageId::Local(id) => {
+                let loc = self.echo_keys.get(id)?;
+                match loc {
+                    EchoLocation::Message(root, key) => return Some((root.as_deref(), key)),
+                    EchoLocation::Replaced(event_id) => event_id,
+                }
+            },
+            MessageId::Origin(event_id) => event_id,
+        };
+
+        let loc = self.keys.get(event_id)?;
+
+        Some((loc.to_thread_root(), loc.to_message_key()?))
+    }
+
+    /// Get an event for an identifier.
+    pub fn get_message(&self, message_id: &MessageId) -> Option<&Message> {
+        let (root, key) = self.get_message_thread_key(message_id)?;
+
+        self.get_thread(root)?.get(key)
+    }
+
+    /// Get an event for an identifier as mutable.
+    pub fn get_message_mut(&mut self, message_id: &MessageId) -> Option<&mut Message> {
+        let (root, key) = self.get_message_thread_key(message_id)?;
+
+        let root = root.map(ToOwned::to_owned);
+        let key = key.to_owned();
+
+        self.get_thread_mut(root).get_mut(&key)
     }
 
     pub fn redact(&mut self, ev: OriginalSyncRoomRedactionEvent) {
@@ -1475,12 +1727,6 @@ impl RoomInfo {
                     poll.redact(&loc);
                 }
             },
-            Some(EventLocation::State(key)) => {
-                if let Some(msg) = self.messages.get_mut(key) {
-                    let ev = SyncRoomRedactionEvent::Original(ev);
-                    msg.redact(ev);
-                }
-            },
             Some(EventLocation::Message(None, key)) => {
                 if let Some(msg) = self.messages.get_mut(key) {
                     let ev = SyncRoomRedactionEvent::Original(ev);
@@ -1503,6 +1749,24 @@ impl RoomInfo {
                 self.keys.remove(redacts);
             },
         }
+    }
+
+    /// Insert a message with a [`EventLocation::Message`].
+    fn insert_msglike(
+        &mut self,
+        event_id: OwnedEventId,
+        thread_root: Option<OwnedEventId>,
+        message: Message,
+    ) {
+        let sender = message.sender.clone();
+
+        let key = MessageKey { ts: message.timestamp, id: event_id.clone().into() };
+        let loc = EventLocation::Message(thread_root.clone(), key.clone());
+        self.keys.insert(event_id.clone(), loc);
+
+        let thread = self.get_thread_mut(thread_root);
+        thread.insert_message(key, message);
+        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert a reaction to a message.
@@ -1531,12 +1795,6 @@ impl RoomInfo {
         previews: &mut PreviewManager,
     ) {
         let event_id = sticker.event_id().to_owned();
-        let sender = sticker.sender().to_owned();
-        let key = MessageKey {
-            ts: sticker.origin_server_ts().into(),
-            id: event_id.clone().into(),
-        };
-
         let thread_root = match &sticker {
             MessageLikeEvent::Original(OriginalMessageLikeEvent {
                 content:
@@ -1559,12 +1817,7 @@ impl RoomInfo {
             previews.register_preview(settings, &source, PreviewKind::Message);
         }
 
-        let loc = EventLocation::Message(thread_root.clone(), key.clone());
-        self.keys.insert(event_id.clone(), loc);
-
-        let thread = self.get_thread_mut(thread_root);
-        thread.insert_message(key, sticker);
-        self.set_implicit_receipt(sender, event_id);
+        self.insert_msglike(event_id, thread_root, sticker.into());
     }
 
     /// Insert a reaction to a message.
@@ -1595,7 +1848,6 @@ impl RoomInfo {
 
     /// Insert the start of a poll.
     pub fn insert_poll_start(&mut self, poll: PollStartEvent) {
-        let sender = poll.sender().to_owned();
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
             ts: poll.origin_server_ts().into(),
@@ -1638,32 +1890,25 @@ impl RoomInfo {
                         _ => None,
                     };
 
-                    let loc = EventLocation::Message(thread_root.clone(), key.clone());
-                    self.keys.insert(event_id.clone(), loc);
-
                     let unloaded = self.unloaded_polls.remove(&ev.event_id).unwrap_or_default();
                     let msg = MessageEvent::Poll(
                         Poll::new(ev.event_id, ev.sender.to_owned(), ev.content, unloaded).into(),
                     );
                     let msg = Message::new(msg, ev.sender, ev.origin_server_ts.into());
 
-                    self.get_thread_mut(thread_root).insert_message(key, msg);
+                    self.insert_msglike(event_id, thread_root, msg);
                 }
             },
             MessageLikeEvent::Redacted(ev) => {
-                let loc = EventLocation::Message(None, key.clone());
                 let message: Message = ev.into();
-                self.keys.insert(event_id.clone(), loc);
-                self.messages.insert_message(key, message);
+
+                self.insert_msglike(event_id, None, message);
             },
         }
-
-        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert the start of a poll.
     pub fn insert_unstable_poll_start(&mut self, poll: UnstablePollStartEvent) {
-        let sender = poll.sender().to_owned();
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
             ts: poll.origin_server_ts().into(),
@@ -1681,9 +1926,6 @@ impl RoomInfo {
                             _ => None,
                         };
 
-                        let loc = EventLocation::Message(thread_root.clone(), key.clone());
-                        self.keys.insert(event_id.clone(), loc);
-
                         let unloaded =
                             self.unloaded_unstable_polls.remove(&ev.event_id).unwrap_or_default();
                         let msg = MessageEvent::UnstablePoll(
@@ -1692,7 +1934,7 @@ impl RoomInfo {
                         );
                         let msg = Message::new(msg, ev.sender, ev.origin_server_ts.into());
 
-                        self.get_thread_mut(thread_root).insert_message(key, msg);
+                        self.insert_msglike(event_id, thread_root, msg);
                     },
                     UnstablePollStartEventContent::Replacement(content) => {
                         let loc = EventLocation::Poll(
@@ -1722,14 +1964,11 @@ impl RoomInfo {
                 }
             },
             MessageLikeEvent::Redacted(ev) => {
-                let loc = EventLocation::Message(None, key.clone());
                 let message: Message = ev.into();
-                self.keys.insert(event_id.clone(), loc);
-                self.messages.insert_message(key, message);
+
+                self.insert_msglike(event_id, None, message);
             },
         }
-
-        self.set_implicit_receipt(sender, event_id);
     }
 
     /// Insert an event that relates to a poll
@@ -1809,113 +2048,44 @@ impl RoomInfo {
 
     pub fn insert_any_state(&mut self, msg: AnySyncStateEvent) {
         let event_id = msg.event_id().to_owned();
-        let sender = msg.sender().to_owned();
-        let key = MessageKey {
-            ts: msg.origin_server_ts().into(),
-            id: event_id.clone().into(),
-        };
 
-        let loc = EventLocation::State(key.clone());
-        self.keys.insert(event_id.clone(), loc);
-        self.messages.insert_message(key, msg);
-        self.set_implicit_receipt(sender, event_id);
-    }
-
-    /// Indicates whether this room has unread messages.
-    pub fn unreads(&self, room: &matrix_sdk::Room) -> UnreadInfo {
-        let last_message = self
-            .messages
-            .iter()
-            .rev()
-            .find(|(_, msg)| !matches!(&msg.event, MessageEvent::State(..)));
-
-        UnreadInfo {
-            unread_mark: room.is_marked_unread(),
-            unread_messages: room.num_unread_messages(),
-            unread_notifications: room.num_unread_notifications(),
-            unread_mentions: room.num_unread_mentions(),
-            latest: last_message.map(|(key, _)| key.ts.to_owned()),
-        }
+        self.insert_msglike(event_id, None, msg.into());
     }
 
     /// Inserts events that couldn't be decrypted into the scrollback.
     pub fn insert_encrypted(&mut self, msg: RoomEncryptedEvent) {
         let event_id = msg.event_id().to_owned();
-        let sender = msg.sender().to_owned();
-        let key = MessageKey {
-            ts: msg.origin_server_ts().into(),
-            id: event_id.clone().into(),
+
+        let thread_root = if let Some(EncryptedRelation::Thread(Thread { event_id, .. })) =
+            msg.as_original().and_then(|ev| ev.content.relates_to.as_ref())
+        {
+            Some(event_id.to_owned())
+        } else {
+            None
         };
 
-        self.keys
-            .insert(event_id.clone(), EventLocation::Message(None, key.clone()));
-        self.messages.insert(key, msg.into());
-        self.set_implicit_receipt(sender, event_id);
+        self.insert_msglike(event_id, thread_root, msg.into());
     }
 
     /// Insert a new message.
-    pub fn insert_message(&mut self, msg: RoomMessageEvent) {
+    fn insert_message(&mut self, msg: RoomMessageEvent) {
         let event_id = msg.event_id().to_owned();
-        let sender = msg.sender().to_owned();
-        let key = MessageKey {
-            ts: msg.origin_server_ts().into(),
-            id: event_id.clone().into(),
-        };
-
-        let loc = EventLocation::Message(None, key.clone());
-        let mut message: Message = msg.into();
-        if let Some(edits) = self.unloaded_edits.remove(&event_id) {
-            message.set_edits(edits);
-        }
-        self.keys.insert(event_id.clone(), loc);
-        self.messages.insert_message(key, message);
-        self.set_implicit_receipt(sender, event_id);
-    }
-
-    fn insert_thread(&mut self, msg: RoomMessageEvent, thread_root: OwnedEventId) {
-        let event_id = msg.event_id().to_owned();
-        let sender = msg.sender().to_owned();
-        let key = MessageKey {
-            ts: msg.origin_server_ts().into(),
-            id: event_id.clone().into(),
-        };
-
-        let replies = self
-            .threads
-            .entry(thread_root.clone())
-            .or_insert_with(|| Messages::thread(thread_root.clone()));
-        let loc = EventLocation::Message(Some(thread_root), key.clone());
-        let mut message: Message = msg.into();
-        if let Some(edits) = self.unloaded_edits.remove(&event_id) {
-            message.set_edits(edits);
-        }
-        self.keys.insert(event_id.clone(), loc);
-        replies.insert_message(key, message);
-        self.set_implicit_receipt(sender, event_id);
-    }
-
-    /// Insert a new message event.
-    pub fn insert(&mut self, msg: RoomMessageEvent) {
-        match msg {
-            RoomMessageEvent::Original(OriginalRoomMessageEvent {
-                content: RoomMessageEventContent { relates_to: Some(ref relates_to), .. },
-                ..
-            }) => {
-                match relates_to {
-                    Relation::Replacement(repl) => {
-                        let repl = repl.clone();
-                        self.insert_edit(msg, repl)
-                    },
-                    Relation::Thread(Thread { event_id, .. }) => {
-                        let event_id = event_id.clone();
-                        self.insert_thread(msg, event_id);
-                    },
-                    Relation::Reply { .. } => self.insert_message(msg),
-                    _ => self.insert_message(msg),
-                }
+        let thread_root = match msg.as_original().and_then(|ev| ev.content.relates_to.as_ref()) {
+            Some(Relation::Replacement(repl)) => {
+                let repl = repl.to_owned();
+                self.insert_edit(msg, repl);
+                return;
             },
-            _ => self.insert_message(msg),
+            Some(Relation::Thread(Thread { event_id, .. })) => Some(event_id.to_owned()),
+            _ => None,
+        };
+
+        let mut message: Message = msg.into();
+        if let Some(edits) = self.unloaded_edits.remove(&event_id) {
+            message.set_edits(edits);
         }
+
+        self.insert_msglike(event_id, thread_root, message);
     }
 
     /// Insert a new message event, and prepare for image-preview if it has an image attachment.
@@ -1934,7 +2104,24 @@ impl RoomInfo {
             previews.register_preview(settings, &c.source, PreviewKind::Message)
         }
 
-        self.insert(ev);
+        self.insert_message(ev);
+    }
+
+    /// Indicates whether this room has unread messages.
+    pub fn unreads(&self, room: &matrix_sdk::Room) -> UnreadInfo {
+        let last_message = self
+            .messages
+            .iter()
+            .rev()
+            .find(|(_, msg)| !matches!(&msg.event, MessageEvent::State(..)));
+
+        UnreadInfo {
+            unread_mark: room.is_marked_unread(),
+            unread_messages: room.num_unread_messages(),
+            unread_notifications: room.num_unread_notifications(),
+            unread_mentions: room.num_unread_mentions(),
+            latest: last_message.map(|(key, _)| key.ts.to_owned()),
+        }
     }
 
     /// Indicates whether we've recently fetched scrollback for this room.
@@ -1994,7 +2181,7 @@ impl RoomInfo {
 
     fn receipt_key(&self, event_id: &EventId) -> Option<&MessageKey> {
         match self.keys.get(event_id)? {
-            EventLocation::Message(_, key) | EventLocation::State(key) => Some(key),
+            EventLocation::Message(_, key) => Some(key),
             _ => None,
         }
     }
@@ -2218,7 +2405,7 @@ impl RoomInfo {
 
     /// Checks if a given user has reacted with the given emoji on the given event
     pub fn user_reactions_contains(
-        &mut self,
+        &self,
         user_id: &UserId,
         event_id: &EventId,
         emoji: &str,
@@ -2244,6 +2431,13 @@ fn emoji_map() -> CompletionMap<String, &'static Emoji> {
     }
 
     return emojis;
+}
+
+/// Information about spaces the user's joined.
+#[derive(Default)]
+pub struct SpaceInfo {
+    /// The space child events with content and `origin_server_ts`.
+    pub children: HashMap<OwnedRoomId, (SpaceChildEventContent, MilliSecondsSinceUnixEpoch)>,
 }
 
 /// Information gathered during server syncs about joined rooms.
@@ -2374,7 +2568,10 @@ pub struct ChatStore {
     /// Cache of encountered `via` parameters in room links.
     ///
     /// This is stored here because this data is lost in the conversion to [IambId].
-    pub room_via: HashMap<OwnedRoomOrAliasId, Vec<OwnedServerName>>,
+    pub room_via: HashMap<OwnedRoomOrAliasId, HashSet<OwnedServerName>>,
+
+    /// Map of joined spaces.
+    pub spaces: HashMap<OwnedRoomId, SpaceInfo>,
 
     /// Map of room aliases.
     pub aliases: CompletionMap<OwnedRoomAliasId, OwnedRoomId>,
@@ -2438,6 +2635,7 @@ impl ChatStore {
             rooms: Default::default(),
             room_previews: Default::default(),
             room_via: Default::default(),
+            spaces: Default::default(),
             presences: Default::default(),
             verifications: Default::default(),
             need_load: Default::default(),
@@ -2450,6 +2648,22 @@ impl ChatStore {
         };
 
         Ok(store)
+    }
+
+    /// Clear the `EventCache` for all rooms.
+    ///
+    /// This forces a re-fetch of the most recent messages in joined rooms afterwards,
+    /// which makes sure that we re-fetch any missing events (such as those sent by
+    /// recently unignored users that a re-fetch would make appear in the timeline).
+    pub async fn clear_room_cache(&mut self, client: &Client) -> Result<(), IambError> {
+        client.event_cache().clear_all_rooms().await?;
+        for room in client.joined_rooms() {
+            let room_id = room.room_id().to_owned();
+            let room = self.rooms.get_or_default(room_id.clone());
+            room.reached_timeline_start = false;
+            self.need_load.need_messages(room_id.to_owned());
+        }
+        Ok(())
     }
 
     /// Get a joined room.
@@ -2489,6 +2703,7 @@ impl ChatStore {
         name: String,
         tags: Option<Tags>,
         aliases: Vec<OwnedRoomAliasId>,
+        flags: RoomInfoFlags,
     ) {
         for alias in aliases {
             self.aliases.insert(alias, room_id.clone());
@@ -2496,17 +2711,46 @@ impl ChatStore {
 
         let info = self.rooms.get_or_default(room_id);
         info.name = name.into();
+        info.flags = flags;
         info.tags = tags;
     }
 }
 
 impl ApplicationStore for ChatStore {}
 
+#[derive(Clone, Debug, Eq, Hash, PartialEq)]
+pub enum RoomView {
+    /// The main timeline is shown.
+    Main,
+    /// A thread is shown.
+    Thread(OwnedEventId),
+    /// A single message is shown.
+    Message(MessageId),
+}
+
+impl From<Option<OwnedEventId>> for RoomView {
+    fn from(thread: Option<OwnedEventId>) -> Self {
+        match thread {
+            Some(thread) => Self::Thread(thread),
+            None => Self::Main,
+        }
+    }
+}
+
+impl From<Option<&OwnedEventId>> for RoomView {
+    fn from(thread: Option<&OwnedEventId>) -> Self {
+        match thread {
+            Some(thread) => Self::Thread(thread.to_owned()),
+            None => Self::Main,
+        }
+    }
+}
+
 /// Identified used to track window content.
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub enum IambId {
-    /// A Matrix room, with an optional thread to show.
-    Room(OwnedRoomOrAliasId, Option<OwnedEventId>),
+    /// A Matrix room, with an item that is shown.
+    Room(OwnedRoomOrAliasId, RoomView),
 
     /// The `:dms` window.
     DirectList,
@@ -2522,6 +2766,9 @@ pub enum IambId {
 
     /// The `:spaces` window.
     SpaceList,
+
+    /// The `:spaces toplevel` window.
+    ToplevelSpaceList,
 
     /// The `:verify` window.
     VerifyList,
@@ -2545,13 +2792,17 @@ pub enum IambId {
 impl Display for IambId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            IambId::Room(alias, None) => {
+            IambId::Room(alias, RoomView::Main) => {
                 let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
-                write!(f, "iamb://room/{}", encoded)
+                write!(f, "iamb://room/{encoded}")
             },
-            IambId::Room(alias, Some(thread)) => {
+            IambId::Room(alias, RoomView::Thread(thread)) => {
                 let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
-                write!(f, "iamb://room/{}/threads/{thread}", encoded)
+                write!(f, "iamb://room/{encoded}/threads/{thread}")
+            },
+            IambId::Room(alias, RoomView::Message(message)) => {
+                let encoded = percent_encode(alias.as_bytes(), NON_ALPHANUMERIC);
+                write!(f, "iamb://room/{encoded}/messages/{message}")
             },
             IambId::MemberList(room_id) => {
                 write!(f, "iamb://members/{room_id}")
@@ -2562,6 +2813,7 @@ impl Display for IambId {
             IambId::DirectList => f.write_str("iamb://dms"),
             IambId::RoomList => f.write_str("iamb://rooms"),
             IambId::SpaceList => f.write_str("iamb://spaces"),
+            IambId::ToplevelSpaceList => f.write_str("iamb://spaces/toplevel"),
             IambId::VerifyList => f.write_str("iamb://verify"),
             IambId::Welcome => f.write_str("iamb://welcome"),
             IambId::ChatList => f.write_str("iamb://chats"),
@@ -2627,7 +2879,7 @@ impl Visitor<'_> for IambIdVisitor {
                             return Err(E::custom(format!("Invalid room identifier: {decoded:?}")));
                         };
 
-                        Ok(IambId::Room(room_id, None))
+                        Ok(IambId::Room(room_id, RoomView::Main))
                     },
                     [alias, "threads", thread_root] => {
                         let decoded = percent_decode(alias.as_bytes()).decode_utf8_lossy();
@@ -2639,7 +2891,19 @@ impl Visitor<'_> for IambIdVisitor {
                             return Err(E::custom("Invalid thread root identifier"));
                         };
 
-                        Ok(IambId::Room(room_id, Some(thread_root)))
+                        Ok(IambId::Room(room_id, RoomView::Thread(thread_root)))
+                    },
+                    [alias, "messages", message] => {
+                        let decoded = percent_decode(alias.as_bytes()).decode_utf8_lossy();
+                        let Ok(room_id) = OwnedRoomOrAliasId::try_from(decoded.as_ref()) else {
+                            return Err(E::custom("Invalid room identifier: {decoded:?}"));
+                        };
+
+                        let message_id = OwnedEventId::try_from(message)
+                            .map(Into::into)
+                            .unwrap_or_else(|_| OwnedTransactionId::from(message).into());
+
+                        Ok(IambId::Room(room_id, RoomView::Message(message_id)))
                     },
                     [room_id, "pinned"] => {
                         let Ok(room_id) = OwnedRoomId::try_from(room_id) else {
@@ -2681,8 +2945,12 @@ impl Visitor<'_> for IambIdVisitor {
                 Ok(IambId::RoomList)
             },
             Some("spaces") => {
+                if url.path() == "toplevel" {
+                    return Ok(IambId::ToplevelSpaceList);
+                }
+
                 if url.path() != "" {
-                    return Err(E::custom("iamb://spaces takes no path"));
+                    return Err(E::custom("Invalid iamb window URL"));
                 }
 
                 Ok(IambId::SpaceList)
@@ -2774,7 +3042,7 @@ pub enum IambBufferId {
     Command(CommandType),
 
     /// The message buffer or a specific message in a room.
-    Room(OwnedRoomId, Option<OwnedEventId>, RoomFocus),
+    Room(OwnedRoomId, RoomView, RoomFocus),
 
     /// The `:dms` window.
     DirectList,
@@ -2790,6 +3058,9 @@ pub enum IambBufferId {
 
     /// The `:spaces` window.
     SpaceList,
+
+    /// The `:spaces toplevel` window.
+    ToplevelSpaceList,
 
     /// The `:verify` window.
     VerifyList,
@@ -2815,14 +3086,13 @@ impl IambBufferId {
     pub fn to_window(&self) -> Option<IambId> {
         let id = match self {
             IambBufferId::Command(_) => return None,
-            IambBufferId::Room(room, thread, _) => {
-                IambId::Room(room.clone().into(), thread.clone())
-            },
+            IambBufferId::Room(room, view, _) => IambId::Room(room.clone().into(), view.clone()),
             IambBufferId::DirectList => IambId::DirectList,
             IambBufferId::MemberList(room) => IambId::MemberList(room.clone()),
             IambBufferId::PinnedList(room) => IambId::PinnedList(room.clone()),
             IambBufferId::RoomList => IambId::RoomList,
             IambBufferId::SpaceList => IambId::SpaceList,
+            IambBufferId::ToplevelSpaceList => IambId::ToplevelSpaceList,
             IambBufferId::VerifyList => IambId::VerifyList,
             IambBufferId::Welcome => IambId::Welcome,
             IambBufferId::ChatList => IambId::ChatList,
@@ -2857,7 +3127,7 @@ pub mod tests {
 
     use matrix_sdk::ruma::events::reaction::ReactionEventContent;
     use matrix_sdk::ruma::events::relation::Annotation;
-    use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, owned_event_id};
+    use matrix_sdk::ruma::{MilliSecondsSinceUnixEpoch, owned_event_id, owned_user_id};
     use pretty_assertions::assert_eq;
     use ratatui::style::Color;
     use serde_json::{Map, Value};
@@ -2933,7 +3203,13 @@ pub mod tests {
             .into_iter()
             .map(|(key, count, _)| (key, count))
             .collect();
-        assert_eq!(reacts, vec![("🏠", 1), ("🙂", 2)]);
+        assert_eq!(reacts, vec![
+            ("🏠", vec![owned_user_id!("@foo:example.com").deref()]),
+            ("🙂", vec![
+                owned_user_id!("@bar:example.com").deref(),
+                owned_user_id!("@foo:example.com").deref(),
+            ],)
+        ]);
     }
 
     #[test]
@@ -3012,7 +3288,8 @@ pub mod tests {
     #[test]
     fn test_implicit_receipt_supports_state_events() {
         let mut info = RoomInfo::default();
-        info.keys.insert(MSG5_EVID.clone(), EventLocation::State(MSG5_KEY.clone()));
+        info.keys
+            .insert(MSG5_EVID.clone(), EventLocation::Message(None, MSG5_KEY.clone()));
 
         info.set_implicit_receipt(TEST_USER2.clone(), MSG5_EVID.clone());
 
@@ -3208,7 +3485,7 @@ pub mod tests {
     #[test]
     fn test_alias_window_id() {
         let room_id = TEST_ROOM1_ALIAS.clone();
-        let id = IambId::Room(room_id.into(), None);
+        let id = IambId::Room(room_id.into(), RoomView::Main);
 
         // Hash gets replaced during encoding:
         let exp = "iamb://room/%23room1%3Aexample%2Ecom";

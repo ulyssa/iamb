@@ -5,7 +5,7 @@
 .\"
 .\" You can preview this file with:
 .\"     $ man ./docs/iamb.5
-.Dd Sep 19, 2026
+.Dd Oct 21, 2026
 .Dt IAMB 5
 .Os
 .Sh NAME
@@ -142,6 +142,13 @@ Specifying this object will replace the upstream defaults and possibly lead to u
 Possible keys and their effect are documented at:
 .br
 .Lk https://docs.rs/matrix-sdk/latest/matrix_sdk/media/struct.MediaRetentionPolicy.html#fields
+.It Sy date_format
+A strftime format string for the date separator between messages from different days.
+See
+.Lk https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+for the conversion specifiers.
+Defaults to
+.Dq "%A, %B %d %Y" .
 .It Sy default_markup
 Controls how text in the message bar is interpreted by default.
 Possible values are
@@ -195,9 +202,12 @@ Possible values are:
 .Dq Sy trace ,
 .Dq Sy debug ,
 .Dq Sy info ,
-.Dq Sy warn
-(the default), and
-.Dq Sy error .
+.Dq Sy warn ,
+.Dq Sy error ,
+and
+.Dq Sy off
+(the default), which disables logging entirely.
+Note that this means no log files are written unless you adjust the level yourself.
 Also supports the syntax defined by
 .Lk https://docs.rs/tracing_subscriber/0.3.16/tracing_subscriber/filter/struct.EnvFilter.html
 .It Sy max_log_files
@@ -284,6 +294,27 @@ A message must be sent to the room before marking it read.
 Defines whether or not read confirmations are displayed.
 .It Sy request_timeout
 Defines the maximum time per request in seconds.
+.It Sy room_labels
+Defines which kinds of labels to put next to room names and what order to show the information in.
+This defaults to
+.Sy ["unread",\ "membership",\ "tags",\ "muted",\ "type"] .
+The possible values and the information shown are:
+.Bl -tag -width Ds
+.It Sy membership
+Show whether you're not currently a room member, such as when you're invited to a room.
+.It Sy muted
+Show
+.Dq Muted
+and
+.Dq Calmed
+if the room doesn't notify for all new messages.
+.It Sy tags
+Show if the room has been tagged, such as a Favorite or Low Priority room.
+.It Sy type
+Show if this is a regular room, a DM or a space when the current window shows multiple kinds.
+.It Sy unread
+Show if a non-muted, non-calmed room has unread messages or mentions.
+.El
 .It Sy send_on_enter
 If
 .Sy true
@@ -301,11 +332,28 @@ Defines whether the state events like joined or left are shown.
 .It Sy sync_delay_ms
 How long to wait after a sync completes before doing the next one.
 Defaults to 250 milliseconds.
+.It Sy theme
+Configure which theme to use at startup.
+Defaults to
+.Dq Sy "default" .
 .It Sy terminal
 Subsection for configuring how specific terminal features are used (or not used).
 See
 .Sx TERMINAL
 for more details.
+.It Sy time_format
+A strftime format string for the time shown beside each message.
+See
+.Lk https://docs.rs/chrono/latest/chrono/format/strftime/index.html
+for the conversion specifiers.
+The value is the full gutter text, including any brackets or spacing.
+Its display width, measured by rendering the format for a sample timestamp,
+is the width of the time column and does not change from message to message.
+An empty string disables the time display and reserves no columns.
+Defaults to
+.Dq "  [%T]" ,
+which renders as
+.Dq "  [HH:MM:SS]" .
 .It Sy typing_notice_send
 Defines whether or not the typing state is sent.
 .It Sy typing_notice_display
@@ -567,7 +615,7 @@ How to sort the
 .Sy :rooms
 window.
 Defaults to
-.Sy ["favorite",\ "lowpriority",\ "unread",\ "name"] .
+.Sy ["favorite",\ "invite",\ "lowpriority",\ "mentions",\ "notifications",\ "joined",\ "space",\ "dm",\ "recent",\ "name"] .
 .It Sy chats
 How to sort the
 .Sy :chats
@@ -589,6 +637,10 @@ window.
 Defaults to the
 .Sy rooms
 value.
+.It Sy space
+How to sort rooms in a space.
+Defaults to
+.Sy ["space",\ "joined",\ "spaceorder"] .
 .It Sy members
 How to sort the
 .Sy :members
@@ -599,26 +651,43 @@ Defaults to
 .Pp
 The available values for sorting rooms are:
 .Bl -tag -width Ds
-.It Sy favorite
-Put favorite rooms before other rooms.
-.It Sy lowpriority
-Put lowpriority rooms after other rooms.
-.It Sy name
-Sort rooms by alphabetically ascending room name.
 .It Sy alias
 Sort rooms by alphabetically ascending canonical room alias.
+.It Sy dm
+Put direct messages before other rooms.
+.It Sy favorite
+Put favorite rooms before other rooms.
 .It Sy id
 Sort rooms by alphabetically ascending Matrix room identifier.
+.It Sy invite
+Put invites before other rooms.
+.It Sy joined
+Put joined rooms before unjoined rooms.
+.It Sy lowpriority
+Put lowpriority rooms after other rooms.
+.It Sy mentions
+Put rooms with unread mentions before other rooms.
+.It Sy name
+Sort rooms by alphabetically ascending room name.
+.It Sy notifications
+Put rooms with unread notifications before other rooms.
+.It Sy recent
+Sort rooms by most recent message timestamp.
 .It Sy server
 Sort rooms by alphabetically ascending server name from the room alias.
 This will fall back to the server from the room identifier if there is
 no canonical alias for the room.
 .It Sy unread
-Put unread rooms before other rooms.
+Put rooms with unread messages before other rooms.
 .It Sy recent
 Sort rooms by most recent message timestamp.
-.It Sy invite
-Put invites before other rooms.
+.It Sy space
+Put spaces before other rooms.
+.El
+The available values for sorting space members are the same as for sorting rooms with the addition:
+.Bl -tag -width Ds
+.It Sy spaceorder
+Sort rooms according to the relative order defined by the space admins.
 .El
 .Pp
 The available values for sorting users are:
@@ -717,12 +786,43 @@ Modifier names prefixed with
 will remove the modifier if it was inherited from another default, global config, etc.
 .El
 .Pp
+Some special UI elements also have additional properties available:
+.Bl -tag -width Ds
+.It Sy line
+For UI elements that draw a block, such as
+.Sy "theme.windows.border" ,
+.Sy "theme.windows.border_focused" ,
+.Sy "theme.messages.code_block" ,
+or
+.Sy "theme.messages.table" ,
+you can specify what characters should be used to draw the bounding line.
+.Pp
+Possible values are
+.Dq Sy "plain" ,
+.Dq Sy "rounded" ,
+.Dq Sy "double" ,
+.Dq Sy "thick" ,
+.Dq Sy "double-dashed-light" ,
+.Dq Sy "double-dashed-heavy" ,
+.Dq Sy "triple-dashed-light" ,
+.Dq Sy "triple-dashed-heavy" ,
+.Dq Sy "quadruple-dashed-light" ,
+and
+.Dq Sy "quadruple-dashed-heavy" .
+.It Sy colors
+For UI elements that can use multiple colors, like
+.Sy "theme.users"
+for usernames, you can specify an array of colors that make up the pallete to pick from.
+.El
+.Pp
 Within
 .Sy theme ,
 there are several subsections for specific UI areas:
 .Bl -tag -width Ds
 .It Sy default
 The base, default style that everything else should inherit.
+.It Sy selected
+Additional options for how to style selected items in lists and timelines.
 .It Sy cmdbar
 For controlling how the text in the command bar is styled.
 .Bl -tag -width Ds
@@ -730,6 +830,8 @@ For controlling how the text in the command bar is styled.
 Configure the default styling for the command bar.
 .It Sy prompt
 Configure the styling for the prompt in the command bar.
+.It Sy completions
+Configure the styling for displaying possible command bar completions.
 .It Sy error
 Configure the styling for error messages shown in the command bar.
 .It Sy info
@@ -761,6 +863,10 @@ UI elements you can set within this subsection are:
 .Bl -tag -width Ds
 .It Sy default
 Configure the default styling for messages.
+.It Sy "blockquote"
+Configure the styling for the line used for indenting
+.Sy "<blockquote>"
+elements in formatted message bodies.
 .It Sy code
 Configure the styling for
 .Sy "<code>"
@@ -775,6 +881,10 @@ Configure the styling for
 and
 .Sy "<i>"
 elements in formatted message bodies.
+.It Sy "ruler"
+Configure the styling for the line used for drawing
+.Sy "<ruler>"
+elements in formatted message bodies.
 .It Sy "strikethrough"
 Configure the styling for
 .Sy "<del>" ,
@@ -787,6 +897,10 @@ Configure the styling for
 .Sy "<strong>"
 and
 .Sy "<b>"
+elements in formatted message bodies.
+.It Sy "table"
+Configure the styling for the line used for drawing the cells for
+.Sy "<table>"
 elements in formatted message bodies.
 .It Sy "underlined"
 Configure the styling for
@@ -826,7 +940,12 @@ and
 .Sy modifiers
 properties, you can also specify a
 .Sy colors
-array for providing a broad palette of colors from which to style usernames.
+field for providing a broad palette of colors from which to style usernames.
+You can provide an array of specific colors, which you may want if you have a list of specific colors that work for your theme, but you can also set it to
+.Sy "rainbow-light"
+or
+.Sy "rainbow-dark"
+to use a large light- or dark-colored rainbow palette for usernames.
 .Pp
 By default, this is a selection of 13 standard ANSI colors that should look okay on both light and dark backgrounds.
 You can set this array to
@@ -835,6 +954,14 @@ to force all usernames to use the value in
 .Sy color
 or its inherited value from
 .Sy "theme.default" .
+.It Sy completion
+For controlling how the completion menu is styled.
+.Bl -tag -width Ds
+.It Sy default
+Configure the default style for entries in the menu.
+.It Sy selected
+Configure how the selected entry is styled.
+.El
 .It Sy windows
 For controlling how the windows are styled.
 .Bl -tag -width Ds
@@ -868,8 +995,28 @@ UI elements you can set within this subsection are:
 Configure the default style for text in room lists.
 .It Sy labels
 Configure the style for the labels following room names in lists.
+.It Sy notification
+Configure how rooms with unread notifications are displayed.
+.Bl -tag -width Ds
+.It Sy number
+Configure the style of the number showing how many unread notifications a room has.
+.It Sy name
+Configure the style for rooms with unread notifications.
+.It Sy labels
+Configure the style for the labels of rooms with unread notifications.
+.El
+.It Sy mention
+Configure how rooms with unread mentions are displayed.
+Accepts the same values as
+.Sy notification .
 .It Sy unread
-Configure the style for unread room names in lists.
+Configure how rooms with unread muted messages are displayed.
+Accepts the same values as
+.Sy notification .
+.It Sy marked_unread .
+Configure how rooms that are manually marked as unread are displayed.
+Accepts the same values as
+.Sy notification .
 .El
 .El
 .Ss Example 1: Make code blocks a lighter gray background and state events red
@@ -1055,7 +1202,9 @@ A JSON configuration file that
 .Sy iamb
 will load if the TOML one is not found.
 .It Pa /usr/share/iamb/config.example.toml
-A sample configuration file with examples of how to set different values.
+A sample configuration file showing the basic values needed to get started.
+.It Pa /usr/share/iamb/config.full.toml
+A sample configuration file with examples of how to set many different values.
 .El
 .Sh "REPORTING BUGS"
 Please report bugs in

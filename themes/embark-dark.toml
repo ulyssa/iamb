@@ -1,0 +1,79 @@
+# embark-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#100E23)
+# COLOR_BG2 => Alternate background (#1E1C31)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#91DDFF)
+#
+# COLOR_UI1 => Window border color, completion menu background (#585273)
+# COLOR_UI2 => Window title color (#8A889D)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#F2B482)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#E0E2EA)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#FFE6B3)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#A1EFD3)
+#
+# COLOR_TEXT1 => Primary text color (#ABF8F7)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#F48FB1)
+# COLOR_TEXT3 => Alternate text color (#63F2F1)
+# COLOR_TEXT4 => Alternate text color (#CBE3E7)
+# COLOR_TEXT5 => Alternate text color (#ABF8F7)
+#
+#
+[theme.users]
+colors = [
+    "#F2B482",
+    "#E0E2EA",
+    "#FFE6B3",
+    "#A1EFD3",
+    "#F48FB1",
+    "#63F2F1",
+    "#CBE3E7",
+    "#ABF8F7",
+]
+
+[theme.default]
+color = "#ABF8F7"
+background = "#100E23"
+
+[theme.completion]
+default.background = "#91DDFF"
+default.color = "#585273"
+selected.background = "#1E1C31"
+selected.color = "#ABF8F7"
+
+[theme.timeline]
+redacted.color = "#E0E2EA"
+
+[theme.messages]
+code.color = "#F48FB1"
+code.background = "#1E1C31"
+emphasis.color = "#CBE3E7"
+strong.color = "#63F2F1"
+
+[theme.rooms]
+default.color = "#ABF8F7"
+labels.color = "#CBE3E7"
+unread.name.color = "#F48FB1"
+unread.number.color = "#CBE3E7"
+mention.number.color = "#F2B482"
+notification.number.color = "#FFE6B3"
+marked_unread.number.color = "#A1EFD3"
+
+[theme.windows]
+border.color = "#585273"
+title.color = "#8A889D"
+
+[theme.encryption]
+icon_encrypted.color = "#A1EFD3"
+icon_unencrypted.color = "#F2B482"
+icon_unknown.color = "#FFE6B3"
+
+[theme.cmdbar]
+error.color = "#F2B482"

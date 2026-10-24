@@ -1,6 +1,6 @@
 [package]
 name = "iamb"
-version = "0.0.13-alpha.1"
+version = "0.14.0-alpha.1"
 edition = "2024"
 authors = ["Ulyssa <git@ulyssa.dev>"]
 repository = "https://github.com/ulyssa/iamb"
@@ -33,12 +33,13 @@ features = ["build"]
 anyhow = "1.0"
 bitflags = "2.3"
 chrono = "0.4"
-clap = {version = "^4.6", features = ["derive"]}
+clap = { version = "^4.6", features = ["derive", "string"] }
 clap_complete = "^4.6"
 css-color-parser = "0.1.2"
 dirs = "7.0"
 edit = "0.1.4"
 emojis = "0.9"
+palette = "0.7.7"
 feruca = "0.12"
 futures = "0.3"
 gethostname = "1.1"
@@ -55,7 +56,7 @@ mime = "0.3.16"
 mime_guess = "2.0.4"
 nom = "8.0"
 open = "5.0.0"
-ratatui = { version = "0.30.2", features = ["serde"] }
+ratatui = { version = "0.30.2", features = ["palette", "serde"] }
 regex = "1.5"
 rpassword = "7.2"
 serde = "1.0"
@@ -71,6 +72,7 @@ unicode-segmentation = "1.7"
 unicode-width = "0.2"
 url = {version = "2.5.8", features = ["serde"]}
 percent-encoding = "2.3.2"
+xdg = "3.0.0"
 
 [dependencies.comrak]
 version = "0.55.0"
@@ -82,15 +84,15 @@ version = "4.12"
 optional = true
 
 [dependencies.modalkit]
-version = "0.0.29"
+version = "0.0.32"
 default-features = false
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "bdb1c365417234f0c3be297beeffcfe2d1e75a5a"
+#rev = "31158b7b759ef6f4b3c0d56305fa8a68365d8a96"
 
 [dependencies.modalkit-ratatui]
-version = "0.0.29"
+version = "0.0.32"
 #git = "https://github.com/ulyssa/modalkit"
-#rev = "bdb1c365417234f0c3be297beeffcfe2d1e75a5a"
+#rev = "31158b7b759ef6f4b3c0d56305fa8a68365d8a96"
 
 [dependencies.matrix-sdk-base]
 version = "0.19.0"
@@ -105,7 +107,7 @@ version = "0.19.0"
 
 [dependencies.tokio]
 version = "1.24.1"
-features = ["macros", "net", "rt-multi-thread", "sync", "time"]
+features = ["io-std", "macros", "net", "rt-multi-thread", "sync", "time"]
 
 [dependencies.ratatui-image]
 version = "11.0.8"
@@ -135,24 +137,48 @@ assets = [
     # Manual pages:
     ["docs/iamb.1", "usr/share/man/man1/iamb.1", "644"],
     ["docs/iamb.5", "usr/share/man/man5/iamb.5", "644"],
+    # Packaged themes:
+    [ "themes/*.toml", "usr/share/iamb/themes/", "644" ],
     # Other assets:
     ["iamb.desktop", "usr/share/applications/iamb.desktop", "644"],
     ["config.example.toml", "usr/share/iamb/config.example.toml", "644"],
+    ["config.full.toml", "usr/share/iamb/config.full.toml", "644"],
     ["docs/iamb.svg", "usr/share/icons/hicolor/scalable/apps/iamb.svg", "644"],
     ["docs/iamb.metainfo.xml", "usr/share/metainfo/iamb.metainfo.xml", "644"],
 ]
 
 [package.metadata.generate-rpm]
-version = "0.0.13_alpha.1"
+version = "0.14.0_alpha.1"
 assets = [
     # Binary:
     { source = "target/release/iamb", dest = "/usr/bin/iamb", mode = "755" },
     # Manual pages:
     { source = "docs/iamb.1", dest = "/usr/share/man/man1/iamb.1", mode = "644" },
     { source = "docs/iamb.5", dest = "/usr/share/man/man5/iamb.5", mode = "644" },
+    # Packaged themes:
+    { source = "themes/*.toml", dest = "/usr/share/iamb/themes/", mode = "644" },
     # Other assets:
     { source = "iamb.desktop", dest = "/usr/share/applications/iamb.desktop", mode = "644" },
     { source = "config.example.toml", dest = "/usr/share/iamb/config.example.toml", mode = "644"},
+    { source = "config.full.toml", dest = "/usr/share/iamb/config.full.toml", mode = "644"},
     { source = "docs/iamb.svg", dest = "/usr/share/icons/hicolor/scalable/apps/iamb.svg", mode = "644"},
     { source = "docs/iamb.metainfo.xml", dest = "/usr/share/metainfo/iamb.metainfo.xml", mode = "644"},
+]
+
+[package.metadata.tar]
+format = "tar.gz"
+assets = [
+    # License:
+    { source = "LICENSE", dest = "LICENSE", mode = "644" },
+    # Manual pages:
+    { source = "docs/iamb.1", dest = "docs/iamb.1", mode = "644" },
+    { source = "docs/iamb.5", dest = "docs/iamb.5", mode = "644" },
+    # Packaged themes:
+    { source = "themes/*.toml", dest = "themes/", mode = "644" },
+    # Other assets:
+    { source = "iamb.desktop", dest = "assets/iamb.desktop", mode = "644" },
+    { source = "config.example.toml", dest = "assets/config.example.toml", mode = "644"},
+    { source = "config.full.toml", dest = "assets/config.full.toml", mode = "644"},
+    { source = "docs/iamb.svg", dest = "assets/iamb.svg", mode = "644"},
+    { source = "docs/iamb.metainfo.xml", dest = "assets/iamb.metainfo.xml", mode = "644"},
 ]

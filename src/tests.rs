@@ -1,7 +1,9 @@
 use std::iter::FromIterator as _;
 
 use lazy_static::lazy_static;
+use matrix_sdk::ruma::events::room::member::MembershipState;
 use matrix_sdk::ruma::events::room::message::RoomMessageEventContent;
+use matrix_sdk::ruma::events::room::power_levels::UserPowerLevel;
 use matrix_sdk::ruma::{UInt, event_id, server_name, user_id};
 use matrix_sdk::ruma::{assign, owned_room_alias_id};
 use serde_json::{Map, Value};
@@ -135,6 +137,14 @@ pub fn mock_room() -> RoomInfo {
     let name = "User 2";
     room.display_names.set(user_id.clone(), Some(name.to_string()), true);
 
+    let member = MemberSummary {
+        user_id: user_id.clone(),
+        display_name: Some(name.to_string()),
+        power_level: UserPowerLevel::Int(50.into()),
+        membership: MembershipState::Join,
+    };
+    room.memberships.insert(user_id, member);
+
     room
 }
 
@@ -153,7 +163,7 @@ pub fn mock_tunables() -> TunableValues {
         ignorecase: false,
         default_register: None,
         default_room: None,
-        default_via: vec![],
+        default_via: Default::default(),
         encryption: Encryption::default().values(),
         input_prompt: None,
         log_level: "warn".into(),
@@ -167,11 +177,13 @@ pub fn mock_tunables() -> TunableValues {
         read_receipt_send: true,
         read_receipt_trigger: Default::default(),
         read_receipt_display: true,
+        room_labels: Default::default(),
         request_timeout: 120,
         sort: SortOverrides::default().values(),
         state_event_display: true,
         sync_delay_ms: 1000,
         terminal: Terminal::default().values(),
+        theme: "default".into(),
         typing_notice_send: true,
         typing_notice_display: true,
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
@@ -199,6 +211,9 @@ pub fn mock_tunables() -> TunableValues {
         ssl_verify: true,
         cache_policy: Default::default(),
         send_on_enter: true,
+        date_format: "%A, %B %d %Y".to_string(),
+        time_format: "  [%T]".to_string(),
+        time_gutter_width: 12,
     }
 }
 
@@ -206,6 +221,7 @@ pub fn mock_settings() -> ApplicationSettings {
     ApplicationSettings {
         layout_json: PathBuf::new(),
         session_json: PathBuf::new(),
+        device_json: PathBuf::new(),
         session_json_old: PathBuf::new(),
         sled_dir: PathBuf::new(),
         sqlite_dir: PathBuf::new(),
@@ -229,6 +245,7 @@ pub fn mock_settings() -> ApplicationSettings {
         macros: HashMap::default(),
         aliases: Aliases::default(),
         theme: crate::config::theme::default_theme().values().into(),
+        themes: Default::default(),
         enable_enhanced_keys: false,
     }
 }

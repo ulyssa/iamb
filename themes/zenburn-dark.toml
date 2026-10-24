@@ -1,0 +1,80 @@
+# zenburn-dark theme for iamb
+#
+# You can place this directly in your `~/.config/iamb/themes` directory to make it
+# discoverable, or copy its contents directly into your `config.toml`.
+#
+# If you are looking to remix this file to make a derived theme, the colors were
+# picked and assigned as:
+#
+# COLOR_BG1 => Primary background (#262626)
+# COLOR_BG2 => Alternate background (#3F3F3F)
+# COLOR_BG3 => Completion menu text, drawn reversed over COLOR_UI1 (#262626)
+#
+# COLOR_UI1 => Window border color, completion menu background (#EFEF8F)
+# COLOR_UI2 => Window title color (#8F8F8F)
+#
+# COLOR_WARN1 => Errors, unencrypted, etc. - typically a red (#CC9393)
+# COLOR_WARN2 => Redacted messages - typically a red or light orange (#EFDCBC)
+# COLOR_WARN3 => Unknown encryption status - typically a yellow (#D2D39B)
+#
+# COLOR_GOOD1 => Encrypted indicator - typically a green (#7F9F7F)
+#
+# COLOR_TEXT1 => Primary text color (#F0EFD0)
+# COLOR_TEXT2 => Contrast text color, should differ from COLOR_TEXT1 (#9FAFAF)
+# COLOR_TEXT3 => Alternate text color (#CFBFAF)
+# COLOR_TEXT4 => Alternate text color (#8CD0D3)
+# COLOR_TEXT5 => Alternate text color (#E3CEAB)
+#
+# COLOR_PLUS => Extra colors used for user names: #DCDCCC
+[theme.users]
+colors = [
+    "#CC9393",
+    "#EFDCBC",
+    "#D2D39B",
+    "#7F9F7F",
+    "#9FAFAF",
+    "#CFBFAF",
+    "#8CD0D3",
+    "#E3CEAB",
+    "#DCDCCC",
+]
+
+[theme.default]
+color = "#F0EFD0"
+background = "#262626"
+
+[theme.completion]
+default.background = "#262626"
+default.color = "#EFEF8F"
+selected.background = "#3F3F3F"
+selected.color = "#F0EFD0"
+
+[theme.timeline]
+redacted.color = "#EFDCBC"
+
+[theme.messages]
+code.color = "#9FAFAF"
+code.background = "#3F3F3F"
+emphasis.color = "#8CD0D3"
+strong.color = "#CFBFAF"
+
+[theme.rooms]
+default.color = "#E3CEAB"
+labels.color = "#8CD0D3"
+unread.name.color = "#9FAFAF"
+unread.number.color = "#8CD0D3"
+mention.number.color = "#CC9393"
+notification.number.color = "#D2D39B"
+marked_unread.number.color = "#7F9F7F"
+
+[theme.windows]
+border.color = "#EFEF8F"
+title.color = "#8F8F8F"
+
+[theme.encryption]
+icon_encrypted.color = "#7F9F7F"
+icon_unencrypted.color = "#CC9393"
+icon_unknown.color = "#D2D39B"
+
+[theme.cmdbar]
+error.color = "#CC9393"

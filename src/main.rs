@@ -26,6 +26,11 @@ use std::sync::atomic::AtomicUsize;
 use clap::{CommandFactory, Parser};
 use matrix_sdk::OwnedServerName;
 use matrix_sdk::ruma::api::error::ErrorKind;
+use matrix_sdk::ruma::events::ignored_user_list::IgnoredUserListEventContent;
+use matrix_sdk::ruma::events::invite_permission_config::{
+    InvitePermissionAction,
+    InvitePermissionConfigEventContent,
+};
 use modalkit::actions::{Commandable, TabAction, TabContainer, TabCount, WindowContainer};
 use modalkit::crossterm;
 use modalkit::crossterm::cursor::SetCursorStyle;
@@ -43,6 +48,7 @@ use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tokio::sync::Mutex as AsyncMutex;
 use tracing::Level;
+use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 use crate::base::{HomeserverAction, KeysAction};
@@ -60,6 +66,7 @@ mod config;
 mod keybindings;
 mod message;
 mod notifications;
+mod oauth;
 mod prelude;
 mod preview;
 mod util;
@@ -79,14 +86,16 @@ fn config_tab_to_desc(
             let window = match window {
                 config::WindowPath::UserId(user_id) => {
                     if let Some(dm) = store.application.worker.client.get_dm_room(&user_id) {
-                        IambId::Room(dm.room_id().to_owned().into(), None)
+                        IambId::Room(dm.room_id().to_owned().into(), RoomView::Main)
                     } else {
                         let room_id = store.application.worker.create_dm(user_id)?;
-                        IambId::Room(room_id.into(), None)
+                        IambId::Room(room_id.into(), RoomView::Main)
                     }
                 },
-                config::WindowPath::RoomId(room_id) => IambId::Room(room_id.into(), None),
-                config::WindowPath::AliasId(alias_id) => IambId::Room(alias_id.into(), None),
+                config::WindowPath::RoomId(room_id) => IambId::Room(room_id.into(), RoomView::Main),
+                config::WindowPath::AliasId(alias_id) => {
+                    IambId::Room(alias_id.into(), RoomView::Main)
+                },
                 config::WindowPath::Window(id) => id,
             };
 
@@ -121,6 +130,8 @@ fn resolve_mxid(
     id: MatrixId,
     via: Vec<OwnedServerName>,
 ) -> IambResult<IambId> {
+    let mut view = RoomView::Main;
+
     let alias_id = match id {
         MatrixId::Room(room_id) => room_id.into(),
         MatrixId::RoomAlias(alias) => {
@@ -137,8 +148,8 @@ fn resolve_mxid(
                 store.application.worker.create_dm(user_id.to_owned())?.into()
             }
         },
-        MatrixId::Event(alias_id, _) => {
-            // ignore event id for now
+        MatrixId::Event(alias_id, event_id) => {
+            view = RoomView::Message(event_id.into());
             alias_id
         },
         _ => {
@@ -147,9 +158,14 @@ fn resolve_mxid(
         },
     };
 
-    store.application.room_via.insert(alias_id.to_owned(), via);
+    store
+        .application
+        .room_via
+        .entry(alias_id.to_owned())
+        .or_default()
+        .extend(via);
 
-    Ok(IambId::Room(alias_id, None))
+    Ok(IambId::Room(alias_id, view))
 }
 
 fn setup_screen(
@@ -164,7 +180,7 @@ fn setup_screen(
     if let Some((id, via)) = initial_room {
         match resolve_mxid(store, id, via) {
             Ok(id) => {
-                return Ok(ScreenState::new(IambWindow::open(id, store)?, cmd));
+                return Ok(ScreenState::new(IambWindow::open(id, OpenFlags::NONE, store)?, cmd));
             },
             Err(err) => {
                 store.application.draw_error = Some(format!("layout restore: {err}"));
@@ -201,8 +217,8 @@ fn setup_screen(
     let win = settings
         .tunables
         .default_room
-        .and_then(|room| IambWindow::find(room, store).ok())
-        .or_else(|| IambWindow::open(IambId::Welcome, store).ok())
+        .and_then(|room| IambWindow::find(room, OpenFlags::NONE, store).ok())
+        .or_else(|| IambWindow::open(IambId::Welcome, OpenFlags::NONE, store).ok())
         .unwrap();
 
     return Ok(ScreenState::new(win, cmd));
@@ -315,9 +331,15 @@ impl Application {
                 .borders(true)
                 .border_style(theme.windows.border)
                 .border_style_focused(theme.windows.border_focused)
+                .border_type(theme.windows.border_line)
+                .border_type_focused(theme.windows.border_focused_line)
                 .cmdbar_style(theme.cmdbar.default)
+                .cmdbar_completions_style(theme.cmdbar.completions)
+                .cmdbar_prompt_style(theme.cmdbar.prompt)
                 .tab_style(theme.tabs.title)
                 .tab_style_focused(theme.tabs.title_focused)
+                .completion_style(theme.completion.default)
+                .completion_style_selected(theme.completion.selected)
                 .focus(focused);
             f.render_stateful_widget(screen, area, sstate);
 
@@ -466,7 +488,7 @@ impl Application {
                         // Switch to the right window.
                         if let Some(winid) = content.to_window() {
                             let open = OpenTarget::Application(winid);
-                            let open = WindowAction::Switch(open);
+                            let open = WindowAction::Switch(open, OpenFlags::NONE);
                             let _ = self.screen.window_command(&open, &ctx, store)?;
 
                             // Run command again.
@@ -559,6 +581,19 @@ impl Application {
         }
 
         let info = match action {
+            IambAction::ChangeTheme(theme) => {
+                let Some(theme) = store.application.settings.themes.get(&theme) else {
+                    let err = format!("Unknown theme: {theme:?}");
+                    return Err(UIError::Failure(err.to_string()));
+                };
+
+                self.dirty = true;
+                self.theme = Arc::new(theme.clone().values());
+                store.application.settings.theme = self.theme.clone();
+                self.screen.clear_message();
+
+                None
+            },
             IambAction::ClearUnreads => {
                 // Clear any notifications we displayed:
                 store.application.open_notifications.clear();
@@ -591,7 +626,11 @@ impl Application {
             },
             IambAction::Keys(act) => self.keys_command(act, ctx, store).await?,
             IambAction::Message(act) => {
-                self.screen.current_window_mut()?.message_command(act, ctx, store).await?
+                let acts =
+                    self.screen.current_window_mut()?.message_command(act, ctx, store).await?;
+                self.action_prepend(acts);
+
+                None
             },
             IambAction::Space(act) => {
                 self.screen.current_window_mut()?.space_command(act, ctx, store).await?
@@ -631,7 +670,7 @@ impl Application {
                     match resolve_mxid(store, id.to_owned(), via.to_vec()) {
                         Ok(id) => {
                             let target = OpenTarget::Application(id);
-                            let action = WindowAction::Switch(target);
+                            let action = WindowAction::Switch(target, OpenFlags::NONE);
 
                             self.action_prepend(vec![(action.into(), ctx)]);
                             None
@@ -673,11 +712,126 @@ impl Application {
             HomeserverAction::CreateRoom(alias, vis, flags) => {
                 let client = &store.application.worker.client;
                 let room_id = create_room(client, alias, vis, flags).await?;
-                let room = IambId::Room(room_id.into(), None);
+                let room = IambId::Room(room_id.into(), RoomView::Main);
                 let target = OpenTarget::Application(room);
-                let action = WindowAction::Switch(target);
+                let action = WindowAction::Switch(target, OpenFlags::NONE);
 
                 Ok(vec![(action.into(), ctx)])
+            },
+            HomeserverAction::AccountSet(AccountField::Invites, perms) => {
+                let perms = match perms.as_str() {
+                    "allow" => None,
+                    "block" => Some(InvitePermissionAction::Block),
+                    perm => {
+                        return Err(UIError::Failure(format!(
+                            "{perm:?} is not a valid invite permission"
+                        )));
+                    },
+                };
+                let mut content = InvitePermissionConfigEventContent::new();
+                content.default_action = perms;
+                let _ = self
+                    .worker
+                    .client
+                    .account()
+                    .set_account_data(content)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountUnset(AccountField::Invites, val) => {
+                if let Some(val) = val {
+                    let msg = format!("Cannot unset invites with a value (given {val:?})");
+                    return Err(UIError::Failure(msg));
+                }
+
+                let mut content = InvitePermissionConfigEventContent::new();
+                content.default_action = None;
+                let _ = self
+                    .worker
+                    .client
+                    .account()
+                    .set_account_data(content)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountShow(AccountField::Invites) => {
+                let resp = self
+                    .worker
+                    .client
+                    .account()
+                    .fetch_account_data_static::<InvitePermissionConfigEventContent>()
+                    .await
+                    .map_err(IambError::from)?;
+                let resp = resp
+                    .map(|r| r.deserialize())
+                    .transpose()
+                    .map_err(IambError::from)?
+                    .and_then(|r| r.default_action);
+                let action = match resp.as_ref() {
+                    None => "allow",
+                    Some(InvitePermissionAction::Block) => "block",
+                    Some(other) => other.as_str(),
+                };
+                let msg = format!("Current default invite permission: {action}");
+                Ok(vec![(Action::ShowInfoMessage(msg.into()), ctx)])
+            },
+            HomeserverAction::AccountSet(AccountField::Ignore, user) => {
+                let Ok(user) = OwnedUserId::from_str(&user) else {
+                    return Err(IambError::InvalidUserId(user).into());
+                };
+                self.worker
+                    .client
+                    .account()
+                    .ignore_user(&user)
+                    .await
+                    .map_err(IambError::from)?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountUnset(AccountField::Ignore, user) => {
+                let Some(user) = user else {
+                    return Err(IambError::InvalidUserId("".into()).into());
+                };
+                let Ok(user) = OwnedUserId::from_str(&user) else {
+                    return Err(IambError::InvalidUserId(user).into());
+                };
+                self.worker
+                    .client
+                    .account()
+                    .unignore_user(&user)
+                    .await
+                    .map_err(IambError::from)?;
+                store.application.clear_room_cache(&self.worker.client).await?;
+                Ok(vec![])
+            },
+            HomeserverAction::AccountShow(AccountField::Ignore) => {
+                let ignored = self
+                    .worker
+                    .client
+                    .account()
+                    .account_data::<IgnoredUserListEventContent>()
+                    .await
+                    .map_err(IambError::from)?;
+                let ignored_users = ignored
+                    .map(|raw| raw.deserialize())
+                    .transpose()
+                    .map_err(IambError::from)?
+                    .map(|c| c.ignored_users);
+
+                let msg = match ignored_users {
+                    Some(users) if !users.is_empty() => {
+                        let mut s = String::from("You are currently ignoring:");
+                        users.keys().for_each(|u| {
+                            s.push_str("\n - ");
+                            s.push_str(u.as_ref());
+                        });
+                        s
+                    },
+                    _ => "You have no users in your ignore list.".into(),
+                };
+
+                Ok(vec![(Action::ShowInfoMessage(InfoMessage::Pager(msg)), ctx)])
             },
             HomeserverAction::KnockSend(alias, reason) => {
                 let _ = self
@@ -880,14 +1034,12 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
     if settings.session_json.is_file() {
         let session = settings.read_session(&settings.session_json)?;
         worker.login(LoginStyle::SessionRestore(session.into()))?;
-
         return Ok(());
     }
 
     if settings.session_json_old.is_file() && !settings.sled_dir.is_dir() {
         let session = settings.read_session(&settings.session_json_old)?;
         worker.login(LoginStyle::SessionRestore(session.into()))?;
-
         return Ok(());
     }
 
@@ -903,22 +1055,24 @@ async fn login(worker: &Requester, settings: &ApplicationSettings) -> IambResult
     }
 
     loop {
-        let login_style =
-            match read_response("Please select login type: [p]assword / [s]ingle sign on")
-                .chars()
-                .next()
-                .map(|c| c.to_ascii_lowercase())
-            {
-                None | Some('p') => {
-                    let password = rpassword::prompt_password("Password: ")?;
-                    LoginStyle::Password(password)
-                },
-                Some('s') => LoginStyle::SingleSignOn,
-                Some(_) => {
-                    println!("Failed to login. Please enter 'p' or 's'");
-                    continue;
-                },
-            };
+        let login_style = match read_response(
+            "Please select login type: [p]assword / [s]ingle sign on / [o]auth",
+        )
+        .chars()
+        .next()
+        .map(|c| c.to_ascii_lowercase())
+        {
+            None | Some('p') => {
+                let password = rpassword::prompt_password("Password: ")?;
+                LoginStyle::Password(password)
+            },
+            Some('s') => LoginStyle::SingleSignOn,
+            Some('o') => LoginStyle::OAuth,
+            Some(_) => {
+                println!("Failed to login. Please enter 'p', 's' or 'o'");
+                continue;
+            },
+        };
 
         match worker.login(login_style) {
             Ok(info) => {
@@ -951,6 +1105,8 @@ async fn login_normal(
     println!("* Logging in for {}...", settings.profile.user_id);
     login(worker, settings).await?;
     println!("* Syncing...");
+    worker.spawn_sync()?;
+    worker.setup_persistent_tokens();
     worker::do_first_sync(&worker.client, store)
         .await
         .map_err(IambError::from)?;
@@ -1050,7 +1206,7 @@ fn setup_logging(settings: &ApplicationSettings) -> tracing_appender::non_blocki
             .unwrap_or_else(print_exit)
     } else {
         EnvFilter::builder()
-            .with_default_directive(Level::WARN.into())
+            .with_default_directive(LevelFilter::OFF.into())
             .parse(log_level)
             .map_err(|err| format!("Unable to parse `log_level`: {err}"))
             .unwrap_or_else(print_exit)

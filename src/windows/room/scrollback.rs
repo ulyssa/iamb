@@ -103,7 +103,8 @@ pub struct ScrollbackState {
 
 impl ScrollbackState {
     pub fn new(room_id: OwnedRoomId, thread: Option<OwnedEventId>) -> ScrollbackState {
-        let id = IambBufferId::Room(room_id.to_owned(), thread.clone(), RoomFocus::Scrollback);
+        let id =
+            IambBufferId::Room(room_id.to_owned(), thread.clone().into(), RoomFocus::Scrollback);
         let cursor = MessageCursor::default();
         let viewctx = ViewportContext::default();
         let jumped = HistoryList::default();
@@ -145,6 +146,16 @@ impl ScrollbackState {
             .timestamp
             .clone()
             .or_else(|| self.get_thread(info)?.last_key_value().map(|kv| kv.0.clone()))
+    }
+
+    pub fn get<'a>(&self, info: &'a RoomInfo) -> Option<&'a Message> {
+        let thread = self.get_thread(info);
+
+        if let Some(k) = &self.cursor.timestamp {
+            thread.and_then(|t| t.get(k))
+        } else {
+            thread.and_then(|t| t.last_key_value()).map(|(_, v)| v)
+        }
     }
 
     pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
@@ -254,8 +265,10 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = selidx == key;
                     let prev = prevmsg(key, thread);
-                    let len =
-                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
+                    let len = item
+                        .show(prev, sel, self.viewctx.get_width(), info, settings, previews)
+                        .lines
+                        .len();
 
                     if key == &idx {
                         lines += len / 2;
@@ -278,8 +291,10 @@ impl ScrollbackState {
                 for (key, item) in thread.range(..=&idx).rev() {
                     let sel = key == selidx;
                     let prev = prevmsg(key, thread);
-                    let len =
-                        item.show(prev, sel, &self.viewctx, info, settings, previews).lines.len();
+                    let len = item
+                        .show(prev, sel, self.viewctx.get_width(), info, settings, previews)
+                        .lines
+                        .len();
 
                     lines += len;
 
@@ -338,7 +353,7 @@ impl ScrollbackState {
             }
 
             lines += item
-                .show(prev, false, &self.viewctx, info, settings, previews)
+                .show(prev, false, self.viewctx.get_width(), info, settings, previews)
                 .height()
                 .max(1);
 
@@ -699,7 +714,7 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 return Ok(None);
             },
-            EditAction::Yank => {
+            EditAction::Yank(reg, style) => {
                 let range = match motion {
                     EditTarget::CurrentPosition | EditTarget::Selection => {
                         Some(self._range_to(key.into()))
@@ -778,14 +793,9 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     }
 
                     let cell = RegisterCell::new(TargetShape::LineWise, yanked);
+                    let flags = RegisterPutFlags::from(ctx.resolve(style));
                     let register =
-                        ctx.get_register().unwrap_or(store.registers.get_default_register());
-                    let mut flags = RegisterPutFlags::NONE;
-
-                    if ctx.get_register_append() {
-                        flags |= RegisterPutFlags::APPEND;
-                    }
-
+                        ctx.resolve(reg).unwrap_or(store.registers.get_default_register());
                     store.registers.put(&register, cell, flags)?;
                 }
 
@@ -794,8 +804,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
             // Everything else is a modifying action.
             EditAction::ChangeCase(_) => Err(EditError::ReadOnly),
-            EditAction::ChangeNumber(_, _) => Err(EditError::ReadOnly),
-            EditAction::Delete => Err(EditError::ReadOnly),
+            EditAction::ChangeNumber(..) => Err(EditError::ReadOnly),
+            EditAction::Delete(..) => Err(EditError::ReadOnly),
             EditAction::Format => Err(EditError::ReadOnly),
             EditAction::Indent(_) => Err(EditError::ReadOnly),
             EditAction::Join(_) => Err(EditError::ReadOnly),
@@ -873,8 +883,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
             CursorAction::Rotate(_, _) => Ok(None),
             CursorAction::Split(_) => Ok(None),
 
-            CursorAction::Restore(_) => {
-                let reg = ctx.get_register().unwrap_or(store.registers.get_default_register());
+            CursorAction::Restore(reg, _) => {
+                let reg = ctx.resolve(reg).unwrap_or(store.registers.get_default_register());
 
                 // Get saved group.
                 let ngroup = store.cursors.get_group(self.id.clone(), &reg)?;
@@ -895,8 +905,8 @@ impl EditorActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                     Err(err)
                 }
             },
-            CursorAction::Save(_) => {
-                let reg = ctx.get_register().unwrap_or(store.registers.get_default_register());
+            CursorAction::Save(reg, _) => {
+                let reg = ctx.resolve(reg).unwrap_or(store.registers.get_default_register());
 
                 // Lists don't have groups; override any previously saved group.
                 let cursor = self.cursor.to_cursor(thread).ok_or_else(|| {
@@ -1021,8 +1031,8 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                         return Err(err);
                     };
                     let room_id = self.room_id.clone();
-                    let id = IambId::Room(room_id.into(), Some(root.to_owned()));
-                    let open = WindowAction::Switch(OpenTarget::Application(id));
+                    let id = IambId::Room(room_id.into(), RoomView::Thread(root.to_owned()));
+                    let open = WindowAction::Switch(OpenTarget::Application(id), OpenFlags::NONE);
                     Ok(vec![(open.into(), ctx.clone())])
                 }
             },
@@ -1079,7 +1089,8 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
                 for (key, item) in thread.range(..=&corner_key).rev() {
                     let sel = key == cursor_key;
                     let prev = prevmsg(key, thread);
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
+                    let txt =
+                        item.show(prev, sel, self.viewctx.get_width(), info, settings, previews);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1107,7 +1118,8 @@ impl ScrollActions<ProgramContext, ProgramStore, IambInfo> for ScrollbackState {
 
                 for (key, item) in thread.range(&corner_key..) {
                     let sel = key == cursor_key;
-                    let txt = item.show(prev, sel, &self.viewctx, info, settings, previews);
+                    let txt =
+                        item.show(prev, sel, self.viewctx.get_width(), info, settings, previews);
                     let len = txt.height().max(1);
                     let max = len.saturating_sub(1);
 
@@ -1393,8 +1405,14 @@ impl StatefulWidget for Scrollback<'_> {
         for (key, item) in thread.range(&corner_key..) {
             let sel = key == cursor_key;
 
-            let (txt, mut msg_previews) =
-                item.show_with_preview(prev, foc && sel, &state.viewctx, info, settings, previews);
+            let (txt, mut msg_previews) = item.show_with_preview(
+                prev,
+                foc && sel,
+                state.viewctx.get_width(),
+                info,
+                settings,
+                previews,
+            );
 
             let incomplete_ok = !full || !sel;
 
@@ -1471,11 +1489,11 @@ impl StatefulWidget for Scrollback<'_> {
         // Render image previews after all text lines have been drawn, as the render might draw below the current
         // line.
         for (x, y, backend) in image_previews {
-            if backend.size().height as i16 + y >= area.y as i16 {
-                let hidden_lines = (area.y as i16 - y).max(0);
+            if backend.size().height as i16 + y >= area.top() as i16 {
+                let hidden_lines = (area.top() as i16 - y).max(0);
 
                 let position = SignedPosition { x: 0, y: -hidden_lines };
-                let image_widget = SlicedImage::new(backend, position);
+                let image_widget = SlicedImage::new(&backend, position);
                 let mut rect: Rect = backend.size().into();
                 rect.x = x;
                 rect.y = (y + hidden_lines) as u16;

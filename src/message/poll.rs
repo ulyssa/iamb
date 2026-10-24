@@ -28,6 +28,8 @@ use matrix_sdk::ruma::{EventId, MilliSecondsSinceUnixEpoch, OwnedEventId, OwnedU
 
 use crate::message::{MessageKey, MessageTimeStamp};
 
+const PLAINTEXT_FALLBACK: &str = "(Answer is missing plain text description)";
+
 /// Indicates where an [EventId] lives in the poll.
 #[derive(Clone, Debug)]
 pub enum PollEventLocation {
@@ -57,7 +59,9 @@ fn body_cow<'a>(
 
     let show_user_count = ended.is_some() || *kind == PollKind::Disclosed;
     for (id, users) in results {
-        let (answer_text, selection_char) = answers.get_mut(id).unwrap();
+        let Some((answer_text, selection_char)) = answers.get_mut(id) else {
+            continue;
+        };
 
         if users.contains(own_user_id) {
             *selection_char = 'X';
@@ -94,7 +98,7 @@ pub struct Poll {
     pub start: PollStartEventContent,
     pub replacements: BTreeMap<MessageKey, PollStartEventContentWithoutRelation>,
 
-    pub responeses: BTreeMap<MessageKey, OriginalPollResponseEvent>,
+    pub responses: BTreeMap<MessageKey, OriginalPollResponseEvent>,
 
     pub end: Option<OriginalMessageLikeEvent<PollEndEventContent>>,
 }
@@ -111,7 +115,7 @@ impl Poll {
             own_user_id,
             start,
             replacements: unloaded.replacements,
-            responeses: unloaded.responeses,
+            responses: unloaded.responses,
             end: unloaded.end,
         }
     }
@@ -127,7 +131,7 @@ impl Poll {
 
     fn results(&self) -> impl IntoIterator<Item = (&str, BTreeSet<&UserId>)> {
         let poll = self.content();
-        let responses = self.responeses.values().map(OriginalPollResponseEvent::data);
+        let responses = self.responses.values().map(OriginalPollResponseEvent::data);
         let end_timestamp = self.end.as_ref().map(|end| end.origin_server_ts);
 
         poll::compile_poll_results(poll, responses, end_timestamp)
@@ -169,7 +173,7 @@ impl Poll {
                 self.replacements.remove(key);
             },
             PollEventLocation::Response(key) => {
-                self.responeses.remove(key);
+                self.responses.remove(key);
             },
             PollEventLocation::End => self.end = None,
         }
@@ -183,7 +187,7 @@ impl Poll {
                     id: ev.event_id.clone().into(),
                 };
 
-                self.responeses.insert(key.clone(), ev);
+                self.responses.insert(key.clone(), ev);
 
                 PollEventLocation::Response(key)
             },
@@ -198,10 +202,10 @@ impl Poll {
         let start = self.content();
 
         let question = start.question.text.find_plain().unwrap_or("Question not found");
-        let answers = start
-            .answers
-            .iter()
-            .filter_map(|answer| answer.text.find_plain().map(|text| (answer.id.as_str(), text)));
+        let answers = start.answers.iter().map(|answer| {
+            // Only show the plaintext representation for now:
+            (answer.id.as_str(), answer.text.find_plain().unwrap_or(PLAINTEXT_FALLBACK))
+        });
         let results = self.results();
         let ended = self.end.as_ref().map(|ev| ev.origin_server_ts);
 
@@ -214,7 +218,7 @@ impl Poll {
 pub struct UnloadedPoll {
     pub replacements: BTreeMap<MessageKey, PollStartEventContentWithoutRelation>,
 
-    pub responeses: BTreeMap<MessageKey, OriginalPollResponseEvent>,
+    pub responses: BTreeMap<MessageKey, OriginalPollResponseEvent>,
 
     pub end: Option<OriginalMessageLikeEvent<PollEndEventContent>>,
 }
@@ -226,7 +230,7 @@ impl UnloadedPoll {
                 self.replacements.remove(key);
             },
             PollEventLocation::Response(key) => {
-                self.responeses.remove(key);
+                self.responses.remove(key);
             },
             PollEventLocation::End => self.end = None,
         }
@@ -240,7 +244,7 @@ impl UnloadedPoll {
                     id: ev.event_id.clone().into(),
                 };
 
-                self.responeses.insert(key.clone(), ev);
+                self.responses.insert(key.clone(), ev);
 
                 PollEventLocation::Response(key)
             },
@@ -295,7 +299,7 @@ pub struct UnstablePoll {
     pub start: NewUnstablePollStartEventContent,
     pub replacements: BTreeMap<MessageKey, ReplacementUnstablePollStartEventContent>,
 
-    pub responeses: BTreeMap<MessageKey, OriginalUnstablePollResponseEvent>,
+    pub responses: BTreeMap<MessageKey, OriginalUnstablePollResponseEvent>,
 
     pub end: Option<OriginalMessageLikeEvent<UnstablePollEndEventContent>>,
 }
@@ -312,7 +316,7 @@ impl UnstablePoll {
             own_user_id,
             start,
             replacements: unloaded.replacements,
-            responeses: unloaded.responeses,
+            responses: unloaded.responses,
             end: unloaded.end,
         }
     }
@@ -328,7 +332,7 @@ impl UnstablePoll {
 
     fn results(&self) -> impl IntoIterator<Item = (&str, BTreeSet<&UserId>)> {
         let poll = self.content();
-        let responses = self.responeses.values().map(OriginalUnstablePollResponseEvent::data);
+        let responses = self.responses.values().map(OriginalUnstablePollResponseEvent::data);
         let end_timestamp = self.end.as_ref().map(|end| end.origin_server_ts);
 
         poll::compile_unstable_poll_results(poll, responses, end_timestamp)
@@ -372,7 +376,7 @@ impl UnstablePoll {
                 self.replacements.remove(key);
             },
             PollEventLocation::Response(key) => {
-                self.responeses.remove(key);
+                self.responses.remove(key);
             },
             PollEventLocation::End => self.end = None,
         }
@@ -386,7 +390,7 @@ impl UnstablePoll {
                     id: ev.event_id.clone().into(),
                 };
 
-                self.responeses.insert(key.clone(), ev);
+                self.responses.insert(key.clone(), ev);
 
                 PollEventLocation::Response(key)
             },
@@ -417,7 +421,7 @@ impl UnstablePoll {
 pub struct UnloadedUnstablePoll {
     pub replacements: BTreeMap<MessageKey, ReplacementUnstablePollStartEventContent>,
 
-    pub responeses: BTreeMap<MessageKey, OriginalUnstablePollResponseEvent>,
+    pub responses: BTreeMap<MessageKey, OriginalUnstablePollResponseEvent>,
 
     pub end: Option<OriginalMessageLikeEvent<UnstablePollEndEventContent>>,
 }
@@ -429,7 +433,7 @@ impl UnloadedUnstablePoll {
                 self.replacements.remove(key);
             },
             PollEventLocation::Response(key) => {
-                self.responeses.remove(key);
+                self.responses.remove(key);
             },
             PollEventLocation::End => self.end = None,
         }
@@ -443,7 +447,7 @@ impl UnloadedUnstablePoll {
                     id: ev.event_id.clone().into(),
                 };
 
-                self.responeses.insert(key.clone(), ev);
+                self.responses.insert(key.clone(), ev);
 
                 PollEventLocation::Response(key)
             },
@@ -487,5 +491,56 @@ impl From<OriginalUnstablePollResponseEvent> for UnstablePollRelation {
 impl From<OriginalUnstablePollEndEvent> for UnstablePollRelation {
     fn from(value: OriginalUnstablePollEndEvent) -> Self {
         Self::End(value)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use matrix_sdk::ruma::events::message::{TextContentBlock, TextRepresentation};
+    use matrix_sdk::ruma::events::poll::start::{PollAnswer, PollAnswers};
+    use matrix_sdk::ruma::{owned_event_id, owned_user_id};
+
+    fn poll_from(answers: Vec<PollAnswer>) -> Poll {
+        let answers = PollAnswers::try_from(answers).unwrap();
+        let block = PollContentBlock::new(TextContentBlock::plain("Pick one"), answers);
+        let start = PollStartEventContent::new(TextContentBlock::plain("Pick one"), block);
+
+        Poll::new(
+            owned_event_id!("$poll:example.com"),
+            owned_user_id!("@user:example.com"),
+            start,
+            UnloadedPoll::default(),
+        )
+    }
+
+    #[test]
+    fn test_body_cow_answer_html() {
+        let html_only = TextContentBlock::from(vec![TextRepresentation::html("<b>Yes</b>")]);
+        let answer1 = PollAnswer::new("a1".to_owned(), html_only);
+        let answer2 = PollAnswer::new("a2".to_owned(), TextContentBlock::plain("No"));
+        let poll = poll_from(vec![answer1, answer2]);
+
+        // Verify that we show a fallback message when we don't show HTML answers:
+        let body = poll.body_cow();
+        assert!(body.contains("Poll: Pick one"), "{body:?}");
+        assert!(body.contains(PLAINTEXT_FALLBACK), "{body:?}");
+        assert!(body.contains("No"), "{body:?}");
+        assert!(!body.contains("Yes"), "{body:?}");
+        assert_eq!(body.lines().count(), 3, "{body:?}");
+    }
+
+    #[test]
+    fn test_body_cow_answer_plaintext_only() {
+        let answer1 = PollAnswer::new("a1".to_owned(), TextContentBlock::plain("Yes"));
+        let answer2 = PollAnswer::new("a2".to_owned(), TextContentBlock::plain("No"));
+        let poll = poll_from(vec![answer1, answer2]);
+
+        let body = poll.body_cow();
+        assert!(body.contains("Poll: Pick one"), "{body:?}");
+        assert!(body.contains("Yes"), "{body:?}");
+        assert!(body.contains("No"), "{body:?}");
+        assert!(!body.contains(PLAINTEXT_FALLBACK), "{body:?}");
     }
 }
