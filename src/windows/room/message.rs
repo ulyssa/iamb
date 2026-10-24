@@ -221,6 +221,7 @@ impl StatefulWidget for MessageWidget<'_> {
 
         let info = rooms.get_or_default(state.room_id().to_owned());
         let Some(msg) = info.get_message(&state.message_id) else {
+            saved_tunables.restore(&mut settings.tunables);
             match &state.message_id {
                 MessageId::Origin(event_id) => {
                     self.store
