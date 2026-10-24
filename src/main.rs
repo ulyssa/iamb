@@ -130,6 +130,8 @@ fn resolve_mxid(
     id: MatrixId,
     via: Vec<OwnedServerName>,
 ) -> IambResult<IambId> {
+    let mut view = RoomView::Main;
+
     let alias_id = match id {
         MatrixId::Room(room_id) => room_id.into(),
         MatrixId::RoomAlias(alias) => {
@@ -146,8 +148,8 @@ fn resolve_mxid(
                 store.application.worker.create_dm(user_id.to_owned())?.into()
             }
         },
-        MatrixId::Event(alias_id, _) => {
-            // ignore event id for now
+        MatrixId::Event(alias_id, event_id) => {
+            view = RoomView::Message(event_id.into());
             alias_id
         },
         _ => {
@@ -163,7 +165,7 @@ fn resolve_mxid(
         .or_default()
         .extend(via);
 
-    Ok(IambId::Room(alias_id, RoomView::Main))
+    Ok(IambId::Room(alias_id, view))
 }
 
 fn setup_screen(
