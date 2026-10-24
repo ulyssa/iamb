@@ -7,6 +7,22 @@ use crate::preview::ImageStatus;
 use crate::util::space;
 use crate::windows::room::chat;
 
+fn contains_reaction(
+    info: &RoomInfo,
+    key: &str,
+    message_id: &MessageId,
+    settings: &ApplicationSettings,
+) -> bool {
+    message_id
+        .as_origin()
+        .and_then(|event_id| info.reactions.get(event_id))
+        .is_some_and(|reacts| {
+            reacts
+                .values()
+                .any(|(k, user, _)| user == &settings.profile.user_id && k == key)
+        })
+}
+
 /// State needed for rendering [MessageWidget].
 pub(crate) struct MessageState {
     room: MatrixRoom,
@@ -347,6 +363,12 @@ impl StatefulWidget for MessageWidget<'_> {
                 }
 
                 let section = Cow::from(content);
+                items.push(MessageInfoItem::Reaction(
+                    section.clone(),
+                    key.to_string(),
+                    state.room_id().to_owned(),
+                    state.id(),
+                ));
                 items.extend(users.into_iter().map(|user_id| {
                     MessageInfoItem::User(
                         section.clone(),
@@ -447,6 +469,9 @@ pub(crate) enum MessageInfoItem {
     /// The message itself
     Message(OwnedRoomId, MessageId),
 
+    /// The line to interactively un-/react
+    Reaction(Cow<'static, str>, String, OwnedRoomId, MessageId),
+
     User(Cow<'static, str>, OwnedRoomId, OwnedUserId),
     Link(char, Url),
 }
@@ -463,6 +488,7 @@ impl Display for MessageInfoItem {
                 write!(f, "{user_id}")
             },
             MessageInfoItem::Link(_, url) => write!(f, "{url}"),
+            MessageInfoItem::Reaction(_, key, ..) => write!(f, "{key}"),
         }
     }
 }
@@ -545,6 +571,17 @@ impl ListItem<IambInfo> for MessageInfoItem {
             MessageInfoItem::Link(c, url) => {
                 Text::from(Span::styled(format!("[{c}] {url}"), style.bold()))
             },
+            MessageInfoItem::Reaction(_, key, room_id, message_id) => {
+                let Some(info) = store.application.rooms.get(room_id) else {
+                    return Span::styled("Loading room...", style.fg(Color::Gray)).into();
+                };
+
+                if contains_reaction(info, key, message_id, &store.application.settings) {
+                    Text::from(Span::styled(format!("Press Enter to unreact with '{key}'"), style))
+                } else {
+                    Text::from(Span::styled(format!("Press Enter to react with '{key}'"), style))
+                }
+            },
         }
     }
 
@@ -558,6 +595,7 @@ impl ListItem<IambInfo> for MessageInfoItem {
                 Some(user_id.to_string())
             },
             MessageInfoItem::Link(.., url) => Some(url.to_string()),
+            MessageInfoItem::Reaction(_, key, ..) => Some(key.to_string()),
         }
     }
 
@@ -566,6 +604,7 @@ impl ListItem<IambInfo> for MessageInfoItem {
             MessageInfoItem::Header(..) | MessageInfoItem::Message(..) => None,
             MessageInfoItem::User(section, ..) => Some(section),
             MessageInfoItem::Link(..) => Some(&Cow::Borrowed("Links:")),
+            MessageInfoItem::Reaction(section, ..) => Some(section),
         }
     }
 }
@@ -575,7 +614,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MessageInfoItem {
         &mut self,
         act: &PromptAction,
         ctx: &ProgramContext,
-        _: &mut ProgramStore,
+        store: &mut ProgramStore,
     ) -> EditResult<Vec<(ProgramAction, ProgramContext)>, IambInfo> {
         match act {
             PromptAction::Submit => {
@@ -602,6 +641,27 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MessageInfoItem {
                     },
                     MessageInfoItem::Link(_, url) => {
                         let act = IambAction::OpenLink(url.to_string());
+                        Ok(vec![(act.into(), ctx.clone())])
+                    },
+                    MessageInfoItem::Reaction(_, key, room_id, message_id) => {
+                        let Some(info) = store.application.rooms.get(room_id) else {
+                            let msg = "Room not loaded.";
+                            let err = EditError::Failure(msg.into());
+
+                            return Err(err);
+                        };
+
+                        let act = if contains_reaction(
+                            info,
+                            key,
+                            message_id,
+                            &store.application.settings,
+                        ) {
+                            MessageAction::Unreact(Some(key.to_string()), true)
+                        } else {
+                            MessageAction::React(key.to_string(), true)
+                        };
+                        let act: IambAction = act.into();
                         Ok(vec![(act.into(), ctx.clone())])
                     },
                 }
