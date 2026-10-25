@@ -807,7 +807,8 @@ impl<'a> MessageFormatter<'a> {
                 line.push(time);
 
                 // Show read receipts.
-                let user_char = |user: OwnedUserId| -> Span { settings.get_user_char_span(&user) };
+                let user_char =
+                    |user: OwnedUserId| -> Span { settings.get_user_char_span(&user, self.info) };
 
                 let a = self.read.pop().map(user_char).unwrap_or_else(|| Span::raw(" "));
                 let b = self.read.pop().map(user_char).unwrap_or_else(|| Span::raw(" "));
