@@ -1054,7 +1054,9 @@ async fn load_space_children(client: &Client, store: &AsyncProgramStore) {
             let ev = match ev.deserialize() {
                 Ok(ev) => ev,
                 Err(e) => {
-                    tracing::warn!(room_id=?room.room_id(), "Unable to deserialize space child event: {e}");
+                    // A child that has been removed will have an invalid `m.space.child` event
+                    // (without a `via` field).
+                    tracing::trace!(room_id=?room.room_id(), "Unable to deserialize space child event: {e}");
                     continue;
                 },
             };
