@@ -967,6 +967,9 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
     }
 
     while let Ok(SendQueueUpdate { room_id, update }) = receiver.recv().await {
+        let span = tracing::info_span!("handle_sendqueue_update", ?room_id);
+        let _guard = span.enter();
+
         let mut locked = store.lock().await;
         let info = locked.application.get_room_info(room_id);
         match update {
@@ -977,10 +980,12 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
                 let Some(EchoLocation::Message(thread, key)) =
                     info.echo_keys.get(&transaction_id).cloned()
                 else {
+                    tracing::debug!(?transaction_id, "replaced local echo location not found");
                     continue;
                 };
 
                 let Ok(content) = new_content.deserialize() else {
+                    tracing::warn!(?transaction_id, "unable to deserialize sendqueue replacement");
                     continue;
                 };
                 let AnyMessageLikeEventContent::RoomMessage(new_content) = content else {
@@ -989,10 +994,12 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
                 };
 
                 let Some(msg) = info.get_thread_mut(thread).get_mut(&key) else {
+                    tracing::debug!(?transaction_id, "replaced local echo not found");
                     continue;
                 };
 
                 let MessageEvent::Local(_, _, msg) = &mut msg.event else {
+                    tracing::debug!(?transaction_id, "replaced message is not a local echo");
                     continue;
                 };
 
@@ -1001,6 +1008,7 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
 
             RoomSendQueueUpdate::SendError { error, .. } => {
                 // XXX: Retry recoverable errors
+                tracing::warn!("error sending local echo: {error:?}");
                 locked.application.draw_error = Some(format!("Error sending message: {error}"));
             },
             RoomSendQueueUpdate::CancelledLocalEvent { transaction_id } => {
