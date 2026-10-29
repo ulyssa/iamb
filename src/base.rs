@@ -1847,7 +1847,7 @@ impl RoomInfo {
     }
 
     /// Insert the start of a poll.
-    pub fn insert_poll_start(&mut self, poll: PollStartEvent) {
+    pub fn insert_poll_start(&mut self, poll: PollStartEvent, own_user_id: &UserId) {
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
             ts: poll.origin_server_ts().into(),
@@ -1892,7 +1892,7 @@ impl RoomInfo {
 
                     let unloaded = self.unloaded_polls.remove(&ev.event_id).unwrap_or_default();
                     let msg = MessageEvent::Poll(
-                        Poll::new(ev.event_id, ev.sender.to_owned(), ev.content, unloaded).into(),
+                        Poll::new(ev.event_id, own_user_id.to_owned(), ev.content, unloaded).into(),
                     );
                     let msg = Message::new(msg, ev.sender, ev.origin_server_ts.into());
 
@@ -1908,7 +1908,11 @@ impl RoomInfo {
     }
 
     /// Insert the start of a poll.
-    pub fn insert_unstable_poll_start(&mut self, poll: UnstablePollStartEvent) {
+    pub fn insert_unstable_poll_start(
+        &mut self,
+        poll: UnstablePollStartEvent,
+        own_user_id: &UserId,
+    ) {
         let event_id = poll.event_id().to_owned();
         let key = MessageKey {
             ts: poll.origin_server_ts().into(),
@@ -1929,8 +1933,13 @@ impl RoomInfo {
                         let unloaded =
                             self.unloaded_unstable_polls.remove(&ev.event_id).unwrap_or_default();
                         let msg = MessageEvent::UnstablePoll(
-                            UnstablePoll::new(ev.event_id, ev.sender.to_owned(), content, unloaded)
-                                .into(),
+                            UnstablePoll::new(
+                                ev.event_id,
+                                own_user_id.to_owned(),
+                                content,
+                                unloaded,
+                            )
+                            .into(),
                         );
                         let msg = Message::new(msg, ev.sender, ev.origin_server_ts.into());
 
