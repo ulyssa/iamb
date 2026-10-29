@@ -510,10 +510,10 @@ fn insert_msgs_and_receipts(
                 // ignoring redaction events because we get them bundled with the redacted event
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollStart(ev)) => {
-                info.insert_poll_start(ev);
+                info.insert_poll_start(ev, &settings.profile.user_id);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::UnstablePollStart(ev)) => {
-                info.insert_unstable_poll_start(ev);
+                info.insert_unstable_poll_start(ev, &settings.profile.user_id);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollResponse(ev)) => {
                 if let MessageLikeEvent::Original(ev) = ev {
@@ -1855,10 +1855,12 @@ impl ClientWorker {
                     let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let info = locked.application.rooms.get_or_default(room_id.to_owned());
+                    let ChatStore { rooms, settings, .. } = &mut locked.application;
+
+                    let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_poll_start(full_ev);
+                    info.insert_poll_start(full_ev, &settings.profile.user_id);
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1878,10 +1880,12 @@ impl ClientWorker {
                     let event_id = ev.event_id().to_owned();
                     let _ = locked.application.presences.get_or_default(sender);
 
-                    let info = locked.application.rooms.get_or_default(room_id.to_owned());
+                    let ChatStore { rooms, settings, .. } = &mut locked.application;
+
+                    let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_unstable_poll_start(full_ev);
+                    info.insert_unstable_poll_start(full_ev, &settings.profile.user_id);
 
                     update_event_receipts(info, &room, event_id).await;
                 }
