@@ -23,14 +23,14 @@ const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
 /// Handle for an open notification that should be closed when the user views it.
 pub struct NotificationHandle(
     #[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
-    Option<notify_rust::NotificationHandle>,
+    Option<Arc<tokio::sync::Notify>>,
 );
 
 impl Drop for NotificationHandle {
     fn drop(&mut self) {
         #[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
         if let Some(handle) = self.0.take() {
-            handle.close();
+            handle.notify_waiters();
         }
     }
 }
@@ -71,7 +71,7 @@ pub async fn register_notifications(
                 match notification.event {
                     RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
                         match parse_full_notification(e, room, show_message).await {
-                            Ok((summary, body, server_ts)) => {
+                            Ok((summary, body, server_ts, thread)) => {
                                 if server_ts < startup_ts {
                                     return;
                                 }
@@ -89,6 +89,7 @@ pub async fn register_notifications(
                                     &summary,
                                     &body,
                                     room_id,
+                                    thread,
                                     &store,
                                     sound_hint.as_deref(),
                                 )
@@ -114,12 +115,13 @@ async fn send_notification(
     summary: &str,
     body: &str,
     room_id: OwnedRoomId,
+    thread: Option<OwnedEventId>,
     store: &AsyncProgramStore,
     sound_hint: Option<&str>,
 ) {
     #[cfg(feature = "desktop")]
     if via.desktop {
-        send_notification_desktop(summary, body, room_id, store, sound_hint).await;
+        send_notification_desktop(summary, body, room_id, thread, store, sound_hint).await;
     }
     #[cfg(not(feature = "desktop"))]
     {
@@ -136,12 +138,70 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
     locked.application.ring_bell = true;
 }
 
+/// Insert the notification handle into the store and spawn a listener to handle user interactions.
+#[cfg(all(feature = "desktop", unix, not(target_os = "macos")))]
+async fn spawn_notification_handler(
+    handle: notify_rust::NotificationHandle,
+    room_id: OwnedRoomId,
+    thread: Option<OwnedEventId>,
+    store: &AsyncProgramStore,
+) {
+    let notify = Arc::new(tokio::sync::Notify::new());
+
+    let notify_clone = Arc::clone(&notify);
+    let store_clone = Arc::clone(store);
+    let room_id_clone = room_id.clone();
+    tokio::spawn(async move {
+        let mut do_open = false;
+
+        let wait_action = handle.wait_for_action_async(|response| {
+            match response {
+                notify_rust::NotificationResponse::Default => {
+                    do_open = true;
+                },
+                notify_rust::NotificationResponse::Action(_) => {
+                    // XXX: Maybe add action to mark message as read
+                },
+                _ => {},
+            }
+        });
+
+        tokio::select! {
+            _ = notify_clone.notified() => {
+                handle.close_async().await;
+            }
+            _ = wait_action => {}
+        };
+
+        if do_open {
+            let target = OpenTarget::Application(IambId::Room(room_id_clone.into(), thread.into()));
+            let act = WindowAction::Switch(target, OpenFlags::NONE);
+            let _ = store_clone
+                .lock()
+                .await
+                .application
+                .action_channel
+                .send((act.into(), Default::default()));
+        }
+    });
+
+    store
+        .lock()
+        .await
+        .application
+        .open_notifications
+        .entry(room_id)
+        .or_default()
+        .push(NotificationHandle(Some(notify)));
+}
+
 #[cfg(feature = "desktop")]
 #[cfg_attr(target_os = "macos", allow(unused_variables))]
 async fn send_notification_desktop(
     summary: &str,
     body: &str,
     room_id: OwnedRoomId,
+    _thread: Option<OwnedEventId>,
     _store: &AsyncProgramStore,
     sound_hint: Option<&str>,
 ) {
@@ -168,16 +228,10 @@ async fn send_notification_desktop(
 
     match res {
         Err(err) => tracing::error!("Failed to send notification: {err}"),
-        Ok(handle) => {
+        Ok(handle) =>
+        {
             #[cfg(all(unix, not(target_os = "macos")))]
-            _store
-                .lock()
-                .await
-                .application
-                .open_notifications
-                .entry(room_id)
-                .or_default()
-                .push(NotificationHandle(Some(handle)));
+            spawn_notification_handler(handle, room_id, _thread, _store).await
         },
     }
 }
@@ -238,7 +292,7 @@ pub async fn parse_full_notification(
     event: Raw<AnySyncTimelineEvent>,
     room: MatrixRoom,
     show_body: bool,
-) -> IambResult<(String, Option<String>, MilliSecondsSinceUnixEpoch)> {
+) -> IambResult<(String, Option<String>, MilliSecondsSinceUnixEpoch, Option<OwnedEventId>)> {
     let event = event.deserialize().map_err(IambError::from)?;
 
     let server_ts = event.origin_server_ts();
@@ -268,7 +322,20 @@ pub async fn parse_full_notification(
         None
     };
 
-    return Ok((summary, body, server_ts));
+    let thread = event_notification_thread(&event);
+
+    return Ok((summary, body, server_ts, thread));
+}
+
+fn event_notification_thread(event: &AnySyncTimelineEvent) -> Option<OwnedEventId> {
+    let AnySyncTimelineEvent::MessageLike(event) = event else {
+        return None;
+    };
+
+    match event.original_content()?.relation()? {
+        EncryptedRelation::Thread(thread) => Some(thread.event_id),
+        _ => None,
+    }
 }
 
 pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) -> Option<String> {

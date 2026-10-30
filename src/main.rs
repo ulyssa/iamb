@@ -47,6 +47,7 @@ use modalkit_ratatui::{TerminalExtOps, Window};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::Level;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
@@ -247,6 +248,9 @@ struct Application {
     /// Pending actions to run.
     actstack: VecDeque<(ProgramAction, ProgramContext)>,
 
+    /// Pending actions to run.
+    act_receiver: UnboundedReceiver<(ProgramAction, ProgramContext)>,
+
     /// Whether or not the terminal is currently focused.
     focused: bool,
 
@@ -262,6 +266,7 @@ impl Application {
         settings: ApplicationSettings,
         store: AsyncProgramStore,
         initial_room: Option<(MatrixId, Vec<OwnedServerName>)>,
+        act_receiver: UnboundedReceiver<(ProgramAction, ProgramContext)>,
     ) -> IambResult<Application> {
         let backend = CrosstermBackend::new(stdout());
         let terminal = Terminal::new(backend)?;
@@ -291,6 +296,7 @@ impl Application {
             focused: true,
             last_layout: None,
             dirty: true,
+            act_receiver,
         })
     }
 
@@ -374,10 +380,14 @@ impl Application {
         Ok(())
     }
 
-    async fn step(&mut self) -> Result<TerminalKey, std::io::Error> {
+    async fn step(&mut self) -> Result<Option<TerminalKey>, std::io::Error> {
         loop {
             self.redraw(self.dirty, self.store.clone().lock().await.deref_mut())?;
             self.dirty = false;
+
+            if !self.act_receiver.is_empty() {
+                return Ok(None);
+            }
 
             if !poll(Duration::from_secs(1))? {
                 // Redraw in case there's new messages to show.
@@ -390,7 +400,7 @@ impl Application {
                         continue;
                     }
 
-                    return Ok(ke.into());
+                    return Ok(Some(ke.into()));
                 },
                 Event::Mouse(me) => {
                     let dir = match me.kind {
@@ -461,6 +471,10 @@ impl Application {
 
     fn action_pop(&mut self, keyskip: bool) -> Option<(ProgramAction, ProgramContext)> {
         if let res @ Some(_) = self.actstack.pop_front() {
+            return res;
+        }
+
+        if let res @ Some(_) = self.act_receiver.try_recv().ok() {
             return res;
         }
 
@@ -971,7 +985,9 @@ impl Application {
         while self.screen.tabs() != 0 {
             let key = self.step().await?;
 
-            self.bindings.input_key(key);
+            if let Some(key) = key {
+                self.bindings.input_key(key);
+            }
 
             let mut locked = store.lock().await;
             let mut keyskip = false;
@@ -1128,7 +1144,8 @@ async fn run(
 
     // Set up the async worker thread and global store.
     let worker = ClientWorker::spawn(client.clone(), settings.clone()).await;
-    let store = ChatStore::new(worker.clone(), settings.clone())?;
+    let (sender, act_receiver) = tokio::sync::mpsc::unbounded_channel();
+    let store = ChatStore::new(worker.clone(), settings.clone(), sender)?;
     let mut store = Store::new(store);
     store.completer = Box::new(IambCompleter);
 
@@ -1170,7 +1187,7 @@ async fn run(
     }));
 
     // And finally, start running the terminal UI.
-    let mut application = Application::new(settings, store, initial_room)
+    let mut application = Application::new(settings, store, initial_room, act_receiver)
         .await
         .inspect_err(|_| restore_tty(enable_enhanced_keys, enable_mouse))?;
     application

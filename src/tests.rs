@@ -262,7 +262,8 @@ pub async fn mock_store() -> ProgramStore {
         .unwrap();
     let worker = Requester { tx, receipts, client };
 
-    let mut store = ChatStore::new(worker, mock_settings()).unwrap();
+    let (tx, _) = unbounded_channel();
+    let mut store = ChatStore::new(worker, mock_settings(), tx).unwrap();
 
     // Add presence information.
     store.presences.get_or_default(TEST_USER1.clone());
