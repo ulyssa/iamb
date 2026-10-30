@@ -490,6 +490,46 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Hash)]
+#[serde(untagged)]
+pub enum RoomOverrideKey {
+    User(OwnedUserId),
+    Room(OwnedRoomId),
+    Alias(OwnedRoomAliasId),
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct RoomOverrideTunables {
+    pub name: Option<String>,
+}
+
+pub type RoomOverrides = HashMap<RoomOverrideKey, RoomOverrideTunables>;
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct RoomOverrideValues {
+    pub rooms: HashMap<OwnedRoomId, RoomOverrideTunables>,
+    pub aliases: HashMap<OwnedRoomAliasId, RoomOverrideTunables>,
+    pub dms: HashMap<OwnedUserId, RoomOverrideTunables>,
+}
+
+impl From<RoomOverrides> for RoomOverrideValues {
+    fn from(value: RoomOverrides) -> Self {
+        let mut rooms = HashMap::new();
+        let mut aliases = HashMap::new();
+        let mut dms = HashMap::new();
+
+        for (key, value) in value {
+            match key {
+                RoomOverrideKey::User(user_id) => dms.insert(user_id, value),
+                RoomOverrideKey::Room(room_id) => rooms.insert(room_id, value),
+                RoomOverrideKey::Alias(alias_id) => aliases.insert(alias_id, value),
+            };
+        }
+
+        Self { rooms, aliases, dms }
+    }
+}
+
 fn merge_maps<M, K, V>(profile: Option<M>, global: Option<M>) -> Option<M>
 where
     M: Extend<(K, V)> + IntoIterator<Item = (K, V)>,
@@ -994,6 +1034,7 @@ pub struct TunableValues {
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
     pub users: UserOverrides,
+    pub rooms: RoomOverrideValues,
     pub username_display: UserDisplayStyle,
     pub message_user_color: bool,
     pub default_register: Option<Register>,
@@ -1039,6 +1080,7 @@ pub struct Tunables {
 
     /// Subsection for overriding how specific Matrix users are rendered.
     pub users: Option<UserOverrides>,
+    pub rooms: Option<RoomOverrides>,
 
     pub default_markup: Option<MarkupFormat>,
     pub ignorecase: Option<bool>,
@@ -1094,6 +1136,7 @@ impl Tunables {
             sort: SortOverrides::merge(self.sort, other.sort),
             terminal: Terminal::merge(self.terminal, other.terminal),
             users: merge_maps(self.users, other.users),
+            rooms: merge_maps(self.rooms, other.rooms),
 
             // Proxy configuration sub-field do *not* get merged, so that a
             // per-profile override won't inherit auth or headers from the
@@ -1160,6 +1203,7 @@ impl Tunables {
             sort: self.sort.values(),
             terminal: self.terminal.values(),
             users: self.users.unwrap_or_default(),
+            rooms: self.rooms.unwrap_or_default().into(),
 
             default_markup: self.default_markup.unwrap_or_default(),
             log_level: self.log_level.unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_owned()),

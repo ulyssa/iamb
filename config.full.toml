@@ -83,6 +83,11 @@ enable_title = true
 [settings.users]
 "@user:matrix.org" = { "name" = "John Doe", "color" = "magenta" }
 
+# Settings to override room names
+[settings.rooms]
+"#room:matrix.org".name = "Some different room name"
+"@user:matrix.org".name = "My dm with John"
+
 # Specify a specific tab and window layout to use every time iamb starts:
 [layout]
 style = "config"

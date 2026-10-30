@@ -315,6 +315,11 @@ Show if this is a regular room, a DM or a space when the current window shows mu
 .It Sy unread
 Show if a non-muted, non-calmed room has unread messages or mentions.
 .El
+.It Sy rooms
+Overrides values for the specified room.
+See
+.Sx "ROOM OVERRIDES"
+for details on the format.
 .It Sy send_on_enter
 If
 .Sy true
@@ -1032,6 +1037,23 @@ state.color = "cyan"
 [theme]
 tabs.title.modifiers = ["~bold", "italic"]
 windows.title.modifiers = ["~bold", "italic"]
+.Ed
+.Sh "ROOM OVERRIDES"
+The
+.Sy settings.rooms
+subsections allows overriding how specific rooms are displayed.
+Overrides are mapped onto Matrix Room IDs, Matrix Room Aliases, or User IDs for DMs.
+They are typically written as inline tables containing the following keys:
+.Bl -tag -width Ds
+.It Sy name
+Change the display name of the room.
+.El
+.Ss Example 1: Override how the iamb rooms appear in the room list
+.Bd -literal -offset indent
+[settings.rooms]
+"#iamb-users:0x.badd.cafe".name = "iamb user discussion"
+"!EpWjxfRMnoLQPCKZei:0x.badd.cafe".name = "iamb developers"
+"@ada:example.com".name = "My DM with Ada Lovelace"
 .Ed
 .Sh "USER OVERRIDES"
 The

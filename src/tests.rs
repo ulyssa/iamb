@@ -186,6 +186,7 @@ pub fn mock_tunables() -> TunableValues {
         theme: "default".into(),
         typing_notice_send: true,
         typing_notice_display: true,
+        rooms: Default::default(),
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
             color: Some(Color::Black),
             name: Some("USER 5".into()),
