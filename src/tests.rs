@@ -214,6 +214,7 @@ pub fn mock_tunables() -> TunableValues {
         date_format: "%A, %B %d %Y".to_string(),
         time_format: "  [%T]".to_string(),
         time_gutter_width: 12,
+        reply_on_insert: false,
     }
 }
 
