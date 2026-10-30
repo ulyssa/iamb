@@ -1386,6 +1386,9 @@ bitflags::bitflags! {
 
         /// Non-mention/keyword notifications for this room have been muted.
         const CALMED = 0b00000010;
+
+        /// Room is read only for the user due to too low power level.
+        const READONLY = 0b00000100;
     }
 }
 

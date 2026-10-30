@@ -33,7 +33,6 @@ use matrix_sdk::ruma::api::client::room::create_room::v3::{
 };
 use matrix_sdk::ruma::api::client::space::get_hierarchy::v1::Request as SpaceHierarchyRequest;
 use matrix_sdk::ruma::assign;
-use matrix_sdk::ruma::events::MessageLikeEvent;
 use matrix_sdk::ruma::events::key::verification::ready::{
     OriginalSyncKeyVerificationReadyEvent,
     ToDeviceKeyVerificationReadyEvent,
@@ -69,6 +68,7 @@ use matrix_sdk::ruma::events::{
     SyncMessageLikeEvent,
     SyncStateEvent,
 };
+use matrix_sdk::ruma::events::{MessageLikeEvent, MessageLikeEventType};
 use matrix_sdk::ruma::presence::PresenceState;
 use matrix_sdk::ruma::room::RoomType;
 use matrix_sdk::ruma::serde::Raw;
@@ -771,6 +771,15 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
             Some(RoomNotificationMode::MentionsAndKeywordsOnly) => flags |= RoomInfoFlags::CALMED,
             Some(RoomNotificationMode::Mute) => flags |= RoomInfoFlags::MUTED,
             _ => (),
+        }
+
+        if let Ok(power_levels) = room.power_levels().await &&
+            !power_levels.user_can_send_message(
+                client.user_id().expect("logged in user should have id"),
+                MessageLikeEventType::RoomMessage,
+            )
+        {
+            flags |= RoomInfoFlags::READONLY;
         }
 
         pinned.push((room.room_id().to_owned(), room.pinned_event_ids().unwrap_or_default()));
