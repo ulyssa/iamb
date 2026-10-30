@@ -375,9 +375,7 @@ fn redaction_reason_event(ev: SyncRoomRedactionEvent) -> Option<String> {
     ev.content.reason
 }
 
-fn has_reply_fallback(
-    relation: Option<&Relation<RoomMessageEventContentWithoutRelation>>,
-) -> bool {
+fn has_reply_fallback(relation: Option<&Relation<RoomMessageEventContentWithoutRelation>>) -> bool {
     matches!(
         relation,
         Some(Relation::Reply(_) | Relation::Thread(Thread { in_reply_to: Some(_), .. }))
