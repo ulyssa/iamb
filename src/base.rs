@@ -52,6 +52,7 @@ use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::message::poll::{
     Poll,
@@ -2605,6 +2606,7 @@ pub struct ChatStore {
     pub ring_bell: bool,
 
     /// An error raised while drawing, shown in the message bar on the next redraw.
+    // XXX: this should be migrated to `action_channel` at some point
     pub draw_error: Option<String>,
 
     /// Whether the application is currently focused
@@ -2615,11 +2617,18 @@ pub struct ChatStore {
 
     /// Notifications that should be dismissed when the user opens the room.
     pub open_notifications: HashMap<OwnedRoomId, Vec<NotificationHandle>>,
+
+    /// Channel for actions that should be handled by the main loop.
+    pub action_channel: UnboundedSender<(ProgramAction, ProgramContext)>,
 }
 
 impl ChatStore {
     /// Create a new [ChatStore].
-    pub fn new(worker: Requester, settings: ApplicationSettings) -> IambResult<Self> {
+    pub fn new(
+        worker: Requester,
+        settings: ApplicationSettings,
+        action_channel: UnboundedSender<(ProgramAction, ProgramContext)>,
+    ) -> IambResult<Self> {
         let previews = PreviewManager::new(&settings);
         let cmds = crate::commands::setup_commands(&settings.aliases)?;
 
@@ -2629,6 +2638,7 @@ impl ChatStore {
             previews,
             cmds,
             emojis: emoji_map(),
+            action_channel,
 
             collator: Default::default(),
             aliases: Default::default(),
