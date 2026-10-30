@@ -774,7 +774,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
         }
 
         pinned.push((room.room_id().to_owned(), room.pinned_event_ids().unwrap_or_default()));
-        names_and_tags.push((room.room_id().to_owned(), name, tags, aliases, flags));
+        names_and_tags.push((room.clone(), name, tags, aliases, flags));
 
         if room.is_direct().await.unwrap_or_default() {
             dms.push(room);
@@ -786,12 +786,34 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     }
 
     let mut locked = store.lock().await;
+
     locked.application.sync_info.spaces = spaces;
     locked.application.sync_info.rooms = rooms;
     locked.application.sync_info.dms = dms;
 
-    for (room_id, name, tags, aliases, flags) in names_and_tags {
+    for (room, mut name, tags, aliases, flags) in names_and_tags {
+        let room_id = room.room_id().to_owned();
+
+        let rooms = &locked.application.settings.tunables.rooms;
+        let room_override = rooms
+            .rooms
+            .get(&room_id)
+            .or_else(|| aliases.iter().find_map(|alias| rooms.aliases.get(alias)));
+        if let Some(name_override) = room_override.and_then(|v| v.name.as_ref()) {
+            name.clone_from(name_override);
+        }
+
         locked.application.set_room_info(room_id, name, tags, aliases, flags);
+    }
+
+    let ChatStore { rooms, settings, .. } = &mut locked.application;
+    for (user_id, room_override) in settings.tunables.rooms.dms.iter() {
+        if let Some(name) = &room_override.name &&
+            let Some(room) = client.get_dm_room(user_id) &&
+            let Some(info) = rooms.get_mut(room.room_id())
+        {
+            info.name = Some(name.to_owned());
+        }
     }
 
     for (room_id, pinned_events) in pinned {
