@@ -2277,15 +2277,6 @@ impl RoomInfo {
                 // specification quoted above.
                 msg.sender != *user_id
             })
-            .filter(|(_, msg)| {
-                matches!(
-                    msg.event,
-                    MessageEvent::EncryptedOriginal(..) |
-                        MessageEvent::EncryptedRedacted(..) |
-                        MessageEvent::Original(..) |
-                        MessageEvent::Redacted(..)
-                )
-            })
             .flat_map(|(_, msg)| msg.event.event_id())
             .next_back()
             .map(ToOwned::to_owned);
