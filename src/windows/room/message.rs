@@ -4,7 +4,7 @@ use ratatui_image::sliced::{SignedPosition, SlicedImage};
 
 use crate::prelude::*;
 use crate::preview::ImageStatus;
-use crate::util::space;
+use crate::util::{space, wrapped_text};
 use crate::windows::room::chat;
 
 fn contains_reaction(
@@ -398,6 +398,11 @@ impl StatefulWidget for MessageWidget<'_> {
             items.extend(receipts);
         }
 
+        items.push(MessageInfoItem::RawMessage(
+            state.room_id().to_owned(),
+            state.message_id.clone(),
+        ));
+
         state.list.set(items);
         state.set_ignorecase(settings.tunables.ignorecase);
 
@@ -469,6 +474,9 @@ pub(crate) enum MessageInfoItem {
     /// The message itself
     Message(OwnedRoomId, MessageId),
 
+    /// The internal representation of the message
+    RawMessage(OwnedRoomId, MessageId),
+
     /// The line to interactively un-/react
     Reaction(Cow<'static, str>, String, OwnedRoomId, MessageId),
 
@@ -479,7 +487,8 @@ pub(crate) enum MessageInfoItem {
 impl Display for MessageInfoItem {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            MessageInfoItem::Message(_, message_id) => {
+            MessageInfoItem::Message(_, message_id) |
+            MessageInfoItem::RawMessage(_, message_id) => {
                 // XXX: This should return the message text for yanking (or modify modalkit to not
                 // use `ToString` here)
                 write!(f, "{message_id}")
@@ -559,6 +568,18 @@ impl ListItem<IambInfo> for MessageInfoItem {
                     &store.application.previews,
                 )
             },
+            MessageInfoItem::RawMessage(room_id, message_id) => {
+                let Some(info) = store.application.rooms.get(room_id) else {
+                    return Span::styled("Loading room...", style.fg(Color::Gray)).into();
+                };
+                let Some(msg) = info.get_message(message_id) else {
+                    return Span::styled("Loading message...", style.fg(Color::Gray)).into();
+                };
+
+                let text = format!("{:#?}", msg.event);
+
+                wrapped_text(text, viewctx.get_width(), style)
+            },
             // XXX: show reaction time
             MessageInfoItem::User(_, room_id, user_id) => {
                 let info = store.application.rooms.get(room_id);
@@ -596,6 +617,7 @@ impl ListItem<IambInfo> for MessageInfoItem {
             },
             MessageInfoItem::Link(.., url) => Some(url.to_string()),
             MessageInfoItem::Reaction(_, key, ..) => Some(key.to_string()),
+            MessageInfoItem::RawMessage(..) => None,
         }
     }
 
@@ -605,6 +627,7 @@ impl ListItem<IambInfo> for MessageInfoItem {
             MessageInfoItem::User(section, ..) => Some(section),
             MessageInfoItem::Link(..) => Some(&Cow::Borrowed("Links:")),
             MessageInfoItem::Reaction(section, ..) => Some(section),
+            MessageInfoItem::RawMessage(..) => Some(&Cow::Borrowed("Message Source:")),
         }
     }
 }
@@ -664,6 +687,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MessageInfoItem {
                         let act: IambAction = act.into();
                         Ok(vec![(act.into(), ctx.clone())])
                     },
+                    MessageInfoItem::RawMessage(..) => Ok(vec![]),
                 }
             },
             PromptAction::Abort(..) => {
