@@ -12,7 +12,6 @@ use matrix_sdk::ruma::events::room::message::Relation;
 use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, AnySyncTimelineEvent};
 use matrix_sdk::ruma::serde::Raw;
 
-use crate::config::NotifyVia;
 use crate::prelude::*;
 
 const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
@@ -35,17 +34,7 @@ impl Drop for NotificationHandle {
     }
 }
 
-pub async fn register_notifications(
-    client: &Client,
-    settings: &ApplicationSettings,
-    store: &AsyncProgramStore,
-) {
-    if !settings.tunables.notifications.enabled {
-        return;
-    }
-    let notify_via = settings.tunables.notifications.via;
-    let show_message = settings.tunables.notifications.show_message;
-    let sound_hint = settings.tunables.notifications.sound_hint.clone();
+pub async fn register_notifications(client: &Client, store: &AsyncProgramStore) {
     let server_settings = client.notification_settings().await;
     let Some(startup_ts) = MilliSecondsSinceUnixEpoch::from_system_time(SystemTime::now()) else {
         return;
@@ -56,7 +45,6 @@ pub async fn register_notifications(
         .register_notification_handler(move |notification, room: MatrixRoom, client: Client| {
             let store = store.clone();
             let server_settings = server_settings.clone();
-            let sound_hint = sound_hint.clone();
             async move {
                 let mode = global_or_room_mode(&server_settings, &room).await;
                 if mode == RoomNotificationMode::Mute {
@@ -70,7 +58,7 @@ pub async fn register_notifications(
                 let room_id = room.room_id().to_owned();
                 match notification.event {
                     RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
-                        match parse_full_notification(e, room, show_message).await {
+                        match parse_full_notification(e, room).await {
                             Ok((summary, body, server_ts)) => {
                                 if server_ts < startup_ts {
                                     return;
@@ -84,15 +72,13 @@ pub async fn register_notifications(
                                     return;
                                 }
 
-                                send_notification(
-                                    &notify_via,
-                                    &summary,
-                                    &body,
-                                    room_id,
-                                    &store,
-                                    sound_hint.as_deref(),
-                                )
-                                .await;
+                                let mut locked = store.lock().await;
+
+                                if !locked.application.settings.tunables.notifications.enabled {
+                                    return;
+                                }
+
+                                send_notification(&summary, &body, room_id, &mut locked).await;
                             },
                             Err(err) => {
                                 tracing::error!("Failed to extract notification data: {err}")
@@ -110,30 +96,27 @@ pub async fn register_notifications(
 }
 
 async fn send_notification(
-    via: &NotifyVia,
     summary: &str,
     body: &str,
     room_id: OwnedRoomId,
-    store: &AsyncProgramStore,
-    sound_hint: Option<&str>,
+    store: &mut ProgramStore,
 ) {
     #[cfg(feature = "desktop")]
-    if via.desktop {
-        send_notification_desktop(summary, body, room_id, store, sound_hint).await;
+    if store.application.settings.tunables.notifications.via.desktop {
+        send_notification_desktop(summary, body, room_id, store).await;
     }
     #[cfg(not(feature = "desktop"))]
     {
         let _ = (summary, body, IAMB_XDG_NAME);
     }
 
-    if via.bell {
+    if store.application.settings.tunables.notifications.via.bell {
         send_notification_bell(store).await;
     }
 }
 
-async fn send_notification_bell(store: &AsyncProgramStore) {
-    let mut locked = store.lock().await;
-    locked.application.ring_bell = true;
+async fn send_notification_bell(store: &mut ProgramStore) {
+    store.application.ring_bell = true;
 }
 
 #[cfg(feature = "desktop")]
@@ -142,8 +125,7 @@ async fn send_notification_desktop(
     summary: &str,
     body: &str,
     room_id: OwnedRoomId,
-    _store: &AsyncProgramStore,
-    sound_hint: Option<&str>,
+    store: &mut ProgramStore,
 ) {
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
@@ -152,14 +134,16 @@ async fn send_notification_desktop(
         .icon(IAMB_XDG_NAME)
         .action("default", "default");
 
-    if let Some(sound_hint) = sound_hint {
+    if let Some(sound_hint) = &store.application.settings.tunables.notifications.sound_hint {
         desktop_notification.sound_name(sound_hint);
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     desktop_notification.urgency(notify_rust::Urgency::Normal);
 
-    desktop_notification.body(body);
+    if store.application.settings.tunables.notifications.show_message {
+        desktop_notification.body(body);
+    }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     let res = desktop_notification.show_async().await;
@@ -170,9 +154,7 @@ async fn send_notification_desktop(
         Err(err) => tracing::error!("Failed to send notification: {err}"),
         Ok(handle) => {
             #[cfg(all(unix, not(target_os = "macos")))]
-            _store
-                .lock()
-                .await
+            store
                 .application
                 .open_notifications
                 .entry(room_id)
@@ -237,7 +219,6 @@ async fn is_visible_room(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
 pub async fn parse_full_notification(
     event: Raw<AnySyncTimelineEvent>,
     room: MatrixRoom,
-    show_body: bool,
 ) -> IambResult<(String, Option<String>, MilliSecondsSinceUnixEpoch)> {
     let event = event.deserialize().map_err(IambError::from)?;
 
@@ -262,11 +243,7 @@ pub async fn parse_full_notification(
         sender_name.to_string()
     };
 
-    let body = if show_body {
-        event_notification_body(&event, sender_name).map(truncate)
-    } else {
-        None
-    };
+    let body = event_notification_body(&event, sender_name).map(truncate);
 
     return Ok((summary, body, server_ts));
 }

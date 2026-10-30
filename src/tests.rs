@@ -247,6 +247,8 @@ pub fn mock_settings() -> ApplicationSettings {
         theme: crate::config::theme::default_theme().values().into(),
         themes: Default::default(),
         enable_enhanced_keys: false,
+        log_level_handle: None,
+        load_file: SettingsFile::Toml("/dev/null".into()),
     }
 }
 
