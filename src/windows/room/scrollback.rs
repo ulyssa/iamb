@@ -1571,8 +1571,10 @@ mod tests {
         scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
         assert_eq!(
-            std::mem::take(&mut store.application.need_load)
-                .into_iter()
+            store
+                .application
+                .need_load
+                .room_needs()
                 .collect::<Vec<(OwnedRoomId, Need)>>()
                 .is_empty(),
             true,
@@ -1582,8 +1584,10 @@ mod tests {
         scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
         assert_eq!(
-            std::mem::take(&mut store.application.need_load)
-                .into_iter()
+            store
+                .application
+                .need_load
+                .room_needs()
                 .collect::<Vec<(OwnedRoomId, Need)>>(),
             vec![(room_id.clone(), Need {
                 messages: Some(Vec::new()),

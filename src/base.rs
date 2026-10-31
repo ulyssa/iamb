@@ -2,7 +2,6 @@
 //!
 //! The types defined here get used throughout iamb.
 
-use std::collections::hash_map::IntoIter;
 use std::collections::{BTreeSet, HashSet};
 
 use emojis::Emoji;
@@ -51,7 +50,7 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_decode, percent_encode};
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
-use tokio::sync::Mutex as AsyncMutex;
+use tokio::sync::{Mutex as AsyncMutex, Notify};
 
 use crate::message::poll::{
     Poll,
@@ -2491,22 +2490,26 @@ pub struct Need {
 pub struct RoomNeeds {
     needs: HashMap<OwnedRoomId, Need>,
     previews: HashSet<OwnedRoomOrAliasId>,
+    notify: Arc<Notify>,
 }
 
 impl RoomNeeds {
     /// Mark a room for needing to load members.
     pub fn need_members(&mut self, room_id: OwnedRoomId) {
         self.needs.entry(room_id).or_default().members = true;
+        self.notify.notify_waiters();
     }
 
     /// Mark a room for needing to fetch its pinned events.
     pub fn need_pinned(&mut self, room_id: OwnedRoomId) {
         self.needs.entry(room_id).or_default().pinned = true;
+        self.notify.notify_waiters();
     }
 
     /// Mark a room for needing to load messages.
     pub fn need_messages(&mut self, room_id: OwnedRoomId) {
         self.needs.entry(room_id).or_default().messages.get_or_insert_default();
+        self.notify.notify_waiters();
     }
 
     /// Mark a room for needing to load messages until the given message is loaded or a retry limit
@@ -2515,6 +2518,7 @@ impl RoomNeeds {
         let messages = &mut self.needs.entry(room_id).or_default().messages.get_or_insert_default();
 
         messages.push(MessageNeed { event_id, ttl: MESSAGE_NEED_TTL });
+        self.notify.notify_waiters();
     }
 
     pub fn need_messages_all(&mut self, room_id: OwnedRoomId, message_needs: Vec<MessageNeed>) {
@@ -2524,29 +2528,33 @@ impl RoomNeeds {
             .messages
             .get_or_insert_default()
             .extend(message_needs);
+        self.notify.notify_waiters();
     }
 
     /// Request the load of a room preview.
     pub fn need_preview(&mut self, room: OwnedRoomOrAliasId) {
         self.previews.insert(room);
+        self.notify.notify_waiters();
     }
 
     /// Return all requested room previews
-    pub fn preview_needs(&mut self) -> impl Iterator<Item = OwnedRoomOrAliasId> {
+    pub fn preview_needs(&mut self) -> impl Iterator<Item = OwnedRoomOrAliasId> + use<> {
         std::mem::take(&mut self.previews).into_iter()
+    }
+
+    /// Return all requested rooms
+    pub fn room_needs(&mut self) -> impl Iterator<Item = (OwnedRoomId, Need)> + use<> {
+        std::mem::take(&mut self.needs).into_iter()
     }
 
     pub fn rooms(&self) -> usize {
         self.needs.len()
     }
-}
 
-impl IntoIterator for RoomNeeds {
-    type Item = (OwnedRoomId, Need);
-    type IntoIter = IntoIter<OwnedRoomId, Need>;
-
-    fn into_iter(self) -> Self::IntoIter {
-        self.needs.into_iter()
+    /// The returned [`Notify`] instance will be notified with [`Notify::notify_waiters`] for every
+    /// inserted [`Need`].
+    pub fn notifier(&self) -> Arc<Notify> {
+        Arc::clone(&self.notify)
     }
 }
 
@@ -3434,7 +3442,7 @@ pub mod tests {
         need_load.need_messages(room_id.clone());
         need_load.need_members(room_id.clone());
 
-        assert_eq!(need_load.into_iter().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
+        assert_eq!(need_load.room_needs().collect::<Vec<(OwnedRoomId, Need)>>(), vec![(
             room_id,
             Need {
                 members: true,
