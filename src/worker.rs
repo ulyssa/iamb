@@ -242,7 +242,7 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
         plan.push(Plan::RoomPreview(room));
     }
 
-    for (room_id, need) in std::mem::take(need_load).into_iter() {
+    for (room_id, need) in need_load.room_needs() {
         if need.pinned {
             let missing = rooms.get_or_default(room_id.clone()).missing_pinned();
 
@@ -730,9 +730,11 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
     // Load any pending older messages or members every 2 seconds.
     let mut interval = tokio::time::interval(Duration::from_secs(2));
 
-    loop {
-        interval.tick().await;
+    let mut recv = store.lock().await.application.need_load.receiver();
+
+    while let Ok(()) = recv.changed().await {
         load_older(client, store).await;
+        interval.tick().await;
     }
 }
 
