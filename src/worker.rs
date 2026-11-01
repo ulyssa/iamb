@@ -498,13 +498,13 @@ fn insert_msgs_and_receipts(
                 info.insert_encrypted(msg);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
-                info.insert_with_preview(msg, settings, previews);
+                info.insert_message(msg, settings, previews);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
                 info.insert_reaction_with_preview(ev, settings, previews);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
-                info.insert_sticker_with_preview(ev, settings, previews);
+                info.insert_sticker(ev, settings, previews);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomRedaction(..)) => {
                 // ignoring redaction events because we get them bundled with the redacted event
@@ -1757,7 +1757,7 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_with_preview(full_ev, settings, previews);
+                    info.insert_message(full_ev, settings, previews);
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1809,7 +1809,7 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_sticker_with_preview(full_ev, settings, previews);
+                    info.insert_sticker(full_ev, settings, previews);
 
                     update_event_receipts(info, &room, event_id).await;
                 }

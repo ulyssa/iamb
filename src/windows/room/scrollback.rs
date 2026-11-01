@@ -158,26 +158,12 @@ impl ScrollbackState {
         }
     }
 
-    pub fn get_mut<'a>(&mut self, info: &'a mut RoomInfo) -> Option<&'a mut Message> {
-        let thread = self.get_thread_mut(info);
-
-        if let Some(k) = &self.cursor.timestamp {
-            thread.get_mut(k)
-        } else {
-            thread.last_entry().map(|o| o.into_mut())
-        }
-    }
-
     pub fn thread(&self) -> Option<&OwnedEventId> {
         self.thread.as_ref()
     }
 
     pub fn get_thread<'a>(&self, info: &'a RoomInfo) -> Option<&'a Messages> {
         info.get_thread(self.thread.as_deref())
-    }
-
-    pub fn get_thread_mut<'a>(&self, info: &'a mut RoomInfo) -> &'a mut Messages {
-        info.get_thread_mut(self.thread.clone())
     }
 
     pub fn messages<'a>(
@@ -1368,22 +1354,17 @@ impl StatefulWidget for Scrollback<'_> {
         // load image previews
         if settings.tunables.image_preview.enabled {
             for (key, item) in thread.range(&corner_key..).rev() {
-                if let Some(source) = item.image_preview() {
-                    self.store.application.previews.load(
-                        source,
-                        PreviewKind::Message,
-                        &self.store.application.worker,
-                    );
-                }
-                let reply = item
+                let previews = item
                     .reply_to()
                     .or_else(|| item.thread_root())
                     .and_then(|e| info.get_event(&e))
-                    .and_then(|msg| msg.image_preview());
-                if let Some(source) = reply {
+                    .into_iter()
+                    .chain(std::iter::once(item))
+                    .flat_map(|msg| msg.image_previews());
+                for (source, kind) in previews {
                     self.store.application.previews.load(
                         source,
-                        PreviewKind::Message,
+                        kind,
                         &self.store.application.worker,
                     );
                 }
@@ -1391,7 +1372,7 @@ impl StatefulWidget for Scrollback<'_> {
                     for source in info.get_reaction_images(event_id) {
                         self.store.application.previews.load(
                             source,
-                            PreviewKind::Reaction,
+                            PreviewKind::Emote,
                             &self.store.application.worker,
                         );
                     }

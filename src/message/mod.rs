@@ -33,7 +33,6 @@ use matrix_sdk::ruma::{OwnedTransactionId, UserId};
 use matrix_sdk::send_queue::SendHandle;
 use modalkit::editing::cursor::Cursor;
 use ratatui::symbols::line::{HORIZONTAL, THICK_VERTICAL};
-use ratatui_image::sliced::SlicedProtocol;
 
 use crate::base::MessageEdits;
 use crate::message::html::{StyleTree, parse_matrix_html};
@@ -53,6 +52,7 @@ pub mod poll;
 pub use self::compose::{text_to_message, text_to_text_message_event_content};
 pub use self::html::TreeGenState;
 
+/// `proto, x, y`
 type ProtocolPreview = (Arc<SlicedProtocol>, u16, u16);
 
 /// The key used for uniquely identifying messages within a room and its threads.
@@ -114,6 +114,51 @@ const MIN_MSG_LEN: usize = 30;
 
 const USIZE_TOO_SMALL: bool = usize::BITS < u64::BITS;
 
+/// Macro rule converting a File / Image / Audio / Video to its text content with the shape:
+/// `[Attached <type>: <content>[ (<human readable file size>)]]`
+macro_rules! display_file_name {
+    ( $msgtype:ident, $content:expr ) => {{
+        format!(
+            "[Attached {}: {}{}]",
+            stringify!($msgtype),
+            $content.filename(),
+            $content
+                .info
+                .as_ref()
+                .map(|info| {
+                    info.size
+                        .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
+                        .unwrap_or_else(String::new)
+                })
+                .unwrap_or_else(String::new)
+        )
+    }};
+}
+
+/// Macro rule extraction the text caption of a File / Image / Audio / Video
+macro_rules! display_file_to_text {
+    ( $msgtype:ident, $content:expr ) => {{
+        if $content
+            .filename
+            .as_ref()
+            .is_none_or(|filename| *filename == $content.body)
+        {
+            return Cow::Borrowed("");
+        }
+        $content.body.as_str()
+    }};
+}
+
+fn content_filename(msgtype: &MessageType) -> Option<String> {
+    match msgtype {
+        MessageType::Audio(content) => Some(display_file_name!(Audio, content)),
+        MessageType::File(content) => Some(display_file_name!(File, content)),
+        MessageType::Image(content) => Some(display_file_name!(Image, content)),
+        MessageType::Video(content) => Some(display_file_name!(Video, content)),
+        _ => None,
+    }
+}
+
 /// Convert the [u64] hash to [usize] as needed.
 fn hash_finish_usize(hasher: DefaultHasher) -> Option<usize> {
     if USIZE_TOO_SMALL {
@@ -131,15 +176,13 @@ fn hash_message_id(id: &MessageId) -> Option<usize> {
 }
 
 /// Before the image is loaded, already display a placeholder frame of the image size.
-fn placeholder_frame(
-    text: Option<&str>,
-    outer_width: usize,
-    image_preview_size: &Size,
-) -> Option<String> {
+fn placeholder_frame(text: Option<&str>, outer_width: usize, image_preview_size: &Size) -> String {
     let Size { width, height } = image_preview_size;
     let width = usize::min(*width as usize, outer_width);
     if width < 2 || *height < 2 {
-        return None;
+        let mut line = "#".repeat(width);
+        line.push('\n');
+        return line.repeat(*height as usize);
     }
     let mut placeholder = "\u{230c}".to_string();
     placeholder.push_str(&" ".repeat(width - 2));
@@ -158,7 +201,7 @@ fn placeholder_frame(
     placeholder.push('\u{230e}');
     placeholder.push_str(&" ".repeat(width - 2));
     placeholder.push_str("\u{230f}\n");
-    Some(placeholder)
+    placeholder
 }
 
 #[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Clone, Hash)]
@@ -398,16 +441,50 @@ fn content_html(msgtype: &MessageType) -> Option<StyleTree> {
 
         MessageType::Audio(content) => content.formatted.as_ref(),
         MessageType::File(content) => content.formatted.as_ref(),
-        MessageType::Image(content) => content.formatted.as_ref(),
         MessageType::Video(content) => content.formatted.as_ref(),
+
+        MessageType::Image(content) => {
+            let mut html = if let Some(FormattedBody { format: MessageFormat::Html, body }) =
+                &content.formatted
+            {
+                parse_matrix_html(body.as_str())
+            } else {
+                StyleTree { children: vec![] }
+            };
+
+            html.children
+                .insert(0, html::StyleTreeNode::Text(display_file_name!(Image, content).into()));
+
+            let src = content.source.clone();
+            html.children.insert(
+                0,
+                html::StyleTreeNode::Image(html::Image::new(src, content.info.as_deref())),
+            );
+
+            return Some(html);
+        },
         _ => None,
     };
 
-    if let Some(FormattedBody { format: MessageFormat::Html, body }) = formatted {
+    let mut html = if let Some(FormattedBody { format: MessageFormat::Html, body }) = formatted {
         Some(parse_matrix_html(body.as_str()))
     } else {
         None
+    };
+
+    if let Some(filename) = content_filename(msgtype) {
+        let html = html.get_or_insert_with(|| {
+            let text = body_cow_content(msgtype).into_owned();
+            StyleTree {
+                children: vec![html::StyleTreeNode::Text(text.into())],
+            }
+        });
+
+        html.children.push(html::StyleTreeNode::Break);
+        html.children.push(html::StyleTreeNode::Text(filename.into()));
     }
+
+    html
 }
 
 #[derive(Clone, Debug)]
@@ -417,7 +494,7 @@ pub enum MessageEvent {
     Original(Box<OriginalRoomMessageEvent>, MessageEdits),
     Redacted(OwnedEventId, Option<String>),
     State(Box<AnySyncStateEvent>),
-    Sticker(Box<OriginalStickerEvent>, MediaSource),
+    Sticker(Box<OriginalStickerEvent>),
     Local(OwnedTransactionId, SendHandle, Box<RoomMessageEventContent>),
     Poll(Box<Poll>),
     UnstablePoll(Box<UnstablePoll>),
@@ -487,10 +564,6 @@ impl MessageEvent {
         }
 
         self.msgtype().and_then(content_html)
-    }
-
-    pub fn filename(&self) -> Option<String> {
-        self.msgtype().and_then(content_filename)
     }
 
     pub fn mentions(&self) -> Option<&Mentions> {
@@ -576,59 +649,6 @@ impl MessageEvent {
             Self::UnstablePoll(poll) => !poll.replacements.is_empty(),
             _ => false,
         }
-    }
-}
-
-/// Macro rule converting a File / Image / Audio / Video to its text content with the shape:
-/// `[Attached <type>: <content>[ (<human readable file size>)]]`
-macro_rules! display_file_name {
-    ( $msgtype:ident, $content:expr ) => {{
-        Some(format!(
-            "[Attached {}: {}{}]",
-            stringify!($msgtype),
-            $content.filename(),
-            $content
-                .info
-                .as_ref()
-                .map(|info| {
-                    info.size
-                        .map(|s| format!(" ({})", format_size(u64::from(s), DECIMAL)))
-                        .unwrap_or_else(String::new)
-                })
-                .unwrap_or_else(String::new)
-        ))
-    }};
-}
-
-/// Macro rule extraction the text caption of a File / Image / Audio / Video
-macro_rules! display_file_to_text {
-    ( $msgtype:ident, $content:expr ) => {{
-        if $content
-            .filename
-            .as_ref()
-            .is_none_or(|filename| *filename == $content.body)
-        {
-            return Cow::Borrowed("");
-        }
-        $content.body.as_str()
-    }};
-}
-
-fn content_filename(msgtype: &MessageType) -> Option<String> {
-    match msgtype {
-        MessageType::Audio(content) => {
-            display_file_name!(Audio, content)
-        },
-        MessageType::File(content) => {
-            display_file_name!(File, content)
-        },
-        MessageType::Image(content) => {
-            display_file_name!(Image, content)
-        },
-        MessageType::Video(content) => {
-            display_file_name!(Video, content)
-        },
-        _ => None,
     }
 }
 
@@ -865,7 +885,7 @@ impl<'a> MessageFormatter<'a> {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
-    ) -> Option<ProtocolPreview> {
+    ) -> Vec<ProtocolPreview> {
         let reply_style = if settings.tunables.message_user_color {
             style.patch(settings.get_user_color(&msg.sender))
         } else {
@@ -894,12 +914,15 @@ impl<'a> MessageFormatter<'a> {
         );
 
         // Determine the image offset of the reply header, taking into account the formatting
-        let proto = proto.map(|p| {
-            let y_off = text.lines.len() as u16;
-            // Adjust x_off by 2 to account for the vertical line and indent
-            let x_off = self.cols.user_gutter_width(settings) + 2;
-            (p, x_off, y_off)
-        });
+        let proto = proto
+            .into_iter()
+            .map(|(p, x, y)| {
+                let y_off = text.lines.len() as u16;
+                // Adjust x_off by 2 to account for the vertical line and indent
+                let x_off = self.cols.user_gutter_width(settings) + 2;
+                (p, x + x_off, y + y_off)
+            })
+            .collect();
 
         for line in replied.lines.iter_mut() {
             line.spans.insert(0, Span::styled(THICK_VERTICAL, style));
@@ -919,25 +942,28 @@ impl<'a> MessageFormatter<'a> {
         settings: &ApplicationSettings,
         previews: &'a PreviewManager,
     ) -> Vec<ProtocolPreview> {
-        let mut emojis = printer::TextPrinter::new(self.width(), style, self.settings, self.info);
+        let mut emojis = printer::TextPrinter::new(
+            self.width(),
+            style,
+            self.settings,
+            self.info,
+            Some(previews),
+        );
         let mut reactions = 0;
-        let mut protos = Vec::new();
 
         for (key, count, source) in counts {
             if reactions != 0 {
                 emojis.push_str(" ", style);
             }
 
-            let proto = match source
-                .as_ref()
-                .and_then(|source| previews.get(source, PreviewKind::Reaction))
-            {
-                Some(ImageStatus::Loaded(backend)) => Some(Some(backend)),
-                // Use empty space as placeholder
-                Some(ImageStatus::Queued(_)) | Some(ImageStatus::Downloading(_)) => Some(None),
-                // Fall back to text
-                None | Some(ImageStatus::Error(_)) => None,
-            };
+            let proto =
+                match source.as_ref().and_then(|source| previews.get(source, PreviewKind::Emote)) {
+                    Some(ImageStatus::Loaded(backend)) => Some(Some(backend)),
+                    // Use empty space as placeholder
+                    Some(ImageStatus::Queued(_)) | Some(ImageStatus::Downloading(_)) => Some(None),
+                    // Fall back to text
+                    None | Some(ImageStatus::Error(_)) => None,
+                };
 
             let name = if proto.is_some() {
                 "  "
@@ -961,15 +987,10 @@ impl<'a> MessageFormatter<'a> {
 
             emojis.push_str("[", style);
             if let Some(Some(proto)) = proto {
-                let proto = Arc::clone(proto);
-
-                let (x, y) = emojis.cursor_pos();
-                let y = (y + text.lines.len()) as u16;
-                let x = x as u16 + self.cols.user_gutter_width(settings);
-
-                protos.push((proto, x, y));
+                emojis.push_emote(proto, style);
+            } else {
+                emojis.push_str(name, style);
             }
-            emojis.push_str(name, style);
             emojis.push_str(" ", style);
             emojis.push_span_nobreak(Span::styled(count.len().to_string(), style));
             emojis.push_str("]", style);
@@ -978,10 +999,17 @@ impl<'a> MessageFormatter<'a> {
         }
 
         if reactions > 0 {
-            self.push_text(emojis.finish(), style, text);
-        }
+            let (txt, protos) = emojis.finish();
 
-        protos
+            let x_off = self.cols.user_gutter_width(settings);
+            let y_off = text.lines.len() as u16;
+
+            self.push_text(txt, style, text);
+
+            protos.into_iter().map(|(p, x, y)| (p, x + x_off, y + y_off)).collect()
+        } else {
+            vec![]
+        }
     }
 
     fn push_thread_reply_count(&mut self, len: usize, text: &mut Text<'a>, style: Style) {
@@ -992,7 +1020,8 @@ impl<'a> MessageFormatter<'a> {
         // If we have threaded replies to this message, show how many.
         let plural = len != 1;
         let mut threaded =
-            printer::TextPrinter::new(self.width(), style, self.settings, self.info).literal(true);
+            printer::TextPrinter::new(self.width(), style, self.settings, self.info, None)
+                .literal(true);
         let len = Span::styled(len.to_string(), style.add_modifier(StyleModifier::BOLD));
         threaded.push_str(" \u{2937} ", style);
         threaded.push_span_nobreak(len);
@@ -1002,7 +1031,7 @@ impl<'a> MessageFormatter<'a> {
             threaded.push_str(" reply in thread", style);
         }
 
-        self.push_text(threaded.finish(), style, text);
+        self.push_text(threaded.finish().0, style, text);
     }
 }
 
@@ -1010,7 +1039,6 @@ pub struct Message {
     pub event: MessageEvent,
     pub sender: OwnedUserId,
     pub timestamp: MessageTimeStamp,
-    pub downloaded: bool,
     pub html: Option<StyleTree>,
 }
 
@@ -1029,9 +1057,8 @@ fn is_after_read_marker(prev: Option<&Message>, marker: Option<&OwnedEventId>) -
 impl Message {
     pub fn new(event: MessageEvent, sender: OwnedUserId, timestamp: MessageTimeStamp) -> Self {
         let html = event.html();
-        let downloaded = false;
 
-        Message { event, sender, timestamp, downloaded, html }
+        Message { event, sender, timestamp, html }
     }
 
     pub fn reply_to(&self) -> Option<OwnedEventId> {
@@ -1093,15 +1120,11 @@ impl Message {
         }
     }
 
-    pub fn image_preview(&self) -> Option<&MediaSource> {
-        if let Some(MessageType::Image(c)) = self.event.msgtype() {
-            return Some(&c.source);
-        }
-
-        match &self.event {
-            MessageEvent::Sticker(_, source) => Some(source),
-
-            _ => None,
+    pub fn image_previews(&self) -> Vec<(&MediaSource, PreviewKind)> {
+        if let Some(html) = &self.html {
+            html.image_previews()
+        } else {
+            vec![]
         }
     }
 
@@ -1315,10 +1338,7 @@ impl Message {
         if let Some(r) = reply {
             if let Some(r) = r {
                 // Format the reply header, push it into the `Text` buffer, and get any image.
-                let proto_reply = fmt.push_in_reply(r, style, &mut text, info, settings, previews);
-                if let Some(proto) = proto_reply {
-                    protos.push(proto)
-                }
+                protos = fmt.push_in_reply(r, style, &mut text, info, settings, previews);
             } else {
                 fmt.push_spans(
                     Line::from(vec![
@@ -1337,13 +1357,16 @@ impl Message {
         let (msg, proto) = self.show_msg(width, style, settings, previews, info);
 
         // Given our text so far, determine the image offset.
-        if let Some(p) = proto {
+        {
             let y_off = text.lines.len() as u16;
             let x_off = fmt.cols.user_gutter_width(settings);
 
             // Account for extra lines printed before the message;
             let y_off = y_off + fmt.message_start_line();
-            protos.push((p, x_off, y_off));
+
+            for (p, x, y) in proto {
+                protos.push((p, x + x_off, y + y_off));
+            }
         }
 
         fmt.push_text(msg, style, &mut text);
@@ -1405,44 +1428,16 @@ impl Message {
         settings: &'a ApplicationSettings,
         previews: &'a PreviewManager,
         info: &'a RoomInfo,
-    ) -> (Text<'a>, Option<Arc<SlicedProtocol>>) {
-        let mut proto = None;
-        let placeholder = match self
-            .image_preview()
-            .and_then(|source| previews.get(source, PreviewKind::Message))
-        {
-            None => None,
-            Some(ImageStatus::Queued(image_preview_size)) => {
-                placeholder_frame(Some("Queued..."), width, image_preview_size)
-            },
-            Some(ImageStatus::Downloading(image_preview_size)) => {
-                placeholder_frame(Some("Downloading..."), width, image_preview_size)
-            },
-            Some(ImageStatus::Loaded(backend)) => {
-                proto = Some(Arc::clone(backend));
-                placeholder_frame(None, width, &backend.size())
-            },
-            Some(ImageStatus::Error(err)) => Some(format!("[Image error: {err}]\n")),
-        };
+    ) -> (Text<'a>, Vec<ProtocolPreview>) {
+        let mut protos = vec![];
 
-        let mut text = if let Some(placeholder) = placeholder {
-            wrapped_text(placeholder, width, style)
-        } else {
-            Default::default()
-        };
-
-        if let Some(mut filename) = self.event.filename() {
-            if self.downloaded {
-                filename.push_str(" \u{2705}");
-            }
-
-            text += wrapped_text(filename, width, style);
-        }
-
+        let mut text = Default::default();
         if let Some(html) = &self.html &&
             settings.tunables.message_formatted_display
         {
-            text += html.to_text(width, style, settings, info);
+            let (t, p) = html.render(width, style, settings, info, previews);
+            text += t;
+            protos = p;
         } else {
             let mut msg = self.event.body();
             if settings.tunables.message_shortcode_display {
@@ -1451,7 +1446,7 @@ impl Message {
             text += wrapped_text(msg, width, style);
         };
 
-        (text, proto)
+        (text, protos)
     }
 
     fn sender_span<'a>(
@@ -1502,7 +1497,6 @@ impl Message {
     pub fn redact(&mut self, redaction: SyncRoomRedactionEvent) {
         self.event.redact(redaction);
         self.html = None;
-        self.downloaded = false;
     }
 
     pub fn set_edits(&mut self, new_edits: MessageEdits) {
@@ -1656,9 +1650,21 @@ impl From<OriginalStickerEvent> for Message {
         let timestamp = event.origin_server_ts.into();
         let user_id = event.sender.clone();
         let source = event.content.source.clone().into();
-        let content = MessageEvent::Sticker(event.into(), source);
 
-        Message::new(content, user_id, timestamp)
+        let html_image =
+            html::StyleTreeNode::Image(html::Image::new(source, Some(&event.content.info)));
+
+        let content = MessageEvent::Sticker(event.into());
+        let mut msg = Message::new(content, user_id, timestamp);
+
+        msg.html = Some(StyleTree {
+            children: vec![
+                html::StyleTreeNode::Text("* sent a sticker:".into()),
+                html_image,
+            ],
+        });
+
+        msg
     }
 }
 
@@ -1850,8 +1856,8 @@ pub mod tests {
 
     #[test]
     fn test_placeholder_frame() {
-        fn pretty_frame_test(str: &str) -> Option<String> {
-            Some(str[1..].to_string())
+        fn pretty_frame_test(str: &str) -> String {
+            str[1..].to_string()
         }
 
         assert_eq!(
@@ -1877,9 +1883,9 @@ pub mod tests {
 "#
             )
         );
-        assert_eq!(placeholder_frame(None, 4, &Size { width: 1, height: 4 }), None);
+        assert_eq!(placeholder_frame(None, 4, &Size { width: 1, height: 4 }), "#\n#\n#\n#\n");
 
-        assert_eq!(placeholder_frame(None, 4, &Size { width: 4, height: 1 }), None);
+        assert_eq!(placeholder_frame(None, 4, &Size { width: 4, height: 1 }), "####\n");
 
         assert_eq!(
             placeholder_frame(Some("OK"), 4, &Size { width: 4, height: 4 }),

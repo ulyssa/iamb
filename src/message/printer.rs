@@ -5,6 +5,7 @@
 //! contents).
 
 use crate::base::RoomInfo;
+use crate::message::ProtocolPreview;
 use crate::prelude::*;
 use crate::util::{
     replace_emojis_in_line,
@@ -17,6 +18,7 @@ use crate::util::{
 /// Wrap styled text for the current terminal width.
 pub struct TextPrinter<'a> {
     text: Text<'a>,
+    images: Vec<ProtocolPreview>,
     width: usize,
     base_style: Style,
 
@@ -27,6 +29,7 @@ pub struct TextPrinter<'a> {
 
     pub(super) settings: &'a ApplicationSettings,
     pub(super) info: &'a RoomInfo,
+    pub(super) previews: Option<&'a PreviewManager>,
 }
 
 impl<'a> TextPrinter<'a> {
@@ -36,9 +39,11 @@ impl<'a> TextPrinter<'a> {
         base_style: Style,
         settings: &'a ApplicationSettings,
         info: &'a RoomInfo,
+        previews: Option<&'a PreviewManager>,
     ) -> Self {
         TextPrinter {
             text: Text::default(),
+            images: vec![],
             width,
             base_style,
 
@@ -48,12 +53,8 @@ impl<'a> TextPrinter<'a> {
             literal: false,
             settings,
             info,
+            previews,
         }
-    }
-
-    /// The `(x, y)` position where the next text will be printed.
-    pub fn cursor_pos(&self) -> (usize, usize) {
-        (self.curr_width, self.text.lines.len())
     }
 
     /// Configure the alignment for each line.
@@ -95,6 +96,7 @@ impl<'a> TextPrinter<'a> {
     pub fn sub(&self, indent: usize) -> Self {
         TextPrinter {
             text: Text::default(),
+            images: vec![],
             width: self.width.saturating_sub(indent),
             base_style: self.base_style,
 
@@ -104,6 +106,7 @@ impl<'a> TextPrinter<'a> {
             literal: self.literal,
             settings: self.settings,
             info: self.info,
+            previews: self.previews,
         }
     }
 
@@ -292,10 +295,29 @@ impl<'a> TextPrinter<'a> {
         self.text.lines.extend(text.lines);
     }
 
+    /// Push an emote with placeholder
+    pub fn push_emote(&mut self, image: &Arc<SlicedProtocol>, style: Style) {
+        if self.curr_width + 2 > self.width {
+            self.commit();
+        }
+
+        self.push_image(image);
+        self.curr_spans.push(Span::styled("  ", style));
+        self.curr_width += 2;
+    }
+
+    /// Push an image without placeholder
+    pub fn push_image(&mut self, image: &Arc<SlicedProtocol>) {
+        let y = self.text.lines.len() as u16;
+        let x = self.curr_width as u16;
+
+        self.images.push((Arc::clone(image), x, y));
+    }
+
     /// Render the contents of this printer as [Text].
-    pub fn finish(mut self) -> Text<'a> {
+    pub fn finish(mut self) -> (Text<'a>, Vec<ProtocolPreview>) {
         self.commit();
-        self.text
+        (self.text, self.images)
     }
 }
 
@@ -309,9 +331,9 @@ pub mod tests {
     fn test_push_nobreak() {
         let settings = mock_settings();
         let info = mock_room();
-        let mut printer = TextPrinter::new(5, Style::default(), &settings, &info);
+        let mut printer = TextPrinter::new(5, Style::default(), &settings, &info, None);
         printer.push_span_nobreak("hello world".into());
-        let text = printer.finish();
+        let text = printer.finish().0;
         assert_eq!(text.lines.len(), 1);
         assert_eq!(text.lines[0].spans.len(), 1);
         assert_eq!(text.lines[0].spans[0].content, "hello world");

@@ -18,10 +18,14 @@ use html5ever::tendril::{StrTendril, TendrilSink};
 use html5ever::{local_name, ns};
 use markup5ever_rcdom::{Handle, NodeData, RcDom};
 use matrix_sdk::OwnedServerName;
+use matrix_sdk::ruma::OwnedMxcUri;
+use matrix_sdk::ruma::events::room::ImageInfo;
 
 use crate::message::printer::TextPrinter;
+use crate::message::{ProtocolPreview, placeholder_frame};
 use crate::prelude::*;
-use crate::util::{join_cell_text, space_text};
+use crate::preview::ImageStatus;
+use crate::util::{join_cell_text, space_text, wrapped_text};
 
 /// Generate bullet points from a [ListStyle].
 pub struct BulletIterator {
@@ -96,6 +100,12 @@ impl TableRow {
         }
     }
 
+    pub fn image_previews<'a>(&'a self, previews: &mut Vec<(&'a MediaSource, PreviewKind)>) {
+        for (_, cell) in &self.cells {
+            cell.image_previews(previews);
+        }
+    }
+
     fn columns(&self) -> usize {
         self.cells.len()
     }
@@ -111,6 +121,12 @@ impl TableSection {
     pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
         for row in &self.rows {
             row.gather_links(urls);
+        }
+    }
+
+    pub fn image_previews<'a>(&'a self, previews: &mut Vec<(&'a MediaSource, PreviewKind)>) {
+        for row in &self.rows {
+            row.image_previews(previews);
         }
     }
 
@@ -137,16 +153,16 @@ impl Table {
         }
     }
 
-    fn to_text<'a>(
-        &'a self,
-        width: usize,
-        style: Style,
-        settings: &'a ApplicationSettings,
-        info: &'a RoomInfo,
-    ) -> Text<'a> {
+    pub fn image_previews<'a>(&'a self, previews: &mut Vec<(&'a MediaSource, PreviewKind)>) {
+        for section in &self.sections {
+            section.image_previews(previews);
+        }
+    }
+
+    fn to_text<'a>(&'a self, printer: &TextPrinter<'a>, style: Style) -> Text<'a> {
         let mut text = Text::default();
         let columns = self.columns();
-        let cell_total = width.saturating_sub(columns).saturating_sub(1);
+        let cell_total = printer.width().saturating_sub(columns).saturating_sub(1);
         let cell_min = cell_total / columns;
         let mut cell_slop = cell_total - cell_min * columns;
         let cell_widths = (0..columns)
@@ -159,16 +175,14 @@ impl Table {
 
         let mut nrows = 0;
 
-        let line_style = style.patch(settings.theme.messages.table);
-        let line = settings.theme.messages.table_line.to_table_set();
+        let line_style = style.patch(printer.settings.theme.messages.table);
+        let line = printer.settings.theme.messages.table_line.to_table_set();
 
         if let Some(caption) = &self.caption {
-            let subw = width.saturating_sub(6);
-            let mut printer =
-                TextPrinter::new(subw, style, settings, info).align(Alignment::Center);
+            let mut printer = printer.sub(6).align(Alignment::Center);
             caption.print(&mut printer, style);
 
-            for mut line in printer.finish().lines {
+            for mut line in printer.finish().0.lines {
                 line.spans.insert(0, Span::styled("   ", style));
                 line.spans.push(Span::styled("   ", style));
                 text.lines.push(line);
@@ -212,7 +226,7 @@ impl Table {
                                 CellType::Data => style,
                             };
 
-                            cell.to_text(*w, style, settings, info)
+                            cell.to_text(*w, style, printer.settings, printer.info)
                         } else {
                             space_text(*w, style)
                         };
@@ -272,6 +286,49 @@ impl ThemeSelector {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct Image {
+    title: Option<String>,
+    alt: Option<String>,
+    width: Option<u16>,
+    height: Option<u16>,
+    src: Option<MediaSource>,
+    is_emote: bool,
+}
+
+impl Image {
+    pub fn new(src: MediaSource, info: Option<&ImageInfo>) -> Self {
+        let width = info
+            .and_then(|info| info.width)
+            .and_then(|width| u16::try_from(width).ok());
+        let height = info
+            .and_then(|info| info.height)
+            .and_then(|height| u16::try_from(height).ok());
+
+        Self {
+            src: Some(src),
+            width,
+            height,
+
+            title: None,
+            alt: None,
+            is_emote: false,
+        }
+    }
+
+    fn kind(&self) -> PreviewKind {
+        if self.is_emote {
+            return PreviewKind::Emote;
+        }
+
+        PreviewKind::Custom(self.width, self.height)
+    }
+
+    fn preview<'a>(&self, previews: &'a PreviewManager) -> Option<&'a ImageStatus> {
+        self.src.as_ref().and_then(|src| previews.get(src, self.kind()))
+    }
+}
+
 /// A processed HTML element that we can render to the terminal.
 #[derive(Debug, Clone)]
 pub enum StyleTreeNode {
@@ -281,7 +338,7 @@ pub enum StyleTreeNode {
     #[allow(dead_code)]
     Code(Box<StyleTreeNode>, Option<String>),
     Header(Box<StyleTreeNode>, usize),
-    Image(Option<String>),
+    Image(Image),
     List(StyleTreeChildren, ListStyle),
     Paragraph(Box<StyleTreeNode>),
     Pre(Box<StyleTreeNode>),
@@ -305,9 +362,9 @@ impl StyleTreeNode {
         settings: &'a ApplicationSettings,
         info: &'a RoomInfo,
     ) -> Text<'a> {
-        let mut printer = TextPrinter::new(width, style, settings, info);
+        let mut printer = TextPrinter::new(width, style, settings, info, None);
         self.print(&mut printer, style);
-        printer.finish()
+        printer.finish().0
     }
 
     pub fn gather_links(&self, urls: &mut Vec<(char, Url)>) {
@@ -369,10 +426,49 @@ impl StyleTreeNode {
                 }
             },
 
-            StyleTreeNode::Image(_) => {},
+            StyleTreeNode::Image(..) => {},
             StyleTreeNode::Ruler => {},
             StyleTreeNode::Text(_) => {},
             StyleTreeNode::Break => {},
+        }
+    }
+
+    pub fn image_previews<'a>(&'a self, previews: &mut Vec<(&'a MediaSource, PreviewKind)>) {
+        match self {
+            StyleTreeNode::Image(img) => {
+                if let Some(source) = &img.src {
+                    previews.push((source, img.kind()));
+                }
+            },
+
+            StyleTreeNode::Blockquote(child) |
+            StyleTreeNode::Code(child, _) |
+            StyleTreeNode::Header(child, _) |
+            StyleTreeNode::Paragraph(child) |
+            StyleTreeNode::Pre(child) |
+            StyleTreeNode::Style(child, _) |
+            StyleTreeNode::Themed(child, _) => {
+                child.image_previews(previews);
+            },
+
+            StyleTreeNode::List(children, _) | StyleTreeNode::Sequence(children) => {
+                for child in children {
+                    child.image_previews(previews);
+                }
+            },
+
+            StyleTreeNode::Table(table) => {
+                table.image_previews(previews);
+            },
+
+            StyleTreeNode::Ruler |
+            StyleTreeNode::Text(..) |
+            StyleTreeNode::Break |
+            StyleTreeNode::Anchor(..) |
+            StyleTreeNode::RoomAlias(..) |
+            StyleTreeNode::RoomId(..) |
+            StyleTreeNode::UserId(..) |
+            StyleTreeNode::DisplayName(..) => {},
         }
     }
 
@@ -396,7 +492,7 @@ impl StyleTreeNode {
                 let mut subp = printer.sub(3);
                 child.print(&mut subp, style);
 
-                for mut line in subp.finish() {
+                for mut line in subp.finish().0 {
                     line.spans.insert(0, Span::styled(" ", style));
                     line.spans.insert(0, Span::styled(quote, quote_style));
                     line.spans.insert(0, Span::styled(" ", style));
@@ -422,11 +518,48 @@ impl StyleTreeNode {
                 printer.push_str(" ", style);
                 child.print(printer, style);
             },
-            StyleTreeNode::Image(None) => {},
-            StyleTreeNode::Image(Some(alt)) => {
+            StyleTreeNode::Image(img @ Image { is_emote: true, .. }) => {
+                if let Some(previews) = printer.previews &&
+                    let Some(image) = img.preview(previews) &&
+                    let ImageStatus::Loaded(image) = image
+                {
+                    printer.push_emote(image, style);
+                } else {
+                    let title = img.title.as_deref().unwrap_or("emote");
+                    printer.push_span_nobreak(Span::styled(format!(":{title}:"), style));
+                }
+            },
+            StyleTreeNode::Image(img) => {
+                let alt = img.alt.as_deref().or(img.title.as_deref());
+
+                let mut proto = None;
+                let placeholder = match printer.previews.and_then(|previews| img.preview(previews))
+                {
+                    None => {
+                        if let Some(alt) = alt {
+                            format!("[Image Alt: {alt}]")
+                        } else {
+                            "[Image]".to_string()
+                        }
+                    },
+                    Some(ImageStatus::Queued(image_preview_size)) => {
+                        placeholder_frame(Some("Queued..."), width, image_preview_size)
+                    },
+                    Some(ImageStatus::Downloading(image_preview_size)) => {
+                        placeholder_frame(Some("Downloading..."), width, image_preview_size)
+                    },
+                    Some(ImageStatus::Loaded(backend)) => {
+                        proto = Some(backend);
+                        placeholder_frame(None, width, &backend.size())
+                    },
+                    Some(ImageStatus::Error(err)) => format!("[Image error: {err}]\n"),
+                };
+
                 printer.commit();
-                printer.push_str("Image Alt: ", style);
-                printer.push_str(alt, style);
+                if let Some(proto) = proto {
+                    printer.push_image(proto);
+                }
+                printer.push_text(wrapped_text(placeholder, width, style));
                 printer.commit();
             },
             StyleTreeNode::List(children, lt) => {
@@ -438,7 +571,7 @@ impl StyleTreeNode {
                     let mut bullet = bullets.next();
                     child.print(&mut subp, style);
 
-                    for mut line in subp.finish() {
+                    for mut line in subp.finish().0 {
                         let leading = if let Some(bullet) = bullet.take() {
                             Span::styled(bullet, style)
                         } else {
@@ -474,7 +607,7 @@ impl StyleTreeNode {
                     .into(),
                 );
 
-                for mut line in subp.finish() {
+                for mut line in subp.finish().0 {
                     line.spans.insert(0, Span::styled(border.vertical_left, style));
                     line.spans.push(Span::styled(border.vertical_right, style));
                     printer.push_line(line);
@@ -500,7 +633,7 @@ impl StyleTreeNode {
                 }
             },
             StyleTreeNode::Table(table) => {
-                let text = table.to_text(width, style, printer.settings, printer.info);
+                let text = table.to_text(printer, style);
                 printer.push_text(text);
             },
             StyleTreeNode::Break => {
@@ -569,6 +702,16 @@ impl StyleTree {
         return links;
     }
 
+    pub fn image_previews(&self) -> Vec<(&MediaSource, PreviewKind)> {
+        let mut previews = vec![];
+
+        for child in &self.children {
+            child.image_previews(&mut previews);
+        }
+
+        return previews;
+    }
+
     pub fn to_text<'a>(
         &'a self,
         width: usize,
@@ -576,7 +719,25 @@ impl StyleTree {
         settings: &'a ApplicationSettings,
         info: &'a RoomInfo,
     ) -> Text<'a> {
-        let mut printer = TextPrinter::new(width, style, settings, info);
+        let mut printer = TextPrinter::new(width, style, settings, info, None);
+
+        for child in self.children.iter() {
+            child.print(&mut printer, style);
+        }
+
+        printer.finish().0
+    }
+
+    /// The images are in the format `(protocol, x, y)`
+    pub fn render<'a>(
+        &'a self,
+        width: usize,
+        style: Style,
+        settings: &'a ApplicationSettings,
+        info: &'a RoomInfo,
+        previews: &'a PreviewManager,
+    ) -> (Text<'a>, Vec<ProtocolPreview>) {
+        let mut printer = TextPrinter::new(width, style, settings, info, Some(previews));
 
         for child in self.children.iter() {
             child.print(&mut printer, style);
@@ -695,16 +856,54 @@ fn lic2t(handles: &[Handle], state: &mut TreeGenState) -> StyleTreeChildren {
     handles.iter().filter_map(|h| li2t(h, state)).collect()
 }
 
-fn attrs_to_alt(attrs: &[Attribute]) -> Option<String> {
-    for attr in attrs {
-        if attr.name.local.as_ref() != "alt" {
-            continue;
-        }
+fn attrs_to_image(attrs: &[Attribute]) -> Image {
+    let mut title = None;
+    let mut alt = None;
+    let mut width = None;
+    let mut height = None;
+    let mut src = None;
+    let mut is_emote = false;
 
-        return Some(attr.value.to_string());
+    for attr in attrs {
+        match attr.name.local.as_ref() {
+            "title" => {
+                title = Some(attr.value.to_string());
+            },
+            "alt" => {
+                alt = Some(attr.value.to_string());
+            },
+            "width" => {
+                if let Ok(val) = u16::from_str(attr.value.as_ref()) {
+                    width = Some(val);
+                }
+            },
+            "height" => {
+                if let Ok(val) = u16::from_str(attr.value.as_ref()) {
+                    height = Some(val);
+                }
+            },
+            "src" => {
+                let uri = OwnedMxcUri::from(attr.value.to_string());
+
+                if uri.is_valid() {
+                    src = Some(uri);
+                }
+            },
+            "data-mx-emoticon" => {
+                is_emote = true;
+            },
+            _ => (),
+        }
     }
 
-    return None;
+    Image {
+        title,
+        alt,
+        width,
+        height,
+        is_emote,
+        src: src.map(MediaSource::Plain),
+    }
 }
 
 fn attrs_to_href(attrs: &[Attribute]) -> Option<String> {
@@ -900,7 +1099,7 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
                 "hr" => StyleTreeNode::Ruler,
                 "br" => StyleTreeNode::Break,
 
-                "img" => StyleTreeNode::Image(attrs_to_alt(&attrs.borrow())),
+                "img" => StyleTreeNode::Image(attrs_to_image(&attrs.borrow())),
 
                 // These don't render in any special way.
                 "details" | "html" | "summary" | "sub" | "sup" => {
