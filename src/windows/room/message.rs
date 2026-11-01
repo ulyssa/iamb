@@ -83,7 +83,6 @@ impl MessageState {
 
         match act {
             MessageAction::Download(filename, flags) => {
-                let msg = info.get_message_mut(&self.id()).unwrap();
                 chat::msg_download(
                     ctx,
                     &store.application.worker.client,
@@ -264,16 +263,15 @@ impl StatefulWidget for MessageWidget<'_> {
 
         // load image previews
         {
-            if let Some(source) = msg.image_preview() {
-                previews.load(source, PreviewKind::Message, worker);
-            }
-            let reply = msg
+            let sources = msg
                 .reply_to()
                 .or_else(|| msg.thread_root())
                 .and_then(|e| info.get_event(&e))
-                .and_then(|msg| msg.image_preview());
-            if let Some(source) = reply {
-                previews.load(source, PreviewKind::Message, worker);
+                .into_iter()
+                .chain(std::iter::once(msg))
+                .flat_map(|msg| msg.image_previews());
+            for (source, kind) in sources {
+                previews.load(source, kind, worker);
             }
             let reactions =
                 msg.event.event_id().and_then(|event_id| info.reactions.get(event_id)).map(
@@ -281,7 +279,7 @@ impl StatefulWidget for MessageWidget<'_> {
                 );
             if let Some(reactions) = reactions {
                 for source in reactions {
-                    previews.load(source, PreviewKind::Reaction, worker);
+                    previews.load(source, PreviewKind::Emote, worker);
                 }
             }
         }
@@ -329,7 +327,7 @@ impl StatefulWidget for MessageWidget<'_> {
 
                 let proto = match source
                     .as_ref()
-                    .and_then(|source| previews.get(source, PreviewKind::Reaction))
+                    .and_then(|source| previews.get(source, PreviewKind::Emote))
                 {
                     Some(ImageStatus::Loaded(backend)) => Some(Some(backend)),
                     // Use empty space as placeholder

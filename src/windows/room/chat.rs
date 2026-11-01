@@ -197,7 +197,7 @@ impl ChatState {
         let settings = &store.application.settings;
         let info = store.application.rooms.get_or_default(self.room_id.clone());
 
-        let msg = self.scrollback.get_mut(info).ok_or(IambError::NoSelectedMessage)?;
+        let msg = self.scrollback.get(info).ok_or(IambError::NoSelectedMessage)?;
 
         match act {
             MessageAction::Cancel(skip_confirm) => {
@@ -652,7 +652,7 @@ fn open_links(msg: &Message) -> UIError<IambInfo> {
 pub async fn msg_download(
     ctx: ProgramContext,
     client: &Client,
-    msg: &mut Message,
+    msg: &Message,
     settings: &ApplicationSettings,
     filename: Option<PathBuf>,
     flags: DownloadFlags,
@@ -732,8 +732,6 @@ pub async fn msg_download(
             let bytes = media.get_media_content(&req, true).await.map_err(IambError::from)?;
 
             fs::write(filename.as_path(), bytes.as_slice())?;
-
-            msg.downloaded = true;
         } else if !flags.contains(DownloadFlags::OPEN) {
             let msg = format!(
                 "The file {} already exists; add ! to end of command to overwrite it.",

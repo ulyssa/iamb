@@ -1,7 +1,6 @@
 use matrix_sdk::Media;
 use matrix_sdk::media::{MediaFormat, MediaRequestParameters, UniqueKey};
 use ratatui_image::picker::Picker;
-use ratatui_image::sliced::SlicedProtocol;
 use ratatui_image::{FilterType, Resize};
 use tokio::sync::Semaphore;
 
@@ -17,15 +16,38 @@ pub enum ImageStatus {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum PreviewKind {
-    Message,
-    Reaction,
+    /// A custom `width, height` is given in pixels or defaults to the config
+    Custom(Option<u16>, Option<u16>),
+
+    /// The image is rendered as 1x2 characters
+    Emote,
+}
+
+impl Default for PreviewKind {
+    fn default() -> Self {
+        Self::Custom(None, None)
+    }
 }
 
 impl PreviewKind {
-    fn image_size(self, image_preview: &ImagePreviewValues) -> Size {
+    fn image_size(self, picker: &Picker, image_preview: &ImagePreviewValues) -> Size {
         match self {
-            Self::Message => image_preview.size,
-            Self::Reaction => Size { width: 2, height: 1 },
+            Self::Emote => Size { width: 2, height: 1 },
+            Self::Custom(width, height) => {
+                let font_size = picker.font_size();
+
+                let width = width
+                    .map(|width| width.div_ceil(font_size.width))
+                    .unwrap_or(image_preview.size.width)
+                    .min(image_preview.size.width);
+
+                let height = height
+                    .map(|height| height.div_ceil(font_size.height))
+                    .unwrap_or(image_preview.size.height)
+                    .min(image_preview.size.height);
+
+                Size { width, height }
+            },
         }
     }
 }
@@ -91,7 +113,7 @@ impl PreviewManager {
             return;
         }
 
-        let size = kind.image_size(&settings.tunables.image_preview);
+        let size = kind.image_size(&self.picker, &settings.tunables.image_preview);
         self.previews.insert(key, ImageStatus::Queued(size));
     }
 }

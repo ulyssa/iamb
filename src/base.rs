@@ -1768,6 +1768,24 @@ impl RoomInfo {
         self.set_implicit_receipt(sender, event_id);
     }
 
+    /// Insert a message with a [`EventLocation::Message`] and previews.
+    fn insert_msglike_with_preview(
+        &mut self,
+        event_id: OwnedEventId,
+        thread_root: Option<OwnedEventId>,
+        message: Message,
+        settings: &ApplicationSettings,
+        previews: &mut PreviewManager,
+    ) {
+        if settings.tunables.image_preview.enabled {
+            for (source, kind) in message.image_previews() {
+                previews.register_preview(settings, source, kind);
+            }
+        }
+
+        self.insert_msglike(event_id, thread_root, message);
+    }
+
     /// Insert a reaction to a message.
     fn insert_reaction(&mut self, react: ReactionEvent, source: Option<MediaSource>) {
         let MessageLikeEvent::Original(react) = react else {
@@ -1787,7 +1805,7 @@ impl RoomInfo {
     }
 
     /// Insert a sticker
-    pub fn insert_sticker_with_preview(
+    pub fn insert_sticker(
         &mut self,
         sticker: StickerEvent,
         settings: &ApplicationSettings,
@@ -1806,17 +1824,7 @@ impl RoomInfo {
             _ => None,
         };
 
-        if let MessageLikeEvent::Original(OriginalMessageLikeEvent {
-            content: StickerEventContent { source, .. },
-            ..
-        }) = &sticker &&
-            settings.tunables.image_preview.enabled
-        {
-            let source = source.clone().into();
-            previews.register_preview(settings, &source, PreviewKind::Message);
-        }
-
-        self.insert_msglike(event_id, thread_root, sticker.into());
+        self.insert_msglike_with_preview(event_id, thread_root, sticker.into(), settings, previews);
     }
 
     /// Insert a reaction to a message.
@@ -1839,7 +1847,7 @@ impl RoomInfo {
         if settings.tunables.image_preview.enabled &&
             let Some(source) = source.as_ref()
         {
-            previews.register_preview(settings, source, PreviewKind::Reaction);
+            previews.register_preview(settings, source, PreviewKind::Emote);
         }
 
         self.insert_reaction(react, source);
@@ -2028,6 +2036,8 @@ impl RoomInfo {
         &mut self,
         edit_msg: RoomMessageEvent,
         replacement: Replacement<RoomMessageEventContentWithoutRelation>,
+        settings: &ApplicationSettings,
+        previews: &mut PreviewManager,
     ) {
         let RoomMessageEvent::Original(edit_msg) = edit_msg else {
             return;
@@ -2044,6 +2054,12 @@ impl RoomInfo {
                 return;
             };
             msg.insert_edit(edit_key.clone(), replacement.new_content);
+
+            if settings.tunables.image_preview.enabled {
+                for (source, kind) in msg.image_previews() {
+                    previews.register_preview(settings, source, kind);
+                }
+            }
         } else {
             // The edited message is not yet loaded
             let entry = self.unloaded_edits.entry(replacement.event_id.clone());
@@ -2075,44 +2091,28 @@ impl RoomInfo {
         self.insert_msglike(event_id, thread_root, msg.into());
     }
 
-    /// Insert a new message.
-    fn insert_message(&mut self, msg: RoomMessageEvent) {
-        let event_id = msg.event_id().to_owned();
-        let thread_root = match msg.as_original().and_then(|ev| ev.content.relates_to.as_ref()) {
-            Some(Relation::Replacement(repl)) => {
-                let repl = repl.to_owned();
-                self.insert_edit(msg, repl);
-                return;
-            },
-            Some(Relation::Thread(Thread { event_id, .. })) => Some(event_id.to_owned()),
-            _ => None,
-        };
-
-        let mut message: Message = msg.into();
-        if let Some(edits) = self.unloaded_edits.remove(&event_id) {
-            message.set_edits(edits);
-        }
-
-        self.insert_msglike(event_id, thread_root, message);
-    }
-
     /// Insert a new message event, and prepare for image-preview if it has an image attachment.
-    pub fn insert_with_preview(
+    pub fn insert_message(
         &mut self,
         ev: RoomMessageEvent,
         settings: &ApplicationSettings,
         previews: &mut PreviewManager,
     ) {
-        if let MessageLikeEvent::Original(OriginalMessageLikeEvent {
-            content: RoomMessageEventContent { msgtype: MessageType::Image(c), .. },
-            ..
-        }) = &ev &&
-            settings.tunables.image_preview.enabled
-        {
-            previews.register_preview(settings, &c.source, PreviewKind::Message)
+        let event_id = ev.event_id().to_owned();
+        let thread_root = match ev.as_original().and_then(|ev| ev.content.relates_to.as_ref()) {
+            Some(Relation::Replacement(repl)) => {
+                let repl = repl.to_owned();
+                self.insert_edit(ev, repl, settings, previews);
+                return;
+            },
+            Some(Relation::Thread(Thread { event_id, .. })) => Some(event_id.to_owned()),
+            _ => None,
+        };
+        let mut message: Message = ev.into();
+        if let Some(edits) = self.unloaded_edits.remove(&event_id) {
+            message.set_edits(edits);
         }
-
-        self.insert_message(ev);
+        self.insert_msglike_with_preview(event_id, thread_root, message, settings, previews);
     }
 
     /// Indicates whether this room has unread messages.
@@ -3231,7 +3231,7 @@ pub mod tests {
             MSG5_KEY.clone(),
         );
 
-        info.insert_with_preview(event, &settings, &mut previews);
+        info.insert_message(event, &settings, &mut previews);
 
         assert_eq!(
             info.user_receipts
@@ -3263,8 +3263,8 @@ pub mod tests {
             MSG2_KEY.clone(),
         );
 
-        info.insert_with_preview(newer, &settings, &mut previews);
-        info.insert_with_preview(older, &settings, &mut previews);
+        info.insert_message(newer, &settings, &mut previews);
+        info.insert_message(older, &settings, &mut previews);
 
         assert_eq!(
             info.user_receipts
@@ -3311,6 +3311,8 @@ pub mod tests {
 
     #[test]
     fn test_explicit_receipt_does_not_move_implicit_receipt_backwards() {
+        let settings = mock_settings();
+        let mut previews = PreviewManager::new(&settings);
         let mut info = RoomInfo::default();
         let older = mock_room_message_event(
             RoomMessageEventContent::text_plain("older"),
@@ -3323,8 +3325,8 @@ pub mod tests {
             MSG5_KEY.clone(),
         );
 
-        info.insert_message(older);
-        info.insert_message(newer);
+        info.insert_message(older, &settings, &mut previews);
+        info.insert_message(newer, &settings, &mut previews);
         info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG2_EVID.clone());
 
         assert_eq!(
@@ -3337,6 +3339,8 @@ pub mod tests {
 
     #[test]
     fn test_implicit_receipt_waits_for_unloaded_explicit_receipt() {
+        let settings = mock_settings();
+        let mut previews = PreviewManager::new(&settings);
         let mut info = RoomInfo::default();
         info.set_receipt(ReceiptThread::Main, TEST_USER2.clone(), MSG5_EVID.clone());
         let older = mock_room_message_event(
@@ -3345,7 +3349,7 @@ pub mod tests {
             MSG2_KEY.clone(),
         );
 
-        info.insert_message(older);
+        info.insert_message(older, &settings, &mut previews);
 
         assert_eq!(
             info.user_receipts
