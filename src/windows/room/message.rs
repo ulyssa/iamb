@@ -17,9 +17,7 @@ fn contains_reaction(
         .as_origin()
         .and_then(|event_id| info.reactions.get(event_id))
         .is_some_and(|reacts| {
-            reacts
-                .values()
-                .any(|(k, user, _)| user == &settings.profile.user_id && k == key)
+            reacts.values().any(|(k, user, _)| user == &settings.user_id && k == key)
         })
 }
 

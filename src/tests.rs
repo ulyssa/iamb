@@ -228,8 +228,9 @@ pub fn mock_settings() -> ApplicationSettings {
         sqlite_cache_dir: PathBuf::new(),
 
         profile_name: "test".into(),
+        user_id: user_id!("@user:example.com").to_owned(),
         profile: ProfileConfig {
-            user_id: user_id!("@user:example.com").to_owned(),
+            user_id: Some(user_id!("@user:example.com").to_owned()),
             password_file: None,
             url: None,
             settings: None,

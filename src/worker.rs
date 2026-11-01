@@ -510,10 +510,10 @@ fn insert_msgs_and_receipts(
                 // ignoring redaction events because we get them bundled with the redacted event
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollStart(ev)) => {
-                info.insert_poll_start(ev, &settings.profile.user_id);
+                info.insert_poll_start(ev, &settings.user_id);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::UnstablePollStart(ev)) => {
-                info.insert_unstable_poll_start(ev, &settings.profile.user_id);
+                info.insert_unstable_poll_start(ev, &settings.user_id);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollResponse(ev)) => {
                 if let MessageLikeEvent::Original(ev) = ev {
@@ -1330,8 +1330,7 @@ async fn create_client_inner(
         builder.homeserver_url(url.as_str())
     } else {
         // Try to discover the homeserver from the user ID.
-        let account = &settings.profile;
-        builder.server_name(account.user_id.server_name())
+        builder.server_name(settings.user_id.server_name())
     };
 
     builder.build().await
@@ -1341,7 +1340,7 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
     let account = &settings.profile;
     let res = match create_client_inner(&account.url, settings).await {
         Err(ClientBuildError::AutoDiscovery(_)) => {
-            let url = format!("https://{}/", account.user_id.server_name().as_str());
+            let url = format!("https://{}/", settings.user_id.server_name().as_str());
             let url = Url::parse(&url).unwrap();
             create_client_inner(&Some(url), settings).await
         },
@@ -1675,7 +1674,7 @@ impl ClientWorker {
                         .content
                         .user_ids
                         .into_iter()
-                        .filter(|u| u != &locked.application.settings.profile.user_id)
+                        .filter(|u| u != &locked.application.settings.user_id)
                         .collect();
 
                     locked.application.get_room_info(room_id).set_typing(users);
@@ -1869,7 +1868,7 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_poll_start(full_ev, &settings.profile.user_id);
+                    info.insert_poll_start(full_ev, &settings.user_id);
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1894,7 +1893,7 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_unstable_poll_start(full_ev, &settings.profile.user_id);
+                    info.insert_unstable_poll_start(full_ev, &settings.user_id);
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -2189,7 +2188,7 @@ impl ClientWorker {
             LoginStyle::Password(password) => {
                 let mut login = client
                     .matrix_auth()
-                    .login_username(&self.settings.profile.user_id, &password)
+                    .login_username(&self.settings.user_id, &password)
                     .initial_device_display_name(initial_devname().as_str());
                 if let Some(device) = self.settings.read_saved_device() {
                     login = login.device_id(device.device_id().as_str());
@@ -2224,7 +2223,7 @@ impl ClientWorker {
             LoginStyle::OAuth => {
                 oauth_login(
                     self.client.clone(),
-                    &self.settings.profile.user_id,
+                    &self.settings.user_id,
                     self.settings.read_saved_device(),
                 )
                 .await?;
@@ -2241,7 +2240,7 @@ impl ClientWorker {
 
     async fn logout(&mut self, user_id: String) -> IambResult<EditInfo> {
         // Verify that the user is logging out of the correct profile.
-        let curr = self.settings.profile.user_id.as_str();
+        let curr = self.settings.user_id.as_str();
 
         if user_id != curr {
             let msg = format!("Incorrect user ID (currently logged in as {curr})");
@@ -2406,12 +2405,12 @@ impl ClientWorker {
         };
 
         let msg = format!("* Successfully logged in with {}!", user);
-        if user != self.settings.profile.user_id {
+        if user != self.settings.user_id {
             // Trace warning if this happens
             tracing::warn!("logged in as a different user than expected");
-            self.settings.profile.user_id = user.to_owned();
+            self.settings.user_id = user.to_owned();
             let store = self.store.as_ref().expect("initialised worker should have store");
-            store.lock().await.application.settings.profile.user_id = user.to_owned();
+            store.lock().await.application.settings.user_id = user.to_owned();
         }
         Ok(Some(InfoMessage::from(msg)))
     }

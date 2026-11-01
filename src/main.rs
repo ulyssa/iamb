@@ -878,7 +878,7 @@ impl Application {
             },
             HomeserverAction::ProfileFieldShow(field) => {
                 let client = &store.application.worker.client;
-                let user_id = store.application.settings.profile.user_id.clone();
+                let user_id = store.application.settings.user_id.clone();
                 let account = client.account();
                 let value = account
                     .fetch_profile_field_of(user_id, field.clone())
@@ -1102,7 +1102,7 @@ async fn login_normal(
     settings: &ApplicationSettings,
     store: &AsyncProgramStore,
 ) -> IambResult<()> {
-    println!("* Logging in for {}...", settings.profile.user_id);
+    println!("* Logging in for {}...", settings.user_id);
     login(worker, settings).await?;
     println!("* Syncing...");
     worker.spawn_sync()?;
