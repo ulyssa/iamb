@@ -27,6 +27,7 @@ use crate::util::{join_cell_text, space_text};
 pub struct BulletIterator {
     style: ListStyle,
     pos: usize,
+    /// The number of characters the number takes up
     len: usize,
 }
 
@@ -34,7 +35,7 @@ impl BulletIterator {
     fn width(&self) -> usize {
         match self.style {
             ListStyle::Unordered => 2,
-            ListStyle::Ordered => self.len.to_string().len() + 2,
+            ListStyle::Ordered(_) => self.len + 2,
         }
     }
 }
@@ -43,19 +44,15 @@ impl Iterator for BulletIterator {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos == self.len {
-            return None;
-        }
-
-        self.pos += 1;
-
         let bullet = match self.style {
             ListStyle::Unordered => "- ".to_string(),
-            ListStyle::Ordered => {
-                let w = self.len.to_string().len();
+            ListStyle::Ordered(_) => {
+                let w = self.len;
                 format!("{: >w$}. ", self.pos, w = w)
             },
         };
+
+        self.pos += 1;
 
         return Some(bullet);
     }
@@ -64,13 +61,21 @@ impl Iterator for BulletIterator {
 /// Whether this list is ordered or unordered.
 #[derive(Clone, Copy, Debug)]
 pub enum ListStyle {
-    Ordered,
+    /// The `usize` is the start index.
+    Ordered(usize),
     Unordered,
 }
 
 impl ListStyle {
     fn bullets(&self, len: usize) -> BulletIterator {
-        BulletIterator { style: *self, pos: 0, len }
+        let pos = match self {
+            Self::Ordered(start) => *start,
+            Self::Unordered => 0,
+        };
+
+        let len = (pos + len).to_string().len();
+
+        BulletIterator { style: *self, pos, len }
     }
 }
 
@@ -711,6 +716,20 @@ fn lic2t(handles: &[Handle], state: &mut TreeGenState) -> StyleTreeChildren {
     handles.iter().filter_map(|h| li2t(h, state)).collect()
 }
 
+fn attrs_to_start(attrs: &[Attribute]) -> Option<usize> {
+    for attr in attrs {
+        if attr.name.local.as_ref() != "start" {
+            continue;
+        }
+
+        if let Ok(start) = usize::from_str(attr.value.as_ref()) {
+            return Some(start);
+        }
+    }
+
+    return None;
+}
+
 fn attrs_to_alt(attrs: &[Attribute]) -> Option<String> {
     for attr in attrs {
         if attr.name.local.as_ref() != "alt" {
@@ -871,7 +890,10 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
 
                 // Lists
                 "ol" => {
-                    StyleTreeNode::List(lic2t(&node.children.borrow(), state), ListStyle::Ordered)
+                    StyleTreeNode::List(
+                        lic2t(&node.children.borrow(), state),
+                        ListStyle::Ordered(attrs_to_start(&attrs.borrow()).unwrap_or(1)),
+                    )
                 },
                 "ul" => {
                     StyleTreeNode::List(lic2t(&node.children.borrow(), state), ListStyle::Unordered)
