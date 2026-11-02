@@ -516,7 +516,23 @@ impl StyleTreeNode {
             },
             StyleTreeNode::Style(child, patch) => child.print(printer, style.patch(*patch)),
             StyleTreeNode::Sequence(children) => {
+                let mut after_quote = false;
+
                 for child in children {
+                    match child {
+                        // Whitespace between elements shouldn't affect spacing.
+                        StyleTreeNode::Text(text) if text.trim().is_empty() => {},
+                        StyleTreeNode::Blockquote(_) => {
+                            if after_quote {
+                                // Keep adjacent blockquotes from visually merging.
+                                printer.commit();
+                                printer.push_break();
+                            }
+                            after_quote = true;
+                        },
+                        _ => after_quote = false,
+                    }
+
                     child.print(printer, style);
                 }
             },
@@ -1202,6 +1218,29 @@ pub mod tests {
                 Span::raw(" "),
             ])
         );
+    }
+
+    #[test]
+    fn test_blockquote_adjacent() {
+        let info = mock_room();
+        let settings = mock_settings();
+        let s = "<blockquote>\n<p>One</p>\n</blockquote>\n<blockquote>\n<p>Two</p>\n</blockquote>";
+        let tree = parse_matrix_html(s);
+        let text = tree.to_text(10, Style::default(), &settings, &info);
+        let style = Style::new().fg(Color::Cyan);
+        let quoted = |word: &'static str, pad: &'static str| {
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled(line::THICK_VERTICAL, style),
+                Span::raw(" "),
+                Span::raw(word),
+                Span::raw(pad),
+            ])
+        };
+        assert_eq!(text.lines.len(), 3);
+        assert_eq!(text.lines[0], quoted("One", "    "));
+        assert_eq!(text.lines[1], Line::from(vec![Span::raw(" ".repeat(10))]));
+        assert_eq!(text.lines[2], quoted("Two", "    "));
     }
 
     #[test]
