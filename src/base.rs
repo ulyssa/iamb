@@ -2257,7 +2257,7 @@ impl RoomInfo {
         settings: &ApplicationSettings,
         open_notifications: &mut HashMap<OwnedRoomId, Vec<NotificationHandle>>,
     ) {
-        let user_id = &settings.profile.user_id;
+        let user_id = &settings.user_id;
 
         let messages = match &thread {
             ReceiptThread::Main => self.get_thread(None),

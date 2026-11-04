@@ -34,6 +34,11 @@ It's structure and fields are described below.
 .Sh CONFIGURATION
 These options are sections at the top-level of the file.
 .Bl -tag -width Ds
+.It Sy include
+A list of additional toml configs to include. Paths are either absolute or
+relative to the config directory and support shell variable expansion. Configs
+specified later take precedence. If the path is a directory all files ending in
+".toml" are loaded. Transitive includes are not supported.
 .It Sy profiles
 A map of profile names containing per-account information.
 See

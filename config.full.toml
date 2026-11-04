@@ -7,6 +7,16 @@
 # If you want to start with something simple, use `config.example.toml` and add
 # things in one-by-one as you need them.
 # ==============================================================================
+
+# Include other config files
+include = [
+  # load `~/.config/iamb/config.d/*.toml` in lexicographic order
+  "config.d",
+
+  # override all local settings with values from a global config
+  "/etc/iamb/config.toml"
+]
+
 default_profile = "default"
 
 # Specify a user profile to log in as.
