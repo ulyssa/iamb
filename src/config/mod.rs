@@ -302,6 +302,9 @@ fn load_config_includes(mut config: IambConfig, config_dir: &Path) -> IambConfig
 
                 match IambConfig::load_toml(&path) {
                     Ok(include) => {
+                        if !include.include.is_empty() {
+                            eprintln!("Ignoring nested includes in {path:?}");
+                        }
                         config = include.merge(config);
                     },
                     Err(e) => {
@@ -312,6 +315,9 @@ fn load_config_includes(mut config: IambConfig, config_dir: &Path) -> IambConfig
         } else {
             match IambConfig::load_toml(&path) {
                 Ok(include) => {
+                    if !include.include.is_empty() {
+                        eprintln!("Ignoring nested includes in {path:?}");
+                    }
                     config = include.merge(config);
                 },
                 Err(e) => {
