@@ -3,6 +3,7 @@
 //! The worker thread handles asynchronous work, and can receive messages from the main thread that
 //! block on a reply from the async worker.
 
+use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
@@ -15,6 +16,7 @@ use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
 use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
+use matrix_sdk::event_cache::DecryptionRetryRequest;
 use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::notification_settings::RoomNotificationMode;
 use matrix_sdk::room::RoomMember;
@@ -382,6 +384,7 @@ async fn get_receipts_for_timeline_events(
     events: Vec<TimelineEvent>,
 ) -> Vec<MessageAndReceipts> {
     let mut msgs = vec![];
+    let mut redecryption_requests = BTreeSet::new();
 
     for ev in events.into_iter() {
         let event_id = ev.event_id().map(ToOwned::to_owned);
@@ -401,9 +404,13 @@ async fn get_receipts_for_timeline_events(
                 }
             },
             TimelineEventKind::UnableToDecrypt { event, utd_info, .. } => {
+                if let Some(session_id) = &utd_info.session_id {
+                    redecryption_requests.insert(session_id.to_string());
+                }
+
                 let event = match event.deserialize() {
                     Ok(event) => {
-                        tracing::debug!(
+                        tracing::trace!(
                             ?utd_info,
                             room_id = room.room_id().as_str(),
                             ?event_id,
@@ -456,6 +463,19 @@ async fn get_receipts_for_timeline_events(
         };
 
         msgs.push((msg, thread, receipts));
+    }
+
+    if !redecryption_requests.is_empty() {
+        tracing::debug!(
+            room_id = room.room_id().as_str(),
+            "Requesting redecryption of {} events",
+            redecryption_requests.len()
+        );
+        room.client().event_cache().request_decryption(DecryptionRetryRequest {
+            room_id: room.room_id().to_owned(),
+            utd_session_ids: redecryption_requests,
+            refresh_info_session_ids: Default::default(),
+        });
     }
 
     msgs
@@ -1370,8 +1390,6 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
     };
 
     let client = res.expect("Failed to instantiate client");
-
-    client.event_cache().subscribe().expect("Failed to start event cache");
 
     client
         .media()
