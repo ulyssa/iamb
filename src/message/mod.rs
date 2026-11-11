@@ -1027,12 +1027,9 @@ impl<'a> MessageFormatter<'a> {
 
         if num > 0 {
             threaded.push_str(" (", style);
-            threaded.push_span_nobreak(Span::styled(
-                thread.unreads.num_mentions.to_string(),
-                style.bold(),
-            ));
+            threaded.push_span_nobreak(Span::styled(num.to_string(), style.bold()));
             threaded.push_str(" ", style);
-            if is_plural {
+            if num > 1 {
                 threaded.push_str(plural, style);
             } else {
                 threaded.push_str(singular, style);
@@ -1183,7 +1180,7 @@ impl Message {
     }
 
     /// The read receipt thread that this message was inserted into.
-    fn receipt_thread(&self, info: &RoomInfo) -> ReceiptThread {
+    pub(crate) fn receipt_thread(&self, info: &RoomInfo) -> ReceiptThread {
         self.event
             .event_id()
             .and_then(|event_id| info.get_receipt_thread(event_id))
