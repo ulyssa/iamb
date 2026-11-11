@@ -1396,7 +1396,6 @@ pub struct Thread {
     messages: Messages,
 
     root: Option<Message>,
-    // TODO: check access
     pub(crate) summary: Option<ThreadSummary>,
 
     pub(crate) unreads: ReadReceipts,
@@ -1431,7 +1430,7 @@ impl Thread {
         root: &EventId,
         store: &AsyncProgramStore,
     ) {
-        if self.update_handle.is_some() {
+        if self.update_handle.as_ref().is_some_and(|handle| !handle.is_finished()) {
             return;
         }
 
@@ -1685,6 +1684,7 @@ impl RoomInfo {
         }
     }
 
+    /// Spawn subscriber tasks for all thread updates.
     pub(crate) async fn subscribe_thread_updates(
         &mut self,
         room: &MatrixRoom,

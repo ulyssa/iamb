@@ -762,6 +762,7 @@ pub(crate) async fn subscribe_thread_updates(
     Ok(tokio::spawn(async move {
         let _drop_handle = drop_handle;
 
+        // Insert the initial events
         {
             let msgs = get_receipts_for_timeline_events(&room, initial_events).await;
             let mut locked = store.lock().await;
@@ -789,13 +790,13 @@ pub(crate) async fn subscribe_thread_updates(
                         return
                     };
 
-                store
-                    .lock()
-                    .await
-                    .application
-                    .get_room_info(room.room_id().to_owned())
-                    .get_thread_mut(thread_id.clone())
-                    .unreads = update.read_receipts;
+                    store
+                        .lock()
+                        .await
+                        .application
+                        .get_room_info(room.room_id().to_owned())
+                        .get_thread_mut(thread_id.clone())
+                        .unreads = update.read_receipts;
                 }
             }
         }
@@ -809,8 +810,8 @@ async fn handle_thread_update(
 ) {
     match update {
         ThreadEventCacheUpdate::UpdateTimelineEvents(diffs) => {
-            // Ignore the update itself and just collect the changed items. Because we index by
-            // `MessageKey`, the correct events should be replaced.
+            // Ignore the update itself and just collect the changed items.
+            // The updated events will be replaced because we index by `MessageKey`.
             let events = diffs
                 .diffs
                 .into_iter()

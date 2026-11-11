@@ -380,12 +380,8 @@ impl StatefulWidget for MessageWidget<'_> {
         // receipts
         if saved_tunables.read_receipt_display &&
             let Some(event_id) = msg.event.event_id() &&
-            let Some((thread, _)) = info.get_message_location(event_id)
+            let Some(thread) = info.get_receipt_thread(event_id)
         {
-            let thread = match thread {
-                Some(root) => ReceiptThread::Thread(root.to_owned()),
-                None => ReceiptThread::Main,
-            };
             let receipts = info
                 .event_receipts(&thread)
                 .into_iter()
