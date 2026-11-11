@@ -70,7 +70,7 @@ pub async fn register_notifications(
                 let room_id = room.room_id().to_owned();
                 match notification.event {
                     RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
-                        match parse_full_notification(e, room, show_message).await {
+                        match parse_full_notification(e, room, show_message, &store).await {
                             Ok((summary, body, server_ts)) => {
                                 if server_ts < startup_ts {
                                     return;
@@ -238,18 +238,16 @@ pub async fn parse_full_notification(
     event: Raw<AnySyncTimelineEvent>,
     room: MatrixRoom,
     show_body: bool,
+    store: &AsyncProgramStore,
 ) -> IambResult<(String, Option<String>, MilliSecondsSinceUnixEpoch)> {
     let event = event.deserialize().map_err(IambError::from)?;
 
     let server_ts = event.origin_server_ts();
 
-    let sender_id = event.sender();
-    let sender = room.get_member_no_sync(sender_id).await.map_err(IambError::from)?;
-
-    let sender_name = sender
-        .as_ref()
-        .and_then(|m| m.display_name())
-        .unwrap_or_else(|| sender_id.localpart());
+    let mut locked = store.lock().await;
+    let ChatStore { rooms, settings, .. } = &mut locked.application;
+    let info = rooms.get_or_default(room.room_id().to_owned());
+    let sender_name = settings.get_user_span(event.sender(), info).content;
 
     let summary = if let Some(room_name) = room.cached_display_name() {
         if room.is_direct().await.map_err(IambError::from)? && sender_name == room_name.to_string()
@@ -263,7 +261,7 @@ pub async fn parse_full_notification(
     };
 
     let body = if show_body {
-        event_notification_body(&event, sender_name).map(truncate)
+        event_notification_body(&event, &sender_name).map(truncate)
     } else {
         None
     };
