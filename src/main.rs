@@ -968,6 +968,7 @@ impl Application {
 
         let store = self.store.clone();
 
+        tracing::info!("starting main loop");
         while self.screen.tabs() != 0 {
             let key = self.step().await?;
 
@@ -1105,6 +1106,14 @@ async fn login_normal(
     println!("* Logging in for {}...", settings.user_id);
     login(worker, settings).await?;
     println!("* Syncing...");
+
+    // Only subscribe after the encryption session has been restored.
+    worker
+        .client
+        .event_cache()
+        .subscribe()
+        .expect("Failed to start event cache");
+
     worker.spawn_sync()?;
     worker.setup_persistent_tokens();
     worker::do_first_sync(&worker.client, store)
@@ -1123,10 +1132,12 @@ async fn run(
     settings.probe_enhanced_keys();
 
     // Set up client state.
+    tracing::info!("setting up client");
     create_dir_all(settings.sqlite_dir.as_path())?;
     let client = worker::create_client(&settings).await;
 
     // Set up the async worker thread and global store.
+    tracing::debug!("setting up worker");
     let worker = ClientWorker::spawn(client.clone(), settings.clone()).await;
     let store = ChatStore::new(worker.clone(), settings.clone())?;
     let mut store = Store::new(store);
@@ -1137,9 +1148,11 @@ async fn run(
         store.registers.set_default_register(r.clone());
     }
 
+    tracing::debug!("initializing worker");
     let store = Arc::new(AsyncMutex::new(store));
     worker.init(store.clone());
 
+    tracing::info!("logging in");
     let res = login_normal(&worker, &settings, &store).await;
 
     match res {
@@ -1157,6 +1170,7 @@ async fn run(
         Ok(()) => (),
     }
 
+    tracing::debug!("setting up tty");
     // Set up the terminal for drawing, and cleanup properly on panics.
     setup_tty(&settings)?;
 
@@ -1170,6 +1184,7 @@ async fn run(
     }));
 
     // And finally, start running the terminal UI.
+    tracing::debug!("creating application");
     let mut application = Application::new(settings, store, initial_room)
         .await
         .inspect_err(|_| restore_tty(enable_enhanced_keys, enable_mouse))?;
