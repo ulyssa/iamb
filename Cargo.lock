@@ -2557,6 +2557,7 @@ dependencies = [
  "dirs 7.0.0",
  "edit",
  "emojis 0.9.1",
+ "eyeball-im",
  "feruca",
  "futures",
  "gethostname",

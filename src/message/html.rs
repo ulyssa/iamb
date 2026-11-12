@@ -575,6 +575,7 @@ impl StyleTreeNode {
 }
 
 /// A processed HTML document.
+#[derive(Clone)]
 pub struct StyleTree {
     pub(super) children: StyleTreeChildren,
 }

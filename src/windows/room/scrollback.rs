@@ -173,11 +173,11 @@ impl ScrollbackState {
     }
 
     pub fn get_thread<'a>(&self, info: &'a RoomInfo) -> Option<&'a Messages> {
-        info.get_thread(self.thread.as_deref())
+        info.get_messages(self.thread.as_deref())
     }
 
     pub fn get_thread_mut<'a>(&self, info: &'a mut RoomInfo) -> &'a mut Messages {
-        info.get_thread_mut(self.thread.clone())
+        info.get_messages_mut(self.thread.clone())
     }
 
     pub fn messages<'a>(
@@ -1904,8 +1904,7 @@ mod tests {
             let info = store.application.get_room_info(TEST_ROOM1_ID.clone());
 
             let receipt = info
-                .user_receipts
-                .get(&ReceiptThread::Main)
+                .user_receipts(&ReceiptThread::Main)
                 .and_then(|receipts| receipts.get(&user_id));
             let exp = Some(&*MSG1_EVID);
             assert_eq!(

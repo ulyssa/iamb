@@ -7,6 +7,7 @@ use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
+use eyeball_im::{Vector, VectorDiff};
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt as _, StreamExt};
 use gethostname::gethostname;
@@ -14,9 +15,10 @@ use matrix_sdk::AuthSession;
 use matrix_sdk::authentication::matrix::MatrixSession;
 use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
-use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
+use matrix_sdk::deserialized_responses::{ThreadSummaryStatus, TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
 use matrix_sdk::event_cache::DecryptionRetryRequest;
+use matrix_sdk::event_cache::ThreadEventCacheUpdate;
 use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::notification_settings::RoomNotificationMode;
 use matrix_sdk::room::RoomMember;
@@ -35,7 +37,6 @@ use matrix_sdk::ruma::api::client::room::create_room::v3::{
 };
 use matrix_sdk::ruma::api::client::space::get_hierarchy::v1::Request as SpaceHierarchyRequest;
 use matrix_sdk::ruma::assign;
-use matrix_sdk::ruma::events::MessageLikeEvent;
 use matrix_sdk::ruma::events::key::verification::ready::{
     OriginalSyncKeyVerificationReadyEvent,
     ToDeviceKeyVerificationReadyEvent,
@@ -67,6 +68,7 @@ use matrix_sdk::ruma::events::{
     AnyMessageLikeEventContent,
     AnyTimelineEvent,
     InitialStateEvent,
+    MessageLikeEvent,
     SyncEphemeralRoomEvent,
     SyncMessageLikeEvent,
     SyncStateEvent,
@@ -116,7 +118,7 @@ const RECEIPT_RETRY_INTERVAL: Duration = Duration::from_secs(2);
 type ReceiptKey = (OwnedRoomId, ReceiptThread, ReceiptType);
 type ReceiptUpdate = (OwnedRoomId, ReceiptThread, ReceiptType, OwnedEventId);
 
-type MessageAndReceipts = (AnyTimelineEvent, ReceiptThread, Vec<OwnedUserId>);
+type MessageAndReceipts = (AnyTimelineEvent, ThreadSummaryStatus, ReceiptThread, Vec<OwnedUserId>);
 type MessageFetchResult = IambResult<(bool, Vec<MessageAndReceipts>)>;
 
 fn initial_devname() -> String {
@@ -462,7 +464,7 @@ async fn get_receipts_for_timeline_events(
             },
         };
 
-        msgs.push((msg, thread, receipts));
+        msgs.push((msg, ev.thread_summary, thread, receipts));
     }
 
     if !redecryption_requests.is_empty() {
@@ -505,7 +507,7 @@ fn insert_msgs_and_receipts(
     previews: &mut PreviewManager,
     settings: &ApplicationSettings,
 ) {
-    for (msg, thread, receipts) in msgs {
+    for (msg, thread_summary, thread, receipts) in msgs {
         let sender = msg.sender().to_owned();
         let _ = presences.get_or_default(sender);
 
@@ -515,25 +517,25 @@ fn insert_msgs_and_receipts(
 
         match msg {
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => {
-                info.insert_encrypted(msg);
+                info.insert_encrypted(msg, thread_summary);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => {
-                info.insert_with_preview(msg, settings, previews);
+                info.insert_with_preview(msg, thread_summary, settings, previews);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Reaction(ev)) => {
                 info.insert_reaction_with_preview(ev, settings, previews);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(ev)) => {
-                info.insert_sticker_with_preview(ev, settings, previews);
+                info.insert_sticker_with_preview(ev, thread_summary, settings, previews);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomRedaction(..)) => {
                 // ignoring redaction events because we get them bundled with the redacted event
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollStart(ev)) => {
-                info.insert_poll_start(ev, &settings.user_id);
+                info.insert_poll_start(ev, &settings.user_id, thread_summary);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::UnstablePollStart(ev)) => {
-                info.insert_unstable_poll_start(ev, &settings.user_id);
+                info.insert_unstable_poll_start(ev, &settings.user_id, thread_summary);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollResponse(ev)) => {
                 if let MessageLikeEvent::Original(ev) = ev {
@@ -746,6 +748,115 @@ async fn load_initial_messages(client: Client, store: AsyncProgramStore) {
         .await;
 }
 
+pub(crate) async fn subscribe_thread_updates(
+    room: MatrixRoom,
+    thread_id: OwnedEventId,
+    store: AsyncProgramStore,
+) -> Result<JoinHandle<()>, matrix_sdk::event_cache::EventCacheError> {
+    let (thread, drop_handle) =
+        room.client().event_cache().thread(room.room_id(), &thread_id).await?;
+    let (initial_events, mut events_sub) = thread.subscribe().await?;
+    let mut unreads_sub = thread.subscribe_to_thread_info().await?;
+    let initial_unreads = thread.read_receipts().await?;
+
+    Ok(tokio::spawn(async move {
+        let _drop_handle = drop_handle;
+
+        // Insert the initial events
+        {
+            let msgs = get_receipts_for_timeline_events(&room, initial_events).await;
+            let mut locked = store.lock().await;
+
+            let ChatStore { presences, rooms, previews, settings, .. } = &mut locked.application;
+            let info = rooms.get_or_default(room.room_id().to_owned());
+            insert_msgs_and_receipts(msgs, info, presences, previews, settings);
+            info.get_thread_mut(thread_id.clone()).unreads = initial_unreads;
+        }
+
+        loop {
+            tokio::select! {
+                update = events_sub.recv() => {
+                    let Ok(update) = update else {
+                        // The sender side has gone away, so just exit the loop.
+                        return
+                    };
+
+                    handle_thread_update(update, &room, &store).await;
+                }
+
+                update = unreads_sub.next() => {
+                    let Some(update) = update else {
+                        // The sender side has gone away, so just exit the loop.
+                        return
+                    };
+
+                    store
+                        .lock()
+                        .await
+                        .application
+                        .get_room_info(room.room_id().to_owned())
+                        .get_thread_mut(thread_id.clone())
+                        .unreads = update.read_receipts;
+                }
+            }
+        }
+    }))
+}
+
+async fn handle_thread_update(
+    update: ThreadEventCacheUpdate,
+    room: &MatrixRoom,
+    store: &AsyncProgramStore,
+) {
+    match update {
+        ThreadEventCacheUpdate::UpdateTimelineEvents(diffs) => {
+            // Ignore the update itself and just collect the changed items.
+            // The updated events will be replaced because we index by `MessageKey`.
+            let events = diffs
+                .diffs
+                .into_iter()
+                .flat_map(|diff| {
+                    match diff {
+                        VectorDiff::Append { values } | VectorDiff::Reset { values } => values,
+                        VectorDiff::PushFront { value } |
+                        VectorDiff::PushBack { value } |
+                        VectorDiff::Insert { value, .. } |
+                        VectorDiff::Set { value, .. } => {
+                            let mut vector = Vector::new();
+                            vector.push_back(value);
+                            vector
+                        },
+                        VectorDiff::PopFront |
+                        VectorDiff::PopBack |
+                        VectorDiff::Clear |
+                        VectorDiff::Remove { .. } |
+                        VectorDiff::Truncate { .. } => Vector::new(),
+                    }
+                })
+                .collect::<Vec<_>>();
+
+            let msgs = get_receipts_for_timeline_events(room, events).await;
+            let mut locked = store.lock().await;
+
+            let ChatStore { presences, rooms, previews, settings, .. } = &mut locked.application;
+            let info = rooms.get_or_default(room.room_id().to_owned());
+            insert_msgs_and_receipts(msgs, info, presences, previews, settings);
+        },
+        ThreadEventCacheUpdate::AddReadReceiptEvent { event } => {
+            let mut locked = store.lock().await;
+            let info = locked.application.get_room_info(room.room_id().to_owned());
+            for (event_id, receipts) in event {
+                let Some(receipts) = receipts.get(&ReceiptType::Read) else {
+                    continue;
+                };
+                for (user_id, rcpt) in receipts.iter() {
+                    info.set_receipt(rcpt.thread.clone(), user_id.to_owned(), event_id.clone());
+                }
+            }
+        },
+    }
+}
+
 async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
     // Load any pending older messages or members every 2 seconds.
     let mut interval = tokio::time::interval(Duration::from_secs(2));
@@ -815,6 +926,14 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     }
 
     let mut locked = store.lock().await;
+
+    for room in rooms.iter().chain(dms.iter()) {
+        locked
+            .application
+            .get_room_info(room.room_id().to_owned())
+            .subscribe_thread_updates(room, store)
+            .await
+    }
 
     locked.application.sync_info.spaces = spaces;
     locked.application.sync_info.rooms = rooms;
@@ -977,7 +1096,9 @@ fn insert_local_echo(
                     // XXX: Show echo on edited message
                     return Ok(());
                 },
-                Some(Relation::Thread(Thread { event_id, .. })) => Some(event_id.to_owned()),
+                Some(Relation::Thread(ThreadRelation { event_id, .. })) => {
+                    Some(event_id.to_owned())
+                },
                 _ => None,
             };
 
@@ -989,7 +1110,7 @@ fn insert_local_echo(
             info.echo_keys
                 .insert(transaction_id, EchoLocation::Message(thread.clone(), key.clone()));
 
-            let thread = info.get_thread_mut(thread);
+            let thread = info.get_messages_mut(thread);
             thread.insert(key, msg);
         },
         LocalEchoContent::Redaction { .. } => {
@@ -1044,7 +1165,7 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
                     continue;
                 };
 
-                let Some(msg) = info.get_thread_mut(thread).get_mut(&key) else {
+                let Some(msg) = info.get_messages_mut(thread).get_mut(&key) else {
                     tracing::debug!(?transaction_id, "replaced local echo not found");
                     continue;
                 };
@@ -1070,7 +1191,7 @@ async fn subscribe_sendqueue_forever(client: &Client, store: &AsyncProgramStore)
                     let location = std::mem::replace(location, EchoLocation::Replaced(event_id));
 
                     if let EchoLocation::Message(thread, key) = location {
-                        info.get_thread_mut(thread).remove(&key);
+                        info.get_messages_mut(thread).remove(&key);
                     }
                 }
             },
@@ -1805,7 +1926,12 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_with_preview(full_ev, settings, previews);
+                    info.insert_with_preview(
+                        full_ev,
+                        ThreadSummaryStatus::Unknown,
+                        settings,
+                        previews,
+                    );
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1857,7 +1983,12 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_sticker_with_preview(full_ev, settings, previews);
+                    info.insert_sticker_with_preview(
+                        full_ev,
+                        ThreadSummaryStatus::Unknown,
+                        settings,
+                        previews,
+                    );
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1908,7 +2039,11 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_poll_start(full_ev, &settings.user_id);
+                    info.insert_poll_start(
+                        full_ev,
+                        &settings.user_id,
+                        ThreadSummaryStatus::Unknown,
+                    );
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1933,7 +2068,11 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_unstable_poll_start(full_ev, &settings.user_id);
+                    info.insert_unstable_poll_start(
+                        full_ev,
+                        &settings.user_id,
+                        ThreadSummaryStatus::Unknown,
+                    );
 
                     update_event_receipts(info, &room, event_id).await;
                 }
