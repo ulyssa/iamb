@@ -1,4 +1,5 @@
 /target
 /result
 /TODO
-.direnv
+/.envrc
+/.direnv
