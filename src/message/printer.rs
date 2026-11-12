@@ -11,6 +11,7 @@ use crate::util::{
     replace_emojis_in_span,
     replace_emojis_in_str,
     space_span,
+    split_cow,
     take_width,
 };
 
@@ -176,7 +177,20 @@ impl<'a> TextPrinter<'a> {
             }
 
             // Take a leading portion of the text that fits in the line.
-            let ((s0, w), s1) = take_width(cow, self.remaining());
+            let ((mut s0, mut w), mut s1) = take_width(cow, self.remaining());
+
+            if s0.is_empty() && self.curr_width == 0 {
+                // The line is narrower than the next grapheme. Place it on its own line anyway,
+                // since otherwise no progress would ever be made.
+                let len = UnicodeSegmentation::graphemes(s1.as_ref(), true)
+                    .next()
+                    .map_or(0, str::len);
+                let (first, rest) = split_cow(s1, len);
+                w = UnicodeWidthStr::width(first.as_ref());
+                s0 = first;
+                s1 = rest;
+            }
+
             cow = s1;
 
             self.curr_spans.push(Span::styled(s0, style));
@@ -315,5 +329,20 @@ pub mod tests {
         assert_eq!(text.lines.len(), 1);
         assert_eq!(text.lines[0].spans.len(), 1);
         assert_eq!(text.lines[0].spans[0].content, "hello world");
+    }
+
+    #[test]
+    fn test_push_str_wide_char_wider_than_width() {
+        let settings = mock_settings();
+        let info = mock_room();
+        let mut printer = TextPrinter::new(1, Style::default(), &settings, &info);
+        printer.push_str("a世b", Style::default());
+        let text = printer.finish();
+        let lines: Vec<String> = text
+            .lines
+            .iter()
+            .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
+            .collect();
+        assert_eq!(lines, vec!["a", "世", "b"]);
     }
 }
