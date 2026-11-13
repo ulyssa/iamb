@@ -1459,7 +1459,7 @@ impl Message {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Span<'a> {
-        settings.get_user_span(self.sender.as_ref(), info)
+        settings.get_user_span(self.sender.as_ref(), info.display_names.get(&self.sender))
     }
 
     fn show_sender<'a>(

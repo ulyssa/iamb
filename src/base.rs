@@ -2350,13 +2350,16 @@ impl RoomInfo {
         match n {
             0 => Line::from(vec![]),
             1 => {
-                let user = settings.get_user_span(typers[0].as_ref(), self);
+                let user =
+                    settings.get_user_span(typers[0].as_ref(), self.display_names.get(&typers[0]));
 
                 Line::from(vec![user, Span::from(" is typing...")])
             },
             2 => {
-                let user1 = settings.get_user_span(typers[0].as_ref(), self);
-                let user2 = settings.get_user_span(typers[1].as_ref(), self);
+                let user1 =
+                    settings.get_user_span(typers[0].as_ref(), self.display_names.get(&typers[0]));
+                let user2 =
+                    settings.get_user_span(typers[1].as_ref(), self.display_names.get(&typers[1]));
 
                 Line::from(vec![
                     user1,

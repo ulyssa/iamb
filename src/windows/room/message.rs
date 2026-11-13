@@ -510,8 +510,8 @@ impl ListItem<IambInfo> for MessageInfoItem {
                 let settings = &store.application.settings;
                 let width = viewctx.get_width();
 
-                let Span { content: mut user, style: user_style } =
-                    settings.get_user_span_maybe(user_id, info);
+                let Span { content: mut user, style: user_style } = settings
+                    .get_user_span(user_id, info.and_then(|info| info.display_names.get(user_id)));
 
                 let mut date = timestamp.as_datetime().format("%T %A, %B %d %Y").to_string();
 
@@ -560,7 +560,10 @@ impl ListItem<IambInfo> for MessageInfoItem {
             // XXX: show reaction time
             MessageInfoItem::User(_, room_id, user_id) => {
                 let info = store.application.rooms.get(room_id);
-                let user = store.application.settings.get_user_span_maybe(user_id, info);
+                let user = store
+                    .application
+                    .settings
+                    .get_user_span(user_id, info.and_then(|info| info.display_names.get(user_id)));
                 let user_span =
                     Span::styled(user.content.into_owned(), theme.selected(user.style, selected));
 

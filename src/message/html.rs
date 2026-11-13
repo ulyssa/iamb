@@ -543,7 +543,9 @@ impl StyleTreeNode {
             },
 
             StyleTreeNode::UserId(user_id, _) => {
-                let mut span: Span<'a> = printer.settings().get_user_span(user_id, printer.info);
+                let mut span: Span<'a> = printer
+                    .settings()
+                    .get_user_span(user_id, printer.info.display_names.get(user_id));
                 let style = style.patch(span.style);
                 span.style = style;
 

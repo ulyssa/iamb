@@ -1955,10 +1955,10 @@ impl ApplicationSettings {
         self.theme.users.style(user_id.as_str(), color)
     }
 
-    pub fn get_user_span_maybe<'a>(
+    pub fn get_user_span<'a>(
         &self,
         user_id: &'a UserId,
-        info: Option<&'a RoomInfo>,
+        display_name: Option<Cow<'a, str>>,
     ) -> Span<'a> {
         let (color, name) = self.get_user_overrides(user_id);
 
@@ -1968,19 +1968,11 @@ impl ApplicationSettings {
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
             (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
             (None, UserDisplayStyle::DisplayName) => {
-                if let Some(name) = info.and_then(|info| info.display_names.get(user_id)) {
-                    name
-                } else {
-                    Cow::Borrowed(user_id.as_str())
-                }
+                display_name.unwrap_or(Cow::Borrowed(user_id.as_str()))
             },
         };
 
         Span::styled(name, style)
-    }
-
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
-        self.get_user_span_maybe(user_id, Some(info))
     }
 }
 
@@ -1999,7 +1991,7 @@ mod tests {
         // fix `StyleTreeNode::print` for `StyleTreeNode::UserId` if this breaks
         let info = mock_room();
         let settings = mock_settings();
-        let span = settings.get_user_span(&TEST_USER1, &info);
+        let span = settings.get_user_span(&TEST_USER1, info.display_names.get(&TEST_USER1));
 
         assert!(matches!(span.content, Cow::Borrowed(_)));
     }

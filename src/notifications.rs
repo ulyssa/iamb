@@ -247,7 +247,15 @@ pub async fn parse_full_notification(
     let mut locked = store.lock().await;
     let ChatStore { rooms, settings, .. } = &mut locked.application;
     let info = rooms.get_or_default(room.room_id().to_owned());
-    let sender_name = settings.get_user_span(event.sender(), info).content;
+
+    // Get the sender name from room info or the room directly and respect the display_name setting
+    let sender;
+    let mut sender_name = info.display_names.get(event.sender());
+    if sender_name.is_none() {
+        sender = room.get_member_no_sync(event.sender()).await.map_err(IambError::from)?;
+        sender_name = sender.as_ref().and_then(|m| m.display_name()).map(Cow::Borrowed);
+    }
+    let sender_name = settings.get_user_span(event.sender(), sender_name).content;
 
     let summary = if let Some(room_name) = room.cached_display_name() {
         if room.is_direct().await.map_err(IambError::from)? && sender_name == room_name.to_string()
