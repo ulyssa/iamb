@@ -781,7 +781,12 @@ impl RoomState {
         if let Ok(Some(inviter)) = &inviter {
             let info = store.application.rooms.get_or_default(room_id.to_owned());
             invited.push(Span::from(" by "));
-            invited.push(store.application.settings.get_user_span(inviter.user_id(), info));
+            invited.push(
+                store
+                    .application
+                    .settings
+                    .get_user_span(inviter.user_id(), info.display_names.get(inviter.user_id())),
+            );
         }
 
         let l1 = Line::from(invited);
