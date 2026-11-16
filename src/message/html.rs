@@ -152,7 +152,7 @@ impl Table {
         let mut text = Text::default();
         let columns = self.columns();
         let cell_total = width.saturating_sub(columns).saturating_sub(1);
-        let cell_min = cell_total / columns;
+        let cell_min = cell_total.checked_div(columns).unwrap_or(0);
         let mut cell_slop = cell_total - cell_min * columns;
         let cell_widths = (0..columns)
             .map(|_| {
@@ -178,6 +178,11 @@ impl Table {
                 line.spans.push(Span::styled("   ", style));
                 text.lines.push(line);
             }
+        }
+
+        if columns == 0 {
+            // There are no cells to draw a grid around.
+            return text;
         }
 
         for section in self.sections.iter() {
@@ -1495,6 +1500,23 @@ pub mod tests {
 
         // Bottom ruler
         assert_eq!(text.lines[10].spans, vec![Span::raw("└────┴────┴───┘")]);
+    }
+
+    #[test]
+    fn test_table_without_cells() {
+        let info = mock_room();
+        let settings = mock_settings();
+
+        for s in ["<table></table>", "<table><tbody><tr></tr></tbody></table>"] {
+            let tree = parse_matrix_html(s);
+            let text = tree.to_text(15, Style::default(), &settings, &info);
+            assert!(text.lines.is_empty());
+        }
+
+        let s = "<table><caption>Title</caption></table>";
+        let tree = parse_matrix_html(s);
+        let text = tree.to_text(15, Style::default(), &settings, &info);
+        assert_eq!(text.lines.len(), 1);
     }
 
     #[test]
