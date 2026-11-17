@@ -4,7 +4,7 @@ use ratatui_image::sliced::{SignedPosition, SlicedImage};
 
 use crate::prelude::*;
 use crate::preview::ImageStatus;
-use crate::util::space;
+use crate::util::{space, take_width_grapheme};
 use crate::windows::room::chat;
 
 fn contains_reaction(
@@ -514,22 +514,28 @@ impl ListItem<IambInfo> for MessageInfoItem {
                 let mut date = timestamp.as_datetime().format("%T %A, %B %d %Y").to_string();
 
                 // truncate if needed
-                if user.len() > width {
+                let mut user_width = UnicodeWidthStr::width(user.as_ref());
+                if user_width > width {
                     date.clear();
-                    let user = user.to_mut();
-                    std::mem::drop(user.drain(width.saturating_sub(2)..));
+                    let keep = width.saturating_sub(2);
+                    let ((head, head_width), _) =
+                        take_width_grapheme(Cow::Borrowed(user.as_ref()), keep);
+                    let mut head = head.into_owned();
+                    user_width = head_width;
                     if width >= 2 {
-                        user.push_str("..");
+                        head.push_str("..");
+                        user_width += 2;
                     }
-                } else if user.len() + date.len() >= width {
-                    let date_width = width.saturating_sub(user.len() + 2);
+                    user = Cow::Owned(head);
+                } else if user_width + date.len() >= width {
+                    let date_width = width.saturating_sub(user_width + 2);
                     std::mem::drop(date.drain(..date.len().saturating_sub(date_width)));
                     if date_width >= 2 {
                         date.insert_str(0, "..");
                     }
                 }
 
-                let padding = width - user.len() - date.len();
+                let padding = width - user_width - date.len();
                 let date_style = theme.timeline.date;
 
                 let line = Span::styled(user, theme.selected(user_style, selected)) +
@@ -682,6 +688,7 @@ impl Promptable<ProgramContext, ProgramStore, IambInfo> for MessageInfoItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::UserDisplayStyle;
     use crate::tests::*;
 
     #[tokio::test]
@@ -719,5 +726,37 @@ mod tests {
         viewctx.dimensions.0 = user_id.as_str().len() + 2 + 4;
         let text = item.show(false, &viewctx, &store);
         assert_eq!(text.width(), viewctx.get_width());
+    }
+
+    #[tokio::test]
+    async fn test_message_header_truncate_multibyte_name() {
+        let mut store = mock_store().await;
+        let room_id = TEST_ROOM1_ID.clone();
+        let user_id = TEST_USER1.clone();
+        let msg_key = MSG1_KEY.clone();
+
+        store.application.settings.tunables.username_display = UserDisplayStyle::DisplayName;
+
+        let item = MessageInfoItem::Header(room_id.clone(), user_id.clone(), msg_key.ts);
+
+        let mut viewctx = ViewportContext::new();
+        viewctx.dimensions.1 = 10;
+
+        // Names whose byte offsets don't line up with their display columns.
+        let names = [
+            "\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}\u{e9}",
+            "\u{4e16}\u{754c}\u{4e16}\u{754c}\u{4e16}\u{754c}",
+        ];
+
+        for name in names {
+            let room = store.application.rooms.get_mut(&room_id).unwrap();
+            room.display_names.set(user_id.clone(), Some(name.into()), true);
+
+            for width in 0..20 {
+                viewctx.dimensions.0 = width;
+                let text = item.show(false, &viewctx, &store);
+                assert_eq!(text.width(), viewctx.get_width());
+            }
+        }
     }
 }
