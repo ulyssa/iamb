@@ -230,7 +230,7 @@ impl ChatState {
                 .await
             },
             MessageAction::Edit => {
-                if msg.sender != settings.profile.user_id {
+                if msg.sender != settings.user_id {
                     let msg = "Cannot edit messages sent by someone else";
                     let err = UIError::Failure(msg.into());
 
@@ -815,7 +815,7 @@ pub async fn msg_react(
         MessageEvent::UnstablePoll(ev) => ev.event_id().to_owned(),
     };
 
-    if info.user_reactions_contains(&settings.profile.user_id, &event_id, &emoji) {
+    if info.user_reactions_contains(&settings.user_id, &event_id, &emoji) {
         let msg = format!("You’ve already reacted to this message with {emoji}");
         let err = UIError::Failure(msg);
 
@@ -945,7 +945,7 @@ pub async fn msg_unreact(
     };
 
     let reactions = reactions.iter().filter_map(|(event_id, (reaction, user_id, _))| {
-        if user_id != &settings.profile.user_id {
+        if user_id != &settings.user_id {
             return None;
         }
 
@@ -998,7 +998,7 @@ pub async fn msg_pin(
         .await
         .map_err(matrix_sdk::Error::from)
         .map_err(IambError::from)?
-        .user_can_send_state(&settings.profile.user_id, StateEventType::RoomPinnedEvents);
+        .user_can_send_state(&settings.user_id, StateEventType::RoomPinnedEvents);
 
     if !can_pin {
         return Err(IambError::InsufficientPermission.into());
@@ -1339,8 +1339,11 @@ impl StatefulWidget for Chat<'_> {
             (editing, Some(_), thread) => {
                 self.store.application.rooms.get(state.id()).and_then(|room| {
                     let msg = state.get_reply_to(room)?;
-                    let user =
-                        self.store.application.settings.get_user_span(msg.sender.as_ref(), room);
+                    let user = self
+                        .store
+                        .application
+                        .settings
+                        .get_user_span(msg.sender.as_ref(), room.display_names.get(&msg.sender));
                     let prefix = match (editing.is_some(), thread.is_some()) {
                         (true, false) => Span::from("Editing reply to "),
                         (true, true) => Span::from("Editing reply in thread to "),

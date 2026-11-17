@@ -7,6 +7,16 @@
 # If you want to start with something simple, use `config.example.toml` and add
 # things in one-by-one as you need them.
 # ==============================================================================
+
+# Include other config files
+include = [
+  # load `~/.config/iamb/config.d/*.toml` in lexicographic order
+  "config.d",
+
+  # override all local settings with values from a global config
+  "/etc/iamb/config.toml"
+]
+
 default_profile = "default"
 
 # Specify a user profile to log in as.
@@ -82,6 +92,11 @@ enable_title = true
 # Settings related to overriding how specific users are shown:
 [settings.users]
 "@user:matrix.org" = { "name" = "John Doe", "color" = "magenta" }
+
+# Settings to override room names
+[settings.rooms]
+"#room:matrix.org".name = "Some different room name"
+"@user:matrix.org".name = "My dm with John"
 
 # Specify a specific tab and window layout to use every time iamb starts:
 [layout]

@@ -3,6 +3,7 @@
 //! The worker thread handles asynchronous work, and can receive messages from the main thread that
 //! block on a reply from the async worker.
 
+use std::collections::BTreeSet;
 use std::fmt::{Debug, Formatter};
 use std::sync::mpsc::{Receiver, SyncSender, sync_channel};
 
@@ -15,6 +16,7 @@ use matrix_sdk::config::{RequestConfig, SyncSettings};
 use matrix_sdk::deserialized_responses::RawSyncOrStrippedState;
 use matrix_sdk::deserialized_responses::{TimelineEvent, TimelineEventKind};
 use matrix_sdk::encryption::{BackupDownloadStrategy, EncryptionSettings};
+use matrix_sdk::event_cache::DecryptionRetryRequest;
 use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::notification_settings::RoomNotificationMode;
 use matrix_sdk::room::RoomMember;
@@ -242,7 +244,7 @@ async fn load_plans(store: &AsyncProgramStore) -> Vec<Plan> {
         plan.push(Plan::RoomPreview(room));
     }
 
-    for (room_id, need) in std::mem::take(need_load).into_iter() {
+    for (room_id, need) in need_load.room_needs() {
         if need.pinned {
             let missing = rooms.get_or_default(room_id.clone()).missing_pinned();
 
@@ -382,6 +384,7 @@ async fn get_receipts_for_timeline_events(
     events: Vec<TimelineEvent>,
 ) -> Vec<MessageAndReceipts> {
     let mut msgs = vec![];
+    let mut redecryption_requests = BTreeSet::new();
 
     for ev in events.into_iter() {
         let event_id = ev.event_id().map(ToOwned::to_owned);
@@ -401,9 +404,13 @@ async fn get_receipts_for_timeline_events(
                 }
             },
             TimelineEventKind::UnableToDecrypt { event, utd_info, .. } => {
+                if let Some(session_id) = &utd_info.session_id {
+                    redecryption_requests.insert(session_id.to_string());
+                }
+
                 let event = match event.deserialize() {
                     Ok(event) => {
-                        tracing::debug!(
+                        tracing::trace!(
                             ?utd_info,
                             room_id = room.room_id().as_str(),
                             ?event_id,
@@ -458,6 +465,19 @@ async fn get_receipts_for_timeline_events(
         msgs.push((msg, thread, receipts));
     }
 
+    if !redecryption_requests.is_empty() {
+        tracing::debug!(
+            room_id = room.room_id().as_str(),
+            "Requesting redecryption of {} events",
+            redecryption_requests.len()
+        );
+        room.client().event_cache().request_decryption(DecryptionRetryRequest {
+            room_id: room.room_id().to_owned(),
+            utd_session_ids: redecryption_requests,
+            refresh_info_session_ids: Default::default(),
+        });
+    }
+
     msgs
 }
 
@@ -510,10 +530,10 @@ fn insert_msgs_and_receipts(
                 // ignoring redaction events because we get them bundled with the redacted event
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollStart(ev)) => {
-                info.insert_poll_start(ev, &settings.profile.user_id);
+                info.insert_poll_start(ev, &settings.user_id);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::UnstablePollStart(ev)) => {
-                info.insert_unstable_poll_start(ev, &settings.profile.user_id);
+                info.insert_unstable_poll_start(ev, &settings.user_id);
             },
             AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollResponse(ev)) => {
                 if let MessageLikeEvent::Original(ev) = ev {
@@ -730,9 +750,18 @@ async fn load_older_forever(client: &Client, store: &AsyncProgramStore) {
     // Load any pending older messages or members every 2 seconds.
     let mut interval = tokio::time::interval(Duration::from_secs(2));
 
+    let notifier = store.lock().await.application.need_load.notifier();
+
+    let mut notified = notifier.notified();
     loop {
-        interval.tick().await;
+        notified.await;
+
+        // get the next `Notified` future here to make sure we get notified about changes happening
+        // while `load_older` runs
+        notified = notifier.notified();
+
         load_older(client, store).await;
+        interval.tick().await;
     }
 }
 
@@ -774,7 +803,7 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
         }
 
         pinned.push((room.room_id().to_owned(), room.pinned_event_ids().unwrap_or_default()));
-        names_and_tags.push((room.room_id().to_owned(), name, tags, aliases, flags));
+        names_and_tags.push((room.clone(), name, tags, aliases, flags));
 
         if room.is_direct().await.unwrap_or_default() {
             dms.push(room);
@@ -786,12 +815,34 @@ async fn refresh_rooms(client: &Client, store: &AsyncProgramStore, first_sync: b
     }
 
     let mut locked = store.lock().await;
+
     locked.application.sync_info.spaces = spaces;
     locked.application.sync_info.rooms = rooms;
     locked.application.sync_info.dms = dms;
 
-    for (room_id, name, tags, aliases, flags) in names_and_tags {
+    for (room, mut name, tags, aliases, flags) in names_and_tags {
+        let room_id = room.room_id().to_owned();
+
+        let rooms = &locked.application.settings.tunables.rooms;
+        let room_override = rooms
+            .rooms
+            .get(&room_id)
+            .or_else(|| aliases.iter().find_map(|alias| rooms.aliases.get(alias)));
+        if let Some(name_override) = room_override.and_then(|v| v.name.as_ref()) {
+            name.clone_from(name_override);
+        }
+
         locked.application.set_room_info(room_id, name, tags, aliases, flags);
+    }
+
+    let ChatStore { rooms, settings, .. } = &mut locked.application;
+    for (user_id, room_override) in settings.tunables.rooms.dms.iter() {
+        if let Some(name) = &room_override.name &&
+            let Some(room) = client.get_dm_room(user_id) &&
+            let Some(info) = rooms.get_mut(room.room_id())
+        {
+            info.name = Some(name.to_owned());
+        }
     }
 
     for (room_id, pinned_events) in pinned {
@@ -1321,8 +1372,7 @@ async fn create_client_inner(
         builder.homeserver_url(url.as_str())
     } else {
         // Try to discover the homeserver from the user ID.
-        let account = &settings.profile;
-        builder.server_name(account.user_id.server_name())
+        builder.server_name(settings.user_id.server_name())
     };
 
     builder.build().await
@@ -1332,7 +1382,7 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
     let account = &settings.profile;
     let res = match create_client_inner(&account.url, settings).await {
         Err(ClientBuildError::AutoDiscovery(_)) => {
-            let url = format!("https://{}/", account.user_id.server_name().as_str());
+            let url = format!("https://{}/", settings.user_id.server_name().as_str());
             let url = Url::parse(&url).unwrap();
             create_client_inner(&Some(url), settings).await
         },
@@ -1340,8 +1390,6 @@ pub async fn create_client(settings: &ApplicationSettings) -> Client {
     };
 
     let client = res.expect("Failed to instantiate client");
-
-    client.event_cache().subscribe().expect("Failed to start event cache");
 
     client
         .media()
@@ -1666,7 +1714,7 @@ impl ClientWorker {
                         .content
                         .user_ids
                         .into_iter()
-                        .filter(|u| u != &locked.application.settings.profile.user_id)
+                        .filter(|u| u != &locked.application.settings.user_id)
                         .collect();
 
                     locked.application.get_room_info(room_id).set_typing(users);
@@ -1860,7 +1908,7 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_poll_start(full_ev, &settings.profile.user_id);
+                    info.insert_poll_start(full_ev, &settings.user_id);
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -1885,7 +1933,7 @@ impl ClientWorker {
                     let info = rooms.get_or_default(room_id.to_owned());
 
                     let full_ev = ev.into_full_event(room_id.to_owned());
-                    info.insert_unstable_poll_start(full_ev, &settings.profile.user_id);
+                    info.insert_unstable_poll_start(full_ev, &settings.user_id);
 
                     update_event_receipts(info, &room, event_id).await;
                 }
@@ -2180,7 +2228,7 @@ impl ClientWorker {
             LoginStyle::Password(password) => {
                 let mut login = client
                     .matrix_auth()
-                    .login_username(&self.settings.profile.user_id, &password)
+                    .login_username(&self.settings.user_id, &password)
                     .initial_device_display_name(initial_devname().as_str());
                 if let Some(device) = self.settings.read_saved_device() {
                     login = login.device_id(device.device_id().as_str());
@@ -2215,7 +2263,7 @@ impl ClientWorker {
             LoginStyle::OAuth => {
                 oauth_login(
                     self.client.clone(),
-                    &self.settings.profile.user_id,
+                    &self.settings.user_id,
                     self.settings.read_saved_device(),
                 )
                 .await?;
@@ -2232,7 +2280,7 @@ impl ClientWorker {
 
     async fn logout(&mut self, user_id: String) -> IambResult<EditInfo> {
         // Verify that the user is logging out of the correct profile.
-        let curr = self.settings.profile.user_id.as_str();
+        let curr = self.settings.user_id.as_str();
 
         if user_id != curr {
             let msg = format!("Incorrect user ID (currently logged in as {curr})");
@@ -2397,12 +2445,12 @@ impl ClientWorker {
         };
 
         let msg = format!("* Successfully logged in with {}!", user);
-        if user != self.settings.profile.user_id {
+        if user != self.settings.user_id {
             // Trace warning if this happens
             tracing::warn!("logged in as a different user than expected");
-            self.settings.profile.user_id = user.to_owned();
+            self.settings.user_id = user.to_owned();
             let store = self.store.as_ref().expect("initialised worker should have store");
-            store.lock().await.application.settings.profile.user_id = user.to_owned();
+            store.lock().await.application.settings.user_id = user.to_owned();
         }
         Ok(Some(InfoMessage::from(msg)))
     }

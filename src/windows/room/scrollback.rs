@@ -1552,8 +1552,10 @@ mod tests {
         scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
         assert_eq!(
-            std::mem::take(&mut store.application.need_load)
-                .into_iter()
+            store
+                .application
+                .need_load
+                .room_needs()
                 .collect::<Vec<(OwnedRoomId, Need)>>()
                 .is_empty(),
             true,
@@ -1563,8 +1565,10 @@ mod tests {
         scrollback.search(prev, 1.into(), &ctx, &mut store).unwrap();
         assert_eq!(scrollback.cursor, MSG2_KEY.clone().into());
         assert_eq!(
-            std::mem::take(&mut store.application.need_load)
-                .into_iter()
+            store
+                .application
+                .need_load
+                .room_needs()
                 .collect::<Vec<(OwnedRoomId, Need)>>(),
             vec![(room_id.clone(), Need {
                 messages: Some(Vec::new()),
@@ -1828,7 +1832,7 @@ mod tests {
         let mut store = mock_store().await;
         store.application.settings.tunables.typing_notice_display = false;
 
-        let user_id = store.application.settings.profile.user_id.clone();
+        let user_id = store.application.settings.user_id.clone();
         store.application.get_room_info(TEST_ROOM1_ID.clone()).set_receipt(
             ReceiptThread::Main,
             user_id,
@@ -1877,7 +1881,7 @@ mod tests {
         // or not it is a private or public receipt that we send to the home server.
         for read_receipt_send in [true, false] {
             let mut store = draw_focused_room(read_receipt_send).await;
-            let user_id = store.application.settings.profile.user_id.clone();
+            let user_id = store.application.settings.user_id.clone();
             let info = store.application.get_room_info(TEST_ROOM1_ID.clone());
 
             let receipt = info

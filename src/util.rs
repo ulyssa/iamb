@@ -226,7 +226,7 @@ pub fn setup_tty(settings: &ApplicationSettings) -> std::io::Result<()> {
     }
 
     if settings.tunables.terminal.enable_title {
-        let title = format!("iamb ({})", settings.profile.user_id.as_str());
+        let title = format!("iamb ({})", settings.user_id.as_str());
         crossterm::execute!(stdout(), SetTitle(title))?;
     }
 

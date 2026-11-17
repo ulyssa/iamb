@@ -66,7 +66,7 @@ impl SpaceState {
                     .map_err(matrix_sdk::Error::from)
                     .map_err(IambError::from)?
                     .user_can_send_state(
-                        &store.application.settings.profile.user_id,
+                        &store.application.settings.user_id,
                         StateEventType::SpaceChild,
                     )
                 {
@@ -117,7 +117,7 @@ impl SpaceState {
                     .map_err(matrix_sdk::Error::from)
                     .map_err(IambError::from)?
                     .user_can_send_state(
-                        &store.application.settings.profile.user_id,
+                        &store.application.settings.user_id,
                         StateEventType::SpaceChild,
                     )
                 {

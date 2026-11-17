@@ -31,6 +31,7 @@ use crate::util::{join_cell_text, space_text, wrapped_text};
 pub struct BulletIterator {
     style: ListStyle,
     pos: usize,
+    /// The number of characters the number takes up
     len: usize,
 }
 
@@ -38,7 +39,7 @@ impl BulletIterator {
     fn width(&self) -> usize {
         match self.style {
             ListStyle::Unordered => 2,
-            ListStyle::Ordered => self.len.to_string().len() + 2,
+            ListStyle::Ordered(_) => self.len + 2,
         }
     }
 }
@@ -47,19 +48,15 @@ impl Iterator for BulletIterator {
     type Item = String;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if self.pos == self.len {
-            return None;
-        }
-
-        self.pos += 1;
-
         let bullet = match self.style {
             ListStyle::Unordered => "- ".to_string(),
-            ListStyle::Ordered => {
-                let w = self.len.to_string().len();
+            ListStyle::Ordered(_) => {
+                let w = self.len;
                 format!("{: >w$}. ", self.pos, w = w)
             },
         };
+
+        self.pos += 1;
 
         return Some(bullet);
     }
@@ -68,13 +65,21 @@ impl Iterator for BulletIterator {
 /// Whether this list is ordered or unordered.
 #[derive(Clone, Copy, Debug)]
 pub enum ListStyle {
-    Ordered,
+    /// The `usize` is the start index.
+    Ordered(usize),
     Unordered,
 }
 
 impl ListStyle {
     fn bullets(&self, len: usize) -> BulletIterator {
-        BulletIterator { style: *self, pos: 0, len }
+        let pos = match self {
+            Self::Ordered(start) => *start,
+            Self::Unordered => 0,
+        };
+
+        let len = (pos + len).to_string().len();
+
+        BulletIterator { style: *self, pos, len }
     }
 }
 
@@ -163,7 +168,7 @@ impl Table {
         let mut text = Text::default();
         let columns = self.columns();
         let cell_total = printer.width().saturating_sub(columns).saturating_sub(1);
-        let cell_min = cell_total / columns;
+        let cell_min = cell_total.checked_div(columns).unwrap_or(0);
         let mut cell_slop = cell_total - cell_min * columns;
         let cell_widths = (0..columns)
             .map(|_| {
@@ -187,6 +192,11 @@ impl Table {
                 line.spans.push(Span::styled("   ", style));
                 text.lines.push(line);
             }
+        }
+
+        if columns == 0 {
+            // There are no cells to draw a grid around.
+            return text;
         }
 
         for section in self.sections.iter() {
@@ -649,13 +659,31 @@ impl StyleTreeNode {
             },
             StyleTreeNode::Style(child, patch) => child.print(printer, style.patch(*patch)),
             StyleTreeNode::Sequence(children) => {
+                let mut after_quote = false;
+
                 for child in children {
+                    match child {
+                        // Whitespace between elements shouldn't affect spacing.
+                        StyleTreeNode::Text(text) if text.trim().is_empty() => {},
+                        StyleTreeNode::Blockquote(_) => {
+                            if after_quote {
+                                // Keep adjacent blockquotes from visually merging.
+                                printer.commit();
+                                printer.push_break();
+                            }
+                            after_quote = true;
+                        },
+                        _ => after_quote = false,
+                    }
+
                     child.print(printer, style);
                 }
             },
 
             StyleTreeNode::UserId(user_id, _) => {
-                let mut span: Span<'a> = printer.settings().get_user_span(user_id, printer.info);
+                let mut span: Span<'a> = printer
+                    .settings()
+                    .get_user_span(user_id, printer.info.display_names.get(user_id));
                 let style = style.patch(span.style);
                 span.style = style;
 
@@ -856,6 +884,20 @@ fn lic2t(handles: &[Handle], state: &mut TreeGenState) -> StyleTreeChildren {
     handles.iter().filter_map(|h| li2t(h, state)).collect()
 }
 
+fn attrs_to_start(attrs: &[Attribute]) -> Option<usize> {
+    for attr in attrs {
+        if attr.name.local.as_ref() != "start" {
+            continue;
+        }
+
+        if let Ok(start) = usize::from_str(attr.value.as_ref()) {
+            return Some(start);
+        }
+    }
+
+    return None;
+}
+
 fn attrs_to_image(attrs: &[Attribute]) -> Image {
     let mut title = None;
     let mut alt = None;
@@ -1054,7 +1096,10 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
 
                 // Lists
                 "ol" => {
-                    StyleTreeNode::List(lic2t(&node.children.borrow(), state), ListStyle::Ordered)
+                    StyleTreeNode::List(
+                        lic2t(&node.children.borrow(), state),
+                        ListStyle::Ordered(attrs_to_start(&attrs.borrow()).unwrap_or(1)),
+                    )
                 },
                 "ul" => {
                     StyleTreeNode::List(lic2t(&node.children.borrow(), state), ListStyle::Unordered)
@@ -1404,6 +1449,29 @@ pub mod tests {
     }
 
     #[test]
+    fn test_blockquote_adjacent() {
+        let info = mock_room();
+        let settings = mock_settings();
+        let s = "<blockquote>\n<p>One</p>\n</blockquote>\n<blockquote>\n<p>Two</p>\n</blockquote>";
+        let tree = parse_matrix_html(s);
+        let text = tree.to_text(10, Style::default(), &settings, &info);
+        let style = Style::new().fg(Color::Cyan);
+        let quoted = |word: &'static str, pad: &'static str| {
+            Line::from(vec![
+                Span::raw(" "),
+                Span::styled(line::THICK_VERTICAL, style),
+                Span::raw(" "),
+                Span::raw(word),
+                Span::raw(pad),
+            ])
+        };
+        assert_eq!(text.lines.len(), 3);
+        assert_eq!(text.lines[0], quoted("One", "    "));
+        assert_eq!(text.lines[1], Line::from(vec![Span::raw(" ".repeat(10))]));
+        assert_eq!(text.lines[2], quoted("Two", "    "));
+    }
+
+    #[test]
     fn test_list_unordered() {
         let info = mock_room();
         let settings = mock_settings();
@@ -1631,6 +1699,23 @@ pub mod tests {
 
         // Bottom ruler
         assert_eq!(text.lines[10].spans, vec![Span::raw("└────┴────┴───┘")]);
+    }
+
+    #[test]
+    fn test_table_without_cells() {
+        let info = mock_room();
+        let settings = mock_settings();
+
+        for s in ["<table></table>", "<table><tbody><tr></tr></tbody></table>"] {
+            let tree = parse_matrix_html(s);
+            let text = tree.to_text(15, Style::default(), &settings, &info);
+            assert!(text.lines.is_empty());
+        }
+
+        let s = "<table><caption>Title</caption></table>";
+        let tree = parse_matrix_html(s);
+        let text = tree.to_text(15, Style::default(), &settings, &info);
+        assert_eq!(text.lines.len(), 1);
     }
 
     #[test]

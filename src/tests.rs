@@ -186,6 +186,7 @@ pub fn mock_tunables() -> TunableValues {
         theme: "default".into(),
         typing_notice_send: true,
         typing_notice_display: true,
+        rooms: Default::default(),
         users: vec![(TEST_USER5.clone(), UserDisplayTunables {
             color: Some(Color::Black),
             name: Some("USER 5".into()),
@@ -228,8 +229,9 @@ pub fn mock_settings() -> ApplicationSettings {
         sqlite_cache_dir: PathBuf::new(),
 
         profile_name: "test".into(),
+        user_id: user_id!("@user:example.com").to_owned(),
         profile: ProfileConfig {
-            user_id: user_id!("@user:example.com").to_owned(),
+            user_id: Some(user_id!("@user:example.com").to_owned()),
             password_file: None,
             url: None,
             settings: None,

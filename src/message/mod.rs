@@ -1168,7 +1168,7 @@ impl Message {
         let marker = info
             .user_receipts
             .get(&self.receipt_thread(info))
-            .and_then(|receipts| receipts.get(&settings.profile.user_id));
+            .and_then(|receipts| receipts.get(&settings.user_id));
 
         is_after_read_marker(prev, marker)
     }
@@ -1236,7 +1236,7 @@ impl Message {
                     let unthreaded = info.read_event_users(ReceiptThread::Unthreaded, event_id);
                     threaded
                         .chain(unthreaded)
-                        .filter(|user_id| **user_id != settings.profile.user_id)
+                        .filter(|user_id| **user_id != settings.user_id)
                         .map(|user_id| user_id.to_owned())
                         .collect()
                 })
@@ -1454,7 +1454,7 @@ impl Message {
         info: &'a RoomInfo,
         settings: &'a ApplicationSettings,
     ) -> Span<'a> {
-        settings.get_user_span(self.sender.as_ref(), info)
+        settings.get_user_span(self.sender.as_ref(), info.display_names.get(&self.sender))
     }
 
     fn show_sender<'a>(
@@ -2078,7 +2078,7 @@ pub mod tests {
 
         let prev = mock_message1();
         let msg = mock_message2();
-        let user_id = settings.profile.user_id.clone();
+        let user_id = settings.user_id.clone();
 
         // Without a marker, no trackbar is drawn.
         let text = msg.show(Some(&prev), false, width, &info, &settings, &previews);
@@ -2104,7 +2104,7 @@ pub mod tests {
     fn test_show_trackbar_thread() {
         let settings = mock_settings();
         let mut info = mock_room();
-        let user_id = settings.profile.user_id.clone();
+        let user_id = settings.user_id.clone();
 
         let prev = mock_message1();
         let msg = mock_message2();

@@ -1,5 +1,6 @@
 //! # Logic for loading and validating application configuration
-use std::collections::HashSet;
+use std::collections::btree_map;
+use std::collections::{HashSet, hash_map};
 use std::env;
 use std::fs::File;
 use std::io::{BufReader, BufWriter, Write as _};
@@ -41,6 +42,16 @@ macro_rules! usage {
         println!($($args)*);
         process::exit(2);
     }
+}
+
+macro_rules! merge_options {
+    ($a: expr, $b: expr) => {
+        match ($a, $b) {
+            (None, None) => None,
+            (Some(v), None) | (None, Some(v)) => Some(v),
+            (Some(a), Some(b)) => Some(a.merge(b)),
+        }
+    };
 }
 
 lazy_static! {
@@ -250,6 +261,73 @@ fn load_themes(
     let default_theme = theme_overrides.clone().merge(theme::default_theme());
     themes.insert("default".into(), default_theme);
     Ok(themes)
+}
+
+/// This must be called before the alternate screen is entered
+fn load_config_includes(mut config: IambConfig, config_dir: &Path) -> IambConfig {
+    for include in std::mem::take(&mut config.include) {
+        let expanded = shellexpand::full(&include)
+            .unwrap_or_else(|err| panic!("unable to expand shell variables in include: {err}"));
+
+        let path = config_dir.join(&*expanded);
+
+        if path.is_dir() {
+            let dir = match path.read_dir() {
+                Ok(dir) => dir,
+                Err(e) => {
+                    eprintln!("Unable to read config files in {path:?}: {e}");
+                    continue;
+                },
+            };
+
+            // get paths in lexicographic order
+            let mut paths: Vec<_> = dir
+                .flat_map(|entry| {
+                    match entry {
+                        Ok(file) => Some(file),
+                        Err(e) => {
+                            eprintln!("Unable to read config file in {path:?}: {e}");
+                            None
+                        },
+                    }
+                })
+                .collect();
+            paths.sort_unstable_by_key(|file| file.file_name());
+
+            for file in paths {
+                let path = file.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("toml") {
+                    continue;
+                }
+
+                match IambConfig::load_toml(&path) {
+                    Ok(include) => {
+                        if !include.include.is_empty() {
+                            eprintln!("Ignoring nested includes in {path:?}");
+                        }
+                        config = include.merge(config);
+                    },
+                    Err(e) => {
+                        eprintln!("Unable to load config file in {path:?}: {e}");
+                    },
+                };
+            }
+        } else {
+            match IambConfig::load_toml(&path) {
+                Ok(include) => {
+                    if !include.include.is_empty() {
+                        eprintln!("Ignoring nested includes in {path:?}");
+                    }
+                    config = include.merge(config);
+                },
+                Err(e) => {
+                    eprintln!("Unable to load config file in {path:?}: {e}");
+                },
+            };
+        }
+    }
+
+    config
 }
 
 struct IambVersion;
@@ -490,6 +568,46 @@ pub struct UserDisplayTunables {
 
 pub type UserOverrides = HashMap<OwnedUserId, UserDisplayTunables>;
 
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Hash)]
+#[serde(untagged)]
+pub enum RoomOverrideKey {
+    User(OwnedUserId),
+    Room(OwnedRoomId),
+    Alias(OwnedRoomAliasId),
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct RoomOverrideTunables {
+    pub name: Option<String>,
+}
+
+pub type RoomOverrides = HashMap<RoomOverrideKey, RoomOverrideTunables>;
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq)]
+pub struct RoomOverrideValues {
+    pub rooms: HashMap<OwnedRoomId, RoomOverrideTunables>,
+    pub aliases: HashMap<OwnedRoomAliasId, RoomOverrideTunables>,
+    pub dms: HashMap<OwnedUserId, RoomOverrideTunables>,
+}
+
+impl From<RoomOverrides> for RoomOverrideValues {
+    fn from(value: RoomOverrides) -> Self {
+        let mut rooms = HashMap::new();
+        let mut aliases = HashMap::new();
+        let mut dms = HashMap::new();
+
+        for (key, value) in value {
+            match key {
+                RoomOverrideKey::User(user_id) => dms.insert(user_id, value),
+                RoomOverrideKey::Room(room_id) => rooms.insert(room_id, value),
+                RoomOverrideKey::Alias(alias_id) => aliases.insert(alias_id, value),
+            };
+        }
+
+        Self { rooms, aliases, dms }
+    }
+}
+
 fn merge_maps<M, K, V>(profile: Option<M>, global: Option<M>) -> Option<M>
 where
     M: Extend<(K, V)> + IntoIterator<Item = (K, V)>,
@@ -498,6 +616,27 @@ where
         (Some(m), None) | (None, Some(m)) => Some(m),
         (Some(mut global), Some(profile)) => {
             global.extend(profile);
+            Some(global)
+        },
+        (None, None) => None,
+    }
+}
+
+fn merge_macros(profile: Option<Macros>, global: Option<Macros>) -> Option<Macros> {
+    match (global, profile) {
+        (Some(m), None) | (None, Some(m)) => Some(m),
+        (Some(mut global), Some(profile)) => {
+            for (mode, macros) in profile {
+                match global.entry(mode) {
+                    hash_map::Entry::Vacant(entry) => {
+                        entry.insert(macros);
+                    },
+                    hash_map::Entry::Occupied(mut entry) => {
+                        entry.get_mut().extend(macros);
+                    },
+                }
+            }
+
             Some(global)
         },
         (None, None) => None,
@@ -994,6 +1133,7 @@ pub struct TunableValues {
     pub typing_notice_send: bool,
     pub typing_notice_display: bool,
     pub users: UserOverrides,
+    pub rooms: RoomOverrideValues,
     pub username_display: UserDisplayStyle,
     pub message_user_color: bool,
     pub default_register: Option<Register>,
@@ -1039,6 +1179,7 @@ pub struct Tunables {
 
     /// Subsection for overriding how specific Matrix users are rendered.
     pub users: Option<UserOverrides>,
+    pub rooms: Option<RoomOverrides>,
 
     pub default_markup: Option<MarkupFormat>,
     pub ignorecase: Option<bool>,
@@ -1094,6 +1235,7 @@ impl Tunables {
             sort: SortOverrides::merge(self.sort, other.sort),
             terminal: Terminal::merge(self.terminal, other.terminal),
             users: merge_maps(self.users, other.users),
+            rooms: merge_maps(self.rooms, other.rooms),
 
             // Proxy configuration sub-field do *not* get merged, so that a
             // per-profile override won't inherit auth or headers from the
@@ -1160,6 +1302,7 @@ impl Tunables {
             sort: self.sort.values(),
             terminal: self.terminal.values(),
             users: self.users.unwrap_or_default(),
+            rooms: self.rooms.unwrap_or_default().into(),
 
             default_markup: self.default_markup.unwrap_or_default(),
             log_level: self.log_level.unwrap_or_else(|| DEFAULT_LOG_LEVEL.to_owned()),
@@ -1376,9 +1519,9 @@ pub enum Layout {
     Config { tabs: Vec<WindowLayout> },
 }
 
-#[derive(Clone, Deserialize)]
+#[derive(Default, Clone, Deserialize)]
 pub struct ProfileConfig {
-    pub user_id: OwnedUserId,
+    pub user_id: Option<OwnedUserId>,
     pub password_file: Option<PathBuf>,
     pub url: Option<Url>,
     pub settings: Option<Tunables>,
@@ -1389,8 +1532,38 @@ pub struct ProfileConfig {
     pub aliases: Option<Aliases>,
 }
 
+impl ProfileConfig {
+    fn merge(self, other: Self) -> Self {
+        let user_id = self.user_id.or(other.user_id);
+        let password_file = self.password_file.or(other.password_file);
+        let url = self.url.or(other.url);
+        let settings = merge_options!(self.settings, other.settings);
+        let theme = merge_options!(self.theme, other.theme);
+        let dirs = merge_options!(self.dirs, other.dirs);
+        let layout = self.layout.or(other.layout);
+        let macros = merge_macros(self.macros, other.macros);
+        let aliases = merge_maps(self.aliases, other.aliases);
+
+        Self {
+            user_id,
+            password_file,
+            url,
+            settings,
+            theme,
+            dirs,
+            layout,
+            macros,
+            aliases,
+        }
+    }
+}
+
 #[derive(Clone, Deserialize)]
 pub struct IambConfig {
+    #[serde(default)]
+    include: Vec<String>,
+
+    #[serde(default)]
     pub profiles: BTreeMap<String, ProfileConfig>,
     pub default_profile: Option<String>,
     pub settings: Option<Tunables>,
@@ -1415,6 +1588,45 @@ impl IambConfig {
 
         Ok(config)
     }
+
+    /// If a value is present in both configs, `self` is prefered.
+    fn merge(self, other: Self) -> Self {
+        // transitive includes are not supported
+        let include = vec![];
+
+        let mut profiles = self.profiles;
+        for (name, profile) in other.profiles {
+            match profiles.entry(name) {
+                btree_map::Entry::Vacant(entry) => {
+                    entry.insert(profile);
+                },
+                btree_map::Entry::Occupied(mut entry) => {
+                    let profile = std::mem::take(entry.get_mut()).merge(profile);
+                    entry.insert(profile);
+                },
+            }
+        }
+
+        let default_profile = self.default_profile.or(other.default_profile);
+        let settings = merge_options!(self.settings, other.settings);
+        let dirs = merge_options!(self.dirs, other.dirs);
+        let layout = self.layout.or(other.layout);
+        let macros = merge_macros(self.macros, other.macros);
+        let aliases = merge_maps(self.aliases, other.aliases);
+        let theme = merge_options!(self.theme, other.theme);
+
+        Self {
+            include,
+            profiles,
+            default_profile,
+            settings,
+            dirs,
+            layout,
+            macros,
+            aliases,
+            theme,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -1427,6 +1639,7 @@ pub struct ApplicationSettings {
     pub sqlite_dir: PathBuf,
     pub sqlite_cache_dir: PathBuf,
     pub profile_name: String,
+    pub user_id: OwnedUserId,
     pub profile: ProfileConfig,
     pub theme: Arc<theme::ThemeValues>,
     pub themes: Arc<CompletionMap<String, theme::Theme>>,
@@ -1476,6 +1689,8 @@ impl ApplicationSettings {
             );
         };
 
+        let config = load_config_includes(config, &config_dir);
+
         let IambConfig {
             mut profiles,
             default_profile,
@@ -1485,6 +1700,7 @@ impl ApplicationSettings {
             macros,
             aliases,
             theme,
+            ..
         } = config;
 
         validate_profile_names(&profiles);
@@ -1526,8 +1742,10 @@ impl ApplicationSettings {
             }
         };
 
+        let user_id = profile.user_id.clone().expect("Active profile does not have a user id");
+
         let aliases = merge_maps(profile.aliases.take(), aliases).unwrap_or_default();
-        let macros = merge_maps(profile.macros.take(), macros).unwrap_or_default();
+        let macros = merge_macros(profile.macros.take(), macros).unwrap_or_default();
         let layout = profile.layout.take().or(layout).unwrap_or_default();
 
         let tunables = global.unwrap_or_default();
@@ -1600,6 +1818,7 @@ impl ApplicationSettings {
             sqlite_dir,
             sqlite_cache_dir,
             profile_name,
+            user_id,
             profile,
             themes,
             theme,
@@ -1656,7 +1875,7 @@ impl ApplicationSettings {
         let reader = BufReader::new(file);
         let saved: SavedDevice = serde_json::from_reader(reader).ok()?;
 
-        if saved.is_user(&self.profile.user_id) {
+        if saved.is_user(&self.user_id) {
             Some(saved)
         } else {
             None
@@ -1674,14 +1893,14 @@ impl ApplicationSettings {
         let saved = match client_id {
             Some(client) => {
                 SavedDevice::OAuth {
-                    user_id: self.profile.user_id.clone(),
+                    user_id: self.user_id.clone(),
                     device_id: device_id.to_owned(),
                     client_id: client,
                 }
             },
             None => {
                 SavedDevice::MatrixAuth {
-                    user_id: self.profile.user_id.clone(),
+                    user_id: self.user_id.clone(),
                     device_id: device_id.to_owned(),
                 }
             },
@@ -1736,10 +1955,10 @@ impl ApplicationSettings {
         self.theme.users.style(user_id.as_str(), color)
     }
 
-    pub fn get_user_span_maybe<'a>(
+    pub fn get_user_span<'a>(
         &self,
         user_id: &'a UserId,
-        info: Option<&'a RoomInfo>,
+        display_name: Option<Cow<'a, str>>,
     ) -> Span<'a> {
         let (color, name) = self.get_user_overrides(user_id);
 
@@ -1749,19 +1968,11 @@ impl ApplicationSettings {
             (None, UserDisplayStyle::Username) => Cow::Borrowed(user_id.as_str()),
             (None, UserDisplayStyle::LocalPart) => Cow::Borrowed(user_id.localpart()),
             (None, UserDisplayStyle::DisplayName) => {
-                if let Some(name) = info.and_then(|info| info.display_names.get(user_id)) {
-                    name
-                } else {
-                    Cow::Borrowed(user_id.as_str())
-                }
+                display_name.unwrap_or(Cow::Borrowed(user_id.as_str()))
             },
         };
 
         Span::styled(name, style)
-    }
-
-    pub fn get_user_span<'a>(&self, user_id: &'a UserId, info: &'a RoomInfo) -> Span<'a> {
-        self.get_user_span_maybe(user_id, Some(info))
     }
 }
 
@@ -1780,7 +1991,7 @@ mod tests {
         // fix `StyleTreeNode::print` for `StyleTreeNode::UserId` if this breaks
         let info = mock_room();
         let settings = mock_settings();
-        let span = settings.get_user_span(&TEST_USER1, &info);
+        let span = settings.get_user_span(&TEST_USER1, info.display_names.get(&TEST_USER1));
 
         assert!(matches!(span.content, Cow::Borrowed(_)));
     }
@@ -2327,6 +2538,7 @@ time_format = "%"
             macros,
             aliases,
             theme,
+            ..
         } = &config;
 
         // There should be an example object for each top-level field.

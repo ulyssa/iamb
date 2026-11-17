@@ -599,7 +599,7 @@ pub async fn room_command(
                     "Cannot show a single alias; use `:room aliases show` instead.".into()
                 },
                 RoomField::UserName => {
-                    let user_id = &store.application.settings.profile.user_id;
+                    let user_id = &store.application.settings.user_id;
                     let Some(member) = room.get_member(user_id).await.map_err(IambError::from)?
                     else {
                         let msg = "Cannot find membership data".into();
@@ -781,7 +781,12 @@ impl RoomState {
         if let Ok(Some(inviter)) = &inviter {
             let info = store.application.rooms.get_or_default(room_id.to_owned());
             invited.push(Span::from(" by "));
-            invited.push(store.application.settings.get_user_span(inviter.user_id(), info));
+            invited.push(
+                store
+                    .application
+                    .settings
+                    .get_user_span(inviter.user_id(), info.display_names.get(inviter.user_id())),
+            );
         }
 
         let l1 = Line::from(invited);

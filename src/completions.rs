@@ -561,7 +561,7 @@ fn complete_iamb_spaces(args: Vec<String>) -> Vec<String> {
 
 /// Tab completion for `:logout`
 fn complete_iamb_logout(args: Vec<String>, store: &ChatStore) -> Vec<String> {
-    let id = store.settings.profile.user_id.as_str();
+    let id = store.settings.user_id.as_str();
     match args.len() {
         1 if id.starts_with(&args[0]) => vec![id.to_string()],
         _ => vec![],
