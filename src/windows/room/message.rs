@@ -277,7 +277,7 @@ impl StatefulWidget for MessageWidget<'_> {
                 );
             if let Some(reactions) = reactions {
                 for source in reactions {
-                    previews.load(source, PreviewKind::Emote, worker);
+                    previews.load(source, PreviewKind::Emoji, worker);
                 }
             }
         }
@@ -325,7 +325,7 @@ impl StatefulWidget for MessageWidget<'_> {
 
                 let proto = match source
                     .as_ref()
-                    .and_then(|source| previews.get(source, PreviewKind::Emote))
+                    .and_then(|source| previews.get(source, PreviewKind::Emoji))
                 {
                     Some(ImageStatus::Loaded(backend)) => Some(Some(backend)),
                     // Use empty space as placeholder

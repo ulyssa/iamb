@@ -1847,7 +1847,7 @@ impl RoomInfo {
         if settings.tunables.image_preview.enabled &&
             let Some(source) = source.as_ref()
         {
-            previews.register_preview(settings, source, PreviewKind::Emote);
+            previews.register_preview(settings, source, PreviewKind::Emoji);
         }
 
         self.insert_reaction(react, source);

@@ -19,8 +19,16 @@ pub enum PreviewKind {
     /// A custom `width, height` is given in pixels or defaults to the config
     Custom(Option<u16>, Option<u16>),
 
-    /// The image is rendered as 1x2 characters
-    Emote,
+    /// Force the image to be rendered in Emoji presentation (i.e., 1x2 characters)
+    ///
+    /// This is used primarily for custom message reactions and for the `data-mx-emoticon`
+    /// attribute on images, which is typically used when forcing stickers to appear like
+    /// custom Emoji.
+    ///
+    /// In the future, we could potentially investigate using this as a way to also handle
+    /// troublesome ZWJ combinations that confuse terminals or ratatui by not having clear
+    /// widths across implementations.
+    Emoji,
 }
 
 impl Default for PreviewKind {
@@ -32,7 +40,7 @@ impl Default for PreviewKind {
 impl PreviewKind {
     fn image_size(self, picker: &Picker, image_preview: &ImagePreviewValues) -> Size {
         match self {
-            Self::Emote => Size { width: 2, height: 1 },
+            Self::Emoji => Size { width: 2, height: 1 },
             Self::Custom(width, height) => {
                 let font_size = picker.font_size();
 

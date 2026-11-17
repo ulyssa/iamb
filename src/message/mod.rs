@@ -957,7 +957,7 @@ impl<'a> MessageFormatter<'a> {
             }
 
             let proto =
-                match source.as_ref().and_then(|source| previews.get(source, PreviewKind::Emote)) {
+                match source.as_ref().and_then(|source| previews.get(source, PreviewKind::Emoji)) {
                     Some(ImageStatus::Loaded(backend)) => Some(Some(backend)),
                     // Use empty space as placeholder
                     Some(ImageStatus::Queued(_)) | Some(ImageStatus::Downloading(_)) => Some(None),
@@ -987,7 +987,7 @@ impl<'a> MessageFormatter<'a> {
 
             emojis.push_str("[", style);
             if let Some(Some(proto)) = proto {
-                emojis.push_emote(proto, style);
+                emojis.push_emoji(proto, style);
             } else {
                 emojis.push_str(name, style);
             }

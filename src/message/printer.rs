@@ -309,8 +309,8 @@ impl<'a> TextPrinter<'a> {
         self.text.lines.extend(text.lines);
     }
 
-    /// Push an emote with placeholder
-    pub fn push_emote(&mut self, image: &Arc<SlicedProtocol>, style: Style) {
+    /// Push an image that will be forced into an Emoji size (1 row, 2 columns).
+    pub fn push_emoji(&mut self, image: &Arc<SlicedProtocol>, style: Style) {
         if self.curr_width + 2 > self.width {
             self.commit();
         }

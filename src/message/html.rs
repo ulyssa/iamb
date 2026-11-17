@@ -328,7 +328,7 @@ impl Image {
 
     fn kind(&self) -> PreviewKind {
         if self.is_emote {
-            return PreviewKind::Emote;
+            return PreviewKind::Emoji;
         }
 
         PreviewKind::Custom(self.width, self.height)
@@ -533,7 +533,7 @@ impl StyleTreeNode {
                     let Some(image) = img.preview(previews) &&
                     let ImageStatus::Loaded(image) = image
                 {
-                    printer.push_emote(image, style);
+                    printer.push_emoji(image, style);
                 } else {
                     let title = img.title.as_deref().unwrap_or("emote");
                     printer.push_span_nobreak(Span::styled(format!(":{title}:"), style));

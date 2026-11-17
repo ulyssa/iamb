@@ -1372,7 +1372,7 @@ impl StatefulWidget for Scrollback<'_> {
                     for source in info.get_reaction_images(event_id) {
                         self.store.application.previews.load(
                             source,
-                            PreviewKind::Emote,
+                            PreviewKind::Emoji,
                             &self.store.application.worker,
                         );
                     }
