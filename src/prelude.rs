@@ -68,6 +68,7 @@ pub use ratatui::layout::{Alignment, Rect, Size};
 pub use ratatui::style::{Color, Modifier as StyleModifier, Style};
 pub use ratatui::text::{Line, Span, Text};
 pub use ratatui::widgets::{Paragraph, StatefulWidget, Widget};
+pub use ratatui_image::sliced::SlicedProtocol;
 pub use unicode_segmentation::UnicodeSegmentation;
 pub use unicode_width::UnicodeWidthStr;
 pub use url::Url;
