@@ -1004,6 +1004,7 @@ pub struct ImagePreviewValues {
     pub enabled: bool,
     pub size: Size,
     pub protocol: ImagePreviewProtocolValues,
+    pub user_avatar: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1011,6 +1012,7 @@ pub struct ImagePreview {
     pub enabled: Option<bool>,
     pub size: Option<Size>,
     pub protocol: Option<ImagePreviewProtocolValues>,
+    pub user_avatar: Option<bool>,
 }
 
 impl ImagePreview {
@@ -1019,6 +1021,7 @@ impl ImagePreview {
             enabled: self.enabled.unwrap_or(true),
             size: self.size.unwrap_or(Size { width: 66, height: 10 }),
             protocol: self.protocol.unwrap_or_default(),
+            user_avatar: self.user_avatar.unwrap_or(true),
         }
     }
 }
@@ -1145,6 +1148,7 @@ pub struct TunableValues {
     pub terminal: TerminalValues,
     pub image_preview: ImagePreviewValues,
     pub user_gutter_width: usize,
+    pub sender_extra_line: bool,
     pub external_edit_file_suffix: String,
     pub tabstop: usize,
     pub input_prompt: Option<String>,
@@ -1211,6 +1215,7 @@ pub struct Tunables {
     pub notifications: Option<Notifications>,
     pub image_preview: Option<ImagePreview>,
     pub user_gutter_width: Option<usize>,
+    pub sender_extra_line: Option<bool>,
     pub external_edit_file_suffix: Option<String>,
     pub tabstop: Option<usize>,
     pub input_prompt: Option<String>,
@@ -1277,6 +1282,7 @@ impl Tunables {
             notifications: self.notifications.or(other.notifications),
             image_preview: self.image_preview.or(other.image_preview),
             user_gutter_width: self.user_gutter_width.or(other.user_gutter_width),
+            sender_extra_line: self.sender_extra_line.or(other.sender_extra_line),
             external_edit_file_suffix: self
                 .external_edit_file_suffix
                 .or(other.external_edit_file_suffix),
@@ -1296,6 +1302,16 @@ impl Tunables {
         let time_format = self.time_format.unwrap_or_else(|| DEFAULT_TIME_FORMAT.to_owned());
         let time_gutter_width = time_gutter_width(&time_format);
 
+        let image_preview = self.image_preview.unwrap_or_default().values();
+
+        let user_gutter_width = self
+            .user_gutter_width
+            .unwrap_or(30)
+            .max(image_preview.user_avatar as usize * 4);
+
+        let sender_extra_line = image_preview.user_avatar ||
+            user_gutter_width <= 2 ||
+            self.sender_extra_line.unwrap_or_default();
         TunableValues {
             encryption: self.encryption.values(),
             proxy: self.proxy.unwrap_or_default().values(),
@@ -1335,8 +1351,9 @@ impl Tunables {
             open_command: self.open_command,
             mouse: self.mouse.unwrap_or_default(),
             notifications: self.notifications.unwrap_or_default(),
-            image_preview: self.image_preview.unwrap_or_default().values(),
-            user_gutter_width: self.user_gutter_width.unwrap_or(30),
+            image_preview,
+            user_gutter_width,
+            sender_extra_line,
             external_edit_file_suffix: self
                 .external_edit_file_suffix
                 .unwrap_or_else(|| ".md".to_string()),

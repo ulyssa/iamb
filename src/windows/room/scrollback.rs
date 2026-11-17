@@ -1377,6 +1377,15 @@ impl StatefulWidget for Scrollback<'_> {
                         );
                     }
                 }
+                if settings.tunables.image_preview.user_avatar &&
+                    let Some(source) = info.avatars.get(&item.sender)
+                {
+                    self.store.application.previews.load(
+                        source,
+                        PreviewKind::Avatar,
+                        &self.store.application.worker,
+                    );
+                }
             }
         }
 

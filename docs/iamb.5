@@ -337,6 +337,16 @@ or
 See
 .Sx "SORTING LISTS"
 for more details.
+.It Sy sender_extra_line
+Defines whether to show the message sender name in the line above the message instead of next to it.
+Defaults to
+.Sy false
+unless
+.Sy image_preview.user_avatar
+is set or
+.Sy user_gutter_width
+is less than
+.Sy 3 .
 .It Sy state_event_display
 Defines whether the state events like joined or left are shown.
 .It Sy sync_delay_ms
@@ -383,8 +393,6 @@ or
 .It Sy user_gutter_width
 Specify the width of the column where usernames are displayed in a room.
 Usernames that are too long are truncated.
-If this value is less than 3, the usernames are displayed in an extra line at the top of the message
-and this value is only used to indent the message.
 Defaults to 30.
 .It Sy tabstop
 Number of spaces that a <Tab> counts for.
@@ -485,6 +493,18 @@ The available fields in this subsection are:
 .Bl -tag -width Ds
 .It Sy enabled
 Defaults to
+.Sy true .
+.It Sy user_avatar
+Whether to render user avatars in the message scrollback.
+Defaults to
+.Sy true .
+Setting this option also sets
+.Sy user_gutter_width
+to at least
+.Sy 4
+and
+.Sy sender_extra_line
+to
 .Sy true .
 .It Sy size
 An optional object with

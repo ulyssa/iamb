@@ -1907,6 +1907,7 @@ mod tests {
         let member = MemberSummary {
             user_id,
             display_name: None,
+            avatar_url: None,
             power_level: UserPowerLevel::Int(power_level.into()),
             membership,
         };

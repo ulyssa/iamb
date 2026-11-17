@@ -625,6 +625,7 @@ fn member_summary(member: &RoomMember) -> MemberSummary {
     MemberSummary {
         user_id: member.user_id().to_owned(),
         display_name: member.display_name().map(ToOwned::to_owned),
+        avatar_url: member.avatar_url().map(ToOwned::to_owned),
         power_level: member.power_level(),
         membership: member.membership().clone(),
     }
@@ -657,10 +658,11 @@ fn members_insert(
     store: &mut ProgramStore,
 ) {
     if let Ok(members) = res {
-        let ChatStore { rooms, .. } = &mut store.application;
+        let ChatStore { rooms, previews, settings, .. } = &mut store.application;
         let info = rooms.get_or_default(room_id);
 
         for member in members {
+            info.update_user_avatar(&member.user_id, member.avatar_url.clone(), settings, previews);
             info.display_names.set(
                 member.user_id.clone(),
                 member.display_name.clone(),
@@ -2089,7 +2091,9 @@ impl ClientWorker {
                     let user_id = ev.state_key;
 
                     let mut locked = store.lock().await;
-                    let info = locked.application.get_room_info(room_id.to_owned());
+                    let ChatStore { rooms, previews, settings, .. } = &mut locked.application;
+                    let info = rooms.get_or_default(room_id.to_owned());
+                    info.update_user_avatar(&user_id, ev.content.avatar_url, settings, previews);
                     let is_active = member_active(&ev.content.membership);
                     info.display_names.set(user_id, ev.content.displayname, is_active);
                 }
