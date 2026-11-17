@@ -357,10 +357,11 @@ pub mod tests {
     fn test_push_str_wide_char_wider_than_width() {
         let settings = mock_settings();
         let info = mock_room();
-        let mut printer = TextPrinter::new(1, Style::default(), &settings, &info);
+        let mut printer = TextPrinter::new(1, Style::default(), &settings, &info, None);
         printer.push_str("a世b", Style::default());
         let text = printer.finish();
         let lines: Vec<String> = text
+            .0
             .lines
             .iter()
             .map(|line| line.spans.iter().map(|span| span.content.as_ref()).collect())
