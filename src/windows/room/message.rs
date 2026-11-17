@@ -282,7 +282,7 @@ impl StatefulWidget for MessageWidget<'_> {
             }
         }
 
-        let (_, msg_previews) = msg.show_with_preview(
+        let (_, mut msg_previews) = msg.show_with_preview(
             // use self as prev to suppress user and date preview
             Some(msg),
             false,
@@ -291,6 +291,8 @@ impl StatefulWidget for MessageWidget<'_> {
             settings,
             previews,
         );
+        // Add offset for header line
+        msg_previews.iter_mut().for_each(|(_, _, msg_y)| *msg_y += 1);
 
         // message
         let mut items = vec![
