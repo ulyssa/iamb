@@ -1555,10 +1555,7 @@ pub mod tests {
     fn test_list_ordered_start_overflow() {
         // Numbering that would overflow a `usize` restarts at 1.
         for start in [usize::MAX, usize::MAX - 1] {
-            assert_eq!(
-                list_bullets(start),
-                vec![Some("1. ".to_string()), Some("2. ".to_string())]
-            );
+            assert_eq!(list_bullets(start), vec![Some("1. ".to_string()), Some("2. ".to_string())]);
         }
     }
 
@@ -1566,10 +1563,10 @@ pub mod tests {
     fn test_list_ordered_start_near_max() {
         // The largest start for which the numbering still fits is left alone.
         let start = usize::MAX - 2;
-        assert_eq!(
-            list_bullets(start),
-            vec![Some(format!("{}. ", start)), Some(format!("{}. ", start + 1))]
-        );
+        assert_eq!(list_bullets(start), vec![
+            Some(format!("{}. ", start)),
+            Some(format!("{}. ", start + 1))
+        ]);
     }
 
     #[test]
