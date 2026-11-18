@@ -30,7 +30,7 @@ use crate::util::{join_cell_text, space_text, wrapped_text};
 /// Generate bullet points from a [ListStyle].
 pub struct BulletIterator {
     style: ListStyle,
-    pos: usize,
+    pos: u128,
     /// The number of characters the number takes up
     len: usize,
 }
@@ -73,11 +73,11 @@ pub enum ListStyle {
 impl ListStyle {
     fn bullets(&self, len: usize) -> BulletIterator {
         let pos = match self {
-            Self::Ordered(start) => *start,
+            Self::Ordered(start) => *start as u128,
             Self::Unordered => 0,
         };
 
-        let len = (pos + len).to_string().len();
+        let len = (pos + len as u128).to_string().len();
 
         BulletIterator { style: *self, pos, len }
     }
@@ -1532,6 +1532,30 @@ pub mod tests {
                 Span::raw(" "),
                 Span::raw("3")
             ])
+        );
+    }
+
+    #[test]
+    fn test_list_ordered_start_overflow() {
+        let info = mock_room();
+        let settings = mock_settings();
+        let start = usize::MAX;
+        let s = format!("<ol start=\"{start}\"><li>a</li><li>b</li></ol>");
+        let tree = parse_matrix_html(&s);
+        let text = tree.to_text(40, Style::default(), &settings, &info);
+        assert_eq!(text.lines.len(), 2);
+
+        let bullets: Vec<_> = text
+            .lines
+            .iter()
+            .map(|line| line.spans.first().map(|span| span.content.to_string()))
+            .collect();
+        assert_eq!(
+            bullets,
+            vec![
+                Some(format!("{start}. ")),
+                Some(format!("{}. ", u128::try_from(start).unwrap() + 1)),
+            ]
         );
     }
 
