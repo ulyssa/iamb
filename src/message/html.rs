@@ -30,7 +30,7 @@ use crate::util::{join_cell_text, space_text, wrapped_text};
 /// Generate bullet points from a [ListStyle].
 pub struct BulletIterator {
     style: ListStyle,
-    pos: u128,
+    pos: usize,
     /// The number of characters the number takes up
     len: usize,
 }
@@ -73,11 +73,13 @@ pub enum ListStyle {
 impl ListStyle {
     fn bullets(&self, len: usize) -> BulletIterator {
         let pos = match self {
-            Self::Ordered(start) => *start as u128,
+            // Restart at 1 if the last number would not fit in a `usize`.
+            Self::Ordered(start) if start.checked_add(len).is_some() => *start,
+            Self::Ordered(_) => 1,
             Self::Unordered => 0,
         };
 
-        let len = (pos + len as u128).to_string().len();
+        let len = (pos + len).to_string().len();
 
         BulletIterator { style: *self, pos, len }
     }
@@ -1535,27 +1537,38 @@ pub mod tests {
         );
     }
 
-    #[test]
-    fn test_list_ordered_start_overflow() {
+    fn list_bullets(start: usize) -> Vec<Option<String>> {
         let info = mock_room();
         let settings = mock_settings();
-        let start = usize::MAX;
         let s = format!("<ol start=\"{start}\"><li>a</li><li>b</li></ol>");
         let tree = parse_matrix_html(&s);
         let text = tree.to_text(40, Style::default(), &settings, &info);
         assert_eq!(text.lines.len(), 2);
 
-        let bullets: Vec<_> = text
-            .lines
+        text.lines
             .iter()
             .map(|line| line.spans.first().map(|span| span.content.to_string()))
-            .collect();
+            .collect()
+    }
+
+    #[test]
+    fn test_list_ordered_start_overflow() {
+        // Numbering that would overflow a `usize` restarts at 1.
+        for start in [usize::MAX, usize::MAX - 1] {
+            assert_eq!(
+                list_bullets(start),
+                vec![Some("1. ".to_string()), Some("2. ".to_string())]
+            );
+        }
+    }
+
+    #[test]
+    fn test_list_ordered_start_near_max() {
+        // The largest start for which the numbering still fits is left alone.
+        let start = usize::MAX - 2;
         assert_eq!(
-            bullets,
-            vec![
-                Some(format!("{start}. ")),
-                Some(format!("{}. ", u128::try_from(start).unwrap() + 1)),
-            ]
+            list_bullets(start),
+            vec![Some(format!("{}. ", start)), Some(format!("{}. ", start + 1))]
         );
     }
 
