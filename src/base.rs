@@ -3,6 +3,7 @@
 //! The types defined here get used throughout iamb.
 
 use std::collections::{BTreeSet, HashSet};
+use std::path::PathBuf;
 
 use emojis::Emoji;
 use matrix_sdk::Client;
@@ -50,8 +51,10 @@ use percent_encoding::{NON_ALPHANUMERIC, percent_decode, percent_encode};
 use serde::de::Error as SerdeError;
 use serde::de::Visitor;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use strum::VariantNames;
 use tokio::sync::{Mutex as AsyncMutex, Notify};
 
+use crate::config::reload::{ReloadError, TunablesUpdate};
 use crate::message::poll::{
     Poll,
     PollEventLocation,
@@ -221,7 +224,8 @@ bitflags::bitflags! {
 }
 
 /// Fields that rooms and spaces can be sorted by.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, VariantNames)]
+#[strum(serialize_all = "lowercase")]
 pub enum SortFieldRoom {
     /// Sort rooms by whether they have the Favorite tag.
     Favorite,
@@ -236,6 +240,7 @@ pub enum SortFieldRoom {
     Alias,
 
     /// Sort rooms by their Matrix room identifier.
+    #[strum(serialize = "id")]
     RoomId,
 
     /// Sort rooms by the server portion of their canonical room alias.
@@ -278,9 +283,12 @@ pub enum SortFieldSpace {
 }
 
 /// Fields that users can be sorted by.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, VariantNames)]
+#[strum(serialize_all = "lowercase")]
 pub enum SortFieldUser {
+    #[strum(serialize = "power")]
     PowerLevel,
+    #[strum(serialize = "id")]
     UserId,
     LocalPart,
     Server,
@@ -309,7 +317,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldRoom> {
 }
 
 /// [serde] visitor for deserializing [SortColumn] for rooms and spaces.
-struct SortRoomVisitor;
+pub(crate) struct SortRoomVisitor;
 
 impl Visitor<'_> for SortRoomVisitor {
     type Value = SortColumn<SortFieldRoom>;
@@ -414,7 +422,7 @@ impl<'de> Deserialize<'de> for SortColumn<SortFieldUser> {
 }
 
 /// [serde] visitor for deserializing [SortColumn] for users.
-struct SortUserVisitor;
+pub(crate) struct SortUserVisitor;
 
 impl Visitor<'_> for SortUserVisitor {
     type Value = SortColumn<SortFieldUser>;
@@ -705,6 +713,16 @@ pub enum KeysAction {
     Import(String, String),
 }
 
+/// An action performed on the application settings.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum SettingsAction {
+    /// Change some settings.
+    Set(Vec<TunablesUpdate>),
+
+    /// Reload the (specified) config file.
+    Reload(Option<PathBuf>),
+}
+
 /// An action that the main program loop should execute.
 ///
 /// See [the commands module][super::commands] for where these are usually created.
@@ -724,6 +742,9 @@ pub enum IambAction {
 
     /// Perform an action on the current space.
     Space(SpaceAction),
+
+    /// Perform an action on the application settings.
+    Settings(SettingsAction),
 
     /// Open a URL.
     OpenLink(String),
@@ -781,6 +802,12 @@ impl From<SpaceAction> for IambAction {
     }
 }
 
+impl From<SettingsAction> for IambAction {
+    fn from(act: SettingsAction) -> Self {
+        IambAction::Settings(act)
+    }
+}
+
 impl From<RoomAction> for IambAction {
     fn from(act: RoomAction) -> Self {
         IambAction::Room(act)
@@ -817,6 +844,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
+            IambAction::Settings(..) => SequenceStatus::Break,
             IambAction::Timeline(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
@@ -837,6 +865,7 @@ impl ApplicationAction for IambAction {
             IambAction::OpenLink(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
+            IambAction::Settings(..) => SequenceStatus::Atom,
             IambAction::Timeline(..) => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
@@ -857,6 +886,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
+            IambAction::Settings(..) => SequenceStatus::Ignore,
             IambAction::Timeline(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
@@ -876,6 +906,7 @@ impl ApplicationAction for IambAction {
             IambAction::Room(..) => false,
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
+            IambAction::Settings(..) => false,
             IambAction::OpenLink(..) => false,
             IambAction::Timeline(..) => false,
             IambAction::ToggleScrollbackFocus => false,
@@ -1068,6 +1099,10 @@ pub enum IambError {
     /// A generic error that doesn't need a specific error type.
     #[error("{0}")]
     Custom(String),
+
+    /// Config couldn't be reloaded
+    #[error("Reload error: {0}")]
+    ConfigReload(#[from] ReloadError),
 }
 
 impl From<IambError> for UIError<IambInfo> {
