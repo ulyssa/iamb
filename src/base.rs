@@ -254,6 +254,9 @@ pub enum SortFieldRoom {
     /// Sort rooms by whether they have unread mentions.
     Mentions,
 
+    /// Sort rooms by whether they were marked as unread.
+    MarkedUnread,
+
     /// Sort rooms by the timestamps of their most recent messages.
     Recent,
 
@@ -340,6 +343,7 @@ impl Visitor<'_> for SortRoomVisitor {
             "unread" => SortFieldRoom::Unread,
             "notifications" => SortFieldRoom::Notifications,
             "mentions" => SortFieldRoom::Mentions,
+            "marked_unread" => SortFieldRoom::MarkedUnread,
             "name" => SortFieldRoom::Name,
             "alias" => SortFieldRoom::Alias,
             "dm" => SortFieldRoom::Direct,
