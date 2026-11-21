@@ -108,6 +108,19 @@ pub enum VerifyAction {
     Emoji,
 }
 
+/// An action taken against an ongoing verification request.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum VerifyUserAction {
+    /// Request a new verification with a user.
+    Request,
+
+    /// Withdraw the verification of a user.
+    Withdraw,
+
+    /// Pin the changed identity of a user.
+    Pin,
+}
+
 /// An action taken against a room's timeline.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TimelineAction {
@@ -748,8 +761,8 @@ pub enum IambAction {
     /// Perform an action for an in-progress verification.
     Verify(VerifyAction, String),
 
-    /// Request a new verification with the specified user.
-    VerifyRequest(String),
+    /// Perform a verification action against the specified user.
+    VerifyUser(VerifyUserAction, OwnedUserId),
 
     /// Recover the encryption secrets for this session with the given recovery key.
     Recover(String),
@@ -828,7 +841,7 @@ impl ApplicationAction for IambAction {
             IambAction::Timeline(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
             IambAction::Verify(..) => SequenceStatus::Break,
-            IambAction::VerifyRequest(..) => SequenceStatus::Break,
+            IambAction::VerifyUser(..) => SequenceStatus::Break,
             IambAction::Recover(..) => SequenceStatus::Break,
             IambAction::Join(..) => SequenceStatus::Break,
         }
@@ -848,7 +861,7 @@ impl ApplicationAction for IambAction {
             IambAction::Timeline(..) => SequenceStatus::Atom,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Atom,
             IambAction::Verify(..) => SequenceStatus::Atom,
-            IambAction::VerifyRequest(..) => SequenceStatus::Atom,
+            IambAction::VerifyUser(..) => SequenceStatus::Atom,
             IambAction::Recover(..) => SequenceStatus::Atom,
             IambAction::Join(..) => SequenceStatus::Atom,
         }
@@ -868,7 +881,7 @@ impl ApplicationAction for IambAction {
             IambAction::Timeline(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
             IambAction::Verify(..) => SequenceStatus::Ignore,
-            IambAction::VerifyRequest(..) => SequenceStatus::Ignore,
+            IambAction::VerifyUser(..) => SequenceStatus::Ignore,
             IambAction::Recover(..) => SequenceStatus::Ignore,
             IambAction::Join(..) => SequenceStatus::Ignore,
         }
@@ -888,7 +901,7 @@ impl ApplicationAction for IambAction {
             IambAction::Timeline(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
-            IambAction::VerifyRequest(..) => false,
+            IambAction::VerifyUser(..) => false,
             IambAction::Recover(..) => false,
             IambAction::Join(..) => false,
         }
@@ -1464,6 +1477,13 @@ pub struct RoomInfo {
     /// filter out values when iterating over it, depending on the use case.
     pub memberships: HashMap<OwnedUserId, MemberSummary>,
 
+    /// List of all users with problematic identity state.
+    ///
+    /// This only tracks [`PinViolation`](`IdentityState::PinViolation`) and
+    /// [`VerificationViolation`](`IdentityState::VerificationViolation`). The normal states don't
+    /// need to be tracked.
+    pub identity_violations: BTreeMap<OwnedUserId, IdentityState>,
+
     /// The last time the room was rendered, used to detect if it is currently open.
     pub draw_last: Option<Instant>,
 
@@ -1500,6 +1520,7 @@ impl Default for RoomInfo {
             users_typing: Default::default(),
             display_names: Default::default(),
             memberships: Default::default(),
+            identity_violations: Default::default(),
             draw_last: Default::default(),
             pinned_events: Default::default(),
             pinned_previews: Default::default(),

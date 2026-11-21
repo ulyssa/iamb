@@ -362,8 +362,11 @@ fn complete_iamb_keys(
 
 /// Tab completion for `:verify`
 fn complete_iamb_verify(args: Vec<String>, store: &ChatStore) -> Vec<String> {
+    let user_subcmds = ["request", "withdraw", "pin"];
     let subcmds = [
         "request",
+        "withdraw",
+        "pin",
         "accept",
         "confirm",
         "cancel",
@@ -373,7 +376,7 @@ fn complete_iamb_verify(args: Vec<String>, store: &ChatStore) -> Vec<String> {
     ];
     match args.len() {
         1 => complete_choices(&args[0], &subcmds),
-        2 if args[0] == "request" => complete_users(&args[1], store),
+        2 if user_subcmds.contains(&args[0].as_str()) => complete_users(&args[1], store),
         2 if args[0] == "recover" => vec![],
         2 if subcmds.contains(&args[0].as_str()) => complete_verification(&args[1], store),
         _ => vec![],

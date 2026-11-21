@@ -117,6 +117,11 @@ Confirm an in-progress verification.
 Reject an in-progress verification due to mismatched Emoji.
 .It Sy ":verify request [user id]"
 Request a new verification with the specified user.
+.It Sy ":verify withdraw [user id]"
+Withdraw the verification of the specified user.
+This is necessary when they have reset their cryptographic identity.
+.It Sy ":verify pin [user id]"
+Acknowledge that a user has reset their cryptographic identity.
 .It Sy ":verify recover [recovery key]"
 Recover the encryption secrets from the backup on your homeserver, verifying this session.
 .El

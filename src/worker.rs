@@ -641,9 +641,10 @@ fn members_insert(
 pub(crate) async fn subscribe_room_updates(
     room: MatrixRoom,
     store: AsyncProgramStore,
-) -> Result<JoinHandle<()>, matrix_sdk::event_cache::EventCacheError> {
+) -> Result<JoinHandle<()>, MatrixError> {
     let (cache, drop_handle) = room.client().event_cache().room(room.room_id()).await?;
     let (initial_events, mut events_sub) = cache.subscribe().await?;
+    let identity_changes = room.subscribe_to_identity_status_changes().await?;
 
     Ok(tokio::spawn(async move {
         let _drop_handle = drop_handle;
@@ -658,24 +659,56 @@ pub(crate) async fn subscribe_room_updates(
             insert_msgs_and_receipts(msgs, info, presences, previews, settings);
         }
 
-        while let Ok(update) = events_sub.recv().await {
-            match update {
-                RoomEventCacheUpdate::UpdateTimelineEvents(diffs) => {
-                    handle_timeline_update(diffs, &room, &store).await;
-                },
-                RoomEventCacheUpdate::AddReadReceiptEvent { event } => {
-                    handle_receipt_update(event, &room, &store).await;
-                },
-                RoomEventCacheUpdate::MoveReadMarkerTo { .. } => {
-                    // XXX: Support the fully_read marker
-                },
-                RoomEventCacheUpdate::UpdateMembers { ambiguity_changes, .. } => {
+        futures::pin_mut!(identity_changes);
+        loop {
+            tokio::select! {
+                update = events_sub.recv() => {
+                    let Ok(update) = update else {
+                        // The sender side has gone away, so just exit the loop.
+                        return
+                    };
+                    match update {
+                        RoomEventCacheUpdate::UpdateTimelineEvents(diffs) => {
+                            handle_timeline_update(diffs, &room, &store).await;
+                        },
+                        RoomEventCacheUpdate::AddReadReceiptEvent { event } => {
+                            handle_receipt_update(event, &room, &store).await;
+                        },
+                        RoomEventCacheUpdate::MoveReadMarkerTo { .. } => {
+                            // XXX: Support the fully_read marker
+                        },
+                        RoomEventCacheUpdate::UpdateMembers { ambiguity_changes, .. } => {
+                            let mut locked = store.lock().await;
+                            let info = locked.application.rooms.get_or_default(room.room_id().to_owned());
+                            for (_, change) in ambiguity_changes.into_iter() {
+                                info.display_names.apply_ambiguity_change(change);
+                            }
+                        },
+                    }
+                }
+
+                update = identity_changes.next() => {
+                    let Some(update) = update else {
+                        // The sender side has gone away, so just exit the loop.
+                        return
+                    };
+
                     let mut locked = store.lock().await;
                     let info = locked.application.rooms.get_or_default(room.room_id().to_owned());
-                    for (_, change) in ambiguity_changes.into_iter() {
-                        info.display_names.apply_ambiguity_change(change);
+
+                    for change in update {
+                        match change.changed_to {
+                            IdentityState::Verified |
+                            IdentityState::Pinned => {
+                                info.identity_violations.remove(&change.user_id);
+                            }
+                            IdentityState::PinViolation |
+                            IdentityState::VerificationViolation => {
+                                info.identity_violations.insert(change.user_id, change.changed_to);
+                            }
+                        }
                     }
-                },
+                }
             }
         }
     }))
