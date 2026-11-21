@@ -199,6 +199,10 @@ fn room_cmp<T: RoomLikeItem>(
             // Sort true (unread) before false (read)
             b.has_mention().cmp(&a.has_mention())
         },
+        SortFieldRoom::MarkedUnread => {
+            // Sort true (unread) before false (read)
+            b.marked_unread().cmp(&a.marked_unread())
+        },
         SortFieldRoom::Recent => {
             // sort larger timestamps towards the top.
             some_cmp(a.recent_ts(), b.recent_ts(), |a, b| b.cmp(a))
@@ -340,6 +344,7 @@ impl SortedSection for SortFieldRoom {
             SortFieldRoom::Mentions if room.has_mention() => ListSectionHeader::UnreadMentions,
             SortFieldRoom::Notifications if room.has_notification() => ListSectionHeader::Unreads,
             SortFieldRoom::Unread if room.is_unread() => ListSectionHeader::Unreads,
+            SortFieldRoom::MarkedUnread if room.marked_unread() => ListSectionHeader::Unreads,
 
             // Since the values that these fields sort on are almost always unique to every room,
             // we don't do much useful sorting after this and can't provide visually useful section
@@ -453,6 +458,7 @@ trait RoomLikeItem {
     fn is_unread(&self) -> bool;
     fn has_notification(&self) -> bool;
     fn has_mention(&self) -> bool;
+    fn marked_unread(&self) -> bool;
     fn recent_ts(&self) -> Option<&MessageTimeStamp>;
     fn alias(&self) -> Option<&RoomAliasId>;
     fn name(&self) -> &str;
@@ -1593,6 +1599,10 @@ impl RoomLikeItem for GenericRoomItem {
     fn has_notification(&self) -> bool {
         self.unread.has_notification()
     }
+
+    fn marked_unread(&self) -> bool {
+        self.unread.unread_mark
+    }
 }
 
 impl Display for GenericRoomItem {
@@ -2017,6 +2027,10 @@ mod tests {
 
         fn membership(&self) -> MatrixRoomState {
             self.membership
+        }
+
+        fn marked_unread(&self) -> bool {
+            self.unread.unread_mark
         }
     }
 
