@@ -687,12 +687,8 @@ impl Application {
             IambAction::Verify(act, flow_id) => {
                 return verifications::iamb_verify(act, flow_id, store).await;
             },
-            IambAction::VerifyRequest(user_id) => {
-                let Ok(user_id) = <&UserId>::try_from(user_id.as_str()) else {
-                    return Err(IambError::InvalidUserId(user_id).into());
-                };
-
-                return verifications::iamb_verify_request(user_id, store).await;
+            IambAction::VerifyUser(act, user_id) => {
+                return verifications::iamb_verify_user(act, &user_id, store).await;
             },
             IambAction::Recover(key) => {
                 return verifications::iamb_recover(key, store).await;

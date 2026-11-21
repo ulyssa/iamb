@@ -2,7 +2,7 @@ use matrix_sdk::encryption::verification::{Verification, VerificationRequestStat
 use matrix_sdk::ruma::OwnedDeviceId;
 use matrix_sdk::ruma::events::key::verification::VerificationMethod;
 
-use crate::base::VerifyAction;
+use crate::base::{VerifyAction, VerifyUserAction};
 use crate::prelude::*;
 
 const SUPPORTED_METHODS: [VerificationMethod; 3] = [
@@ -197,7 +197,8 @@ pub async fn iamb_verify(
     }
 }
 
-pub async fn iamb_verify_request(
+pub async fn iamb_verify_user(
+    act: VerifyUserAction,
     user_id: &UserId,
     store: &mut ProgramStore,
 ) -> IambResult<EditInfo> {
@@ -209,14 +210,30 @@ pub async fn iamb_verify_request(
         return Err(err);
     };
 
-    let request = identity.request_verification_with_methods(SUPPORTED_METHODS.into());
-    let request = request.await.map_err(IambError::from)?;
+    match act {
+        VerifyUserAction::Request => {
+            let request = identity.request_verification_with_methods(SUPPORTED_METHODS.into());
+            let request = request.await.map_err(IambError::from)?;
 
-    let flow_id = request.flow_id().to_owned();
-    store.application.verifications.insert(flow_id, request);
+            let flow_id = request.flow_id().to_owned();
+            store.application.verifications.insert(flow_id, request);
 
-    let info = format!("Sent verification request to {user_id}");
-    Ok(Some(InfoMessage::from(info)))
+            let info = format!("Sent verification request to {user_id}");
+            Ok(Some(InfoMessage::from(info)))
+        },
+        VerifyUserAction::Withdraw => {
+            identity.withdraw_verification().await.map_err(IambError::from)?;
+
+            let info = format!("Withdrawn verification of {user_id}");
+            Ok(Some(InfoMessage::from(info)))
+        },
+        VerifyUserAction::Pin => {
+            identity.pin().await.map_err(IambError::from)?;
+
+            let info = format!("Pinned identity of {user_id}");
+            Ok(Some(InfoMessage::from(info)))
+        },
+    }
 }
 
 pub async fn iamb_recover(key: String, store: &ProgramStore) -> IambResult<EditInfo> {

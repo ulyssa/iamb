@@ -19,6 +19,7 @@ use crate::base::{
     ProgramCommands,
     RoomField,
     VerifyAction,
+    VerifyUserAction,
 };
 use crate::prelude::*;
 
@@ -247,8 +248,20 @@ fn iamb_verify(desc: CommandDescription, ctx: &mut ProgContext) -> ProgResult {
                 "confirm" => VerifyAction::Confirm,
                 "mismatch" => VerifyAction::Mismatch,
                 "emoji" => VerifyAction::Emoji,
-                "request" => {
-                    let iact = IambAction::VerifyRequest(args.remove(1));
+                "request" | "withdraw" | "pin" => {
+                    let user_id = match OwnedUserId::try_from(args.remove(1)) {
+                        Ok(user_id) => user_id,
+                        Err(err) => return Err(CommandError::ParseFailed(err.to_string())),
+                    };
+
+                    let act = match args[0].as_str() {
+                        "request" => VerifyUserAction::Request,
+                        "withdraw" => VerifyUserAction::Withdraw,
+                        "pin" => VerifyUserAction::Pin,
+                        _ => unreachable!(),
+                    };
+
+                    let iact = IambAction::VerifyUser(act, user_id);
                     let step = CommandStep::Continue(iact.into(), ctx.context.clone());
 
                     return Ok(step);
@@ -1351,7 +1364,7 @@ pub fn setup_commands(aliases: &Aliases) -> Result<ProgramCommands, CommandError
 mod tests {
     use super::*;
 
-    use matrix_sdk::ruma::{owned_room_id, user_id};
+    use matrix_sdk::ruma::{owned_room_id, owned_user_id, user_id};
     use modalkit::actions::WindowAction;
     use modalkit::editing::context::EditContext;
 
@@ -1387,7 +1400,20 @@ mod tests {
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds.input_cmd(":verify request @user1:example.com", ctx.clone()).unwrap();
-        let act = IambAction::VerifyRequest("@user1:example.com".into());
+        let act =
+            IambAction::VerifyUser(VerifyUserAction::Request, owned_user_id!("@user1:example.com"));
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":verify withdraw @user1:example.com", ctx.clone()).unwrap();
+        let act = IambAction::VerifyUser(
+            VerifyUserAction::Withdraw,
+            owned_user_id!("@user1:example.com"),
+        );
+        assert_eq!(res, vec![(act.into(), ctx.clone())]);
+
+        let res = cmds.input_cmd(":verify pin @user1:example.com", ctx.clone()).unwrap();
+        let act =
+            IambAction::VerifyUser(VerifyUserAction::Pin, owned_user_id!("@user1:example.com"));
         assert_eq!(res, vec![(act.into(), ctx.clone())]);
 
         let res = cmds
@@ -1433,6 +1459,9 @@ mod tests {
 
         let res = cmds.input_cmd(":verify mismatch a b c d e f", ctx.clone());
         assert_eq!(res, Err(CommandError::InvalidArgument));
+
+        let res = cmds.input_cmd(":verify request foobar", ctx.clone());
+        assert!(matches!(res, Err(CommandError::ParseFailed(_))));
     }
 
     #[test]

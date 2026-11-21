@@ -1325,11 +1325,14 @@ impl StatefulWidget for Chat<'_> {
     fn render(self, area: Rect, buf: &mut Buffer, state: &mut Self::State) {
         state.complete_pending_jump(self.store);
 
+        let info = self.store.application.rooms.get_or_default(state.id().to_owned());
         let settings = &self.store.application.settings;
         let theme = &settings.theme;
+        let mut msgbar_style = theme.msgbar.default;
+        let mut msgbar_readonly = false;
 
         // Determine whether we have a description to show for the message bar.
-        let desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
+        let mut desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
             (None, None, None) => {
                 if state.room.is_tombstoned() {
                     Some(
@@ -1349,25 +1352,50 @@ impl StatefulWidget for Chat<'_> {
             (Some(_), None, None) => Some(Line::from("Editing message")),
             (Some(_), None, Some(_)) => Some(Line::from("Editing message in thread")),
             (editing, Some(_), thread) => {
-                self.store.application.rooms.get(state.id()).and_then(|room| {
-                    let msg = state.get_reply_to(room)?;
+                state.get_reply_to(info).map(|msg| {
                     let user = self
                         .store
                         .application
                         .settings
-                        .get_user_span(msg.sender.as_ref(), room.display_names.get(&msg.sender));
+                        .get_user_span(msg.sender.as_ref(), info.display_names.get(&msg.sender));
                     let prefix = match (editing.is_some(), thread.is_some()) {
                         (true, false) => Span::from("Editing reply to "),
                         (true, true) => Span::from("Editing reply in thread to "),
                         (false, false) => Span::from("Replying to "),
                         (false, true) => Span::from("Replying in thread to "),
                     };
-                    let spans = Line::from(vec![prefix, user]);
-
-                    spans.into()
+                    Line::from(vec![prefix, user])
                 })
             },
         };
+
+        if desc_spans.is_none() &&
+            let Some((user_id, _)) = info
+                .identity_violations
+                .iter()
+                .find(|(_, state)| **state == IdentityState::PinViolation)
+        {
+            let text1 = Span::from("Cryptographic identity of ");
+            let user = self
+                .store
+                .application
+                .settings
+                .get_user_span(user_id, info.display_names.get(user_id));
+            let text2 =
+                Span::from(format!(" has changed. Use `:verify pin {user_id}` to acknowledge."));
+
+            desc_spans = Some(Line::from(vec![text1, user, text2]));
+        }
+
+        if let Some((user_id, _)) = info
+            .identity_violations
+            .iter()
+            .find(|(_, state)| **state == IdentityState::VerificationViolation)
+        {
+            state.tbox.set_text(format!("Cryptographic identity of {user_id} was reset. Use `:verify withdraw {user_id}` to acknowledge"));
+            msgbar_readonly = true;
+            msgbar_style = theme.cmdbar.error;
+        }
 
         // Determine the region to show each UI element.
         let lines = state.tbox.has_lines(5).max(1) as u16;
@@ -1414,11 +1442,17 @@ impl StatefulWidget for Chat<'_> {
             (true, None, None) => Line::from("> "),
         };
 
-        let tbox = TextBox::new().style(theme.msgbar.default).prompt(prompt);
+        let tbox = TextBox::new().style(msgbar_style).prompt(prompt);
+        state.tbox.set_readonly(msgbar_readonly);
         state
             .tbox
             .set_ignorecase(self.store.application.settings.tunables.ignorecase);
         tbox.render(textarea, buf, &mut state.tbox);
+        if msgbar_readonly {
+            // Clear the msgbar here. If it is still readonly on the next render, the content will
+            // be overwritten anyway and if not the content would stay.
+            state.tbox.reset();
+        }
 
         // Render the message scrollback.
         let scrollback_style = self.store.application.settings.theme.timeline.default;

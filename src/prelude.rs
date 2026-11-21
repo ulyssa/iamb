@@ -46,6 +46,7 @@ pub use matrix_sdk::{
     encryption::verification::VerificationRequest,
     room::Room as MatrixRoom,
 };
+pub use matrix_sdk_crypto::IdentityState;
 pub use modalkit::actions::{
     Action,
     Editable,
