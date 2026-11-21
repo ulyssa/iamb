@@ -1919,6 +1919,7 @@ mod tests {
             display_name: None,
             power_level: UserPowerLevel::Int(power_level.into()),
             membership,
+            name_ambiguous: false,
         };
 
         MemberItem::new(member, TEST_ROOM1_ID.clone())

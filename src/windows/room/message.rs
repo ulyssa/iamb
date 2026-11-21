@@ -754,7 +754,7 @@ mod tests {
 
         for name in names {
             let room = store.application.rooms.get_mut(&room_id).unwrap();
-            room.display_names.set(user_id.clone(), Some(name.into()), true);
+            room.display_names.set(user_id.clone(), Some(name.into()), None);
 
             for width in 0..20 {
                 viewctx.dimensions.0 = width;

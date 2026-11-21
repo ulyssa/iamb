@@ -6,7 +6,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use emojis::Emoji;
 use matrix_sdk::Client;
-use matrix_sdk::deserialized_responses::{ThreadSummary, ThreadSummaryStatus};
+use matrix_sdk::deserialized_responses::{AmbiguityChange, ThreadSummary, ThreadSummaryStatus};
 use matrix_sdk::ruma::events::poll::start::PollStartEvent;
 use matrix_sdk::ruma::events::poll::unstable_start::{
     UnstablePollStartEvent,
@@ -66,7 +66,7 @@ use crate::message::poll::{
 };
 use crate::notifications::NotificationHandle;
 use crate::prelude::*;
-use crate::worker::subscribe_thread_updates;
+use crate::worker::{subscribe_room_updates, subscribe_thread_updates};
 
 /// The set of characters used in different Matrix IDs.
 pub const MATRIX_ID_WORD: WordStyle = WordStyle::CharSet(is_mxid_char);
@@ -1182,16 +1182,6 @@ impl std::ops::AddAssign<Self> for UnreadInfo {
     }
 }
 
-/// The [`OwnedUserId`]s for users with the given displayname in [`DisplayNameStore`].
-#[derive(Default)]
-struct DisplayNameUsers {
-    /// Joined or invited users. Count towards username disambiguation.
-    active: HashSet<OwnedUserId>,
-
-    /// Left and knocking users. Are always disambiguated.
-    inactive: HashSet<OwnedUserId>,
-}
-
 /// Information about a user within a specific room.
 #[derive(Clone, Debug)]
 pub struct MemberSummary {
@@ -1206,23 +1196,15 @@ pub struct MemberSummary {
 
     /// The member's current room membership (joined/invited/knocked/etc).
     pub membership: MembershipState,
+
+    /// Whether the name is ambiguous in the room.
+    pub name_ambiguous: bool,
 }
 
 impl MemberSummary {
     /// The display name to show for this member, falling back to their localpart.
     pub fn name(&self) -> &str {
         self.display_name.as_deref().unwrap_or_else(|| self.user_id.localpart())
-    }
-
-    /// A short description to show for the user's membership state.
-    pub fn membership_label(&self) -> Option<&'static str> {
-        match self.membership {
-            MembershipState::Ban => Some("banned"),
-            MembershipState::Invite => Some("invited"),
-            MembershipState::Knock => Some("wants to join"),
-            MembershipState::Leave => Some("left"),
-            _ => None,
-        }
     }
 
     /// Get the member's current state.
@@ -1264,118 +1246,74 @@ impl MemberSummary {
     }
 }
 
+#[derive(Default)]
+struct UserDisplayName {
+    name: Option<String>,
+    is_ambiguous: bool,
+}
+
 /// Track the display names for users and render any needed disambiguation for
 /// those with overlapping names.
 #[derive(Default)]
 pub struct DisplayNameStore {
-    /// The boolean is the same `is_active` field as the argument to [`Self::set`].
-    by_ids: CompletionMap<OwnedUserId, (Option<String>, bool)>,
-
-    by_names: CompletionMap<String, DisplayNameUsers>,
+    by_ids: HashMap<OwnedUserId, UserDisplayName>,
 }
 
 impl DisplayNameStore {
-    /// Update the `HashSet` associated with a given displayname.
-    ///
-    /// Note that this *could* be done more elegantly using the Entry API, but
-    /// is intentionally written in a way to avoid cloning conflicting display
-    /// names.
-    fn set_by_name(&mut self, user_id: OwnedUserId, name: &str, is_active: bool) {
-        if let Some(existing) = self.by_names.get_mut(name) {
-            if is_active {
-                existing.active.insert(user_id);
-            } else {
-                existing.inactive.insert(user_id);
-            }
-        } else {
-            let mut value = DisplayNameUsers::default();
-            if is_active {
-                value.active.insert(user_id);
-            } else {
-                value.inactive.insert(user_id);
-            }
-            self.by_names.insert(name.to_owned(), value);
+    pub(crate) fn apply_ambiguity_change(&mut self, change: AmbiguityChange) {
+        self.by_ids.entry(change.member_id).or_default().is_ambiguous = change.member_ambiguous;
+
+        if let Some(user_id) = change.ambiguated_member {
+            self.by_ids.entry(user_id).or_default().is_ambiguous = true;
+        }
+        if let Some(user_id) = change.disambiguated_member {
+            self.by_ids.entry(user_id).or_default().is_ambiguous = false;
         }
     }
 
-    /// Track a new user ID to displayname mapping, or unset any existing ones. `is_active` tracks,
-    /// whether the user is an active member (invited or joined) or not.
-    pub fn set(&mut self, user_id: OwnedUserId, name: Option<String>, is_active: bool) {
-        if let Some(name) = name.as_deref() {
-            self.set_by_name(user_id.clone(), name, is_active);
-        }
+    /// Track a new user ID to displayname mapping, or unset any existing ones.
+    pub fn set(
+        &mut self,
+        user_id: OwnedUserId,
+        name: Option<String>,
+        name_ambiguous: Option<bool>,
+    ) {
+        let user = self.by_ids.entry(user_id).or_default();
+        user.name = name;
 
-        if self
-            .by_ids
-            .get(&user_id)
-            .is_some_and(|(n, a)| *n == name && *a == is_active)
-        {
-            // nothing to do
-            return;
-        }
-
-        let previous = self.by_ids.insert(user_id.to_owned(), (name, is_active));
-
-        let Some((Some(name), was_active)) = previous else {
-            // no previous entry in `self.by_names` to remove
-            return;
-        };
-
-        let Some(users) = self.by_names.get_mut(&name) else {
-            return;
-        };
-
-        if was_active {
-            users.active.remove(&user_id);
-        } else {
-            users.inactive.remove(&user_id);
-        }
-
-        if users.active.is_empty() && users.inactive.is_empty() {
-            self.by_names.remove(&name);
+        if let Some(ambiguous) = name_ambiguous {
+            user.is_ambiguous = ambiguous;
         }
     }
 
     pub fn get<'a>(&'a self, user_id: &UserId) -> Option<Cow<'a, str>> {
-        let (displayname, is_active) = self.by_ids.get(user_id)?;
-        let displayname = displayname.as_ref()?;
-        let users = self.by_names.get(displayname)?;
+        let user = self.by_ids.get(user_id)?;
+        let displayname = user.name.as_ref()?;
 
-        if !users.active.contains(user_id) && !users.inactive.contains(user_id) {
-            // Internal consistency error? Assume no display name:
-            return None;
+        if user.is_ambiguous {
+            Some(Cow::Owned(format!("{displayname} ({user_id})")))
+        } else {
+            Some(Cow::Borrowed(displayname.as_str()))
         }
-
-        // Inactive members are always assumed to be ambiguous.
-        if *is_active && users.active.len() == 1 {
-            // Unambiguous!
-            return Some(Cow::Borrowed(displayname.as_str()));
-        }
-
-        // Ambiguous username, so include unique user ID:
-        Some(Cow::Owned(format!("{displayname} ({user_id})")))
     }
 
     pub fn complete_mention(&self, prefix: &str) -> Vec<String> {
         // spec says to mention with display name in anchor text
-        let mut users: BTreeSet<_> = self
-            .by_names
-            .complete(prefix.strip_prefix('@').unwrap_or(prefix))
-            .into_iter()
-            .flat_map(|name| {
-                let users = self.by_names.get(&name).unwrap();
-                users.active.iter().map(move |id| format!("[{name}][{}]", id))
-            })
-            .collect();
+        let mut users = BTreeSet::new();
 
-        users.extend(self.by_ids.complete(prefix).into_iter().map(|id| {
-            let name = self
-                .by_ids
-                .get(&id)
-                .and_then(|(name, _)| name.as_deref())
-                .unwrap_or(id.as_str());
-            format!("[{}][{}]", name, id)
-        }));
+        let name_prefix = prefix.strip_prefix('@').unwrap_or(prefix);
+        for (user_id, user) in self.by_ids.iter() {
+            if user_id.as_str().starts_with(prefix) {
+                let name = user.name.as_deref().unwrap_or(user_id.as_str());
+                users.insert(format!("[{}][{}]", name, user_id));
+            }
+
+            if let Some(name) = &user.name &&
+                name.starts_with(name_prefix)
+            {
+                users.insert(format!("[{}][{}]", name, user_id));
+            }
+        }
 
         users.into_iter().collect()
     }
@@ -1511,6 +1449,9 @@ pub struct RoomInfo {
     /// The time that we last fetched scrollback for this room.
     pub fetch_last: Option<Instant>,
 
+    /// Handle for the task receiving event cache updates.
+    update_handle: Option<JoinHandle<()>>,
+
     /// Users currently typing in this room, and when we received notification of them doing so.
     pub users_typing: Option<(Instant, Vec<OwnedUserId>)>,
 
@@ -1555,6 +1496,7 @@ impl Default for RoomInfo {
             fetching: Default::default(),
             reached_timeline_start: false,
             fetch_last: Default::default(),
+            update_handle: Default::default(),
             users_typing: Default::default(),
             display_names: Default::default(),
             memberships: Default::default(),
@@ -1689,11 +1631,16 @@ impl RoomInfo {
     }
 
     /// Spawn subscriber tasks for all thread updates.
-    pub(crate) async fn subscribe_thread_updates(
-        &mut self,
-        room: &MatrixRoom,
-        store: &AsyncProgramStore,
-    ) {
+    pub(crate) async fn subscribe_updates(&mut self, room: &MatrixRoom, store: &AsyncProgramStore) {
+        if self.update_handle.as_ref().is_none_or(|hanlde| hanlde.is_finished()) {
+            match subscribe_room_updates(room.to_owned(), Arc::clone(store)).await {
+                Ok(handle) => self.update_handle = Some(handle),
+                Err(err) => {
+                    tracing::warn!(room_id = ?room.room_id(), "unable to subscribe to room updates: {err}");
+                },
+            }
+        }
+
         for (root, thread) in self.threads.iter_mut() {
             thread.subscribe_updates(room, root, store).await
         }
@@ -3730,62 +3677,5 @@ pub mod tests {
 
         let parsed: IambId = serde_json::from_str(&format!("{url:?}")).unwrap();
         assert_eq!(parsed, id);
-    }
-
-    #[test]
-    fn test_ambiguous_displaynames() {
-        let mut store = DisplayNameStore::default();
-
-        store.set(TEST_USER1.clone(), Some("John".into()), true);
-        store.set(TEST_USER2.clone(), Some("John".into()), true);
-        store.set(TEST_USER3.clone(), Some("Jane".into()), true);
-        store.set(TEST_USER4.clone(), Some("Alice".into()), true);
-        store.set(TEST_USER5.clone(), Some("Bob".into()), true);
-
-        // TEST_USER1 and TEST_USER2 are both ambiguous, while the other are unambiguous:
-        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John (@user1:example.com)");
-        assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "John (@user2:example.com)");
-        assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "Jane");
-        assert_eq!(store.get(&TEST_USER4).unwrap().as_ref(), "Alice");
-        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "Bob");
-
-        // TEST_USER1 becomes unambiguous when TEST_USER2 changes:
-        store.set(TEST_USER2.clone(), Some("Eve".into()), true);
-        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John");
-        assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "Eve");
-        assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "Jane");
-        assert_eq!(store.get(&TEST_USER4).unwrap().as_ref(), "Alice");
-        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "Bob");
-
-        // TEST_USER5 becomes ambiguous when TEST_USER2 once again changes their name to match:
-        store.set(TEST_USER2.clone(), Some("Bob".into()), true);
-        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John");
-        assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "Bob (@user2:example.com)");
-        assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "Jane");
-        assert_eq!(store.get(&TEST_USER4).unwrap().as_ref(), "Alice");
-        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "Bob (@user5:example.com)");
-
-        // Now "Everyone is John":
-        store.set(TEST_USER2.clone(), Some("John".into()), true);
-        store.set(TEST_USER3.clone(), Some("John".into()), true);
-        store.set(TEST_USER4.clone(), Some("John".into()), true);
-        store.set(TEST_USER5.clone(), Some("John".into()), true);
-        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John (@user1:example.com)");
-        assert_eq!(store.get(&TEST_USER2).unwrap().as_ref(), "John (@user2:example.com)");
-        assert_eq!(store.get(&TEST_USER3).unwrap().as_ref(), "John (@user3:example.com)");
-        assert_eq!(store.get(&TEST_USER4).unwrap().as_ref(), "John (@user4:example.com)");
-        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "John (@user5:example.com)");
-
-        // 2-4 unset their displayname:
-        store.set(TEST_USER2.clone(), None, true);
-        store.set(TEST_USER3.clone(), None, true);
-        store.set(TEST_USER4.clone(), None, true);
-        // and 5 leaves
-        store.set(TEST_USER5.clone(), Some("John".into()), false);
-        assert_eq!(store.get(&TEST_USER1).unwrap().as_ref(), "John");
-        assert_eq!(store.get(&TEST_USER2), None);
-        assert_eq!(store.get(&TEST_USER3), None);
-        assert_eq!(store.get(&TEST_USER4), None);
-        assert_eq!(store.get(&TEST_USER5).unwrap().as_ref(), "John (@user5:example.com)");
     }
 }

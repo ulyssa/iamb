@@ -135,13 +135,14 @@ pub fn mock_room() -> RoomInfo {
 
     let user_id = TEST_USER2.clone();
     let name = "User 2";
-    room.display_names.set(user_id.clone(), Some(name.to_string()), true);
+    room.display_names.set(user_id.clone(), Some(name.to_string()), None);
 
     let member = MemberSummary {
         user_id: user_id.clone(),
         display_name: Some(name.to_string()),
         power_level: UserPowerLevel::Int(50.into()),
         membership: MembershipState::Join,
+        name_ambiguous: false,
     };
     room.memberships.insert(user_id, member);
 
