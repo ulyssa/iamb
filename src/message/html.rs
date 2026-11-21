@@ -73,7 +73,9 @@ pub enum ListStyle {
 impl ListStyle {
     fn bullets(&self, len: usize) -> BulletIterator {
         let pos = match self {
-            Self::Ordered(start) => *start,
+            // Restart at 1 if the last number would not fit in a `usize`.
+            Self::Ordered(start) if start.checked_add(len).is_some() => *start,
+            Self::Ordered(_) => 1,
             Self::Unordered => 0,
         };
 
@@ -1533,6 +1535,38 @@ pub mod tests {
                 Span::raw("3")
             ])
         );
+    }
+
+    fn list_bullets(start: usize) -> Vec<Option<String>> {
+        let info = mock_room();
+        let settings = mock_settings();
+        let s = format!("<ol start=\"{start}\"><li>a</li><li>b</li></ol>");
+        let tree = parse_matrix_html(&s);
+        let text = tree.to_text(40, Style::default(), &settings, &info);
+        assert_eq!(text.lines.len(), 2);
+
+        text.lines
+            .iter()
+            .map(|line| line.spans.first().map(|span| span.content.to_string()))
+            .collect()
+    }
+
+    #[test]
+    fn test_list_ordered_start_overflow() {
+        // Numbering that would overflow a `usize` restarts at 1.
+        for start in [usize::MAX, usize::MAX - 1] {
+            assert_eq!(list_bullets(start), vec![Some("1. ".to_string()), Some("2. ".to_string())]);
+        }
+    }
+
+    #[test]
+    fn test_list_ordered_start_near_max() {
+        // The largest start for which the numbering still fits is left alone.
+        let start = usize::MAX - 2;
+        assert_eq!(list_bullets(start), vec![
+            Some(format!("{}. ", start)),
+            Some(format!("{}. ", start + 1))
+        ]);
     }
 
     #[test]
