@@ -439,30 +439,10 @@ fn content_html(msgtype: &MessageType) -> Option<StyleTree> {
         MessageType::Emote(content) => content.formatted.as_ref(),
         MessageType::Notice(content) => content.formatted.as_ref(),
 
-        MessageType::Audio(content) => content.formatted.as_ref(),
-        MessageType::File(content) => content.formatted.as_ref(),
-        MessageType::Video(content) => content.formatted.as_ref(),
-
-        MessageType::Image(content) => {
-            let mut html = if let Some(FormattedBody { format: MessageFormat::Html, body }) =
-                &content.formatted
-            {
-                parse_matrix_html(body.as_str())
-            } else {
-                StyleTree { children: vec![] }
-            };
-
-            html.children
-                .insert(0, html::StyleTreeNode::Text(display_file_name!(Image, content).into()));
-
-            let src = content.source.clone();
-            html.children.insert(
-                0,
-                html::StyleTreeNode::Image(html::Image::new(src, content.info.as_deref())),
-            );
-
-            return Some(html);
-        },
+        MessageType::Audio(content) => content.formatted_caption(),
+        MessageType::File(content) => content.formatted_caption(),
+        MessageType::Video(content) => content.formatted_caption(),
+        MessageType::Image(content) => content.formatted_caption(),
         _ => None,
     };
 
@@ -475,13 +455,20 @@ fn content_html(msgtype: &MessageType) -> Option<StyleTree> {
     if let Some(filename) = content_filename(msgtype) {
         let html = html.get_or_insert_with(|| {
             let text = body_cow_content(msgtype).into_owned();
-            StyleTree {
-                children: vec![html::StyleTreeNode::Text(text.into())],
-            }
+            let text = html::StyleTreeNode::Text(text.into());
+            let text = html::StyleTreeNode::Paragraph(Box::new(text));
+            StyleTree { children: vec![text] }
         });
 
-        html.children.push(html::StyleTreeNode::Break);
-        html.children.push(html::StyleTreeNode::Text(filename.into()));
+        html.children.insert(0, html::StyleTreeNode::Text(filename.into()));
+
+        if let MessageType::Image(content) = msgtype {
+            let src = content.source.clone();
+            html.children.insert(
+                0,
+                html::StyleTreeNode::Image(html::Image::new(src, content.info.as_deref())),
+            );
+        }
     }
 
     html
