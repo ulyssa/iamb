@@ -9,7 +9,13 @@ use matrix_sdk::notification_settings::{
     RoomNotificationMode,
 };
 use matrix_sdk::ruma::events::room::message::Relation;
-use matrix_sdk::ruma::events::{AnyMessageLikeEventContent, AnySyncTimelineEvent};
+use matrix_sdk::ruma::events::{
+    AnyMessageLikeEventContent,
+    AnySyncMessageLikeEvent,
+    AnySyncTimelineEvent,
+    Mentions,
+    SyncMessageLikeEvent,
+};
 use matrix_sdk::ruma::serde::Raw;
 
 use crate::config::NotifyVia;
@@ -44,8 +50,6 @@ pub async fn register_notifications(
         return;
     }
     let notify_via = settings.tunables.notifications.via;
-    let show_message = settings.tunables.notifications.show_message;
-    let sound_hint = settings.tunables.notifications.sound_hint.clone();
     let server_settings = client.notification_settings().await;
     let Some(startup_ts) = MilliSecondsSinceUnixEpoch::from_system_time(SystemTime::now()) else {
         return;
@@ -56,7 +60,6 @@ pub async fn register_notifications(
         .register_notification_handler(move |notification, room: MatrixRoom, client: Client| {
             let store = store.clone();
             let server_settings = server_settings.clone();
-            let sound_hint = sound_hint.clone();
             async move {
                 let mode = global_or_room_mode(&server_settings, &room).await;
                 if mode == RoomNotificationMode::Mute {
@@ -70,29 +73,31 @@ pub async fn register_notifications(
                 let room_id = room.room_id().to_owned();
                 match notification.event {
                     RawAnySyncOrStrippedTimelineEvent::Sync(e) => {
-                        match parse_full_notification(e, room, show_message, &store).await {
-                            Ok((summary, body, server_ts)) => {
+                        match parse_full_notification(e, room, &store).await {
+                            Ok((summary, body, server_ts, mentions)) => {
                                 if server_ts < startup_ts {
                                     return;
                                 }
 
                                 let Some(body) = body else {
+                                    // Don't show notifications for unsupported event types.
                                     return;
                                 };
 
-                                if is_missing_mention(&body, mode, &client) {
+                                if is_missing_mention(
+                                    &body,
+                                    mentions,
+                                    mode,
+                                    &client,
+                                    &server_settings,
+                                )
+                                .await
+                                {
                                     return;
                                 }
 
-                                send_notification(
-                                    &notify_via,
-                                    &summary,
-                                    &body,
-                                    room_id,
-                                    &store,
-                                    sound_hint.as_deref(),
-                                )
-                                .await;
+                                send_notification(&notify_via, &summary, &body, room_id, &store)
+                                    .await;
                             },
                             Err(err) => {
                                 tracing::error!("Failed to extract notification data: {err}")
@@ -115,11 +120,10 @@ async fn send_notification(
     body: &str,
     room_id: OwnedRoomId,
     store: &AsyncProgramStore,
-    sound_hint: Option<&str>,
 ) {
     #[cfg(feature = "desktop")]
     if via.desktop {
-        send_notification_desktop(summary, body, room_id, store, sound_hint).await;
+        send_notification_desktop(summary, body, room_id, store).await;
     }
     #[cfg(not(feature = "desktop"))]
     {
@@ -137,14 +141,16 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
 }
 
 #[cfg(feature = "desktop")]
-#[cfg_attr(target_os = "macos", allow(unused_variables))]
+#[cfg_attr(target_os = "macos", allow(unused_variables, unused_mut))]
 async fn send_notification_desktop(
     summary: &str,
     body: &str,
     room_id: OwnedRoomId,
-    _store: &AsyncProgramStore,
-    sound_hint: Option<&str>,
+    store: &AsyncProgramStore,
 ) {
+    let mut locked = store.lock().await;
+    let settings = &locked.application.settings;
+
     let mut desktop_notification = notify_rust::Notification::new();
     desktop_notification
         .summary(summary)
@@ -152,14 +158,16 @@ async fn send_notification_desktop(
         .icon(IAMB_XDG_NAME)
         .action("default", "default");
 
-    if let Some(sound_hint) = sound_hint {
+    if let Some(sound_hint) = &settings.tunables.notifications.sound_hint {
         desktop_notification.sound_name(sound_hint);
     }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     desktop_notification.urgency(notify_rust::Urgency::Normal);
 
-    desktop_notification.body(body);
+    if settings.tunables.notifications.show_message {
+        desktop_notification.body(body);
+    }
 
     #[cfg(all(unix, not(target_os = "macos")))]
     let res = desktop_notification.show_async().await;
@@ -170,9 +178,7 @@ async fn send_notification_desktop(
         Err(err) => tracing::error!("Failed to send notification: {err}"),
         Ok(handle) => {
             #[cfg(all(unix, not(target_os = "macos")))]
-            _store
-                .lock()
-                .await
+            locked
                 .application
                 .open_notifications
                 .entry(room_id)
@@ -203,15 +209,31 @@ async fn global_or_room_mode(
         .await
 }
 
-fn is_missing_mention(body: &str, mode: RoomNotificationMode, client: &Client) -> bool {
-    if mode == RoomNotificationMode::MentionsAndKeywordsOnly {
-        let mentioned = match client.user_id() {
-            Some(user_id) => body.contains(user_id.localpart()),
-            _ => false,
-        };
-        return !mentioned;
+async fn is_missing_mention(
+    body: &str,
+    mentions: Mentions,
+    mode: RoomNotificationMode,
+    client: &Client,
+    settings: &NotificationSettings,
+) -> bool {
+    if mode != RoomNotificationMode::MentionsAndKeywordsOnly {
+        return false;
     }
-    false
+
+    if mentions.room {
+        return false;
+    }
+    if client.user_id().is_some_and(|user_id| mentions.user_ids.contains(user_id)) {
+        return false;
+    }
+
+    for keyword in settings.enabled_keywords().await {
+        if body.contains(&keyword) {
+            return false;
+        }
+    }
+
+    true
 }
 
 fn is_open(locked: &mut ProgramStore, room_id: &RoomId) -> bool {
@@ -237,9 +259,8 @@ async fn is_visible_room(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
 pub async fn parse_full_notification(
     event: Raw<AnySyncTimelineEvent>,
     room: MatrixRoom,
-    show_body: bool,
     store: &AsyncProgramStore,
-) -> IambResult<(String, Option<String>, MilliSecondsSinceUnixEpoch)> {
+) -> IambResult<(String, Option<String>, MilliSecondsSinceUnixEpoch, Mentions)> {
     let event = event.deserialize().map_err(IambError::from)?;
 
     let server_ts = event.origin_server_ts();
@@ -268,13 +289,18 @@ pub async fn parse_full_notification(
         sender_name.to_string()
     };
 
-    let body = if show_body {
-        event_notification_body(&event, &sender_name).map(truncate)
+    let body = event_notification_body(&event, &sender_name).map(truncate);
+
+    let mentions = if let AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(
+        SyncMessageLikeEvent::Original(ev),
+    )) = event
+    {
+        ev.content.mentions.unwrap_or_default()
     } else {
-        None
+        Default::default()
     };
 
-    return Ok((summary, body, server_ts));
+    return Ok((summary, body, server_ts, mentions));
 }
 
 pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) -> Option<String> {
