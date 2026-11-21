@@ -35,7 +35,7 @@ use modalkit::editing::cursor::Cursor;
 use ratatui::symbols::line::{HORIZONTAL, THICK_VERTICAL};
 
 use crate::base::MessageEdits;
-use crate::message::html::{StyleTree, parse_matrix_html};
+use crate::message::html::{StyleTree, StyleTreeNode, parse_matrix_html};
 use crate::message::poll::{Poll, UnstablePoll};
 use crate::message::state::{body_cow_state, html_state};
 use crate::prelude::*;
@@ -445,9 +445,13 @@ fn content_html(msgtype: &MessageType) -> Option<StyleTree> {
 
         MessageType::Image(content) => {
             let mut html = if let Some(FormattedBody { format: MessageFormat::Html, body }) =
-                &content.formatted
+                content.formatted_caption()
             {
                 parse_matrix_html(body.as_str())
+            } else if let Some(body) = content.caption() {
+                let caption = StyleTreeNode::Text(body.to_owned().into());
+                let caption = StyleTreeNode::Paragraph(Box::new(caption));
+                StyleTree { children: vec![caption] }
             } else {
                 StyleTree { children: vec![] }
             };
