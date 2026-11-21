@@ -1315,6 +1315,7 @@ impl StatefulWidget for Chat<'_> {
 
         let settings = &self.store.application.settings;
         let theme = &settings.theme;
+        let room_info = self.store.application.rooms.get(&state.room_id);
 
         // Determine whether we have a description to show for the message bar.
         let desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
@@ -1329,6 +1330,11 @@ impl StatefulWidget for Chat<'_> {
                         ])
                         .centered(),
                     )
+                } else if let Some(room_info) = room_info &&
+                    room_info.flags.contains(RoomInfoFlags::READONLY)
+                {
+                    state.tbox.set_readonly(true);
+                    Some(Line::from("You do not have permission to post to this room").centered())
                 } else {
                     None
                 }
