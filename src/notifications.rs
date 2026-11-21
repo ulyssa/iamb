@@ -141,6 +141,7 @@ async fn send_notification_bell(store: &AsyncProgramStore) {
 }
 
 #[cfg(feature = "desktop")]
+#[cfg_attr(target_os = "macos", allow(unused_variables, unused_mut))]
 async fn send_notification_desktop(
     summary: &str,
     body: &str,
