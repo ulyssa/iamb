@@ -1159,6 +1159,7 @@ pub struct TunableValues {
     /// Display columns reserved for the time gutter, computed from
     /// `time_format` once when the settings are loaded.
     pub time_gutter_width: usize,
+    pub reply_on_insert: bool,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -1227,6 +1228,7 @@ pub struct Tunables {
     /// An empty string hides the time.
     #[serde(default, deserialize_with = "deserialize_strftime")]
     pub time_format: Option<String>,
+    pub reply_on_insert: Option<bool>,
 }
 
 impl Tunables {
@@ -1290,6 +1292,7 @@ impl Tunables {
             send_on_enter: self.send_on_enter.or(other.send_on_enter),
             date_format: self.date_format.or(other.date_format),
             time_format: self.time_format.or(other.time_format),
+            reply_on_insert: self.reply_on_insert.or(other.reply_on_insert),
         }
     }
 
@@ -1351,6 +1354,7 @@ impl Tunables {
             date_format: self.date_format.unwrap_or_else(|| DEFAULT_DATE_FORMAT.to_owned()),
             time_format,
             time_gutter_width,
+            reply_on_insert: self.reply_on_insert.unwrap_or_default(),
         }
     }
 }
