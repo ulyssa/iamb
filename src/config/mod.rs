@@ -998,6 +998,19 @@ pub struct Notifications {
     pub show_message: bool,
     #[serde(default)]
     pub sound_hint: Option<String>,
+
+    #[serde(default)]
+    pub reactions: bool,
+    #[serde(default)]
+    pub reactions_other_users: bool,
+    #[serde(default)]
+    pub reactions_calmed_rooms: bool,
+    #[serde(default = "default_reaction_context")]
+    pub reaction_context: usize,
+}
+
+fn default_reaction_context() -> usize {
+    50
 }
 
 #[derive(Clone)]
