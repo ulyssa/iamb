@@ -81,16 +81,7 @@ impl MessageState {
 
         match act {
             MessageAction::Download(filename, flags) => {
-                chat::msg_download(
-                    ctx,
-                    &store.application.worker.client,
-                    msg,
-                    settings,
-                    filename,
-                    flags,
-                    &store.application.settings.tunables,
-                )
-                .await
+                chat::msg_download(ctx, msg, settings, filename, flags).await
             },
             MessageAction::React(reaction, literal) => {
                 chat::msg_react(msg, settings, info, worker, self.room_id(), reaction, literal)
