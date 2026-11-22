@@ -567,6 +567,20 @@ The notification rules are stored server side, loaded once at startup, and are c
 In other words, you can simply change the rules with another client.
 .It Sy sound_hint
 Controls the notification sound name that is passed as a hint to the notification daemon.
+.It Sy reactions
+Whether reactions can trigger notifications.
+Defaults to
+.Dq Sy false .
+.It Sy reaction_context
+How many characters of the reacted to message to show.
+.It Sy reactions_other_users
+Whether to show notifications for reactions to messages that other users have sent.
+By default (false) only reactions to your messages will trigger notifications.
+.It Sy reactions_calmed_rooms
+Whether to notify about reactions in calmed rooms (Room with notify mode
+.Dq mentions
+). Defaults to
+.Dq Sy false .
 .El
 .Ss Example 1: Enable notifications with default options
 .Bd -literal -offset indent

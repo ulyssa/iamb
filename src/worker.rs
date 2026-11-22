@@ -379,7 +379,7 @@ async fn pinned_load_one(
     Some(msg)
 }
 
-async fn get_receipts_for_timeline_events(
+pub async fn get_receipts_for_timeline_events(
     room: &MatrixRoom,
     events: Vec<TimelineEvent>,
 ) -> Vec<MessageAndReceipts> {

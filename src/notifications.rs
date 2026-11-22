@@ -2,24 +2,30 @@ use std::time::SystemTime;
 
 use matrix_sdk::EncryptionState;
 use matrix_sdk::deserialized_responses::RawAnySyncOrStrippedTimelineEvent;
+use matrix_sdk::event_handler::Ctx;
 use matrix_sdk::notification_settings::{
     IsEncrypted,
     IsOneToOne,
     NotificationSettings,
     RoomNotificationMode,
 };
+use matrix_sdk::ruma::events::reaction::ReactionEventContent;
 use matrix_sdk::ruma::events::room::message::Relation;
 use matrix_sdk::ruma::events::{
+    AnyMessageLikeEvent,
     AnyMessageLikeEventContent,
     AnySyncMessageLikeEvent,
     AnySyncTimelineEvent,
+    AnyTimelineEvent,
     Mentions,
+    OriginalSyncMessageLikeEvent,
     SyncMessageLikeEvent,
 };
 use matrix_sdk::ruma::serde::Raw;
 
 use crate::config::NotifyVia;
 use crate::prelude::*;
+use crate::worker::get_receipts_for_timeline_events;
 
 const IAMB_XDG_NAME: &str = match option_env!("IAMB_XDG_NAME") {
     None => "iamb",
@@ -54,6 +60,48 @@ pub async fn register_notifications(
     let Some(startup_ts) = MilliSecondsSinceUnixEpoch::from_system_time(SystemTime::now()) else {
         return;
     };
+    let reactions = settings.tunables.notifications.reactions;
+    let reactions_calmed = settings.tunables.notifications.reactions_calmed_rooms;
+
+    let notify_settings = server_settings.clone();
+    client.add_event_handler(
+        move |event: OriginalSyncMessageLikeEvent<ReactionEventContent>,
+              room: MatrixRoom,
+              store: Ctx<AsyncProgramStore>| {
+            let server_settings = notify_settings.clone();
+            async move {
+                if !reactions {
+                    return;
+                }
+
+                let mode = global_or_room_mode(&server_settings, &room).await;
+                if mode == RoomNotificationMode::Mute {
+                    return;
+                }
+                if !reactions_calmed && mode == RoomNotificationMode::MentionsAndKeywordsOnly {
+                    return;
+                }
+
+                if is_visible_room(&store, room.room_id()).await {
+                    return;
+                }
+
+                let room_id = room.room_id().to_owned();
+
+                match parse_reaction_notification(event, room, &store).await {
+                    Ok(Some((summary, body))) => {
+                        send_notification(&notify_via, &summary, &body, room_id, &store).await;
+                    },
+                    Ok(None) => {
+                        // nothing to display
+                    },
+                    Err(err) => {
+                        tracing::error!("Failed to extract notification data: {err}")
+                    },
+                }
+            }
+        },
+    );
 
     let store = store.clone();
     client
@@ -256,7 +304,72 @@ async fn is_visible_room(store: &AsyncProgramStore, room_id: &RoomId) -> bool {
     is_focused(&locked) && is_open(&mut locked, room_id)
 }
 
-pub async fn parse_full_notification(
+async fn parse_reaction_notification(
+    event: OriginalSyncMessageLikeEvent<ReactionEventContent>,
+    room: MatrixRoom,
+    store: &AsyncProgramStore,
+) -> IambResult<Option<(String, String)>> {
+    let mut locked = store.lock().await;
+    let ChatStore { rooms, settings, .. } = &mut locked.application;
+    let info = rooms.get_or_default(room.room_id().to_owned());
+
+    let sender_name = notifiaction_sender_name(&event.sender, info, &room, settings).await?;
+    let summary = event_notification_summary(&sender_name, &room).await?;
+
+    let key = event.content.relates_to.key;
+    let short = emojis::get(&key).and_then(|emoji| emoji.shortcode());
+    let reaction = if settings.tunables.reaction_shortcode_display {
+        short.unwrap_or(&key)
+    } else {
+        &key
+    };
+
+    let owned_msg;
+    let event_id = &event.content.relates_to.event_id;
+    let msg = if let Some(msg) = info.get_event(event_id) {
+        msg
+    } else if let Some(msg) = load_message(&room, event_id).await.map_err(IambError::from)? {
+        owned_msg = msg;
+        &owned_msg
+    } else {
+        return Ok(None);
+    };
+
+    if !(settings.tunables.notifications.reactions_other_users || msg.sender == settings.user_id) {
+        return Ok(None);
+    }
+
+    let text = truncate(msg.event.body(), settings.tunables.notifications.reaction_context);
+    let body = format!("Reacted {reaction} to: \"{text}\"");
+
+    Ok(Some((summary, body)))
+}
+
+async fn load_message(
+    room: &MatrixRoom,
+    event_id: &EventId,
+) -> Result<Option<Message>, matrix_sdk::Error> {
+    let timeline_event = room.load_or_fetch_event(event_id, None).await?;
+    let mut events = get_receipts_for_timeline_events(room, vec![timeline_event]).await;
+    let (event, ..) = events.pop().ok_or(matrix_sdk::Error::InsufficientData)?;
+
+    let msg = match event {
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomEncrypted(msg)) => msg.into(),
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::RoomMessage(msg)) => msg.into(),
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::Sticker(msg)) => msg.into(),
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::PollStart(_)) |
+        AnyTimelineEvent::MessageLike(AnyMessageLikeEvent::UnstablePollStart(_)) => {
+            // XXX: Implement more complex conversion since polls don't implement `From`
+            return Ok(None);
+        },
+        AnyTimelineEvent::State(msg) => AnySyncStateEvent::from(msg).into(),
+        _ => return Ok(None),
+    };
+
+    Ok(Some(msg))
+}
+
+async fn parse_full_notification(
     event: Raw<AnySyncTimelineEvent>,
     room: MatrixRoom,
     store: &AsyncProgramStore,
@@ -269,27 +382,9 @@ pub async fn parse_full_notification(
     let ChatStore { rooms, settings, .. } = &mut locked.application;
     let info = rooms.get_or_default(room.room_id().to_owned());
 
-    // Get the sender name from room info or the room directly and respect the display_name setting
-    let sender;
-    let mut sender_name = info.display_names.get(event.sender());
-    if sender_name.is_none() {
-        sender = room.get_member_no_sync(event.sender()).await.map_err(IambError::from)?;
-        sender_name = sender.as_ref().and_then(|m| m.display_name()).map(Cow::Borrowed);
-    }
-    let sender_name = settings.get_user_span(event.sender(), sender_name).content;
-
-    let summary = if let Some(room_name) = room.cached_display_name() {
-        if room.is_direct().await.map_err(IambError::from)? && sender_name == room_name.to_string()
-        {
-            sender_name.to_string()
-        } else {
-            format!("{sender_name} in {room_name}")
-        }
-    } else {
-        sender_name.to_string()
-    };
-
-    let body = event_notification_body(&event, &sender_name).map(truncate);
+    let sender_name = notifiaction_sender_name(event.sender(), info, &room, settings).await?;
+    let summary = event_notification_summary(&sender_name, &room).await?;
+    let body = event_notification_body(&event, &sender_name).map(truncate_message);
 
     let mentions = if let AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(
         SyncMessageLikeEvent::Original(ev),
@@ -303,7 +398,42 @@ pub async fn parse_full_notification(
     return Ok((summary, body, server_ts, mentions));
 }
 
-pub fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) -> Option<String> {
+async fn notifiaction_sender_name<'a>(
+    sender_id: &'a UserId,
+    info: &'a RoomInfo,
+    room: &MatrixRoom,
+    settings: &ApplicationSettings,
+) -> IambResult<Cow<'a, str>> {
+    // Get the sender name from room info or the room directly and respect the display_name setting
+    let mut sender_name = info.display_names.get(sender_id);
+    if sender_name.is_none() {
+        let sender = room.get_member_no_sync(sender_id).await.map_err(IambError::from)?;
+        sender_name = sender
+            .as_ref()
+            .and_then(|m| m.display_name())
+            .map(|name| name.to_owned().into());
+    }
+    let sender_name = settings.get_user_span(sender_id, sender_name).content;
+
+    Ok(sender_name)
+}
+
+async fn event_notification_summary(sender_name: &str, room: &MatrixRoom) -> IambResult<String> {
+    let summary = if let Some(room_name) = room.cached_display_name() {
+        if room.is_direct().await.map_err(IambError::from)? && sender_name == room_name.to_string()
+        {
+            sender_name.to_string()
+        } else {
+            format!("{sender_name} in {room_name}")
+        }
+    } else {
+        sender_name.to_string()
+    };
+
+    Ok(summary)
+}
+
+fn event_notification_body(event: &AnySyncTimelineEvent, sender_name: &str) -> Option<String> {
     let AnySyncTimelineEvent::MessageLike(event) = event else {
         return None;
     };
@@ -360,14 +490,19 @@ fn thread_notification_body(body: String, is_thread: bool) -> String {
     }
 }
 
-fn truncate(s: String) -> String {
-    static MAX_LENGTH: usize = 5000;
-    if s.graphemes(true).count() > MAX_LENGTH {
-        let truncated: String = s.graphemes(true).take(MAX_LENGTH).collect();
-        truncated + "..."
+fn truncate(s: Cow<'_, str>, w: usize) -> Cow<'_, str> {
+    if s.graphemes(true).count() > w {
+        let truncated: String = s.graphemes(true).take(w).collect();
+        Cow::Owned(truncated + "...")
     } else {
         s
     }
+}
+
+fn truncate_message(s: String) -> String {
+    static MAX_LENGTH: usize = 5000;
+
+    truncate(s.into(), MAX_LENGTH).into_owned()
 }
 
 #[cfg(test)]
