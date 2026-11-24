@@ -18,6 +18,7 @@
 #![allow(clippy::bool_assert_comparison)]
 
 use std::collections::VecDeque;
+use std::ffi::OsStr;
 use std::fs::{File, create_dir_all};
 use std::io::{BufWriter, Stdout, Write, stdout};
 use std::process;
@@ -25,6 +26,7 @@ use std::sync::atomic::AtomicUsize;
 
 use clap::{CommandFactory, Parser};
 use matrix_sdk::OwnedServerName;
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
 use matrix_sdk::ruma::api::error::ErrorKind;
 use matrix_sdk::ruma::events::ignored_user_list::IgnoredUserListEventContent;
 use matrix_sdk::ruma::events::invite_permission_config::{
@@ -51,12 +53,13 @@ use tracing::Level;
 use tracing::level_filters::LevelFilter;
 use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
-use crate::base::{HomeserverAction, KeysAction};
+use crate::base::{DownloadAction, DownloadFlags, HomeserverAction, KeysAction};
 use crate::completions::IambCompleter;
 use crate::config::{CursorShape, Iamb};
 use crate::prelude::*;
 use crate::util::{restore_tty, setup_tty};
 use crate::windows::IambWindow;
+use crate::windows::room::open_command;
 use crate::worker::{ClientWorker, LoginStyle, create_room};
 
 mod base;
@@ -684,6 +687,18 @@ impl Application {
                 }
             },
 
+            IambAction::Download(DownloadAction { filename, file_target, source, flags }) => {
+                download_attachment(
+                    source,
+                    &store.application.worker.client,
+                    &store.application.settings,
+                    file_target,
+                    filename,
+                    flags,
+                )
+                .await?
+            },
+
             IambAction::Verify(act, flow_id) => {
                 return verifications::iamb_verify(act, flow_id, store).await;
             },
@@ -1022,6 +1037,84 @@ impl Application {
 
         return Ok(());
     }
+}
+
+async fn download_attachment(
+    source: MediaSource,
+    client: &Client,
+    settings: &ApplicationSettings,
+    file_target: Option<PathBuf>,
+    filename: Option<String>,
+    flags: DownloadFlags,
+) -> IambResult<EditInfo> {
+    let media = client.media();
+
+    let mut file_target = match (file_target, &settings.dirs.downloads) {
+        (Some(f), _) => f,
+        (None, Some(downloads)) => downloads.clone(),
+        (None, None) => return Err(IambError::NoDownloadDir.into()),
+    };
+    if file_target.is_dir() {
+        let filename = filename.as_deref().unwrap_or("attachment");
+        file_target.push(filename.replace(std::path::MAIN_SEPARATOR_STR, "_"));
+    }
+
+    let mut filename = file_target;
+
+    if filename.exists() && !flags.contains(DownloadFlags::FORCE) {
+        // Find an incrementally suffixed filename, e.g. image-2.jpg -> image-3.jpg
+        if let Some(stem) = filename.file_stem().and_then(OsStr::to_str) {
+            let ext = filename.extension();
+            let mut filename_incr = filename.clone();
+            for n in 1..=1000 {
+                if let Some(ext) = ext.and_then(OsStr::to_str) {
+                    filename_incr.set_file_name(format!("{stem}-{n}.{ext}"));
+                } else {
+                    filename_incr.set_file_name(format!("{stem}-{n}"));
+                }
+
+                if !filename_incr.exists() {
+                    filename = filename_incr;
+                    break;
+                }
+            }
+        }
+    }
+    if !filename.exists() || flags.contains(DownloadFlags::FORCE) {
+        let req = MediaRequestParameters { source, format: MediaFormat::File };
+
+        let bytes = media.get_media_content(&req, true).await.map_err(IambError::from)?;
+
+        std::fs::write(filename.as_path(), bytes.as_slice())?;
+    } else {
+        let msg = format!(
+            "The file {} already exists; add ! to end of command to overwrite it.",
+            filename.display()
+        );
+        let err = UIError::Failure(msg);
+
+        return Err(err);
+    }
+
+    let info = if flags.contains(DownloadFlags::OPEN) {
+        let target = filename.clone().into_os_string();
+
+        match open_command(settings.tunables.open_command.as_ref(), target) {
+            Ok(_) => {
+                InfoMessage::from(format!(
+                    "Attachment downloaded to {} and opened",
+                    filename.display()
+                ))
+            },
+            Err(err) => {
+                return Err(err);
+            },
+        }
+    } else {
+        InfoMessage::from(format!("Attachment downloaded to {}", filename.display()))
+    };
+
+    Ok(Some(info))
 }
 
 fn read_response(question: &str) -> String {

@@ -24,6 +24,7 @@ use crate::windows::room::not_joined::NotJoined;
 use crate::windows::room::space::{Space, SpaceState};
 
 pub use crate::windows::room::not_joined::NotJoinedState;
+pub use chat::open_command;
 
 mod chat;
 mod message;

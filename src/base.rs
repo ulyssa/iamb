@@ -6,6 +6,7 @@ use std::collections::{BTreeSet, HashSet};
 
 use emojis::Emoji;
 use matrix_sdk::Client;
+use matrix_sdk::media::UniqueKey;
 use matrix_sdk::ruma::events::poll::start::PollStartEvent;
 use matrix_sdk::ruma::events::poll::unstable_start::{
     UnstablePollStartEvent,
@@ -207,7 +208,7 @@ bitflags::bitflags! {
 
 bitflags::bitflags! {
     /// Available options when downloading files.
-    #[derive(Clone, Debug, Eq, PartialEq)]
+    #[derive(Copy, Clone, Debug, Eq, PartialEq)]
     pub struct DownloadFlags: u32 {
         /// No flags specified.
         const NONE = 0b00000000;
@@ -709,6 +710,23 @@ pub enum KeysAction {
     Import(String, String),
 }
 
+#[derive(Clone, Debug)]
+pub struct DownloadAction {
+    pub filename: Option<String>,
+    pub file_target: Option<PathBuf>,
+    pub source: MediaSource,
+    pub flags: DownloadFlags,
+}
+
+impl PartialEq for DownloadAction {
+    fn eq(&self, other: &Self) -> bool {
+        self.filename == other.filename &&
+            self.source.unique_key() == other.source.unique_key() &&
+            self.flags == other.flags
+    }
+}
+impl Eq for DownloadAction {}
+
 /// An action that the main program loop should execute.
 ///
 /// See [the commands module][super::commands] for where these are usually created.
@@ -731,6 +749,9 @@ pub enum IambAction {
 
     /// Open a URL.
     OpenLink(String),
+
+    /// Download and potentially open a file.
+    Download(DownloadAction),
 
     /// Perform an action on the currently focused room.
     Room(RoomAction),
@@ -820,6 +841,7 @@ impl ApplicationAction for IambAction {
             IambAction::Space(..) => SequenceStatus::Break,
             IambAction::Room(..) => SequenceStatus::Break,
             IambAction::OpenLink(..) => SequenceStatus::Break,
+            IambAction::Download(..) => SequenceStatus::Break,
             IambAction::Send(..) => SequenceStatus::Break,
             IambAction::Timeline(..) => SequenceStatus::Break,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Break,
@@ -839,6 +861,7 @@ impl ApplicationAction for IambAction {
             IambAction::Message(..) => SequenceStatus::Atom,
             IambAction::Space(..) => SequenceStatus::Atom,
             IambAction::OpenLink(..) => SequenceStatus::Atom,
+            IambAction::Download(..) => SequenceStatus::Atom,
             IambAction::Room(..) => SequenceStatus::Atom,
             IambAction::Send(..) => SequenceStatus::Atom,
             IambAction::Timeline(..) => SequenceStatus::Atom,
@@ -860,6 +883,7 @@ impl ApplicationAction for IambAction {
             IambAction::Space(..) => SequenceStatus::Ignore,
             IambAction::Room(..) => SequenceStatus::Ignore,
             IambAction::OpenLink(..) => SequenceStatus::Ignore,
+            IambAction::Download(..) => SequenceStatus::Ignore,
             IambAction::Send(..) => SequenceStatus::Ignore,
             IambAction::Timeline(..) => SequenceStatus::Ignore,
             IambAction::ToggleScrollbackFocus => SequenceStatus::Ignore,
@@ -881,6 +905,7 @@ impl ApplicationAction for IambAction {
             IambAction::Keys(..) => false,
             IambAction::Send(..) => false,
             IambAction::OpenLink(..) => false,
+            IambAction::Download(..) => false,
             IambAction::Timeline(..) => false,
             IambAction::ToggleScrollbackFocus => false,
             IambAction::Verify(..) => false,
