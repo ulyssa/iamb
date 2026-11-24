@@ -1327,6 +1327,9 @@ impl StatefulWidget for Chat<'_> {
 
         let settings = &self.store.application.settings;
         let theme = &settings.theme;
+        let mut msgbar_style = theme.msgbar.default;
+        let mut msgbar_readonly = false;
+        let room_info = self.store.application.rooms.get(&state.room_id);
 
         // Determine whether we have a description to show for the message bar.
         let desc_spans = match (&state.editing, &state.reply_to, state.thread()) {
@@ -1368,6 +1371,14 @@ impl StatefulWidget for Chat<'_> {
                 })
             },
         };
+
+        if let Some(room_info) = room_info &&
+            room_info.flags.contains(RoomInfoFlags::READONLY)
+        {
+            state.tbox.set_text("You do not have permission to post to this room");
+            msgbar_readonly = true;
+            msgbar_style = theme.cmdbar.info;
+        }
 
         // Determine the region to show each UI element.
         let lines = state.tbox.has_lines(5).max(1) as u16;
@@ -1414,11 +1425,22 @@ impl StatefulWidget for Chat<'_> {
             (true, None, None) => Line::from("> "),
         };
 
-        let tbox = TextBox::new().style(theme.msgbar.default).prompt(prompt);
+        let tbox = TextBox::new().style(msgbar_style).prompt(if msgbar_readonly {
+            Line::from("")
+        } else {
+            prompt
+        });
+        state.tbox.set_readonly(msgbar_readonly);
         state
             .tbox
             .set_ignorecase(self.store.application.settings.tunables.ignorecase);
         tbox.render(textarea, buf, &mut state.tbox);
+
+        if msgbar_readonly {
+            // Clear the msgbar here. If it is still readonly on the next render, the content will
+            // be overwritten anyway and if not the content would stay.
+            state.tbox.reset();
+        }
 
         // Render the message scrollback.
         let scrollback_style = self.store.application.settings.theme.timeline.default;
