@@ -23,6 +23,12 @@ use crate::message::printer::TextPrinter;
 use crate::prelude::*;
 use crate::util::{join_cell_text, space_text};
 
+/// The deepest level of nested elements that is rendered.
+///
+/// Building and printing the [StyleTree] recurses once per level, so a message made of thousands of
+/// unclosed tags would otherwise overflow the stack.
+const MAX_NESTING_DEPTH: usize = 64;
+
 /// Generate bullet points from a [ListStyle].
 pub struct BulletIterator {
     style: ListStyle,
@@ -588,6 +594,7 @@ impl StyleTree {
 
 pub struct TreeGenState {
     pub link_num: u8,
+    pub depth: usize,
 }
 
 impl TreeGenState {
@@ -794,6 +801,19 @@ fn mxid2t(
 }
 
 fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
+    if state.depth >= MAX_NESTING_DEPTH {
+        // Leave out anything nested this deeply instead of recursing until the stack overflows.
+        return vec![];
+    }
+
+    state.depth += 1;
+    let children = h2t_node(hdl, state);
+    state.depth -= 1;
+
+    children
+}
+
+fn h2t_node(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
     let node = hdl.deref();
 
     let tree = match &node.data {
@@ -925,7 +945,7 @@ fn h2t(hdl: &Handle, state: &mut TreeGenState) -> StyleTreeChildren {
 }
 
 fn dom_to_style_tree(dom: RcDom) -> StyleTree {
-    let mut state = TreeGenState { link_num: 0 };
+    let mut state = TreeGenState { link_num: 0, depth: 0 };
     let children = h2t(&dom.document, &mut state);
 
     StyleTree { children }
@@ -1584,6 +1604,20 @@ pub mod tests {
                 Span::raw(line::BOTTOM_RIGHT)
             ])
         );
+    }
+
+    #[test]
+    fn test_deeply_nested_elements() {
+        let info = mock_room();
+        let settings = mock_settings();
+
+        for tag in ["div", "blockquote", "i", "ul", "pre"] {
+            let s = format!("<p>before</p>{}after", format!("<{tag}>").repeat(5_000));
+            let tree = parse_matrix_html(s.as_str());
+            let text = tree.to_text(20, Style::default(), &settings, &info);
+
+            assert_eq!(text.lines[0].spans[0].content, "before", "{tag}");
+        }
     }
 
     #[test]
