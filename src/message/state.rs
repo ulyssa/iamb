@@ -826,7 +826,7 @@ pub fn html_state(ev: &AnySyncStateEvent) -> StyleTree {
             );
             let mut cs = vec![prefix];
 
-            let mut state = TreeGenState { link_num: 0 };
+            let mut state = TreeGenState { link_num: 0, depth: 0 };
 
             for (i, member) in content.service_members.iter().enumerate() {
                 if i != 0 {

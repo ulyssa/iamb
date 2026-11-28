@@ -1541,7 +1541,7 @@ impl Message {
             links = linkify::LinkFinder::new()
                 .links(&self.event.body())
                 .filter_map(|u| Url::parse(u.as_str()).ok())
-                .scan(TreeGenState { link_num: 0 }, |state, u| {
+                .scan(TreeGenState { link_num: 0, depth: 0 }, |state, u| {
                     state.next_link_char().map(|c| (c, u))
                 })
                 .collect();
